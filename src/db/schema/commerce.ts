@@ -2,9 +2,9 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  foreignKey,
   index,
   integer,
-  jsonb,
   pgTable,
   text,
   timestamp,
@@ -39,12 +39,8 @@ export const orders = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     buyerStatusSnapshot: buyerStatusEnum("buyer_status_snapshot").notNull(),
-    attestationAcceptanceId: uuid("attestation_acceptance_id")
-      .notNull()
-      .references(() => attestationAcceptances.id, { onDelete: "restrict" }),
+    attestationAcceptanceId: uuid("attestation_acceptance_id").notNull(),
     destinationStateCode: text("destination_state_code").notNull(),
-    buyerSnapshotHash: text("buyer_snapshot_hash").notNull(),
-    destinationSnapshotHash: text("destination_snapshot_hash").notNull(),
     currency: text("currency").notNull(),
     subtotalMinor: money("subtotal_minor"),
     discountMinor: money("discount_minor"),
@@ -56,9 +52,13 @@ export const orders = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
+    unique("orders_id_buyer_unique").on(table.id, table.buyerUserId),
+    foreignKey({
+      columns: [table.attestationAcceptanceId, table.buyerUserId],
+      foreignColumns: [attestationAcceptances.id, attestationAcceptances.userId],
+      name: "orders_attestation_acceptance_buyer_fk",
+    }).onDelete("restrict"),
     check("orders_destination_state_code", stateCode(table.destinationStateCode)),
-    check("orders_buyer_snapshot_hash", sha256(table.buyerSnapshotHash)),
-    check("orders_destination_snapshot_hash", sha256(table.destinationSnapshotHash)),
     check("orders_currency_format", currency(table.currency)),
     check(
       "orders_money_safe",
@@ -85,9 +85,7 @@ export const orderItems = pgTable(
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "restrict" }),
-    productPriceId: uuid("product_price_id")
-      .notNull()
-      .references(() => productPrices.id, { onDelete: "restrict" }),
+    productPriceId: uuid("product_price_id").notNull(),
     destinationPolicyId: uuid("destination_policy_id")
       .notNull()
       .references(() => destinationPolicies.id, { onDelete: "restrict" }),
@@ -102,6 +100,16 @@ export const orderItems = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
+    unique("order_items_id_order_product_unique").on(
+      table.id,
+      table.orderId,
+      table.productId,
+    ),
+    foreignKey({
+      columns: [table.productPriceId, table.productId],
+      foreignColumns: [productPrices.id, productPrices.productId],
+      name: "order_items_price_product_fk",
+    }).onDelete("restrict"),
     check("order_items_name_nonblank", nonblank(table.productNameSnapshot)),
     check("order_items_package_nonblank", nonblank(table.packageFormSnapshot)),
     check("order_items_currency_format", currency(table.currency)),
@@ -140,7 +148,7 @@ export const checkoutAttempts = pgTable(
       checkoutGateResultEnum("payment_provider_gate").notNull(),
     permitted: boolean("permitted").notNull(),
     reviewRequired: boolean("review_required").notNull(),
-    reasons: jsonb("reasons").default([]).notNull(),
+    reasons: text("reasons").array().default(sql`'{}'::text[]`).notNull(),
     taxReady: boolean("tax_ready").notNull(),
     shippingReady: boolean("shipping_ready").notNull(),
     provider: text("provider"),

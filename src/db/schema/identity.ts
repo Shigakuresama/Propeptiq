@@ -34,7 +34,7 @@ export const buyerProfiles = pgTable(
     userId: uuid("user_id")
       .primaryKey()
       .references(() => users.id, { onDelete: "cascade" }),
-    status: buyerStatusEnum("status").default("review").notNull(),
+    status: buyerStatusEnum("status").notNull(),
     ageConfirmedAt: timestamp("age_confirmed_at", { withTimezone: true }),
     researchPurpose: researchPurposeEnum("research_purpose"),
     organizationName: text("organization_name"),
@@ -92,6 +92,10 @@ export const attestationAcceptances = pgTable(
       .notNull(),
   },
   (table) => [
+    unique("attestation_acceptances_id_user_unique").on(
+      table.id,
+      table.userId,
+    ),
     unique("attestation_acceptances_user_version_unique").on(
       table.userId,
       table.attestationVersionId,

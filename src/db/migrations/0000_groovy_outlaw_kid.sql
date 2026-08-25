@@ -23,6 +23,7 @@ CREATE TABLE "attestation_acceptances" (
 	"user_id" uuid NOT NULL,
 	"attestation_version_id" uuid NOT NULL,
 	"accepted_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "attestation_acceptances_id_user_unique" UNIQUE("id","user_id"),
 	CONSTRAINT "attestation_acceptances_user_version_unique" UNIQUE("user_id","attestation_version_id")
 );
 --> statement-breakpoint
@@ -44,7 +45,7 @@ CREATE TABLE "attestation_versions" (
 --> statement-breakpoint
 CREATE TABLE "buyer_profiles" (
 	"user_id" uuid PRIMARY KEY NOT NULL,
-	"status" "buyer_status" DEFAULT 'review' NOT NULL,
+	"status" "buyer_status" NOT NULL,
 	"age_confirmed_at" timestamp with time zone,
 	"research_purpose" "research_purpose",
 	"organization_name" text,
@@ -116,6 +117,7 @@ CREATE TABLE "destination_policies" (
   'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'
 )),
 	CONSTRAINT "destination_policies_version_positive" CHECK ("destination_policies"."version" > 0),
+	CONSTRAINT "destination_policies_active_not_superseded" CHECK ("destination_policies"."active" = false or "destination_policies"."superseded_at" is null),
 	CONSTRAINT "destination_policies_time_coherent" CHECK ("destination_policies"."superseded_at" is null or "destination_policies"."superseded_at" > "destination_policies"."effective_at")
 );
 --> statement-breakpoint
@@ -131,6 +133,7 @@ CREATE TABLE "lots" (
 	"expires_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "lots_id_product_unique" UNIQUE("id","product_id"),
 	CONSTRAINT "lots_product_supplier_code_unique" UNIQUE("product_id","supplier_name","supplier_lot_code"),
 	CONSTRAINT "lots_supplier_nonblank" CHECK (length(btrim("lots"."supplier_name")) > 0),
 	CONSTRAINT "lots_supplier_code_nonblank" CHECK (length(btrim("lots"."supplier_lot_code")) > 0),
@@ -159,6 +162,7 @@ CREATE TABLE "product_prices" (
 	"effective_at" timestamp with time zone NOT NULL,
 	"superseded_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "product_prices_id_product_unique" UNIQUE("id","product_id"),
 	CONSTRAINT "product_prices_product_version_unique" UNIQUE("product_id","version"),
 	CONSTRAINT "product_prices_version_positive" CHECK ("product_prices"."version" > 0),
 	CONSTRAINT "product_prices_amount_positive_safe" CHECK ("product_prices"."amount_minor" between 1 and 9007199254740991),
@@ -229,7 +233,7 @@ CREATE TABLE "checkout_attempts" (
 	"payment_provider_gate" "checkout_gate_result" NOT NULL,
 	"permitted" boolean NOT NULL,
 	"review_required" boolean NOT NULL,
-	"reasons" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"reasons" text[] DEFAULT '{}'::text[] NOT NULL,
 	"tax_ready" boolean NOT NULL,
 	"shipping_ready" boolean NOT NULL,
 	"provider" text,
@@ -268,6 +272,7 @@ CREATE TABLE "order_items" (
 	"discount_minor" bigint NOT NULL,
 	"total_minor" bigint NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "order_items_id_order_product_unique" UNIQUE("id","order_id","product_id"),
 	CONSTRAINT "order_items_name_nonblank" CHECK (length(btrim("order_items"."product_name_snapshot")) > 0),
 	CONSTRAINT "order_items_package_nonblank" CHECK (length(btrim("order_items"."package_form_snapshot")) > 0),
 	CONSTRAINT "order_items_currency_format" CHECK ("order_items"."currency" ~ '^[A-Z]{3}$'),
@@ -285,8 +290,6 @@ CREATE TABLE "orders" (
 	"buyer_status_snapshot" "buyer_status" NOT NULL,
 	"attestation_acceptance_id" uuid NOT NULL,
 	"destination_state_code" text NOT NULL,
-	"buyer_snapshot_hash" text NOT NULL,
-	"destination_snapshot_hash" text NOT NULL,
 	"currency" text NOT NULL,
 	"subtotal_minor" bigint NOT NULL,
 	"discount_minor" bigint NOT NULL,
@@ -296,6 +299,7 @@ CREATE TABLE "orders" (
 	"state" "order_state" DEFAULT 'draft' NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "orders_id_buyer_unique" UNIQUE("id","buyer_user_id"),
 	CONSTRAINT "orders_destination_state_code" CHECK ("orders"."destination_state_code" in (
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
   'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
@@ -303,8 +307,6 @@ CREATE TABLE "orders" (
   'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
   'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'
 )),
-	CONSTRAINT "orders_buyer_snapshot_hash" CHECK ("orders"."buyer_snapshot_hash" ~ '^[0-9a-f]{64}$'),
-	CONSTRAINT "orders_destination_snapshot_hash" CHECK ("orders"."destination_snapshot_hash" ~ '^[0-9a-f]{64}$'),
 	CONSTRAINT "orders_currency_format" CHECK ("orders"."currency" ~ '^[A-Z]{3}$'),
 	CONSTRAINT "orders_money_safe" CHECK ("orders"."subtotal_minor" between 0 and 9007199254740991 and "orders"."discount_minor" between 0 and 9007199254740991
           and "orders"."tax_minor" between 0 and 9007199254740991 and "orders"."shipping_minor" between 0 and 9007199254740991
@@ -324,6 +326,7 @@ CREATE TABLE "payment_events" (
 	"currency" text NOT NULL,
 	"occurred_at" timestamp with time zone NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "payment_events_id_order_unique" UNIQUE("id","order_id"),
 	CONSTRAINT "payment_events_provider_event_unique" UNIQUE("provider_event_id"),
 	CONSTRAINT "payment_events_idempotency_unique" UNIQUE("idempotency_key"),
 	CONSTRAINT "payment_events_idempotency_nonblank" CHECK (length(btrim("payment_events"."idempotency_key")) > 0),
@@ -344,6 +347,7 @@ CREATE TABLE "provider_events" (
 	"last_error_redacted" text,
 	"received_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"processed_at" timestamp with time zone,
+	CONSTRAINT "provider_events_id_provider_unique" UNIQUE("id","provider"),
 	CONSTRAINT "provider_events_delivery_unique" UNIQUE("provider","provider_event_id"),
 	CONSTRAINT "provider_events_provider_nonblank" CHECK (length(btrim("provider_events"."provider")) > 0),
 	CONSTRAINT "provider_events_id_nonblank" CHECK (length(btrim("provider_events"."provider_event_id")) > 0),
@@ -351,6 +355,7 @@ CREATE TABLE "provider_events" (
 	CONSTRAINT "provider_events_attempt_nonnegative" CHECK ("provider_events"."attempt_count" >= 0),
 	CONSTRAINT "provider_events_error_nonblank" CHECK ("provider_events"."last_error_redacted" is null or length(btrim("provider_events"."last_error_redacted")) > 0),
 	CONSTRAINT "provider_events_lease_pair" CHECK (("provider_events"."lease_token" is null) = ("provider_events"."lease_expires_at" is null)),
+	CONSTRAINT "provider_events_lease_token_nonblank" CHECK ("provider_events"."lease_token" is null or length(btrim("provider_events"."lease_token")) > 0),
 	CONSTRAINT "provider_events_status_coherent" CHECK (("provider_events"."status" = 'pending'
             and "provider_events"."lease_token" is null and "provider_events"."processed_at" is null)
           or ("provider_events"."status" = 'processing'
@@ -384,6 +389,7 @@ CREATE TABLE "refunds" (
 	CONSTRAINT "refunds_provider_event_unique" UNIQUE("provider_event_id"),
 	CONSTRAINT "refunds_provider_nonblank" CHECK (length(btrim("refunds"."provider")) > 0),
 	CONSTRAINT "refunds_idempotency_nonblank" CHECK (length(btrim("refunds"."idempotency_key")) > 0),
+	CONSTRAINT "refunds_provider_refund_nonblank" CHECK ("refunds"."provider_refund_id" is null or length(btrim("refunds"."provider_refund_id")) > 0),
 	CONSTRAINT "refunds_requested_amount_positive" CHECK ("refunds"."requested_amount_minor" between 1 and 9007199254740991),
 	CONSTRAINT "refunds_confirmed_amount_bounds" CHECK ("refunds"."confirmed_amount_minor" is null or ("refunds"."confirmed_amount_minor" between 1 and 9007199254740991 and "refunds"."confirmed_amount_minor" <= "refunds"."requested_amount_minor")),
 	CONSTRAINT "refunds_currency_format" CHECK ("refunds"."currency" ~ '^[A-Z]{3}$'),
@@ -400,18 +406,17 @@ CREATE TABLE "fulfillment_releases" (
 	"idempotency_key" text NOT NULL,
 	"payment_event_id" uuid NOT NULL,
 	"review_request_id" uuid,
-	"clearance_snapshot_hash" text NOT NULL,
 	"state" "fulfillment_release_state" NOT NULL,
 	"issued_at" timestamp with time zone NOT NULL,
 	"expires_at" timestamp with time zone NOT NULL,
 	"revoked_at" timestamp with time zone,
 	"expired_at" timestamp with time zone,
 	"consumed_at" timestamp with time zone,
+	CONSTRAINT "fulfillment_releases_id_order_unique" UNIQUE("id","order_id"),
 	CONSTRAINT "fulfillment_releases_order_version_unique" UNIQUE("order_id","version"),
 	CONSTRAINT "fulfillment_releases_idempotency_unique" UNIQUE("idempotency_key"),
 	CONSTRAINT "fulfillment_releases_version_positive" CHECK ("fulfillment_releases"."version" > 0),
 	CONSTRAINT "fulfillment_releases_idempotency_nonblank" CHECK (length(btrim("fulfillment_releases"."idempotency_key")) > 0),
-	CONSTRAINT "fulfillment_releases_clearance_hash" CHECK ("fulfillment_releases"."clearance_snapshot_hash" ~ '^[0-9a-f]{64}$'),
 	CONSTRAINT "fulfillment_releases_expiry_after_issue" CHECK ("fulfillment_releases"."expires_at" > "fulfillment_releases"."issued_at"),
 	CONSTRAINT "fulfillment_releases_state_coherent" CHECK (("fulfillment_releases"."state" = 'issued' and "fulfillment_releases"."revoked_at" is null and "fulfillment_releases"."expired_at" is null and "fulfillment_releases"."consumed_at" is null)
           or ("fulfillment_releases"."state" = 'revoked' and "fulfillment_releases"."revoked_at" is not null and "fulfillment_releases"."expired_at" is null and "fulfillment_releases"."consumed_at" is null)
@@ -424,6 +429,7 @@ CREATE TABLE "inventory_events" (
 	"idempotency_key" text NOT NULL,
 	"event_type" "inventory_event_type" NOT NULL,
 	"lot_id" uuid NOT NULL,
+	"order_id" uuid,
 	"order_item_id" uuid,
 	"reservation_id" uuid,
 	"fulfillment_release_id" uuid,
@@ -434,13 +440,16 @@ CREATE TABLE "inventory_events" (
 	CONSTRAINT "inventory_events_idempotency_nonblank" CHECK (length(btrim("inventory_events"."idempotency_key")) > 0),
 	CONSTRAINT "inventory_events_quantity_positive" CHECK ("inventory_events"."quantity" > 0),
 	CONSTRAINT "inventory_events_balance_nonnegative" CHECK ("inventory_events"."balance_after" >= 0),
-	CONSTRAINT "inventory_events_consume_release" CHECK ("inventory_events"."event_type" <> 'consume' or ("inventory_events"."fulfillment_release_id" is not null and "inventory_events"."order_item_id" is not null and "inventory_events"."reservation_id" is not null))
+	CONSTRAINT "inventory_events_reservation_context" CHECK ("inventory_events"."reservation_id" is null or ("inventory_events"."order_id" is not null and "inventory_events"."order_item_id" is not null)),
+	CONSTRAINT "inventory_events_consume_release" CHECK ("inventory_events"."event_type" <> 'consume' or ("inventory_events"."fulfillment_release_id" is not null and "inventory_events"."order_id" is not null and "inventory_events"."order_item_id" is not null and "inventory_events"."reservation_id" is not null))
 );
 --> statement-breakpoint
 CREATE TABLE "inventory_reservations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"idempotency_key" text NOT NULL,
+	"order_id" uuid NOT NULL,
 	"order_item_id" uuid NOT NULL,
+	"product_id" uuid NOT NULL,
 	"lot_id" uuid NOT NULL,
 	"quantity_reserved" integer NOT NULL,
 	"quantity_remaining" integer NOT NULL,
@@ -448,9 +457,17 @@ CREATE TABLE "inventory_reservations" (
 	"expires_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "inventory_reservations_event_identity_unique" UNIQUE("id","order_id","order_item_id","lot_id"),
 	CONSTRAINT "inventory_reservations_idempotency_unique" UNIQUE("idempotency_key"),
 	CONSTRAINT "inventory_reservations_idempotency_nonblank" CHECK (length(btrim("inventory_reservations"."idempotency_key")) > 0),
 	CONSTRAINT "inventory_reservations_quantity_bounds" CHECK ("inventory_reservations"."quantity_reserved" > 0 and "inventory_reservations"."quantity_remaining" >= 0 and "inventory_reservations"."quantity_remaining" <= "inventory_reservations"."quantity_reserved")
+);
+--> statement-breakpoint
+CREATE TABLE "review_request_destination_policies" (
+	"review_request_id" uuid NOT NULL,
+	"destination_policy_id" uuid NOT NULL,
+	"covered" boolean DEFAULT false NOT NULL,
+	CONSTRAINT "review_request_destination_policies_pk" PRIMARY KEY("review_request_id","destination_policy_id")
 );
 --> statement-breakpoint
 CREATE TABLE "review_requests" (
@@ -463,13 +480,13 @@ CREATE TABLE "review_requests" (
 	"destination_state_code" text NOT NULL,
 	"cart_snapshot" jsonb NOT NULL,
 	"buyer_review_required" boolean NOT NULL,
-	"destination_policy_ids" uuid[] NOT NULL,
+	"destination_review_required" boolean NOT NULL,
 	"outcome" "review_outcome",
 	"decided_by_user_id" uuid,
 	"decided_at" timestamp with time zone,
 	"covers_buyer_review" boolean,
-	"covered_destination_policy_ids" uuid[],
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "review_requests_id_order_unique" UNIQUE("id","order_id"),
 	CONSTRAINT "review_requests_snapshot_hash_unique" UNIQUE("snapshot_hash"),
 	CONSTRAINT "review_requests_snapshot_hash" CHECK ("review_requests"."snapshot_hash" ~ '^[0-9a-f]{64}$'),
 	CONSTRAINT "review_requests_destination_state" CHECK ("review_requests"."destination_state_code" in (
@@ -479,11 +496,11 @@ CREATE TABLE "review_requests" (
   'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
   'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'
 )),
-	CONSTRAINT "review_requests_explicit_reason" CHECK ("review_requests"."buyer_review_required" = true or cardinality("review_requests"."destination_policy_ids") > 0),
+	CONSTRAINT "review_requests_explicit_reason" CHECK ("review_requests"."buyer_review_required" = true or "review_requests"."destination_review_required" = true),
 	CONSTRAINT "review_requests_decision_coherent" CHECK (("review_requests"."outcome" is null and "review_requests"."decided_by_user_id" is null and "review_requests"."decided_at" is null
-            and "review_requests"."covers_buyer_review" is null and "review_requests"."covered_destination_policy_ids" is null)
+            and "review_requests"."covers_buyer_review" is null)
           or ("review_requests"."outcome" is not null and "review_requests"."decided_by_user_id" is not null and "review_requests"."decided_at" is not null
-            and "review_requests"."covers_buyer_review" is not null and "review_requests"."covered_destination_policy_ids" is not null))
+            and "review_requests"."covers_buyer_review" is not null))
 );
 --> statement-breakpoint
 CREATE TABLE "shipments" (
@@ -542,30 +559,33 @@ ALTER TABLE "promotion_targets" ADD CONSTRAINT "promotion_targets_policy_group_i
 ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "order_items" ADD CONSTRAINT "order_items_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "order_items" ADD CONSTRAINT "order_items_product_id_products_id_fk" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "order_items" ADD CONSTRAINT "order_items_product_price_id_product_prices_id_fk" FOREIGN KEY ("product_price_id") REFERENCES "public"."product_prices"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "order_items" ADD CONSTRAINT "order_items_destination_policy_id_destination_policies_id_fk" FOREIGN KEY ("destination_policy_id") REFERENCES "public"."destination_policies"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "order_items" ADD CONSTRAINT "order_items_price_product_fk" FOREIGN KEY ("product_price_id","product_id") REFERENCES "public"."product_prices"("id","product_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "orders" ADD CONSTRAINT "orders_buyer_user_id_users_id_fk" FOREIGN KEY ("buyer_user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "orders" ADD CONSTRAINT "orders_attestation_acceptance_id_attestation_acceptances_id_fk" FOREIGN KEY ("attestation_acceptance_id") REFERENCES "public"."attestation_acceptances"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "orders" ADD CONSTRAINT "orders_attestation_acceptance_buyer_fk" FOREIGN KEY ("attestation_acceptance_id","buyer_user_id") REFERENCES "public"."attestation_acceptances"("id","user_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_events" ADD CONSTRAINT "payment_events_provider_event_id_provider_events_id_fk" FOREIGN KEY ("provider_event_id") REFERENCES "public"."provider_events"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "payment_events" ADD CONSTRAINT "payment_events_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "refunds" ADD CONSTRAINT "refunds_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "refunds" ADD CONSTRAINT "refunds_requested_by_user_id_users_id_fk" FOREIGN KEY ("requested_by_user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "refunds" ADD CONSTRAINT "refunds_provider_event_id_provider_events_id_fk" FOREIGN KEY ("provider_event_id") REFERENCES "public"."provider_events"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "refunds" ADD CONSTRAINT "refunds_provider_event_provider_fk" FOREIGN KEY ("provider_event_id","provider") REFERENCES "public"."provider_events"("id","provider") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "fulfillment_releases" ADD CONSTRAINT "fulfillment_releases_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "fulfillment_releases" ADD CONSTRAINT "fulfillment_releases_payment_event_id_payment_events_id_fk" FOREIGN KEY ("payment_event_id") REFERENCES "public"."payment_events"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "fulfillment_releases" ADD CONSTRAINT "fulfillment_releases_review_request_id_review_requests_id_fk" FOREIGN KEY ("review_request_id") REFERENCES "public"."review_requests"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "fulfillment_releases" ADD CONSTRAINT "fulfillment_releases_payment_order_fk" FOREIGN KEY ("payment_event_id","order_id") REFERENCES "public"."payment_events"("id","order_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "fulfillment_releases" ADD CONSTRAINT "fulfillment_releases_review_order_fk" FOREIGN KEY ("review_request_id","order_id") REFERENCES "public"."review_requests"("id","order_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "inventory_events" ADD CONSTRAINT "inventory_events_lot_id_lots_id_fk" FOREIGN KEY ("lot_id") REFERENCES "public"."lots"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "inventory_events" ADD CONSTRAINT "inventory_events_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "inventory_events" ADD CONSTRAINT "inventory_events_order_item_id_order_items_id_fk" FOREIGN KEY ("order_item_id") REFERENCES "public"."order_items"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "inventory_events" ADD CONSTRAINT "inventory_events_reservation_id_inventory_reservations_id_fk" FOREIGN KEY ("reservation_id") REFERENCES "public"."inventory_reservations"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "inventory_events" ADD CONSTRAINT "inventory_events_fulfillment_release_id_fulfillment_releases_id_fk" FOREIGN KEY ("fulfillment_release_id") REFERENCES "public"."fulfillment_releases"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "inventory_reservations" ADD CONSTRAINT "inventory_reservations_order_item_id_order_items_id_fk" FOREIGN KEY ("order_item_id") REFERENCES "public"."order_items"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "inventory_reservations" ADD CONSTRAINT "inventory_reservations_lot_id_lots_id_fk" FOREIGN KEY ("lot_id") REFERENCES "public"."lots"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "inventory_events" ADD CONSTRAINT "inventory_events_reservation_line_lot_fk" FOREIGN KEY ("reservation_id","order_id","order_item_id","lot_id") REFERENCES "public"."inventory_reservations"("id","order_id","order_item_id","lot_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "inventory_events" ADD CONSTRAINT "inventory_events_release_order_fk" FOREIGN KEY ("fulfillment_release_id","order_id") REFERENCES "public"."fulfillment_releases"("id","order_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "inventory_reservations" ADD CONSTRAINT "inventory_reservations_item_order_product_fk" FOREIGN KEY ("order_item_id","order_id","product_id") REFERENCES "public"."order_items"("id","order_id","product_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "inventory_reservations" ADD CONSTRAINT "inventory_reservations_lot_product_fk" FOREIGN KEY ("lot_id","product_id") REFERENCES "public"."lots"("id","product_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "review_request_destination_policies" ADD CONSTRAINT "review_request_destination_policies_review_request_id_review_requests_id_fk" FOREIGN KEY ("review_request_id") REFERENCES "public"."review_requests"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "review_request_destination_policies" ADD CONSTRAINT "review_request_destination_policies_destination_policy_id_destination_policies_id_fk" FOREIGN KEY ("destination_policy_id") REFERENCES "public"."destination_policies"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "review_requests" ADD CONSTRAINT "review_requests_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "review_requests" ADD CONSTRAINT "review_requests_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "review_requests" ADD CONSTRAINT "review_requests_attestation_version_id_attestation_versions_id_fk" FOREIGN KEY ("attestation_version_id") REFERENCES "public"."attestation_versions"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "review_requests" ADD CONSTRAINT "review_requests_decided_by_user_id_users_id_fk" FOREIGN KEY ("decided_by_user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "review_requests" ADD CONSTRAINT "review_requests_order_buyer_fk" FOREIGN KEY ("order_id","user_id") REFERENCES "public"."orders"("id","buyer_user_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "shipments" ADD CONSTRAINT "shipments_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "shipments" ADD CONSTRAINT "shipments_fulfillment_release_id_fulfillment_releases_id_fk" FOREIGN KEY ("fulfillment_release_id") REFERENCES "public"."fulfillment_releases"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "shipments" ADD CONSTRAINT "shipments_release_order_fk" FOREIGN KEY ("fulfillment_release_id","order_id") REFERENCES "public"."fulfillment_releases"("id","order_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "admin_audit" ADD CONSTRAINT "admin_audit_actor_user_id_users_id_fk" FOREIGN KEY ("actor_user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "staff_roles_active_user_capability_unique" ON "staff_roles" USING btree ("user_id","capability") WHERE "staff_roles"."revoked_at" is null;--> statement-breakpoint
 CREATE INDEX "coa_documents_lot_active_idx" ON "coa_documents" USING btree ("lot_id","active");--> statement-breakpoint
@@ -582,8 +602,10 @@ CREATE INDEX "order_items_order_idx" ON "order_items" USING btree ("order_id");-
 CREATE INDEX "orders_buyer_created_idx" ON "orders" USING btree ("buyer_user_id","created_at");--> statement-breakpoint
 CREATE INDEX "payment_events_order_occurred_idx" ON "payment_events" USING btree ("order_id","occurred_at");--> statement-breakpoint
 CREATE INDEX "provider_events_status_lease_idx" ON "provider_events" USING btree ("status","lease_expires_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "refunds_provider_refund_unique" ON "refunds" USING btree ("provider","provider_refund_id") WHERE "refunds"."provider_refund_id" is not null;--> statement-breakpoint
 CREATE UNIQUE INDEX "fulfillment_releases_current_issued_unique" ON "fulfillment_releases" USING btree ("order_id") WHERE "fulfillment_releases"."state" = 'issued';--> statement-breakpoint
-CREATE UNIQUE INDEX "inventory_events_release_consume_unique" ON "inventory_events" USING btree ("fulfillment_release_id") WHERE "inventory_events"."event_type" = 'consume' and "inventory_events"."fulfillment_release_id" is not null;--> statement-breakpoint
+CREATE UNIQUE INDEX "fulfillment_releases_consumed_order_unique" ON "fulfillment_releases" USING btree ("order_id") WHERE "fulfillment_releases"."state" = 'consumed';--> statement-breakpoint
+CREATE UNIQUE INDEX "inventory_events_reservation_consume_unique" ON "inventory_events" USING btree ("reservation_id") WHERE "inventory_events"."event_type" = 'consume' and "inventory_events"."reservation_id" is not null;--> statement-breakpoint
 CREATE INDEX "inventory_events_lot_occurred_idx" ON "inventory_events" USING btree ("lot_id","occurred_at");--> statement-breakpoint
 CREATE INDEX "inventory_reservations_lot_state_idx" ON "inventory_reservations" USING btree ("lot_id","state");--> statement-breakpoint
 CREATE INDEX "admin_audit_resource_occurred_idx" ON "admin_audit" USING btree ("resource_type","resource_id","occurred_at");

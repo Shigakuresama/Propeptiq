@@ -92,6 +92,7 @@ export const productPrices = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
+    unique("product_prices_id_product_unique").on(table.id, table.productId),
     unique("product_prices_product_version_unique").on(
       table.productId,
       table.version,
@@ -127,6 +128,7 @@ export const lots = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
+    unique("lots_id_product_unique").on(table.id, table.productId),
     unique("lots_product_supplier_code_unique").on(
       table.productId,
       table.supplierName,
@@ -196,6 +198,10 @@ export const destinationPolicies = pgTable(
     ),
     check("destination_policies_state_code", stateCode(table.stateCode)),
     check("destination_policies_version_positive", sql`${table.version} > 0`),
+    check(
+      "destination_policies_active_not_superseded",
+      sql`${table.active} = false or ${table.supersededAt} is null`,
+    ),
     check(
       "destination_policies_time_coherent",
       sql`${table.supersededAt} is null or ${table.supersededAt} > ${table.effectiveAt}`,

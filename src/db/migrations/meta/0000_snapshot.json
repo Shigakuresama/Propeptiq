@@ -1,5 +1,5 @@
 {
-  "id": "e50a6422-6c8b-4108-8af5-667b52de5bde",
+  "id": "b033e9cb-5994-4be7-8a1d-4e191868fa21",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -66,6 +66,14 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "attestation_acceptances_id_user_unique": {
+          "name": "attestation_acceptances_id_user_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "user_id"
+          ]
+        },
         "attestation_acceptances_user_version_unique": {
           "name": "attestation_acceptances_user_version_unique",
           "nullsNotDistinct": false,
@@ -183,8 +191,7 @@
           "type": "buyer_status",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'review'"
+          "notNull": true
         },
         "age_confirmed_at": {
           "name": "age_confirmed_at",
@@ -796,6 +803,10 @@
           "name": "destination_policies_version_positive",
           "value": "\"destination_policies\".\"version\" > 0"
         },
+        "destination_policies_active_not_superseded": {
+          "name": "destination_policies_active_not_superseded",
+          "value": "\"destination_policies\".\"active\" = false or \"destination_policies\".\"superseded_at\" is null"
+        },
         "destination_policies_time_coherent": {
           "name": "destination_policies_time_coherent",
           "value": "\"destination_policies\".\"superseded_at\" is null or \"destination_policies\".\"superseded_at\" > \"destination_policies\".\"effective_at\""
@@ -919,6 +930,14 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "lots_id_product_unique": {
+          "name": "lots_id_product_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "product_id"
+          ]
+        },
         "lots_product_supplier_code_unique": {
           "name": "lots_product_supplier_code_unique",
           "nullsNotDistinct": false,
@@ -1116,6 +1135,14 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "product_prices_id_product_unique": {
+          "name": "product_prices_id_product_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "product_id"
+          ]
+        },
         "product_prices_product_version_unique": {
           "name": "product_prices_product_version_unique",
           "nullsNotDistinct": false,
@@ -1620,10 +1647,10 @@
         },
         "reasons": {
           "name": "reasons",
-          "type": "jsonb",
+          "type": "text[]",
           "primaryKey": false,
           "notNull": true,
-          "default": "'[]'::jsonb"
+          "default": "'{}'::text[]"
         },
         "tax_ready": {
           "name": "tax_ready",
@@ -1874,19 +1901,6 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "order_items_product_price_id_product_prices_id_fk": {
-          "name": "order_items_product_price_id_product_prices_id_fk",
-          "tableFrom": "order_items",
-          "tableTo": "product_prices",
-          "columnsFrom": [
-            "product_price_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
         "order_items_destination_policy_id_destination_policies_id_fk": {
           "name": "order_items_destination_policy_id_destination_policies_id_fk",
           "tableFrom": "order_items",
@@ -1899,10 +1913,35 @@
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
+        },
+        "order_items_price_product_fk": {
+          "name": "order_items_price_product_fk",
+          "tableFrom": "order_items",
+          "tableTo": "product_prices",
+          "columnsFrom": [
+            "product_price_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "id",
+            "product_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "order_items_id_order_product_unique": {
+          "name": "order_items_id_order_product_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "order_id",
+            "product_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "order_items_name_nonblank": {
@@ -1964,18 +2003,6 @@
         },
         "destination_state_code": {
           "name": "destination_state_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "buyer_snapshot_hash": {
-          "name": "buyer_snapshot_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "destination_snapshot_hash": {
-          "name": "destination_snapshot_hash",
           "type": "text",
           "primaryKey": false,
           "notNull": true
@@ -2076,35 +2103,38 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "orders_attestation_acceptance_id_attestation_acceptances_id_fk": {
-          "name": "orders_attestation_acceptance_id_attestation_acceptances_id_fk",
+        "orders_attestation_acceptance_buyer_fk": {
+          "name": "orders_attestation_acceptance_buyer_fk",
           "tableFrom": "orders",
           "tableTo": "attestation_acceptances",
           "columnsFrom": [
-            "attestation_acceptance_id"
+            "attestation_acceptance_id",
+            "buyer_user_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "user_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "orders_id_buyer_unique": {
+          "name": "orders_id_buyer_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "buyer_user_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "orders_destination_state_code": {
           "name": "orders_destination_state_code",
           "value": "\"orders\".\"destination_state_code\" in (\n  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',\n  'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',\n  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',\n  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',\n  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'\n)"
-        },
-        "orders_buyer_snapshot_hash": {
-          "name": "orders_buyer_snapshot_hash",
-          "value": "\"orders\".\"buyer_snapshot_hash\" ~ '^[0-9a-f]{64}$'"
-        },
-        "orders_destination_snapshot_hash": {
-          "name": "orders_destination_snapshot_hash",
-          "value": "\"orders\".\"destination_snapshot_hash\" ~ '^[0-9a-f]{64}$'"
         },
         "orders_currency_format": {
           "name": "orders_currency_format",
@@ -2242,6 +2272,14 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "payment_events_id_order_unique": {
+          "name": "payment_events_id_order_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "order_id"
+          ]
+        },
         "payment_events_provider_event_unique": {
           "name": "payment_events_provider_event_unique",
           "nullsNotDistinct": false,
@@ -2380,6 +2418,14 @@
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "provider_events_id_provider_unique": {
+          "name": "provider_events_id_provider_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "provider"
+          ]
+        },
         "provider_events_delivery_unique": {
           "name": "provider_events_delivery_unique",
           "nullsNotDistinct": false,
@@ -2414,6 +2460,10 @@
         "provider_events_lease_pair": {
           "name": "provider_events_lease_pair",
           "value": "(\"provider_events\".\"lease_token\" is null) = (\"provider_events\".\"lease_expires_at\" is null)"
+        },
+        "provider_events_lease_token_nonblank": {
+          "name": "provider_events_lease_token_nonblank",
+          "value": "\"provider_events\".\"lease_token\" is null or length(btrim(\"provider_events\".\"lease_token\")) > 0"
         },
         "provider_events_status_coherent": {
           "name": "provider_events_status_coherent",
@@ -2515,7 +2565,30 @@
           "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "refunds_provider_refund_unique": {
+          "name": "refunds_provider_refund_unique",
+          "columns": [
+            {
+              "expression": "provider",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "provider_refund_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"refunds\".\"provider_refund_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "refunds_order_id_orders_id_fk": {
           "name": "refunds_order_id_orders_id_fk",
@@ -2543,15 +2616,17 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "refunds_provider_event_id_provider_events_id_fk": {
-          "name": "refunds_provider_event_id_provider_events_id_fk",
+        "refunds_provider_event_provider_fk": {
+          "name": "refunds_provider_event_provider_fk",
           "tableFrom": "refunds",
           "tableTo": "provider_events",
           "columnsFrom": [
-            "provider_event_id"
+            "provider_event_id",
+            "provider"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "provider"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -2583,6 +2658,10 @@
         "refunds_idempotency_nonblank": {
           "name": "refunds_idempotency_nonblank",
           "value": "length(btrim(\"refunds\".\"idempotency_key\")) > 0"
+        },
+        "refunds_provider_refund_nonblank": {
+          "name": "refunds_provider_refund_nonblank",
+          "value": "\"refunds\".\"provider_refund_id\" is null or length(btrim(\"refunds\".\"provider_refund_id\")) > 0"
         },
         "refunds_requested_amount_positive": {
           "name": "refunds_requested_amount_positive",
@@ -2644,12 +2723,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "clearance_snapshot_hash": {
-          "name": "clearance_snapshot_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "state": {
           "name": "state",
           "type": "fulfillment_release_state",
@@ -2704,6 +2777,22 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "fulfillment_releases_consumed_order_unique": {
+          "name": "fulfillment_releases_consumed_order_unique",
+          "columns": [
+            {
+              "expression": "order_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"fulfillment_releases\".\"state\" = 'consumed'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -2720,28 +2809,32 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "fulfillment_releases_payment_event_id_payment_events_id_fk": {
-          "name": "fulfillment_releases_payment_event_id_payment_events_id_fk",
+        "fulfillment_releases_payment_order_fk": {
+          "name": "fulfillment_releases_payment_order_fk",
           "tableFrom": "fulfillment_releases",
           "tableTo": "payment_events",
           "columnsFrom": [
-            "payment_event_id"
+            "payment_event_id",
+            "order_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "order_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "fulfillment_releases_review_request_id_review_requests_id_fk": {
-          "name": "fulfillment_releases_review_request_id_review_requests_id_fk",
+        "fulfillment_releases_review_order_fk": {
+          "name": "fulfillment_releases_review_order_fk",
           "tableFrom": "fulfillment_releases",
           "tableTo": "review_requests",
           "columnsFrom": [
-            "review_request_id"
+            "review_request_id",
+            "order_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "order_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -2749,6 +2842,14 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "fulfillment_releases_id_order_unique": {
+          "name": "fulfillment_releases_id_order_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "order_id"
+          ]
+        },
         "fulfillment_releases_order_version_unique": {
           "name": "fulfillment_releases_order_version_unique",
           "nullsNotDistinct": false,
@@ -2774,10 +2875,6 @@
         "fulfillment_releases_idempotency_nonblank": {
           "name": "fulfillment_releases_idempotency_nonblank",
           "value": "length(btrim(\"fulfillment_releases\".\"idempotency_key\")) > 0"
-        },
-        "fulfillment_releases_clearance_hash": {
-          "name": "fulfillment_releases_clearance_hash",
-          "value": "\"fulfillment_releases\".\"clearance_snapshot_hash\" ~ '^[0-9a-f]{64}$'"
         },
         "fulfillment_releases_expiry_after_issue": {
           "name": "fulfillment_releases_expiry_after_issue",
@@ -2820,6 +2917,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "order_item_id": {
           "name": "order_item_id",
           "type": "uuid",
@@ -2859,18 +2962,18 @@
         }
       },
       "indexes": {
-        "inventory_events_release_consume_unique": {
-          "name": "inventory_events_release_consume_unique",
+        "inventory_events_reservation_consume_unique": {
+          "name": "inventory_events_reservation_consume_unique",
           "columns": [
             {
-              "expression": "fulfillment_release_id",
+              "expression": "reservation_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
             }
           ],
           "isUnique": true,
-          "where": "\"inventory_events\".\"event_type\" = 'consume' and \"inventory_events\".\"fulfillment_release_id\" is not null",
+          "where": "\"inventory_events\".\"event_type\" = 'consume' and \"inventory_events\".\"reservation_id\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -2911,6 +3014,19 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
+        "inventory_events_order_id_orders_id_fk": {
+          "name": "inventory_events_order_id_orders_id_fk",
+          "tableFrom": "inventory_events",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "inventory_events_order_item_id_order_items_id_fk": {
           "name": "inventory_events_order_item_id_order_items_id_fk",
           "tableFrom": "inventory_events",
@@ -2924,28 +3040,36 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "inventory_events_reservation_id_inventory_reservations_id_fk": {
-          "name": "inventory_events_reservation_id_inventory_reservations_id_fk",
+        "inventory_events_reservation_line_lot_fk": {
+          "name": "inventory_events_reservation_line_lot_fk",
           "tableFrom": "inventory_events",
           "tableTo": "inventory_reservations",
           "columnsFrom": [
-            "reservation_id"
+            "reservation_id",
+            "order_id",
+            "order_item_id",
+            "lot_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "order_id",
+            "order_item_id",
+            "lot_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "inventory_events_fulfillment_release_id_fulfillment_releases_id_fk": {
-          "name": "inventory_events_fulfillment_release_id_fulfillment_releases_id_fk",
+        "inventory_events_release_order_fk": {
+          "name": "inventory_events_release_order_fk",
           "tableFrom": "inventory_events",
           "tableTo": "fulfillment_releases",
           "columnsFrom": [
-            "fulfillment_release_id"
+            "fulfillment_release_id",
+            "order_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "order_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -2975,9 +3099,13 @@
           "name": "inventory_events_balance_nonnegative",
           "value": "\"inventory_events\".\"balance_after\" >= 0"
         },
+        "inventory_events_reservation_context": {
+          "name": "inventory_events_reservation_context",
+          "value": "\"inventory_events\".\"reservation_id\" is null or (\"inventory_events\".\"order_id\" is not null and \"inventory_events\".\"order_item_id\" is not null)"
+        },
         "inventory_events_consume_release": {
           "name": "inventory_events_consume_release",
-          "value": "\"inventory_events\".\"event_type\" <> 'consume' or (\"inventory_events\".\"fulfillment_release_id\" is not null and \"inventory_events\".\"order_item_id\" is not null and \"inventory_events\".\"reservation_id\" is not null)"
+          "value": "\"inventory_events\".\"event_type\" <> 'consume' or (\"inventory_events\".\"fulfillment_release_id\" is not null and \"inventory_events\".\"order_id\" is not null and \"inventory_events\".\"order_item_id\" is not null and \"inventory_events\".\"reservation_id\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -2999,8 +3127,20 @@
           "primaryKey": false,
           "notNull": true
         },
+        "order_id": {
+          "name": "order_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
         "order_item_id": {
           "name": "order_item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "product_id": {
+          "name": "product_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
@@ -3076,28 +3216,34 @@
         }
       },
       "foreignKeys": {
-        "inventory_reservations_order_item_id_order_items_id_fk": {
-          "name": "inventory_reservations_order_item_id_order_items_id_fk",
+        "inventory_reservations_item_order_product_fk": {
+          "name": "inventory_reservations_item_order_product_fk",
           "tableFrom": "inventory_reservations",
           "tableTo": "order_items",
           "columnsFrom": [
-            "order_item_id"
+            "order_item_id",
+            "order_id",
+            "product_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "order_id",
+            "product_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "inventory_reservations_lot_id_lots_id_fk": {
-          "name": "inventory_reservations_lot_id_lots_id_fk",
+        "inventory_reservations_lot_product_fk": {
+          "name": "inventory_reservations_lot_product_fk",
           "tableFrom": "inventory_reservations",
           "tableTo": "lots",
           "columnsFrom": [
-            "lot_id"
+            "lot_id",
+            "product_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "product_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
@@ -3105,6 +3251,16 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "inventory_reservations_event_identity_unique": {
+          "name": "inventory_reservations_event_identity_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "order_id",
+            "order_item_id",
+            "lot_id"
+          ]
+        },
         "inventory_reservations_idempotency_unique": {
           "name": "inventory_reservations_idempotency_unique",
           "nullsNotDistinct": false,
@@ -3124,6 +3280,73 @@
           "value": "\"inventory_reservations\".\"quantity_reserved\" > 0 and \"inventory_reservations\".\"quantity_remaining\" >= 0 and \"inventory_reservations\".\"quantity_remaining\" <= \"inventory_reservations\".\"quantity_reserved\""
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.review_request_destination_policies": {
+      "name": "review_request_destination_policies",
+      "schema": "",
+      "columns": {
+        "review_request_id": {
+          "name": "review_request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destination_policy_id": {
+          "name": "destination_policy_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "covered": {
+          "name": "covered",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "review_request_destination_policies_review_request_id_review_requests_id_fk": {
+          "name": "review_request_destination_policies_review_request_id_review_requests_id_fk",
+          "tableFrom": "review_request_destination_policies",
+          "tableTo": "review_requests",
+          "columnsFrom": [
+            "review_request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "review_request_destination_policies_destination_policy_id_destination_policies_id_fk": {
+          "name": "review_request_destination_policies_destination_policy_id_destination_policies_id_fk",
+          "tableFrom": "review_request_destination_policies",
+          "tableTo": "destination_policies",
+          "columnsFrom": [
+            "destination_policy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "review_request_destination_policies_pk": {
+          "name": "review_request_destination_policies_pk",
+          "columns": [
+            "review_request_id",
+            "destination_policy_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.review_requests": {
@@ -3186,9 +3409,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "destination_policy_ids": {
-          "name": "destination_policy_ids",
-          "type": "uuid[]",
+        "destination_review_required": {
+          "name": "destination_review_required",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": true
         },
@@ -3217,12 +3440,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "covered_destination_policy_ids": {
-          "name": "covered_destination_policy_ids",
-          "type": "uuid[]",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3239,19 +3456,6 @@
           "tableTo": "users",
           "columnsFrom": [
             "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
-        "review_requests_order_id_orders_id_fk": {
-          "name": "review_requests_order_id_orders_id_fk",
-          "tableFrom": "review_requests",
-          "tableTo": "orders",
-          "columnsFrom": [
-            "order_id"
           ],
           "columnsTo": [
             "id"
@@ -3284,10 +3488,33 @@
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
+        },
+        "review_requests_order_buyer_fk": {
+          "name": "review_requests_order_buyer_fk",
+          "tableFrom": "review_requests",
+          "tableTo": "orders",
+          "columnsFrom": [
+            "order_id",
+            "user_id"
+          ],
+          "columnsTo": [
+            "id",
+            "buyer_user_id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "review_requests_id_order_unique": {
+          "name": "review_requests_id_order_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "order_id"
+          ]
+        },
         "review_requests_snapshot_hash_unique": {
           "name": "review_requests_snapshot_hash_unique",
           "nullsNotDistinct": false,
@@ -3308,11 +3535,11 @@
         },
         "review_requests_explicit_reason": {
           "name": "review_requests_explicit_reason",
-          "value": "\"review_requests\".\"buyer_review_required\" = true or cardinality(\"review_requests\".\"destination_policy_ids\") > 0"
+          "value": "\"review_requests\".\"buyer_review_required\" = true or \"review_requests\".\"destination_review_required\" = true"
         },
         "review_requests_decision_coherent": {
           "name": "review_requests_decision_coherent",
-          "value": "(\"review_requests\".\"outcome\" is null and \"review_requests\".\"decided_by_user_id\" is null and \"review_requests\".\"decided_at\" is null\n            and \"review_requests\".\"covers_buyer_review\" is null and \"review_requests\".\"covered_destination_policy_ids\" is null)\n          or (\"review_requests\".\"outcome\" is not null and \"review_requests\".\"decided_by_user_id\" is not null and \"review_requests\".\"decided_at\" is not null\n            and \"review_requests\".\"covers_buyer_review\" is not null and \"review_requests\".\"covered_destination_policy_ids\" is not null)"
+          "value": "(\"review_requests\".\"outcome\" is null and \"review_requests\".\"decided_by_user_id\" is null and \"review_requests\".\"decided_at\" is null\n            and \"review_requests\".\"covers_buyer_review\" is null)\n          or (\"review_requests\".\"outcome\" is not null and \"review_requests\".\"decided_by_user_id\" is not null and \"review_requests\".\"decided_at\" is not null\n            and \"review_requests\".\"covers_buyer_review\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -3402,15 +3629,17 @@
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
-        "shipments_fulfillment_release_id_fulfillment_releases_id_fk": {
-          "name": "shipments_fulfillment_release_id_fulfillment_releases_id_fk",
+        "shipments_release_order_fk": {
+          "name": "shipments_release_order_fk",
           "tableFrom": "shipments",
           "tableTo": "fulfillment_releases",
           "columnsFrom": [
-            "fulfillment_release_id"
+            "fulfillment_release_id",
+            "order_id"
           ],
           "columnsTo": [
-            "id"
+            "id",
+            "order_id"
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"

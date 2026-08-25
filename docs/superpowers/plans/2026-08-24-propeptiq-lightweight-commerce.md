@@ -109,7 +109,7 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 3: Implement the Lean Database Model
 
-- [x] Model `users`, `buyer_profiles`, `attestation_versions`, `attestation_acceptances`, `staff_roles`, `product_policy_groups`, `products`, `product_prices`, `lots`, optional `coa_documents`, `destination_policies`, `promotions`, `promotion_targets`, `orders`, `order_items`, `checkout_attempts`, `provider_events`, `payment_events`, `inventory_reservations`, `inventory_events`, `refunds`, `review_requests`, `fulfillment_releases`, `shipments`, and `admin_audit`.
+- [x] Model `users`, `buyer_profiles`, `attestation_versions`, `attestation_acceptances`, `staff_roles`, `product_policy_groups`, `products`, `product_prices`, `lots`, optional `coa_documents`, `destination_policies`, `promotions`, `promotion_targets`, `orders`, `order_items`, `checkout_attempts`, `provider_events`, `payment_events`, `inventory_reservations`, `inventory_events`, `refunds`, `review_requests`, `review_request_destination_policies`, `fulfillment_releases`, `shipments`, and `admin_audit`.
 - [x] Omit v1 organization tenancy, membership projection, evidence-document applications, publication approval chains, jurisdiction evidence hashes, launch-gate tables, and database-level separation-of-duty triggers.
 - [x] Resolve destination policy as exact product override → policy group → unavailable.
 - [x] Retain uniqueness/idempotency constraints for payment events, refunds, inventory consumption, and shipment/release consumption.

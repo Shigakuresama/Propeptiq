@@ -1,12 +1,14 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  foreignKey,
   index,
   integer,
   pgTable,
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 
@@ -46,6 +48,7 @@ export const providerEvents = pgTable(
     processedAt: timestamp("processed_at", { withTimezone: true }),
   },
   (table) => [
+    unique("provider_events_id_provider_unique").on(table.id, table.provider),
     unique("provider_events_delivery_unique").on(
       table.provider,
       table.providerEventId,
@@ -61,6 +64,10 @@ export const providerEvents = pgTable(
     check(
       "provider_events_lease_pair",
       sql`(${table.leaseToken} is null) = (${table.leaseExpiresAt} is null)`,
+    ),
+    check(
+      "provider_events_lease_token_nonblank",
+      sql`${table.leaseToken} is null or ${nonblank(table.leaseToken)}`,
     ),
     check(
       "provider_events_status_coherent",
@@ -103,6 +110,7 @@ export const paymentEvents = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
+    unique("payment_events_id_order_unique").on(table.id, table.orderId),
     unique("payment_events_provider_event_unique").on(table.providerEventId),
     unique("payment_events_idempotency_unique").on(table.idempotencyKey),
     check("payment_events_idempotency_nonblank", nonblank(table.idempotencyKey)),
@@ -130,10 +138,7 @@ export const refunds = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     provider: text("provider").notNull(),
-    providerEventId: uuid("provider_event_id").references(
-      () => providerEvents.id,
-      { onDelete: "restrict" },
-    ),
+    providerEventId: uuid("provider_event_id"),
     providerRefundId: text("provider_refund_id"),
     idempotencyKey: text("idempotency_key").notNull(),
     requestedAmountMinor: money("requested_amount_minor"),
@@ -149,8 +154,20 @@ export const refunds = pgTable(
   (table) => [
     unique("refunds_idempotency_unique").on(table.idempotencyKey),
     unique("refunds_provider_event_unique").on(table.providerEventId),
+    uniqueIndex("refunds_provider_refund_unique")
+      .on(table.provider, table.providerRefundId)
+      .where(sql`${table.providerRefundId} is not null`),
+    foreignKey({
+      columns: [table.providerEventId, table.provider],
+      foreignColumns: [providerEvents.id, providerEvents.provider],
+      name: "refunds_provider_event_provider_fk",
+    }).onDelete("restrict"),
     check("refunds_provider_nonblank", nonblank(table.provider)),
     check("refunds_idempotency_nonblank", nonblank(table.idempotencyKey)),
+    check(
+      "refunds_provider_refund_nonblank",
+      sql`${table.providerRefundId} is null or ${nonblank(table.providerRefundId)}`,
+    ),
     check("refunds_requested_amount_positive", safePositiveMoney(table.requestedAmountMinor)),
     check(
       "refunds_confirmed_amount_bounds",
