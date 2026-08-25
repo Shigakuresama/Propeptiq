@@ -29,10 +29,10 @@
 
 - [x] Binding business, architecture, security, payment, compliance, jurisdiction, deployment, testing, and runbook documentation is present.
 - [x] Superdesign project `14bb848e-b774-4091-8f92-6a9cdf2b47ac`, desktop draft `d5bd0bcf-c086-499d-904c-4eb8581d2bb4`, version 3 was generated and audited for invented operating facts and researcher/organization scope.
-- [x] The preserved scaffold/domain draft received a read-only pre-implementation review; its current failures and request-changes ruling are recorded in `docs/reviews/pre-implementation-review.md`.
-- [ ] The user approves version 3 or requests a revision, and the decision is recorded in `docs/design/superdesign-review.md`.
+- [x] The preserved scaffold/domain draft received a read-only pre-implementation review and focused follow-up; the pure Task 2 candidate is approved in that scope but remains subject to formal task acceptance.
+- [x] The user approved desktop version 3 and `responsive-v1`; the exact decision is recorded in `docs/design/superdesign-review.md` and `docs/design/responsive-public-ui.md`.
 
-Until the final checkbox is complete, all implementation tasks below remain paused. Existing uncommitted Task 2 work is preserved but is not accepted evidence of completion.
+The visual hold is released. This approval authorizes implementation of the approved interface direction only; it does not open any business, catalog, jurisdiction, payment, tax, shipping, fulfillment, security, backup, or production launch gate.
 
 ## Task 0: Establish the canonical repository and accept only reviewed artifacts
 

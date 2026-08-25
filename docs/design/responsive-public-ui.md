@@ -1,10 +1,10 @@
 # Responsive Public UI Handoff
 
-**Status:** Proposed implementation contract. It may be refined by the user’s Superdesign decision, and no public UI file may be edited until `docs/design/superdesign-review.md` records approval of an exact draft version.
+**Status:** Approved implementation contract.
 
 **Handoff version:** `responsive-v1`
 
-**Visual source:** Superdesign draft `d5bd0bcf-c086-499d-904c-4eb8581d2bb4`, version `3`; user approval is pending.
+**Visual source:** Superdesign draft `d5bd0bcf-c086-499d-904c-4eb8581d2bb4`, version `3`; explicitly approved with this handoff by the user in the Codex task at `2026-08-24T20:54:54-07:00`.
 
 ## 1. Design-system ruling
 
@@ -118,11 +118,11 @@ The testable accessibility contract is:
 
 | Adaptation from desktop draft version 3 | Rationale | Approval state |
 |---|---|---|
-| Add a labeled mobile navigation trigger and shadcn Sheet containing all routes and the research-use restriction | The inspected 375px draft showed only the wordmark and Account action, leaving no mobile route discovery | Proposed in `responsive-v1`; pending user approval |
-| Keep the Sheet until labels fit at zoom rather than forcing a fixed tablet breakpoint | Prevent collision, truncation, and hidden policy access | Proposed in `responsive-v1`; pending user approval |
-| Convert the horizontal Proof Rail to the same ordered vertical relationship on narrow screens | Preserve DOM/reading order and avoid horizontal overflow | Proposed in `responsive-v1`; pending user approval |
-| Stack the hero record composition beneath the editorial statement on narrow screens | Preserve readable display wrapping and document detail | Proposed in `responsive-v1`; pending user approval |
+| Add a labeled mobile navigation trigger and shadcn Sheet containing all routes and the research-use restriction | The inspected 375px draft showed only the wordmark and Account action, leaving no mobile route discovery | Approved in `responsive-v1` |
+| Keep the Sheet until labels fit at zoom rather than forcing a fixed tablet breakpoint | Prevent collision, truncation, and hidden policy access | Approved in `responsive-v1` |
+| Convert the horizontal Proof Rail to the same ordered vertical relationship on narrow screens | Preserve DOM/reading order and avoid horizontal overflow | Approved in `responsive-v1` |
+| Stack the hero record composition beneath the editorial statement on narrow screens | Preserve readable display wrapping and document detail | Approved in `responsive-v1` |
 
-After the user approves an exact Superdesign version, update this table with the approved responsive handoff version, approver, timestamp, and any requested revision. Task 5 cannot begin from a merely proposed adaptation record.
+Approval record: `responsive-v1`, approved by the user in the Codex task at `2026-08-24T20:54:54-07:00`, with no requested revisions. Task 5 must implement this exact route, responsive, accessibility, truthfulness, and state contract; any necessary deviation requires a recorded accessibility/compliance rationale.
 
 Approval of the visual direction authorizes responsive adaptation and implementation work only. It does not approve any product, category, jurisdiction, provider, price, lot, laboratory, COA, claim, inventory, or production launch gate.

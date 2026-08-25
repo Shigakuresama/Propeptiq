@@ -37,14 +37,14 @@
 | `vercel-react-view-transitions` | Restricted to meaningful list/detail continuity with reduced-motion fallback | Progressive-enhancement and fallback tests; no decorative motion |
 | `vercel:shadcn` | Selected for accessible locally owned UI primitives | Component installation review and keyboard/state tests |
 | `vercel:satori` | Planned only for original brand-level Open Graph artwork | Metadata build test and claim/content review |
-| Superdesign | Project and desktop draft version 3 created and audited; **awaiting user approval** | Approval recorded in `docs/design/superdesign-review.md` before UI implementation |
+| Superdesign | Desktop draft version 3 and `responsive-v1` created, audited, and explicitly approved by the user on 2026-08-24 | Implement the exact approved responsive contract and record any evidence-backed deviation |
 | Chrome / agent-browser | Used for direct reference-site and rendered-draft inspection | Later local and Vercel Preview QA at 375, 768, 1024, and 1440 pixels |
 | Sites | Evaluated for the requested workflow; Vinext/Cloudflare production scaffolding conflicts with the later binding Next.js/Vercel requirement | Sites may support design/preview only; canonical production target remains Vercel per ADR 0001 |
 | Data visualization | A separate chart/dashboard is not justified without real data; `docs/design/responsive-public-ui.md` defines the Proof Rail as the minimal useful provenance visualization | Only implement visualizations that expose real lot/evidence relationships |
 
-## 3. Current hold
+## 3. Current execution state
 
-The requirements and architecture documentation are present. Superdesign draft version 3 exists and has passed a truthfulness review, but it has not been approved by the user. No further implementation task may proceed until that approval is recorded. Existing uncommitted domain work remains paused and is explicitly **request changes** in `docs/reviews/pre-implementation-review.md`; passing isolated runtime tests does not override its failed type/lint gates or open any implementation task.
+The requirements and architecture documentation are present. The user explicitly approved Superdesign desktop version 3 and `responsive-v1` at `2026-08-24T20:54:54-07:00`, releasing the visual implementation hold. The existing uncommitted Task 2 pure-domain candidate is independently approved in its focused scope and passes the current unit/build gate (`npm run verify`), but still requires formal task acceptance. Integration and browser suites do not exist yet, and the design decision does not prove or open any database, identity, provider, commerce, operational, or production launch gate.
 
 ## 4. Production launch decision
 

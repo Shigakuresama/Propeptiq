@@ -1,6 +1,6 @@
 # Superdesign Direction Review
 
-**Status:** **Awaiting user approval.** No visual implementation may begin from this draft until approval or requested revisions are recorded here.
+**Status:** **Approved.** Desktop draft version 3 and responsive handoff `responsive-v1` were explicitly approved by the user in the Codex task on 2026-08-24.
 
 ## Artifact
 
@@ -33,13 +33,13 @@ The user should review three things:
 
 ## Approval record
 
-- Decision: `Pending`
-- Approved version: `None`
-- Approved by: `None`
-- Approved at: `None`
-- Revision notes: `None`
+- Decision: `Approved`
+- Approved version: `3`
+- Approved by: `User in Codex task`
+- Approved at: `2026-08-24T20:54:54-07:00`
+- Revision notes: `Desktop v3 and responsive-v1 approved as submitted.`
 
-After approval, create responsive 375px, 768px, and 1024px adaptations before implementing the public UI. Approval does not open any business, catalog, jurisdiction, payment, or fulfillment launch gate.
+The approved `responsive-v1` handoff defines the 375px, 768px, 1024px, and 1440px adaptations for implementation. Approval does not open any business, catalog, jurisdiction, payment, or fulfillment launch gate.
 
 ## Responsive preflight
 

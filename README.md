@@ -6,7 +6,7 @@ PROPEPTIQ LABS is planned as a production-capable, compliance-first commerce pla
 
 The application is being built from a new workspace. Production commerce is intentionally disabled until every launch gate in this repository is backed by current documentary evidence and an accountable approval.
 
-The current execution state is **planning/design hold**. The binding architecture documentation is present and Superdesign desktop draft version 3 is ready for user review. No further implementation proceeds until that visual direction is approved or revised; existing uncommitted domain work remains paused for independent review.
+The visual implementation hold was released when the user approved Superdesign desktop version 3 and responsive handoff `responsive-v1` on 2026-08-24. Implementation is active on the feature branch. The uncommitted Task 2 pure-domain candidate has passed its focused independent review and current unit/build gate (`npm run verify`) and is next for formal acceptance; integration and browser suites do not exist yet.
 
 This repository uses four evidence labels:
 
@@ -76,7 +76,7 @@ npm run test:e2e
 npm run build
 ```
 
-The current pre-implementation quality status is recorded in `docs/reviews/pre-implementation-review.md`; a listed command is not evidence that it currently passes.
+The current pre-implementation quality evidence and its exact scope limits are recorded in `docs/reviews/pre-implementation-review.md`; a listed command is not evidence that an unimplemented system boundary passes.
 
 Task 3 will add the following database commands only with their real guarded implementations. They do not exist yet:
 
