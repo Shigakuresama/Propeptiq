@@ -70,6 +70,117 @@ describe("scanPublicCopy", () => {
   });
 
   it.each([
+    ["purity", "The current lot has documented purity."],
+    ["percent-pure", "The current lot is 99.9% pure."],
+    ["sterility", "The current lot passed sterility testing."],
+    ["sterile", "The current lot is sterile."],
+    ["HPLC", "The current lot was tested by HPLC."],
+    ["LC-MS", "The current lot was tested by LC-MS."],
+    ["mass spectrometry", "The current lot was tested by mass spectrometry."],
+    ["assay", "The current lot has a documented assay result."],
+    ["analytical testing", "The current lot passed analytical testing."],
+    ["laboratory-tested", "The current lot is laboratory-tested."],
+    ["third-party-tested", "The current lot is third-party-tested."],
+    ["endotoxin", "The current lot has an endotoxin result."],
+    ["COA", "A COA is available for the current lot."],
+    ["certificate of analysis", "The current lot has a certificate of analysis."],
+    ["accreditation", "The testing provider holds laboratory accreditation."],
+    ["accredited laboratory", "The current lot was tested by an accredited laboratory."],
+  ] as const)(
+    "blocks an unstructured top-level %s claim",
+    (_name, text) => {
+      const result = scanPublicCopy(candidate({ text, claims: [] }), policy);
+
+      expect(result).toMatchObject({ publishable: false, status: "blocked" });
+      expect(result.violations).toContainEqual(
+        expect.objectContaining({
+          code: "unsupported_claim",
+          claimId: null,
+        }),
+      );
+    },
+  );
+
+  it("requires evidence for an ordinary-labeled analytical claim", () => {
+    const text = "The current lot is 99.9% pure by HPLC testing.";
+    const result = scanPublicCopy(
+      candidate({
+        text,
+        claims: [
+          {
+            id: "mislabeled-analytical-claim",
+            text,
+            kind: "ordinary",
+            lotEvidenceIds: [],
+          },
+        ],
+      }),
+      policy,
+    );
+
+    expect(result).toMatchObject({ publishable: false, status: "blocked" });
+    expect(result.violations).toContainEqual({
+      code: "unsupported_claim",
+      match: null,
+      claimId: "mislabeled-analytical-claim",
+    });
+  });
+
+  it("allows structured analytical-marker coverage with active matching evidence", () => {
+    const text = "The current lot is 99.9% pure by HPLC testing.";
+
+    expect(
+      scanPublicCopy(
+        candidate({
+          text,
+          claims: [
+            {
+              id: "analytical-coverage-1",
+              text,
+              kind: "ordinary",
+              lotEvidenceIds: ["lot-evidence-1"],
+            },
+          ],
+        }),
+        policy,
+      ),
+    ).toMatchObject({ publishable: true, status: "pass" });
+  });
+
+  it("does not treat neutral laboratory-research wording as an analytical claim", () => {
+    expect(
+      scanPublicCopy(
+        candidate({ text: "For laboratory research workflows." }),
+        policy,
+      ),
+    ).toMatchObject({ publishable: true, status: "pass" });
+  });
+
+  it("does not let a structured claim absent from the copy cover top-level analytical prose", () => {
+    const result = scanPublicCopy(
+      candidate({
+        text: "The current lot was tested by HPLC.",
+        claims: [
+          {
+            id: "foreign-copy-claim",
+            text: "The current lot was tested by mass spectrometry.",
+            kind: "analytical",
+            lotEvidenceIds: ["lot-evidence-1"],
+          },
+        ],
+      }),
+      policy,
+    );
+
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        code: "unsupported_claim",
+        claimId: null,
+      }),
+    );
+  });
+
+  it.each([
     ["missing", []],
     ["inactive", ["lot-evidence-inactive"]],
     ["foreign", ["lot-evidence-1", "lot-evidence-foreign"]],

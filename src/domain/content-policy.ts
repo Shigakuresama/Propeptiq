@@ -181,6 +181,46 @@ const prohibitedCompactPatterns: readonly Readonly<{
   },
 ]);
 
+const analyticalMarkerPatterns: readonly Readonly<{
+  key: string;
+  pattern: RegExp;
+}>[] = Object.freeze([
+  { key: "purity", pattern: /\b(?:purity|pure)\b/ },
+  { key: "sterility", pattern: /\b(?:sterility|sterile)\b/ },
+  { key: "hplc", pattern: /\bhplc\b/ },
+  { key: "mass_spectrometry", pattern: /\b(?:lc ?ms|mass spectrometry)\b/ },
+  { key: "assay", pattern: /\bassay\b/ },
+  {
+    key: "analytical_testing",
+    pattern:
+      /\b(?:analytical (?:methods?|tests?|testing)|analytically tested)\b/,
+  },
+  {
+    key: "laboratory_testing",
+    pattern: /\b(?:(?:laboratory|lab|third party) (?:tested|testing))\b/,
+  },
+  { key: "endotoxin", pattern: /\bendotoxin\b/ },
+  { key: "certificate_of_analysis", pattern: /\b(?:coa|certificate of analysis)\b/ },
+  {
+    key: "accreditation",
+    pattern: /\b(?:accreditation|accredited (?:laboratory|lab))\b/,
+  },
+]);
+
+type AnalyticalMarkerMatch = Readonly<{
+  key: string;
+  match: string;
+}>;
+
+function analyticalMarkerMatches(
+  normalizedText: string,
+): readonly AnalyticalMarkerMatch[] {
+  return analyticalMarkerPatterns.flatMap(({ key, pattern }) => {
+    const match = normalizedText.match(pattern)?.[0];
+    return match === undefined ? [] : [{ key, match }];
+  });
+}
+
 function violation(
   code: ContentViolationCode,
   match: string | null,
@@ -256,7 +296,10 @@ export function scanPublicCopy(
   }
 
   const violations: ContentViolation[] = [];
-  appendProhibitedViolations(normalizeText(candidate.text), null, violations);
+  const normalizedCopy = normalizeText(candidate.text);
+  const topLevelAnalyticalMarkers = analyticalMarkerMatches(normalizedCopy);
+  const coveredAnalyticalMarkerKeys = new Set<string>();
+  appendProhibitedViolations(normalizedCopy, null, violations);
 
   const activeLotEvidenceIds = new Set(policy.activeLotEvidenceIds);
   for (const claim of candidate.claims as readonly unknown[]) {
@@ -272,11 +315,15 @@ export function scanPublicCopy(
       isDenseArray(lotEvidenceIds) &&
       lotEvidenceIds.every(isNonBlank) &&
       new Set(lotEvidenceIds).size === lotEvidenceIds.length;
-    const claimTextIsValid =
-      typeof claim.text === "string" && normalizeText(claim.text).length > 0;
+    const normalizedClaimText =
+      typeof claim.text === "string" ? normalizeText(claim.text) : "";
+    const claimTextIsValid = normalizedClaimText.length > 0;
     const kindIsValid = claim.kind === "ordinary" || claim.kind === "analytical";
+    const claimAnalyticalMarkers = analyticalMarkerMatches(normalizedClaimText);
+    const requiresAnalyticalEvidence =
+      claim.kind === "analytical" || claimAnalyticalMarkers.length > 0;
     const analyticalEvidenceIsValid =
-      claim.kind !== "analytical" ||
+      !requiresAnalyticalEvidence ||
       (evidenceProjectionIsValid &&
         lotEvidenceIds.length > 0 &&
         lotEvidenceIds.every((id) => activeLotEvidenceIds.has(id)));
@@ -290,11 +337,31 @@ export function scanPublicCopy(
     ) {
       violations.push(violation("unsupported_claim", null, claimId));
     }
+    if (
+      claimId !== null &&
+      claimTextIsValid &&
+      kindIsValid &&
+      evidenceProjectionIsValid &&
+      analyticalEvidenceIsValid &&
+      normalizedCopy.includes(normalizedClaimText)
+    ) {
+      for (const marker of claimAnalyticalMarkers) {
+        coveredAnalyticalMarkerKeys.add(marker.key);
+      }
+    }
     if (typeof claim.text === "string") {
       appendProhibitedViolations(
-        normalizeText(claim.text),
+        normalizedClaimText,
         claimId,
         violations,
+      );
+    }
+  }
+
+  for (const marker of topLevelAnalyticalMarkers) {
+    if (!coveredAnalyticalMarkerKeys.has(marker.key)) {
+      violations.push(
+        violation("unsupported_claim", marker.match, null),
       );
     }
   }

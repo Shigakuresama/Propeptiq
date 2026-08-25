@@ -328,6 +328,68 @@ describe("evaluateCheckout", () => {
     });
   });
 
+  it("hard-denies a reviewed buyer when a matching rejection has empty coverage", () => {
+    const decision = evaluateCheckout(
+      checkoutInput({
+        buyerStatus: "review",
+        reviewSnapshotHash,
+        reviewDecision: {
+          reviewSnapshotHash,
+          outcome: "rejected",
+          coversBuyerReview: false,
+          destinationRuleIds: [],
+        },
+      }),
+    );
+
+    expect(decision).toEqual({
+      permitted: false,
+      reviewRequired: false,
+      reasons: ["review_rejected"],
+    });
+  });
+
+  it("hard-denies an otherwise-passable checkout carrying a matching rejection", () => {
+    const decision = evaluateCheckout(
+      checkoutInput({
+        reviewSnapshotHash,
+        reviewDecision: {
+          reviewSnapshotHash,
+          outcome: "rejected",
+          coversBuyerReview: false,
+          destinationRuleIds: [],
+        },
+      }),
+    );
+
+    expect(decision).toEqual({
+      permitted: false,
+      reviewRequired: false,
+      reasons: ["review_rejected"],
+    });
+  });
+
+  it("leaves a mismatched rejection inapplicable", () => {
+    const decision = evaluateCheckout(
+      checkoutInput({
+        buyerStatus: "review",
+        reviewSnapshotHash,
+        reviewDecision: {
+          reviewSnapshotHash: "b".repeat(64),
+          outcome: "rejected",
+          coversBuyerReview: false,
+          destinationRuleIds: [],
+        },
+      }),
+    );
+
+    expect(decision).toEqual({
+      permitted: false,
+      reviewRequired: true,
+      reasons: ["buyer_review_required"],
+    });
+  });
+
   it("suppresses review work whenever another gate hard-denies checkout", () => {
     const decision = evaluateCheckout(
       checkoutInput({

@@ -503,15 +503,7 @@ export function evaluateCheckout(
     reviewDecisionMatches &&
     input.reviewDecision!.outcome === "rejected"
   ) {
-    if (buyerCovered) {
-      addHard("account", "review_rejected");
-    } else if (
-      destinationReviewRuleIds.some((id) =>
-        coveredDestinationRuleIds.has(id),
-      )
-    ) {
-      addHard("destination", "review_rejected");
-    }
+    addHard("account", "review_rejected");
   }
 
   const hardReasons = CHECKOUT_GATES.flatMap(
