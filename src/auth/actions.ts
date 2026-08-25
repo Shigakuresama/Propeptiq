@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 
 import { readServerEnv } from "@/env";
 
+import { SIGN_IN_ROUTE } from "./routes";
 import { LOCAL_ACTOR_COOKIE } from "./server";
 
 export async function signInWithFixedActor(formData: FormData): Promise<never> {
@@ -42,5 +43,5 @@ export async function signOutLocalActor(): Promise<never> {
     throw new Error("Fixed local sign-out is unavailable");
   }
   (await cookies()).delete(LOCAL_ACTOR_COOKIE);
-  redirect("/sign-in");
+  redirect(SIGN_IN_ROUTE);
 }

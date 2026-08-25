@@ -3,6 +3,7 @@
 import { Menu, ShoppingBag, UserRound } from "lucide-react";
 import Link from "next/link";
 
+import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { useCart } from "@/cart/cart-provider";
 import { BrandMark } from "@/components/site/brand-mark";
 import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
@@ -65,7 +66,7 @@ export function SiteHeader() {
           </Link>
 
           <Link
-            href="/sign-in"
+            href={SIGN_IN_ROUTE}
             className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-3"
           >
             <UserRound aria-hidden="true" className="size-4" />
@@ -121,7 +122,7 @@ export function SiteHeader() {
                 </SheetClose>
                 <SheetClose asChild>
                   <Link
-                    href="/sign-in"
+                    href={SIGN_IN_ROUTE}
                     className="flex min-h-12 items-center rounded-xl px-3 py-3 font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     Sign in

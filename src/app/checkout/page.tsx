@@ -3,6 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { accountAccessReason } from "@/account/access";
+import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
 import { AccountFactsForm } from "@/components/account/account-facts-form";
 import { AccountShell } from "@/components/account/account-shell";
@@ -25,7 +26,7 @@ function ClosedState({ reason }: { reason: string }) {
             ? "The account database is disabled or unavailable, so checkout fails closed."
             : "Your product IDs and quantities remain saved in this browser while you sign in."}
       </p>
-      {signedOut ? <Link href="/sign-in" className="action-primary mt-7 inline-flex min-h-12 items-center rounded-full px-6 font-semibold no-underline">Continue to sign in</Link> : null}
+      {signedOut ? <Link href={SIGN_IN_ROUTE} className="action-primary mt-7 inline-flex min-h-12 items-center rounded-full px-6 font-semibold no-underline">Continue to sign in</Link> : null}
     </section>
   );
 }
@@ -33,7 +34,7 @@ function ClosedState({ reason }: { reason: string }) {
 export default async function CheckoutPage() {
   const request = await getRequestIdentity();
   const reason = accountAccessReason(request);
-  if (reason === "signed_out") redirect("/sign-in");
+  if (reason === "signed_out") redirect(SIGN_IN_ROUTE);
   const repositories = getRequestRepositories(request);
   const principal = request.principal;
   const [account, attestation] =

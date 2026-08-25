@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { accountAccessReason } from "@/account/access";
+import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
 import { AccountFactsForm } from "@/components/account/account-facts-form";
 
@@ -16,7 +17,7 @@ export default async function AccountPage() {
       <section className="error-record" role="alert">
         <h1 className="font-heading text-page">Account unavailable</h1>
         <p className="mt-4 text-base leading-7">A current verified identity and configured account database are required.</p>
-        {!request.identity ? <Link className="record-link mt-5 inline-flex min-h-11 items-center" href="/sign-in">Sign in</Link> : null}
+        {!request.identity ? <Link className="record-link mt-5 inline-flex min-h-11 items-center" href={SIGN_IN_ROUTE}>Sign in</Link> : null}
       </section>
     );
   }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import type { AdminGate } from "@/admin/access";
+import { SIGN_IN_ROUTE } from "@/auth/routes";
 
 const copy: Record<Exclude<AdminGate, { allowed: true }>["code"], { title: string; detail: string }> = {
   signed_out: { title: "Administrator sign-in required", detail: "No authenticated server identity is available." },
@@ -30,7 +31,7 @@ export function AdminGateState({ gate, inline = false }: { gate: Exclude<AdminGa
         <p className="eyebrow">Administration closed</p>
         <h1 className="mt-4 font-heading text-page leading-[0.95]">{message.title}</h1>
         <p className="mt-5 text-base leading-7">{message.detail}</p>
-        {gate.code === "signed_out" ? <Link href="/sign-in" className="record-link mt-6 inline-flex min-h-11 items-center">Sign in</Link> : null}
+        {gate.code === "signed_out" ? <Link href={SIGN_IN_ROUTE} className="record-link mt-6 inline-flex min-h-11 items-center">Sign in</Link> : null}
       </section>
     </main>
   );
