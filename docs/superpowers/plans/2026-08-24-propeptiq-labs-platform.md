@@ -73,7 +73,7 @@ Expected: only ADR 0001 may mention why Vinext/Cloudflare was rejected; no runti
 
 - [ ] Read installed Next.js guides for project structure, server/client components, mutation/data security, route handlers, authentication, environment variables, metadata/OG, instrumentation, testing, production checklist, proxy, and view transitions.
 - [ ] Install exact direct dependencies for Clerk, Neon, Drizzle, Stripe, Blob, Resend, OpenTelemetry, Zod, server-only, Radix/shadcn primitives, and class composition; add focused test/dev dependencies.
-- [ ] Add scripts for the implemented toolchain: `lint`, `typecheck`, `test`, `test:watch`, `test:integration`, `test:e2e`, `build`, and `verify`. Add `db:generate`, `db:check`, and guarded `db:migrate` with their real Task 3 implementations so no published script points at absent files.
+- [ ] Add scripts for the implemented toolchain: `lint`, `typecheck`, `test`, `test:watch`, `test:integration`, `test:e2e`, `build`, and `verify`.
 - [ ] Enable strict TypeScript and preserve Next.js generated settings.
 - [ ] Implement typed environment parsing with capability modes `disabled | test | live`; public-only builds require no provider secrets.
 - [ ] Make production reject live commerce unless explicit runtime mode and configuration are present; database launch gates will still be required later.
@@ -130,6 +130,7 @@ npm run typecheck
 - Create: `src/db/migrations/0000_initial.sql`
 - Create: `src/db/migrations/meta/**`
 - Create: `src/db/migration-check.ts`
+- Create: `src/db/migrate.ts`
 - Create: `tests/integration/database.test.ts`
 - Create: `tests/integration/helpers/database.ts`
 
@@ -140,6 +141,7 @@ npm run typecheck
 - [ ] Add database functions/triggers that reject update/delete on decision, payment-journal, inventory-ledger, fulfillment-release, and audit rows for the runtime role.
 - [ ] Separate migration-owner and runtime-role grants.
 - [ ] Add integration tests against an explicit isolated `TEST_DATABASE_URL`; tests must refuse a URL that appears production-scoped.
+- [ ] Add `db:generate`, `db:check`, and guarded `db:migrate` scripts only with their real implementations; extend `verify` with the read-only migration check.
 
 **Validation:**
 
