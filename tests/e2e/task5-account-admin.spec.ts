@@ -59,7 +59,9 @@ test("activates a new customer only after the verified account facts and current
   await page.getByLabel("Research purpose").selectOption("analytical");
   await page.getByRole("checkbox", { name: /accept attestation version 1/i }).check();
   await page.getByRole("button", { name: "Complete verified account" }).click();
-  await expect(page.getByRole("status")).toContainText("Account facts saved");
+  await expect(
+    page.getByRole("status", { name: "Account facts saved" }),
+  ).toContainText("Account facts saved");
   await page.goto("/account");
   await expect(page.getByText("active", { exact: true })).toBeVisible();
   await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
