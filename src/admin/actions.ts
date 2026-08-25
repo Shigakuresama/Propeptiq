@@ -147,6 +147,47 @@ function versionedReference(
   return { id: parsed.id, expectedUpdatedAt: parsed.expectedUpdatedAt };
 }
 
+function promotionReference(
+  formData: FormData,
+  referenceName = "promotionReference",
+): Readonly<{ id: string; expectedVersion: number; expectedUpdatedAt: string }> {
+  const supplied = formData.get(referenceName);
+  if (typeof supplied !== "string") {
+    const expectedVersion = integer(formData, "expectedVersion");
+    if (expectedVersion < 1) throw new Error("expectedVersion is invalid");
+    return {
+      id: value(formData, "promotionId"),
+      expectedVersion,
+      expectedUpdatedAt: value(formData, "expectedUpdatedAt"),
+    };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(supplied);
+  } catch {
+    throw new Error(`${referenceName} is invalid`);
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    !("id" in parsed) ||
+    !("expectedVersion" in parsed) ||
+    !("expectedUpdatedAt" in parsed) ||
+    typeof parsed.id !== "string" ||
+    typeof parsed.expectedVersion !== "number" ||
+    !Number.isSafeInteger(parsed.expectedVersion) ||
+    parsed.expectedVersion < 1 ||
+    typeof parsed.expectedUpdatedAt !== "string"
+  ) {
+    throw new Error(`${referenceName} is invalid`);
+  }
+  return {
+    id: parsed.id,
+    expectedVersion: parsed.expectedVersion,
+    expectedUpdatedAt: parsed.expectedUpdatedAt,
+  };
+}
+
 function resultCode(error: unknown): "saved" | "stale" | "rate-limited" | "denied" | "unavailable" {
   const message = error instanceof Error ? error.message : "";
   if (/stale|changed during/i.test(message)) return "stale";
@@ -342,9 +383,10 @@ export async function setAnalyticalClaimLifecycleAction(formData: FormData): Pro
 export async function activatePromotionAction(formData: FormData): Promise<never> {
   return run("promotions", async () => {
     const admin = await trustedAdmin("promotions");
-    const reference = versionedReference(formData, "promotionReference", "promotionId");
+    const reference = promotionReference(formData);
     await activatePromotion(admin.repositories.adminRepository, admin.context, {
       promotionId: reference.id,
+      expectedVersion: reference.expectedVersion,
       expectedUpdatedAt: reference.expectedUpdatedAt,
     });
   });
@@ -381,6 +423,7 @@ export async function savePromotionDraftAction(formData: FormData): Promise<neve
     ];
     const promotionId = optionalValue(formData, "promotionId");
     const expectedUpdatedAt = optionalValue(formData, "expectedUpdatedAt");
+    const expectedVersion = optionalInteger(formData, "expectedVersion");
     await savePromotionDraft(admin.repositories.adminRepository, admin.context, {
       ...(promotionId ? { promotionId } : {}),
       code: value(formData, "code"),
@@ -393,6 +436,7 @@ export async function savePromotionDraftAction(formData: FormData): Promise<neve
       startsAt: optionalInstant(formData, "startsAt"),
       endsAt: optionalInstant(formData, "endsAt"),
       targets,
+      ...(expectedVersion !== null ? { expectedVersion } : {}),
       ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
     });
   });
@@ -401,9 +445,10 @@ export async function savePromotionDraftAction(formData: FormData): Promise<neve
 export async function retirePromotionAction(formData: FormData): Promise<never> {
   return run("promotions", async () => {
     const admin = await trustedAdmin("promotions");
-    const reference = versionedReference(formData, "promotionReference", "promotionId");
+    const reference = promotionReference(formData);
     await retirePromotion(admin.repositories.adminRepository, admin.context, {
       promotionId: reference.id,
+      expectedVersion: reference.expectedVersion,
       expectedUpdatedAt: reference.expectedUpdatedAt,
     });
   });

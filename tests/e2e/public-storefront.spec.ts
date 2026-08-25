@@ -72,7 +72,7 @@ test("anonymous catalog to cart flow survives reload and preserves only IDs and 
   );
   expect(persisted).toEqual({
     version: 1,
-    items: [{ productId: "demo-product-alpha", quantity: 1 }],
+    items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 1 }],
   });
 
   await page.reload();
@@ -90,7 +90,7 @@ test("anonymous catalog to cart flow survives reload and preserves only IDs and 
     ),
   ).toEqual({
     version: 1,
-    items: [{ productId: "demo-product-alpha", quantity: 1 }],
+    items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 1 }],
   });
 
   const accessibility = await new AxeBuilder({ page }).analyze();

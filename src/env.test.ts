@@ -15,6 +15,11 @@ describe("parseServerEnv", () => {
       PAYMENTS_MODE: "disabled",
       STORAGE_MODE: "disabled",
       EMAIL_MODE: "disabled",
+      COMMERCE_LIVE_CAPABILITY: "disabled",
+      PAYMENTS_LIVE_CAPABILITY: "disabled",
+      TAX_MODE: "disabled",
+      SHIPPING_MODE: "disabled",
+      FULFILLMENT_MODE: "disabled",
     });
   });
 

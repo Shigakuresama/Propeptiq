@@ -15,6 +15,7 @@ import type {
   AdminReadResource,
   AdminReadSnapshot,
   AdminReadSnapshotFor,
+  SafePromotionConfiguration,
 } from "@/admin/admin-read";
 import { signLocalActor, verifyLocalActor, type VerifiedIdentity } from "@/auth/identity";
 import { CAPABILITIES, type Capability } from "@/domain/authorization";
@@ -162,10 +163,21 @@ type LocalState = {
   lotManufacturedAt: string | null;
   lotExpiresAt: string | null;
   promotionStatus: "draft" | "active" | "retired";
+  promotionCode: string;
+  promotionVersion: number;
+  promotionName: string;
+  promotionKind: "discount" | "bundle" | "subscription" | "loyalty" | "cross_sell";
+  promotionAmountMinor: number | null;
+  promotionBasisPoints: number | null;
+  promotionCurrency: string | null;
+  promotionConfiguration: unknown;
   promotionUpdatedAt: string;
   promotionStartsAt: string | null;
   promotionEndsAt: string | null;
-  promotionTargetCount: number;
+  promotionTargets: readonly Readonly<{
+    targetKind: "product" | "policy_group";
+    targetId: string;
+  }>[];
   coaActive: boolean;
   coaPublic: boolean;
   coaStorageKey: string;
@@ -224,10 +236,18 @@ function initialState(): LocalState {
     lotManufacturedAt: "2026-07-01T00:00:00.000Z",
     lotExpiresAt: "2099-07-01T00:00:00.000Z",
     promotionStatus: "draft",
+    promotionCode: "LOCAL-BUNDLE",
+    promotionVersion: 1,
+    promotionName: "Synthetic local reference bundle",
+    promotionKind: "bundle",
+    promotionAmountMinor: 3600,
+    promotionBasisPoints: null,
+    promotionCurrency: "USD",
+    promotionConfiguration: { productIds: [localProductId, "local-product-b"] },
     promotionUpdatedAt: fixedNow,
     promotionStartsAt: null,
     promotionEndsAt: null,
-    promotionTargetCount: 1,
+    promotionTargets: [{ targetKind: "product", targetId: localProductId }],
     coaActive: true,
     coaPublic: false,
     coaStorageKey: "local-private/coa-a.pdf",
@@ -245,6 +265,71 @@ function initialState(): LocalState {
 }
 
 let state = initialState();
+
+function canonicalLocalValue(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalLocalValue).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalLocalValue(nested)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalLocalTargets(
+  targets: readonly Readonly<{ targetKind: string; targetId: string }>[],
+): string {
+  return targets
+    .toSorted((left, right) =>
+      left.targetKind.localeCompare(right.targetKind) ||
+      left.targetId.localeCompare(right.targetId),
+    )
+    .map(({ targetKind, targetId }) => `${targetKind}:${targetId}`)
+    .join("|");
+}
+
+function localPromotionConfiguration(): SafePromotionConfiguration {
+  const configuration = state.promotionConfiguration;
+  if (state.promotionKind === "discount") return { kind: "discount" };
+  if (
+    (state.promotionKind === "bundle" || state.promotionKind === "cross_sell") &&
+    typeof configuration === "object" &&
+    configuration !== null &&
+    Array.isArray(Reflect.get(configuration, "productIds"))
+  ) {
+    return {
+      kind: state.promotionKind,
+      productIds: Reflect.get(configuration, "productIds") as string[],
+    };
+  }
+  if (
+    state.promotionKind === "subscription" &&
+    typeof configuration === "object" &&
+    configuration !== null
+  ) {
+    const interval = Reflect.get(configuration, "interval");
+    const intervalCount = Reflect.get(configuration, "intervalCount");
+    if (
+      (interval === "month" || interval === "year") &&
+      typeof intervalCount === "number"
+    ) {
+      return { kind: "subscription", interval, intervalCount };
+    }
+  }
+  if (
+    state.promotionKind === "loyalty" &&
+    typeof configuration === "object" &&
+    configuration !== null &&
+    typeof Reflect.get(configuration, "pointsPerDollar") === "number"
+  ) {
+    return {
+      kind: "loyalty",
+      pointsPerDollar: Reflect.get(configuration, "pointsPerDollar") as number,
+    };
+  }
+  return { kind: "invalid" };
+}
 
 function actorByClerkId(clerkUserId: string): FixedActor | null {
   return fixedActors.find((actor) => actor.identity.clerkUserId === clerkUserId) ?? null;
@@ -509,7 +594,7 @@ function adminTransaction(): AdminTransaction {
         (input.promotionId !== null && input.promotionId !== localPromotionId) ||
         (input.promotionId !== null &&
           (state.promotionStatus !== "draft" ||
-            state.promotionUpdatedAt !== input.expectedUpdatedAt)) ||
+            state.promotionVersion !== input.expectedVersion)) ||
         input.targets.some(
           (target) =>
             (target.targetKind === "product" && target.targetId !== localProductId) ||
@@ -519,12 +604,49 @@ function adminTransaction(): AdminTransaction {
       ) {
         throw new Error("Fixed promotion draft is unavailable or stale");
       }
+      const startsAt = input.startsAt?.toISOString() ?? null;
+      const endsAt = input.endsAt?.toISOString() ?? null;
+      const unchanged =
+        input.promotionId !== null &&
+        state.promotionCode === input.code &&
+        state.promotionName === input.name &&
+        state.promotionKind === input.kind &&
+        state.promotionAmountMinor === input.amountMinor &&
+        state.promotionBasisPoints === input.basisPoints &&
+        state.promotionCurrency === input.currency &&
+        canonicalLocalValue(state.promotionConfiguration) ===
+          canonicalLocalValue(input.configuration) &&
+        state.promotionStartsAt === startsAt &&
+        state.promotionEndsAt === endsAt &&
+        canonicalLocalTargets(state.promotionTargets) ===
+          canonicalLocalTargets(input.targets);
+      if (unchanged) {
+        return {
+          id: localPromotionId,
+          version: state.promotionVersion,
+          updatedAt: state.promotionUpdatedAt,
+          changed: false,
+        };
+      }
       state.promotionStatus = "draft";
-      state.promotionStartsAt = input.startsAt?.toISOString() ?? null;
-      state.promotionEndsAt = input.endsAt?.toISOString() ?? null;
-      state.promotionTargetCount = input.targets.length;
+      state.promotionCode = input.code;
+      state.promotionVersion = input.promotionId === null ? 1 : state.promotionVersion + 1;
+      state.promotionName = input.name;
+      state.promotionKind = input.kind;
+      state.promotionAmountMinor = input.amountMinor;
+      state.promotionBasisPoints = input.basisPoints;
+      state.promotionCurrency = input.currency;
+      state.promotionConfiguration = input.configuration;
+      state.promotionStartsAt = startsAt;
+      state.promotionEndsAt = endsAt;
+      state.promotionTargets = [...input.targets];
       state.promotionUpdatedAt = input.now.toISOString();
-      return { id: localPromotionId, updatedAt: state.promotionUpdatedAt };
+      return {
+        id: localPromotionId,
+        version: state.promotionVersion,
+        updatedAt: state.promotionUpdatedAt,
+        changed: true,
+      };
     },
     async getProductPublicationFacts(productId) {
       if (productId !== localProductId) return null;
@@ -570,22 +692,27 @@ function adminTransaction(): AdminTransaction {
       if (promotionId !== localPromotionId) return null;
       return {
         id: "local-promotion-a",
-        name: "Synthetic local reference bundle",
-        kind: "bundle",
+        code: state.promotionCode,
+        version: state.promotionVersion,
+        name: state.promotionName,
+        kind: state.promotionKind,
         status: state.promotionStatus,
-        amountMinor: 3600,
-        basisPoints: null,
-        currency: "USD",
-        configuration: { productIds: ["local-product-a", "local-product-b"] },
+        amountMinor: state.promotionAmountMinor,
+        basisPoints: state.promotionBasisPoints,
+        currency: state.promotionCurrency,
+        configuration: state.promotionConfiguration,
         startsAt: state.promotionStartsAt,
         endsAt: state.promotionEndsAt,
         updatedAt: state.promotionUpdatedAt,
-        referencedProductsValid: state.promotionTargetCount > 0,
+        referencedProductsValid: state.promotionTargets.length > 0,
       };
     },
-    async setPromotionStatus(id, status, expectedUpdatedAt, now) {
+    async setPromotionStatus(id, status, expectedVersion, expectedUpdatedAt, now) {
       if (id !== localPromotionId) throw new Error("Promotion does not exist");
-      if (state.promotionUpdatedAt !== expectedUpdatedAt) {
+      if (
+        state.promotionVersion !== expectedVersion ||
+        state.promotionUpdatedAt !== expectedUpdatedAt
+      ) {
         throw new Error("Stale promotion write rejected");
       }
       if (
@@ -596,7 +723,12 @@ function adminTransaction(): AdminTransaction {
       }
       state.promotionStatus = status;
       state.promotionUpdatedAt = now.toISOString();
-      return { id: "local-promotion-a", status, updatedAt: state.promotionUpdatedAt };
+      return {
+        id: "local-promotion-a",
+        status,
+        version: state.promotionVersion,
+        updatedAt: state.promotionUpdatedAt,
+      };
     },
     async getCoaDocument(coaDocumentId) {
       if (coaDocumentId !== localCoaId) return null;
@@ -729,9 +861,10 @@ function adminTransaction(): AdminTransaction {
       if (orderId !== localOrderId) return null;
       return {
         orderId: "local-order-customer",
-        releaseId: "local-release-issued",
-        releaseState: "issued",
-        releaseExpiresAt: "2099-08-26T12:00:00.000Z",
+        orderState: "paid_pending_fulfillment",
+        releaseId: null,
+        releaseState: null,
+        releaseExpiresAt: null,
         shipmentState: state.shipment ? "pending" : null,
         shipmentUpdatedAt: state.shipment?.updatedAt ?? null,
       };
@@ -979,20 +1112,19 @@ function localAdminReadSnapshot(resource: AdminReadResource): AdminReadSnapshot 
         resource,
         items: [{
           id: localPromotionId,
-          code: "LOCAL-BUNDLE",
-          name: "Synthetic local reference bundle",
-          kind: "bundle",
+          code: state.promotionCode,
+          version: state.promotionVersion,
+          name: state.promotionName,
+          kind: state.promotionKind,
           status: state.promotionStatus,
-          amountMinor: 3600,
-          basisPoints: null,
-          currency: "USD",
-          configuration: {
-            kind: "bundle",
-            productIds: [localProductId, "local-product-b"],
-          },
-          targets: state.promotionTargetCount > 0
-            ? [{ kind: "product", id: localProductId }]
-            : [],
+          amountMinor: state.promotionAmountMinor,
+          basisPoints: state.promotionBasisPoints,
+          currency: state.promotionCurrency,
+          configuration: localPromotionConfiguration(),
+          targets: state.promotionTargets.map(({ targetKind, targetId }) => ({
+            kind: targetKind,
+            id: targetId,
+          })),
           startsAt: state.promotionStartsAt,
           endsAt: state.promotionEndsAt,
           createdAt: fixedNow,
@@ -1101,10 +1233,10 @@ function localAdminReadSnapshot(resource: AdminReadResource): AdminReadSnapshot 
           ? [{
               id: "local-shipment",
               orderId: localOrderId,
-              fulfillmentReleaseId: "local-release-issued",
-              releaseState: "issued" as const,
-              releaseVersion: 1,
-              releaseExpiresAt: "2099-08-26T12:00:00.000Z",
+              fulfillmentReleaseId: null,
+              releaseState: null,
+              releaseVersion: null,
+              releaseExpiresAt: null,
               carrier: state.shipment.carrier,
               trackingReference: state.shipment.trackingReference,
               state: "pending" as const,

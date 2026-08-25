@@ -174,7 +174,7 @@ describe("Task 5 production admin read model", () => {
          shipping_minor, total_minor, state, created_at, updated_at)
       VALUES
         ('${ids.order}', '${ids.buyer}', 'active', '${ids.acceptance}', 'CA', 'USD',
-         7500, 500, 0, 0, 7000, 'paid_pending_clearance',
+         7500, 500, 0, 0, 7000, 'paid_pending_fulfillment',
          '2026-08-24T00:00:00.000Z', '2026-08-25T07:00:00.000Z');
       INSERT INTO order_items
         (order_id, product_id, product_price_id, destination_policy_id,
@@ -195,10 +195,14 @@ describe("Task 5 production admin read model", () => {
          true, false, '2026-08-24T01:00:00.000Z');
       INSERT INTO provider_events
         (id, provider, provider_event_id, payload_hash, status, attempt_count,
-         received_at, processed_at)
+         received_at, processed_at, event_type, schema_version,
+         normalized_payload, provider_created_at, livemode)
       VALUES
         ('${ids.providerEvent}', 'synthetic-provider', 'NEVER-EXPOSE-PROVIDER-EVENT-ID', '${"d".repeat(64)}',
-         'processed', 1, '2026-08-24T02:00:00.000Z', '2026-08-24T02:01:00.000Z');
+         'processed', 1, '2026-08-24T02:00:00.000Z', '2026-08-24T02:01:00.000Z',
+         'checkout.session.completed', 1,
+         '{"providerEventId":"NEVER-EXPOSE-PROVIDER-EVENT-ID","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         '2026-08-24T02:00:00.000Z', false);
       INSERT INTO payment_events
         (id, provider_event_id, order_id, event_type, provider_payment_id,
          idempotency_key, amount_minor, currency, occurred_at, created_at)
@@ -222,7 +226,7 @@ describe("Task 5 production admin read model", () => {
         (id, order_id, fulfillment_release_id, carrier, tracking_reference, state,
          created_at, updated_at)
       VALUES
-        ('${ids.shipment}', '${ids.order}', '${ids.release}', 'Synthetic carrier', 'SYN-TRACK-READ',
+        ('${ids.shipment}', '${ids.order}', NULL, 'Synthetic carrier', 'SYN-TRACK-READ',
          'pending', '2026-08-25T09:10:00.000Z', '2026-08-25T09:10:00.000Z');
       INSERT INTO admin_audit
         (id, actor_user_id, action, resource_type, resource_id, correlation_id, metadata, occurred_at)
@@ -452,8 +456,9 @@ describe("Task 5 production admin read model", () => {
       resource: "shipments",
       items: [{
         id: ids.shipment,
-        releaseState: "issued",
-        releaseVersion: 1,
+        fulfillmentReleaseId: null,
+        releaseState: null,
+        releaseVersion: null,
         handoffConfirmationBoundary: "task6_managed",
       }],
     });

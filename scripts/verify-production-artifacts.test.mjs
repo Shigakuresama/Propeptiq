@@ -97,8 +97,8 @@ test("fails without echoing fixture values when local identities, products, or m
   const fixtureSentinel = "LOCAL_TEST_ONLY_PROPEPTIQ_91C4E7";
   const fixedEmail = "fixed-admin@local.test";
   const fixedUserId = "50000000-0000-4000-8000-000000000003";
-  const demoProductAlpha = "demo-product-alpha";
-  const demoProductBeta = "demo-product-beta";
+  const demoProductAlpha = "61000000-0000-4000-8000-000000000001";
+  const demoProductBeta = "61000000-0000-4000-8000-000000000002";
 
   writeArtifact(
     artifactRoot,

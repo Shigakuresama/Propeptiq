@@ -172,6 +172,12 @@ export const inventoryReservations = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
+    unique("inventory_reservations_event_identity_unique").on(
+      table.id,
+      table.orderId,
+      table.orderItemId,
+      table.lotId,
+    ),
     unique("inventory_reservations_item_lot_unique").on(table.orderItemId, table.lotId),
     unique("inventory_reservations_idempotency_unique").on(table.idempotencyKey),
     foreignKey({
@@ -248,8 +254,18 @@ export const inventoryEvents = pgTable(
       sql`${table.reservationId} is null or (${table.orderId} is not null and ${table.orderItemId} is not null)`,
     ),
     check(
-      "inventory_events_consume_release",
-      sql`${table.eventType} <> 'consume' or (${table.fulfillmentReleaseId} is not null and ${table.orderId} is not null and ${table.orderItemId} is not null and ${table.reservationId} is not null)`,
+      "inventory_events_release_shape",
+      sql`${table.eventType} <> 'release' or (
+        ${table.reservationId} is not null and ${table.orderId} is not null
+        and ${table.orderItemId} is not null and ${table.fulfillmentReleaseId} is null
+      )`,
+    ),
+    check(
+      "inventory_events_consume_shape",
+      sql`${table.eventType} <> 'consume' or (
+        ${table.fulfillmentReleaseId} is not null and ${table.orderId} is not null
+        and ${table.orderItemId} is not null and ${table.reservationId} is not null
+      )`,
     ),
     index("inventory_events_lot_occurred_idx").on(table.lotId, table.occurredAt),
   ],

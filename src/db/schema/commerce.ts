@@ -18,6 +18,7 @@ import {
   checkoutAttemptStatusEnum,
   checkoutGateResultEnum,
   orderStateEnum,
+  promotionKindEnum,
 } from "./enums";
 import {
   createdAt,
@@ -162,7 +163,7 @@ export const checkoutAttempts = pgTable(
     shippingQuoteReference: text("shipping_quote_reference"),
     shippingService: text("shipping_service"),
     createdAt: createdAt(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    providerExpiresAt: timestamp("expires_at", { withTimezone: true }),
   },
   (table) => [
     unique("checkout_attempts_buyer_idempotency_unique").on(table.buyerUserId, table.idempotencyKey),
@@ -180,9 +181,52 @@ export const checkoutAttempts = pgTable(
     check("checkout_attempts_request_hash", sha256(table.requestHash)),
     check("checkout_attempts_provider_request_hash", sql`${table.providerRequestHash} is null or ${sha256(table.providerRequestHash)}`),
     check(
+      "checkout_attempts_quote_references_coherent",
+      sql`((${table.taxReady} = true and ${table.taxQuoteReference} is not null and ${nonblank(table.taxQuoteReference)})
+            or (${table.taxReady} = false and ${table.taxQuoteReference} is null))
+          and ((${table.shippingReady} = true and ${table.shippingQuoteReference} is not null
+                 and ${nonblank(table.shippingQuoteReference)} and ${table.shippingService} is not null
+                 and ${nonblank(table.shippingService)})
+            or (${table.shippingReady} = false and ${table.shippingQuoteReference} is null
+                 and ${table.shippingService} is null))`,
+    ),
+    check(
       "checkout_attempts_provider_coherent",
-      sql`(${table.provider} is null and ${table.providerRequestId} is null and ${table.providerSessionId} is null)
-          or (${table.provider} is not null and ${nonblank(table.provider)} and (${table.providerRequestId} is not null or ${table.providerSessionId} is not null))`,
+      sql`(${table.provider} is null and ${table.providerRequestId} is null
+            and ${table.providerSessionId} is null and ${table.providerRequestHash} is null)
+          or (${table.provider} is not null and ${nonblank(table.provider)}
+            and ${table.providerRequestId} is not null and ${nonblank(table.providerRequestId)}
+            and (${table.providerSessionId} is null or ${nonblank(table.providerSessionId)}))`,
+    ),
+    check(
+      "checkout_attempts_status_coherent",
+      sql`(${table.status} = 'created' and (
+              (${table.permitted} = false and ${table.provider} is null
+                and ${table.providerRequestHash} is null and ${table.providerExpiresAt} is null)
+              or (${table.permitted} = true and ${table.provider} is not null
+                and ${table.providerRequestId} is not null and ${table.providerSessionId} is null
+                and ${table.providerRequestHash} is not null and ${table.providerExpiresAt} is not null)))
+          or (${table.status} = 'open' and ${table.permitted} = true
+              and ${table.provider} is not null and ${table.providerRequestId} is not null
+              and ${table.providerSessionId} is not null and ${table.providerRequestHash} is not null
+              and ${table.providerExpiresAt} is not null)
+          or (${table.status} = 'provider_unknown' and ${table.permitted} = true
+              and ${table.provider} is not null and ${table.providerRequestId} is not null
+              and ${table.providerRequestHash} is not null and ${table.providerExpiresAt} is not null)
+          or (${table.status} in ('completed', 'expired') and ${table.permitted} = true
+              and ${table.provider} is not null and ${table.providerRequestId} is not null
+              and ${table.providerSessionId} is not null and ${table.providerRequestHash} is not null
+              and ${table.providerExpiresAt} is not null)
+          or (${table.status} = 'failed' and (
+              (${table.permitted} = false and ${table.provider} is null
+                and ${table.providerRequestHash} is null and ${table.providerExpiresAt} is null)
+              or (${table.permitted} = true and ${table.provider} is not null
+                and ${table.providerRequestId} is not null and ${table.providerRequestHash} is not null
+                and ${table.providerExpiresAt} is not null)))`,
+    ),
+    check(
+      "checkout_attempts_provider_expiry_after_create",
+      sql`${table.providerExpiresAt} is null or ${table.providerExpiresAt} > ${table.createdAt}`,
     ),
     check(
       "checkout_attempts_permitted_coherent",
@@ -203,7 +247,7 @@ export const orderPromotionApplications = pgTable("order_promotion_applications"
   promotionVersion: integer("promotion_version").notNull(),
   codeSnapshot: text("code_snapshot").notNull(),
   nameSnapshot: text("name_snapshot").notNull(),
-  kindSnapshot: text("kind_snapshot").notNull(),
+  kindSnapshot: promotionKindEnum("kind_snapshot").notNull(),
   appliedDiscountMinor: money("applied_discount_minor").notNull(),
   createdAt: createdAt(),
 }, (table) => [
@@ -245,5 +289,27 @@ export const orderShippingAddresses = pgTable("order_shipping_addresses", {
   check("order_shipping_addresses_country_us", sql`${table.country} = 'US'`),
   check("order_shipping_addresses_state_format", stateCode(table.stateCode)),
   check("order_shipping_addresses_postal_format", sql`${table.postalCode} ~ '^[0-9]{5}(-[0-9]{4})?$'`),
-  check("order_shipping_addresses_fields_nonblank", sql`${nonblank(table.recipientName)} and ${nonblank(table.addressLine1)} and ${nonblank(table.city)}`),
+  check(
+    "order_shipping_addresses_field_lengths",
+    sql`char_length(${table.recipientName}) between 1 and 120
+        and char_length(${table.addressLine1}) between 1 and 120
+        and (${table.addressLine2} is null or char_length(${table.addressLine2}) between 1 and 120)
+        and char_length(${table.city}) between 1 and 100`,
+  ),
+  check(
+    "order_shipping_addresses_fields_nonblank",
+    sql`${nonblank(table.recipientName)} and ${nonblank(table.addressLine1)}
+        and (${table.addressLine2} is null or ${nonblank(table.addressLine2)})
+        and ${nonblank(table.city)}`,
+  ),
+  check(
+    "order_shipping_addresses_no_control_characters",
+    sql`${table.recipientName} !~ '[[:cntrl:]]'
+        and ${table.addressLine1} !~ '[[:cntrl:]]'
+        and (${table.addressLine2} is null or ${table.addressLine2} !~ '[[:cntrl:]]')
+        and ${table.city} !~ '[[:cntrl:]]'
+        and ${table.stateCode} !~ '[[:cntrl:]]'
+        and ${table.postalCode} !~ '[[:cntrl:]]'
+        and ${table.country} !~ '[[:cntrl:]]'`,
+  ),
 ]);

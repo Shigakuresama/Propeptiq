@@ -212,9 +212,13 @@ async function insertCommerceFixture(client: PGlite): Promise<void> {
        'Synthetic product', 'sealed vial', 'USD', 2500, 1, 2500, 0, 2500);
 
     INSERT INTO provider_events
-      (id, provider, provider_event_id, payload_hash, status, received_at)
+      (id, provider, provider_event_id, payload_hash, status, received_at,
+       event_type, schema_version, normalized_payload, provider_created_at, livemode)
     VALUES
-      ('${ids.providerEvent}', 'synthetic_provider', 'evt_synthetic_1', '${hashD}', 'pending', now());
+      ('${ids.providerEvent}', 'synthetic_provider', 'evt_synthetic_1', '${hashD}',
+       'pending', now(), 'checkout.session.completed', 1,
+       '{"providerEventId":"evt_synthetic_1","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+       now(), false);
 
     INSERT INTO payment_events
       (id, provider_event_id, order_id, event_type, provider_payment_id,
@@ -273,10 +277,13 @@ async function insertSecondOrderAndPayment(client: PGlite): Promise<void> {
        'USD', 2500, 0, 200, 300, 3000, 'checkout_pending');
 
     INSERT INTO provider_events
-      (id, provider, provider_event_id, payload_hash, status, received_at)
+      (id, provider, provider_event_id, payload_hash, status, received_at,
+       event_type, schema_version, normalized_payload, provider_created_at, livemode)
     VALUES
       ('${ids.providerEvent2}', 'synthetic_provider', 'evt_synthetic_second',
-       '${hashE}', 'pending', now());
+       '${hashE}', 'pending', now(), 'checkout.session.completed', 1,
+       '{"providerEventId":"evt_synthetic_second","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+       now(), false);
 
     INSERT INTO payment_events
       (id, provider_event_id, order_id, event_type, provider_payment_id,
@@ -338,7 +345,7 @@ describe("lean database migration", () => {
     await insertCommerceFixture(client);
     await insertSecondUserAcceptance(client);
 
-    await client.exec(
+    await expectRejected(
       client,
       `INSERT INTO orders
          (buyer_user_id, buyer_status_snapshot, attestation_acceptance_id,
@@ -480,8 +487,13 @@ describe("lean database migration", () => {
     );
     await expectRejected(
       client,
-      `INSERT INTO provider_events (provider, provider_event_id, payload_hash, status)
-       VALUES ('synthetic_provider', 'evt_synthetic_1', '${hashD}', 'pending')`,
+      `INSERT INTO provider_events
+         (provider, provider_event_id, payload_hash, status, event_type,
+          schema_version, normalized_payload, provider_created_at, livemode)
+       VALUES ('synthetic_provider', 'evt_synthetic_1', '${hashD}', 'pending',
+         'checkout.session.completed', 1,
+         '{"providerEventId":"evt_synthetic_1","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false)`,
     );
     await expectRejected(
       client,
@@ -492,8 +504,12 @@ describe("lean database migration", () => {
     );
     await client.exec(`
       INSERT INTO provider_events
-        (provider, provider_event_id, payload_hash, status)
-      VALUES ('synthetic_provider', 'evt_synthetic_2', '${hashE}', 'pending');
+        (provider, provider_event_id, payload_hash, status, event_type,
+         schema_version, normalized_payload, provider_created_at, livemode)
+      VALUES ('synthetic_provider', 'evt_synthetic_2', '${hashE}', 'pending',
+        'payment.failed', 1,
+        '{"providerEventId":"evt_synthetic_2","eventType":"payment.failed","schemaVersion":1,"livemode":false}'::jsonb,
+        now(), false);
     `);
     await expectRejected(
       client,
@@ -510,28 +526,24 @@ describe("lean database migration", () => {
          permitted, review_required, tax_ready, shipping_ready)
       VALUES
         ('00000000-0000-4000-8000-000000000080', '${ids.order}', '${ids.user}', 'checkout-key-1', '${hashE}', 'pass', 'pass',
-         'pass', 'pass', 'pass', 'pass', true, false, true, true);
+         'pass', 'pass', 'pass', 'pass', false, false, false, false);
     `);
-    await expectRejected(
-      client,
-      `INSERT INTO checkout_attempts
+    await expectRejected(client, `INSERT INTO checkout_attempts
          (order_id, buyer_user_id, idempotency_key, request_hash, account_gate, attestation_gate,
           product_gate, destination_gate, inventory_gate, payment_provider_gate,
           permitted, review_required, tax_ready, shipping_ready)
        VALUES
          ('${ids.order}', '${ids.user}', 'checkout-key-1', '${hashF}', 'pass', 'pass',
-          'pass', 'pass', 'pass', 'pass', true, false, true, true)`,
+          'pass', 'pass', 'pass', 'pass', false, false, false, false)`,
     );
-    await expectRejected(
-      client,
+    await client.exec(
       `INSERT INTO checkout_attempts
          (order_id, buyer_user_id, idempotency_key, request_hash, account_gate, attestation_gate,
           product_gate, destination_gate, inventory_gate, payment_provider_gate,
           permitted, review_required, tax_ready, shipping_ready)
        VALUES
          ('${ids.order}', '${ids.user}', 'checkout-key-2', '${hashE}', 'pass', 'pass',
-          'pass', 'pass', 'pass', 'pass', true, false, true, true)`,
-    );
+          'pass', 'pass', 'pass', 'pass', false, false, false, false)`);
 
     await client.exec(`
       INSERT INTO inventory_reservations
@@ -544,11 +556,11 @@ describe("lean database migration", () => {
     await expectRejected(
       client,
       `INSERT INTO inventory_reservations
-         (idempotency_key, order_id, order_item_id, product_id, lot_id,
-          quantity_reserved, quantity_remaining, state)
+         (checkout_attempt_id, idempotency_key, order_id, order_item_id, product_id, lot_id,
+          quantity_reserved, quantity_remaining, state, expires_at)
        VALUES
-         ('reservation-key-1', '${ids.order}', '${ids.item}', '${ids.product}',
-          '${ids.lot}', 1, 1, 'active')`,
+         ('00000000-0000-4000-8000-000000000080', 'reservation-key-1', '${ids.order}', '${ids.item}', '${ids.product}',
+          '${ids.lot}', 1, 1, 'active', now() + interval '1 hour')`,
     );
     await client.exec(`
       INSERT INTO inventory_events
@@ -582,6 +594,17 @@ describe("lean database migration", () => {
   it("enforces lean buyer, destination, money, lease, review, audit, and inventory checks", async () => {
     client = await createMigratedPglite();
     await insertCommerceFixture(client);
+
+    await client.exec(`
+      INSERT INTO checkout_attempts
+        (id, order_id, buyer_user_id, idempotency_key, request_hash, account_gate, attestation_gate,
+         product_gate, destination_gate, inventory_gate, payment_provider_gate,
+         permitted, review_required, tax_ready, shipping_ready)
+      VALUES
+        ('00000000-0000-4000-8000-000000000080', '${ids.order}', '${ids.user}',
+         'constraint-attempt', '${hashE}', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass',
+         false, false, false, false)
+    `);
 
     await client.exec(`INSERT INTO users (id, clerk_id) VALUES ('${ids.user2}', 'clerk_incomplete')`);
     await expectRejected(
@@ -669,11 +692,11 @@ describe("lean database migration", () => {
     await expectRejected(
       client,
       `INSERT INTO inventory_reservations
-         (idempotency_key, order_id, order_item_id, product_id, lot_id,
-          quantity_reserved, quantity_remaining, state)
+         (checkout_attempt_id, idempotency_key, order_id, order_item_id, product_id, lot_id,
+          quantity_reserved, quantity_remaining, state, expires_at)
        VALUES
-         ('reservation-negative', '${ids.order}', '${ids.item}', '${ids.product}',
-          '${ids.lot}', 1, -1, 'active')`,
+         ('00000000-0000-4000-8000-000000000080', 'reservation-negative', '${ids.order}', '${ids.item}', '${ids.product}',
+          '${ids.lot}', 1, -1, 'active', now() + interval '1 hour')`,
     );
     await expectRejected(
       client,
@@ -687,8 +710,13 @@ describe("lean database migration", () => {
     await expectRejected(
       client,
       `INSERT INTO provider_events
-         (provider, provider_event_id, payload_hash, status, lease_token)
-       VALUES ('synthetic_provider', 'evt_bad_lease', '${hashE}', 'processing', 'lease-without-expiry')`,
+         (provider, provider_event_id, payload_hash, status, attempt_count,
+          lease_token, event_type, schema_version, normalized_payload,
+          provider_created_at, livemode)
+       VALUES ('synthetic_provider', 'evt_bad_lease', '${hashE}', 'processing', 1,
+         'lease-without-expiry', 'checkout.session.completed', 1,
+         '{"providerEventId":"evt_bad_lease","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false)`,
     );
     await expectRejected(
       client,
@@ -762,57 +790,90 @@ describe("lean database migration", () => {
     await client.exec(`
       INSERT INTO provider_events
         (provider, provider_event_id, payload_hash, status, attempt_count,
-         lease_token, lease_expires_at, last_error_redacted, received_at, processed_at)
+         lease_token, lease_expires_at, last_error_redacted, received_at, processed_at,
+         event_type, schema_version, normalized_payload, provider_created_at, livemode)
       VALUES
         ('synthetic', 'evt_processing', '${hashA}', 'processing', 1,
-         'lease-1', now() + interval '1 hour', 'previous retryable error', now(), null),
+         'lease-1', now() + interval '1 hour', null, now(), null,
+         'checkout.session.completed', 1,
+         '{"providerEventId":"evt_processing","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false),
         ('synthetic', 'evt_processed', '${hashB}', 'processed', 1,
-         null, null, null, now(), now()),
+         null, null, null, now(), now(), 'checkout.session.completed', 1,
+         '{"providerEventId":"evt_processed","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false),
         ('synthetic', 'evt_failed', '${hashC}', 'failed', 1,
-         null, null, 'redacted provider failure', now(), null);
+         null, null, 'redacted provider failure', now(), null,
+         'checkout.session.completed', 1,
+         '{"providerEventId":"evt_failed","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false);
     `);
 
     await expectRejected(
       client,
       `INSERT INTO provider_events
          (provider, provider_event_id, payload_hash, status, attempt_count,
-          lease_token, lease_expires_at, received_at)
+          lease_token, lease_expires_at, received_at, event_type, schema_version,
+          normalized_payload, provider_created_at, livemode)
        VALUES ('synthetic', 'evt_expired_lease', '${hashD}', 'processing', 1,
-         'lease-2', now() - interval '1 second', now())`,
-    );
-    await expectRejected(
-      client,
-      `INSERT INTO provider_events
-         (provider, provider_event_id, payload_hash, status, attempt_count, processed_at, last_error_redacted)
-       VALUES ('synthetic', 'evt_processed_error', '${hashD}', 'processed', 1, now(), 'stale error')`,
-    );
-    await expectRejected(
-      client,
-      `INSERT INTO provider_events
-         (provider, provider_event_id, payload_hash, status, attempt_count, last_error_redacted)
-       VALUES ('synthetic', 'evt_failed_blank', '${hashD}', 'failed', 1, '   ')`,
-    );
-    await expectRejected(
-      client,
-      `INSERT INTO provider_events
-         (provider, provider_event_id, payload_hash, status, attempt_count)
-       VALUES ('synthetic', 'evt_processing_no_lease', '${hashD}', 'processing', 1)`,
+         'lease-2', now() - interval '1 second', now(), 'checkout.session.completed', 1,
+         '{"providerEventId":"evt_expired_lease","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false)`,
     );
     await expectRejected(
       client,
       `INSERT INTO provider_events
          (provider, provider_event_id, payload_hash, status, attempt_count,
-          lease_token, lease_expires_at, last_error_redacted, received_at)
+          processed_at, last_error_redacted, event_type, schema_version,
+          normalized_payload, provider_created_at, livemode)
+       VALUES ('synthetic', 'evt_processed_error', '${hashD}', 'processed', 1,
+         now(), 'stale error', 'checkout.session.completed', 1,
+         '{"providerEventId":"evt_processed_error","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false)`,
+    );
+    await expectRejected(
+      client,
+      `INSERT INTO provider_events
+         (provider, provider_event_id, payload_hash, status, attempt_count,
+          last_error_redacted, event_type, schema_version, normalized_payload,
+          provider_created_at, livemode)
+       VALUES ('synthetic', 'evt_failed_blank', '${hashD}', 'failed', 1, '   ',
+         'checkout.session.completed', 1,
+         '{"providerEventId":"evt_failed_blank","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false)`,
+    );
+    await expectRejected(
+      client,
+      `INSERT INTO provider_events
+         (provider, provider_event_id, payload_hash, status, attempt_count,
+          event_type, schema_version, normalized_payload, provider_created_at, livemode)
+       VALUES ('synthetic', 'evt_processing_no_lease', '${hashD}', 'processing', 1,
+         'checkout.session.completed', 1,
+         '{"providerEventId":"evt_processing_no_lease","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false)`,
+    );
+    await expectRejected(
+      client,
+      `INSERT INTO provider_events
+         (provider, provider_event_id, payload_hash, status, attempt_count,
+          lease_token, lease_expires_at, last_error_redacted, received_at,
+          event_type, schema_version, normalized_payload, provider_created_at, livemode)
        VALUES ('synthetic', 'evt_processing_blank_error', '${hashD}', 'processing', 1,
-         'lease-3', now() + interval '1 hour', '   ', now())`,
+         'lease-3', now() + interval '1 hour', '   ', now(),
+         'checkout.session.completed', 1,
+         '{"providerEventId":"evt_processing_blank_error","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false)`,
     );
     await expectRejected(
       client,
       `INSERT INTO provider_events
          (provider, provider_event_id, payload_hash, status, attempt_count,
-          lease_token, lease_expires_at, received_at)
+          lease_token, lease_expires_at, received_at, event_type, schema_version,
+          normalized_payload, provider_created_at, livemode)
        VALUES ('synthetic', 'evt_processing_blank_token', '${hashD}', 'processing', 1,
-         '   ', now() + interval '1 hour', now())`,
+         '   ', now() + interval '1 hour', now(), 'checkout.session.completed', 1,
+         '{"providerEventId":"evt_processing_blank_token","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false)`,
     );
   });
 
@@ -823,20 +884,29 @@ describe("lean database migration", () => {
       INSERT INTO refunds
         (order_id, requested_by_user_id, verified_payment_event_id, provider, provider_event_id,
          provider_refund_id, idempotency_key, requested_amount_minor,
-         confirmed_amount_minor, currency, status, confirmed_at)
+         confirmed_amount_minor, currency, status, confirmed_at,
+         provider_request_hash, attempt_count, submitted_at)
       VALUES
         ('${ids.order}', '${ids.user}', '${ids.paymentEvent}', 'synthetic_provider', '${ids.providerEvent}',
          'refund-shared-id', 'refund-provider-key-1', 500, 500, 'USD',
-         'succeeded', now());
+         'succeeded', now(), '${hashA}', 1, now());
 
       INSERT INTO provider_events
-        (id, provider, provider_event_id, payload_hash, status)
+        (id, provider, provider_event_id, payload_hash, status, event_type,
+         schema_version, normalized_payload, provider_created_at, livemode)
       VALUES
-        ('${ids.providerEvent2}', 'synthetic_provider', 'evt_refund_second', '${hashE}', 'pending'),
+        ('${ids.providerEvent2}', 'synthetic_provider', 'evt_refund_second', '${hashE}', 'pending',
+         'refund.updated', 1,
+         '{"providerEventId":"evt_refund_second","eventType":"refund.updated","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false),
         ('00000000-0000-4000-8000-000000000044', 'other_provider',
-         'evt_refund_other', '${hashF}', 'pending'),
+         'evt_refund_other', '${hashF}', 'pending', 'refund.updated', 1,
+         '{"providerEventId":"evt_refund_other","eventType":"refund.updated","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false),
         ('00000000-0000-4000-8000-000000000045', 'synthetic_provider',
-         'evt_refund_blank', '${hashC}', 'pending');
+         'evt_refund_blank', '${hashC}', 'pending', 'refund.updated', 1,
+         '{"providerEventId":"evt_refund_blank","eventType":"refund.updated","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false);
     `);
 
     await expectRejected(
@@ -844,22 +914,25 @@ describe("lean database migration", () => {
        `INSERT INTO refunds
           (order_id, requested_by_user_id, verified_payment_event_id, provider, provider_event_id,
           provider_refund_id, idempotency_key, requested_amount_minor,
-          confirmed_amount_minor, currency, status, confirmed_at)
+          confirmed_amount_minor, currency, status, confirmed_at,
+          provider_request_hash, attempt_count, submitted_at)
        VALUES
           ('${ids.order}', '${ids.user}', '${ids.paymentEvent}', 'synthetic_provider', '${ids.providerEvent2}',
           'refund-shared-id', 'refund-provider-key-2', 400, 400, 'USD',
-          'succeeded', now())`,
+          'succeeded', now(), '${hashB}', 1, now())`,
     );
     await expectRejected(
       client,
        `INSERT INTO refunds
           (order_id, requested_by_user_id, verified_payment_event_id, provider, provider_event_id,
           provider_refund_id, idempotency_key, requested_amount_minor,
-          confirmed_amount_minor, currency, status, confirmed_at)
+          confirmed_amount_minor, currency, status, confirmed_at,
+          provider_request_hash, attempt_count, submitted_at)
        VALUES
           ('${ids.order}', '${ids.user}', '${ids.paymentEvent}', 'synthetic_provider',
           '00000000-0000-4000-8000-000000000045', '   ',
-          'refund-provider-key-blank', 300, 300, 'USD', 'succeeded', now())`,
+          'refund-provider-key-blank', 300, 300, 'USD', 'succeeded', now(),
+          '${hashC}', 1, now())`,
     );
     await expectRejected(
       client,
@@ -908,7 +981,7 @@ describe("lean database migration", () => {
       VALUES
         ('${ids.order}', '${ids.user}', 'checkout-array-key', '${hashE}', 'blocked', 'pass',
          'pass', 'pass', 'pass', 'pass', false, false,
-         ARRAY['account_inactive']::text[], true, true)
+         ARRAY['account_inactive']::text[], false, false)
       RETURNING reasons
     `);
 
@@ -984,14 +1057,25 @@ describe("lean database migration", () => {
     await insertCommerceFixture(client);
     await insertSecondCatalogRecord(client);
 
+    await client.exec(`
+      INSERT INTO checkout_attempts
+        (id, order_id, buyer_user_id, idempotency_key, request_hash, account_gate, attestation_gate,
+         product_gate, destination_gate, inventory_gate, payment_provider_gate,
+         permitted, review_required, tax_ready, shipping_ready)
+      VALUES
+        ('00000000-0000-4000-8000-000000000080', '${ids.order}', '${ids.user}',
+         'reservation-product-attempt', '${hashE}', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass',
+         false, false, false, false)
+    `);
+
     await expectRejected(
       client,
       `INSERT INTO inventory_reservations
-         (idempotency_key, order_id, order_item_id, product_id, lot_id,
-          quantity_reserved, quantity_remaining, state)
+         (checkout_attempt_id, idempotency_key, order_id, order_item_id, product_id, lot_id,
+          quantity_reserved, quantity_remaining, state, expires_at)
        VALUES
-         ('reservation-product-mismatch', '${ids.order}', '${ids.item}',
-          '${ids.product}', '${ids.lot2}', 1, 1, 'active')`,
+         ('00000000-0000-4000-8000-000000000080', 'reservation-product-mismatch', '${ids.order}', '${ids.item}',
+          '${ids.product}', '${ids.lot2}', 1, 1, 'active', now() + interval '1 hour')`,
     );
   });
 
@@ -1007,6 +1091,14 @@ describe("lean database migration", () => {
       VALUES
         ('${ids.item2}', '${ids.order}', '${ids.product2}', '${ids.price2}', '${ids.policy2}',
          'Synthetic product two', 'sealed vial', 'USD', 3500, 1, 3500, 0, 3500);
+
+      INSERT INTO checkout_attempts
+        (id, order_id, buyer_user_id, idempotency_key, request_hash, account_gate, attestation_gate,
+         product_gate, destination_gate, inventory_gate, payment_provider_gate,
+         permitted, review_required, tax_ready, shipping_ready)
+      VALUES
+        ('00000000-0000-4000-8000-000000000080', '${ids.order}', '${ids.user}', 'coherent-attempt', '${hashE}',
+         'pass', 'pass', 'pass', 'pass', 'pass', 'pass', false, false, false, false);
 
       INSERT INTO inventory_reservations
         (id, checkout_attempt_id, idempotency_key, order_id, order_item_id, product_id, lot_id,
@@ -1042,8 +1134,13 @@ describe("lean database migration", () => {
 
     await expectRejected(
       client,
-      `INSERT INTO provider_events (provider, provider_event_id, payload_hash, status)
-       VALUES ('synthetic_provider', 'evt_synthetic_1', '${hashE}', 'pending')`,
+      `INSERT INTO provider_events
+         (provider, provider_event_id, payload_hash, status, event_type,
+          schema_version, normalized_payload, provider_created_at, livemode)
+       VALUES ('synthetic_provider', 'evt_synthetic_1', '${hashE}', 'pending',
+         'checkout.session.completed', 1,
+         '{"providerEventId":"evt_synthetic_1","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         now(), false)`,
     );
   });
 
@@ -1106,14 +1203,32 @@ describe("lean database migration", () => {
       SET state = 'revoked', revoked_at = now()
       WHERE id = '${ids.release}';
 
-      INSERT INTO inventory_reservations
-        (id, idempotency_key, order_id, order_item_id, product_id, lot_id,
-         quantity_reserved, quantity_remaining, state)
+      INSERT INTO order_items
+        (id, order_id, product_id, product_price_id, destination_policy_id,
+         product_name_snapshot, package_form_snapshot, currency,
+         unit_amount_minor, quantity, subtotal_minor, discount_minor, total_minor)
       VALUES
-        ('${ids.reservation}', 'release-reservation-key', '${ids.order}', '${ids.item}',
-         '${ids.product}', '${ids.lot}', 1, 0, 'consumed'),
-        ('${ids.reservation2}', 'release-reservation-key-2', '${ids.order}', '${ids.item}',
-         '${ids.product}', '${ids.lot}', 1, 0, 'consumed');
+        ('${ids.item2}', '${ids.order}', '${ids.product}', '${ids.price}', '${ids.policy}',
+         'Synthetic product second line', 'sealed vial', 'USD', 2500, 1, 2500, 0, 2500);
+
+      INSERT INTO checkout_attempts
+        (id, order_id, buyer_user_id, idempotency_key, request_hash,
+         account_gate, attestation_gate, product_gate, destination_gate,
+         inventory_gate, payment_provider_gate, permitted, review_required,
+         tax_ready, shipping_ready)
+      VALUES
+        ('00000000-0000-4000-8000-000000000080', '${ids.order}', '${ids.user}',
+         'release-history-attempt', '${hashE}', 'pass', 'pass', 'pass', 'pass',
+         'pass', 'pass', false, false, false, false);
+
+      INSERT INTO inventory_reservations
+        (id, checkout_attempt_id, idempotency_key, order_id, order_item_id, product_id, lot_id,
+         quantity_reserved, quantity_remaining, state, expires_at)
+      VALUES
+        ('${ids.reservation}', '00000000-0000-4000-8000-000000000080', 'release-reservation-key', '${ids.order}', '${ids.item}',
+         '${ids.product}', '${ids.lot}', 1, 0, 'consumed', now() + interval '1 hour'),
+        ('${ids.reservation2}', '00000000-0000-4000-8000-000000000080', 'release-reservation-key-2', '${ids.order}', '${ids.item2}',
+         '${ids.product}', '${ids.lot}', 1, 0, 'consumed', now() + interval '1 hour');
 
       INSERT INTO fulfillment_releases
         (order_id, version, idempotency_key, payment_event_id,
@@ -1132,14 +1247,14 @@ describe("lean database migration", () => {
       INSERT INTO shipments
         (order_id, fulfillment_release_id, carrier, tracking_reference, state)
       VALUES
-        ('${ids.order}', '${ids.release}', 'synthetic-carrier', 'track-1', 'pending');
+        ('${ids.order}', null, 'synthetic-carrier', 'track-1', 'pending');
     `);
     await client.exec(`
       INSERT INTO inventory_events
         (idempotency_key, event_type, lot_id, order_id, order_item_id,
          reservation_id, fulfillment_release_id, quantity, balance_after)
       VALUES
-        ('consume-key-2', 'consume', '${ids.lot}', '${ids.order}', '${ids.item}',
+        ('consume-key-2', 'consume', '${ids.lot}', '${ids.order}', '${ids.item2}',
          '${ids.reservation2}', '${ids.release}', 1, 18);
     `);
     await expectRejected(
@@ -1165,7 +1280,7 @@ describe("lean database migration", () => {
       `INSERT INTO shipments
          (order_id, fulfillment_release_id, carrier, tracking_reference, state)
        VALUES
-         ('${ids.order}', '${ids.release}', 'synthetic-carrier', 'track-2', 'pending')`,
+         ('${ids.order}', null, 'synthetic-carrier', 'track-2', 'pending')`,
     );
 
     const releases = await client.query<{ version: number }>(`

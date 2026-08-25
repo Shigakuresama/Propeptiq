@@ -1,8 +1,8 @@
-import type { ServerEnv } from "./env-schema";
+import { hasProductionIdentity, type ServerEnv } from "./env-schema";
 
 /** Configuration evidence only; request-specific catalog and quote readiness remain separate. */
 export function isLiveCheckoutEnvironmentConfigured(env: ServerEnv): boolean {
-  return env.APP_ENV === "production" &&
+  return hasProductionIdentity(env) &&
     env.COMMERCE_LIVE_CAPABILITY === "enabled" &&
     env.PAYMENTS_LIVE_CAPABILITY === "enabled" &&
     env.CATALOG_DEMO_MODE === "disabled" &&

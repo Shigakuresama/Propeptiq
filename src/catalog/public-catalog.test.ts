@@ -190,6 +190,8 @@ function createRecords(): CatalogRecordSet {
     promotions: [
       {
         id: "demo-discount",
+        code: "DEMO-DISCOUNT",
+        version: 1,
         name: "Synthetic percentage display — Demo Only",
         kind: "discount",
         status: "active",
@@ -202,6 +204,8 @@ function createRecords(): CatalogRecordSet {
       },
       {
         id: "demo-bundle",
+        code: "DEMO-BUNDLE",
+        version: 1,
         name: "Synthetic bundle display — Demo Only",
         kind: "bundle",
         status: "active",
@@ -216,6 +220,8 @@ function createRecords(): CatalogRecordSet {
       },
       {
         id: "demo-subscription",
+        code: "DEMO-SUBSCRIPTION",
+        version: 1,
         name: "Synthetic subscription display — Demo Only",
         kind: "subscription",
         status: "active",
@@ -228,6 +234,8 @@ function createRecords(): CatalogRecordSet {
       },
       {
         id: "demo-loyalty",
+        code: "DEMO-LOYALTY",
+        version: 1,
         name: "Synthetic loyalty display — Demo Only",
         kind: "loyalty",
         status: "active",
@@ -240,6 +248,8 @@ function createRecords(): CatalogRecordSet {
       },
       {
         id: "demo-cross-sell",
+        code: "DEMO-CROSS-SELL",
+        version: 1,
         name: "Synthetic related-record display — Demo Only",
         kind: "cross_sell",
         status: "active",
@@ -254,6 +264,8 @@ function createRecords(): CatalogRecordSet {
       },
       {
         id: "demo-invalid-discount",
+        code: "DEMO-INVALID",
+        version: 1,
         name: "Invalid synthetic discount",
         kind: "discount",
         status: "active",
@@ -266,6 +278,8 @@ function createRecords(): CatalogRecordSet {
       },
       {
         id: "demo-ended-discount",
+        code: "DEMO-ENDED",
+        version: 1,
         name: "Ended synthetic discount",
         kind: "discount",
         status: "active",

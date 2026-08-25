@@ -17,7 +17,7 @@ const markerGroups = Object.freeze([
   {
     label: "demo fixture product",
     patterns: [
-      /demo-product-(?:alpha|beta)/gu,
+      /61000000-0000-4000-8000-00000000000[12]/gu,
       /Synthetic Reference (?:Alpha|Beta) — Demo Only/gu,
     ],
   },

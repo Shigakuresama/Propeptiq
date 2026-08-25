@@ -22,7 +22,7 @@ test("preserves exact cart IDs and quantities through fixed sign-in and checkout
   await page.evaluate(() => {
     window.localStorage.setItem(
       "propeptiq.cart.v1",
-      JSON.stringify({ version: 1, items: [{ productId: "demo-product-alpha", quantity: 2 }] }),
+      JSON.stringify({ version: 1, items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }] }),
     );
   });
   await page.reload();
@@ -39,7 +39,7 @@ test("preserves exact cart IDs and quantities through fixed sign-in and checkout
   );
   expect(savedCart).toEqual({
     version: 1,
-    items: [{ productId: "demo-product-alpha", quantity: 2 }],
+    items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }],
   });
 });
 
@@ -126,6 +126,14 @@ test("labels order, refund, and shipment pages as Task 6 unavailable surfaces", 
     await expect(task6Boundary).toBeVisible();
     await expect(task6Boundary).toContainText(/provider refund submission|release issuance|delivery effects remain unavailable/i);
   }
+  await expect(
+    page.locator(".warning-record").filter({
+      hasText: "Preparation does not authorize handoff.",
+    }),
+  ).toBeVisible();
+
+  await page.goto("/admin/promotions");
+  await expect(page.getByText("Terms version", { exact: true }).first()).toBeVisible();
 });
 
 test("account and admin shells remain usable at approved widths without horizontal overflow", async ({ page }) => {

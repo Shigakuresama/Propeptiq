@@ -142,6 +142,7 @@ export type SafePromotionConfiguration =
 type PromotionItem = {
   id: string;
   code: string;
+  version: number;
   name: string;
   kind: "discount" | "bundle" | "subscription" | "loyalty" | "cross_sell";
   status: "draft" | "active" | "retired";
@@ -213,7 +214,7 @@ type OrderItem = {
 type RefundItem = {
   id: string;
   orderId: string;
-  requestedByUserId: string;
+  requestedByUserId: string | null;
   verifiedPaymentEventId: string;
   provider: string;
   requestedAmountMinor: number;
@@ -230,10 +231,10 @@ type RefundItem = {
 type ShipmentItem = {
   id: string;
   orderId: string;
-  fulfillmentReleaseId: string;
-  releaseState: "issued" | "revoked" | "expired" | "consumed";
-  releaseVersion: number;
-  releaseExpiresAt: string;
+  fulfillmentReleaseId: string | null;
+  releaseState: "issued" | "revoked" | "expired" | "consumed" | null;
+  releaseVersion: number | null;
+  releaseExpiresAt: string | null;
   carrier: string;
   trackingReference: string;
   state: "pending" | "handed_off" | "delivered" | "exception";

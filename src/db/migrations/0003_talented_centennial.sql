@@ -1,9 +1,11 @@
 DO $$
 BEGIN
-  IF to_regclass('public.orders') IS NOT NULL AND EXISTS (SELECT 1 FROM public.orders LIMIT 1) THEN
+  IF to_regclass('public.orders') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM public.orders LIMIT 1) THEN
     RAISE EXCEPTION '0003 preflight refused: populated orders require authorized reconciliation';
   END IF;
-  IF to_regclass('public.provider_events') IS NOT NULL AND EXISTS (SELECT 1 FROM public.provider_events LIMIT 1) THEN
+  IF to_regclass('public.provider_events') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM public.provider_events LIMIT 1) THEN
     RAISE EXCEPTION '0003 preflight refused: populated provider_events require authorized reconciliation';
   END IF;
 END $$;--> statement-breakpoint
@@ -30,7 +32,7 @@ CREATE TABLE "order_promotion_applications" (
 	"promotion_version" integer NOT NULL,
 	"code_snapshot" text NOT NULL,
 	"name_snapshot" text NOT NULL,
-	"kind_snapshot" text NOT NULL,
+	"kind_snapshot" "promotion_kind" NOT NULL,
 	"applied_discount_minor" bigint NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "order_promotion_applications_id_order_unique" UNIQUE("id","order_id"),
@@ -61,7 +63,20 @@ CREATE TABLE "order_shipping_addresses" (
   'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC'
 )),
 	CONSTRAINT "order_shipping_addresses_postal_format" CHECK ("order_shipping_addresses"."postal_code" ~ '^[0-9]{5}(-[0-9]{4})?$'),
-	CONSTRAINT "order_shipping_addresses_fields_nonblank" CHECK (length(btrim("order_shipping_addresses"."recipient_name")) > 0 and length(btrim("order_shipping_addresses"."address_line1")) > 0 and length(btrim("order_shipping_addresses"."city")) > 0)
+	CONSTRAINT "order_shipping_addresses_field_lengths" CHECK (char_length("order_shipping_addresses"."recipient_name") between 1 and 120
+        and char_length("order_shipping_addresses"."address_line1") between 1 and 120
+        and ("order_shipping_addresses"."address_line2" is null or char_length("order_shipping_addresses"."address_line2") between 1 and 120)
+        and char_length("order_shipping_addresses"."city") between 1 and 100),
+	CONSTRAINT "order_shipping_addresses_fields_nonblank" CHECK (length(btrim("order_shipping_addresses"."recipient_name")) > 0 and length(btrim("order_shipping_addresses"."address_line1")) > 0
+        and ("order_shipping_addresses"."address_line2" is null or length(btrim("order_shipping_addresses"."address_line2")) > 0)
+        and length(btrim("order_shipping_addresses"."city")) > 0),
+	CONSTRAINT "order_shipping_addresses_no_control_characters" CHECK ("order_shipping_addresses"."recipient_name" !~ '[[:cntrl:]]'
+        and "order_shipping_addresses"."address_line1" !~ '[[:cntrl:]]'
+        and ("order_shipping_addresses"."address_line2" is null or "order_shipping_addresses"."address_line2" !~ '[[:cntrl:]]')
+        and "order_shipping_addresses"."city" !~ '[[:cntrl:]]'
+        and "order_shipping_addresses"."state_code" !~ '[[:cntrl:]]'
+        and "order_shipping_addresses"."postal_code" !~ '[[:cntrl:]]'
+        and "order_shipping_addresses"."country" !~ '[[:cntrl:]]')
 );
 --> statement-breakpoint
 CREATE TABLE "downstream_effects" (
@@ -84,12 +99,33 @@ CREATE TABLE "downstream_effects" (
 	CONSTRAINT "downstream_effects_idempotency_nonblank" CHECK (length(btrim("downstream_effects"."idempotency_key")) > 0),
 	CONSTRAINT "downstream_effects_payload_object" CHECK (jsonb_typeof("downstream_effects"."payload") = 'object'),
 	CONSTRAINT "downstream_effects_status" CHECK ("downstream_effects"."status" in ('pending','processing','processed','failed')),
-	CONSTRAINT "downstream_effects_attempt_nonnegative" CHECK ("downstream_effects"."attempt_count" >= 0)
+	CONSTRAINT "downstream_effects_attempt_nonnegative" CHECK ("downstream_effects"."attempt_count" >= 0),
+	CONSTRAINT "downstream_effects_error_nonblank" CHECK ("downstream_effects"."last_error_redacted" is null or length(btrim("downstream_effects"."last_error_redacted")) > 0),
+	CONSTRAINT "downstream_effects_lease_pair" CHECK (("downstream_effects"."lease_token" is null) = ("downstream_effects"."lease_expires_at" is null)),
+	CONSTRAINT "downstream_effects_lease_token_nonblank" CHECK ("downstream_effects"."lease_token" is null or length(btrim("downstream_effects"."lease_token")) > 0),
+	CONSTRAINT "downstream_effects_timestamps_coherent" CHECK ("downstream_effects"."updated_at" >= "downstream_effects"."created_at"
+      and ("downstream_effects"."processed_at" is null or "downstream_effects"."processed_at" >= "downstream_effects"."created_at")),
+	CONSTRAINT "downstream_effects_status_coherent" CHECK (("downstream_effects"."status" = 'pending'
+          and "downstream_effects"."lease_token" is null and "downstream_effects"."processed_at" is null
+          and "downstream_effects"."last_error_redacted" is null)
+      or ("downstream_effects"."status" = 'processing'
+          and "downstream_effects"."lease_token" is not null and "downstream_effects"."lease_expires_at" > "downstream_effects"."updated_at"
+          and "downstream_effects"."processed_at" is null and "downstream_effects"."last_error_redacted" is null
+          and "downstream_effects"."attempt_count" >= 1)
+      or ("downstream_effects"."status" = 'processed'
+          and "downstream_effects"."lease_token" is null and "downstream_effects"."processed_at" is not null
+          and "downstream_effects"."last_error_redacted" is null and "downstream_effects"."attempt_count" >= 1)
+      or ("downstream_effects"."status" = 'failed'
+          and "downstream_effects"."lease_token" is null and "downstream_effects"."processed_at" is null
+          and "downstream_effects"."last_error_redacted" is not null
+          and length(btrim("downstream_effects"."last_error_redacted")) > 0 and "downstream_effects"."attempt_count" >= 1))
 );
 --> statement-breakpoint
 ALTER TABLE "checkout_attempts" DROP CONSTRAINT "checkout_attempts_idempotency_key_unique";--> statement-breakpoint
 ALTER TABLE "checkout_attempts" DROP CONSTRAINT "checkout_attempts_request_hash_unique";--> statement-breakpoint
+ALTER TABLE "checkout_attempts" DROP CONSTRAINT "checkout_attempts_provider_coherent";--> statement-breakpoint
 ALTER TABLE "provider_events" DROP CONSTRAINT "provider_events_status_coherent";--> statement-breakpoint
+ALTER TABLE "inventory_events" DROP CONSTRAINT "inventory_events_consume_release";--> statement-breakpoint
 ALTER TABLE "shipments" DROP CONSTRAINT "shipments_state_coherent";--> statement-breakpoint
 ALTER TABLE "orders" ALTER COLUMN "state" SET DATA TYPE text;--> statement-breakpoint
 ALTER TABLE "orders" ALTER COLUMN "state" SET DEFAULT 'draft'::text;--> statement-breakpoint
@@ -107,32 +143,32 @@ ALTER TABLE "checkout_attempts" ADD COLUMN "provider_request_hash" text;--> stat
 ALTER TABLE "checkout_attempts" ADD COLUMN "tax_quote_reference" text;--> statement-breakpoint
 ALTER TABLE "checkout_attempts" ADD COLUMN "shipping_quote_reference" text;--> statement-breakpoint
 ALTER TABLE "checkout_attempts" ADD COLUMN "shipping_service" text;--> statement-breakpoint
-ALTER TABLE "provider_events" ADD COLUMN "event_type" text DEFAULT 'unknown' NOT NULL;--> statement-breakpoint
+ALTER TABLE "provider_events" ADD COLUMN "event_type" text NOT NULL;--> statement-breakpoint
 ALTER TABLE "provider_events" ADD COLUMN "schema_version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
-ALTER TABLE "provider_events" ADD COLUMN "normalized_payload" jsonb DEFAULT '{}'::jsonb NOT NULL;--> statement-breakpoint
-ALTER TABLE "provider_events" ADD COLUMN "provider_created_at" timestamp with time zone;--> statement-breakpoint
-ALTER TABLE "provider_events" ADD COLUMN "livemode" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "provider_events" ADD COLUMN "normalized_payload" jsonb NOT NULL;--> statement-breakpoint
+ALTER TABLE "provider_events" ADD COLUMN "provider_created_at" timestamp with time zone NOT NULL;--> statement-breakpoint
+ALTER TABLE "provider_events" ADD COLUMN "livemode" boolean NOT NULL;--> statement-breakpoint
 ALTER TABLE "refunds" ADD COLUMN "origin" "refund_origin" DEFAULT 'staff_requested' NOT NULL;--> statement-breakpoint
 ALTER TABLE "refunds" ADD COLUMN "provider_request_hash" text;--> statement-breakpoint
 ALTER TABLE "refunds" ADD COLUMN "attempt_count" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "refunds" ADD COLUMN "submitted_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "refunds" ADD COLUMN "last_error_redacted" text;--> statement-breakpoint
 ALTER TABLE "inventory_reservations" ADD COLUMN "checkout_attempt_id" uuid NOT NULL;--> statement-breakpoint
-ALTER TABLE "order_promotion_allocations" ADD CONSTRAINT "order_promotion_allocations_application_order_fk" FOREIGN KEY ("application_id","order_id") REFERENCES "public"."order_promotion_applications"("id","order_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "promotions" ADD CONSTRAINT "promotions_id_version_unique" UNIQUE("id","version");--> statement-breakpoint
+ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_id_order_unique" UNIQUE("id","order_id");--> statement-breakpoint
 ALTER TABLE "order_items" ADD CONSTRAINT "order_items_id_order_unique" UNIQUE("id","order_id");--> statement-breakpoint
+ALTER TABLE "orders" ADD CONSTRAINT "orders_id_destination_state_unique" UNIQUE("id","destination_state_code");--> statement-breakpoint
+ALTER TABLE "order_promotion_allocations" ADD CONSTRAINT "order_promotion_allocations_application_order_fk" FOREIGN KEY ("application_id","order_id") REFERENCES "public"."order_promotion_applications"("id","order_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "order_promotion_allocations" ADD CONSTRAINT "order_promotion_allocations_item_order_fk" FOREIGN KEY ("order_item_id","order_id") REFERENCES "public"."order_items"("id","order_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "order_promotion_applications" ADD CONSTRAINT "order_promotion_applications_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "promotions" ADD CONSTRAINT "promotions_id_version_unique" UNIQUE("id","version");--> statement-breakpoint
 ALTER TABLE "order_promotion_applications" ADD CONSTRAINT "order_promotion_applications_promotion_version_fk" FOREIGN KEY ("promotion_id","promotion_version") REFERENCES "public"."promotions"("id","version") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "order_shipping_addresses" ADD CONSTRAINT "order_shipping_addresses_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "orders" ADD CONSTRAINT "orders_id_destination_state_unique" UNIQUE("id","destination_state_code");--> statement-breakpoint
 ALTER TABLE "order_shipping_addresses" ADD CONSTRAINT "order_shipping_addresses_order_state_fk" FOREIGN KEY ("order_id","state_code") REFERENCES "public"."orders"("id","destination_state_code") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "downstream_effects" ADD CONSTRAINT "downstream_effects_order_id_orders_id_fk" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "downstream_effects" ADD CONSTRAINT "downstream_effects_provider_event_id_provider_events_id_fk" FOREIGN KEY ("provider_event_id") REFERENCES "public"."provider_events"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "downstream_effects_status_lease_idx" ON "downstream_effects" USING btree ("status","lease_expires_at");--> statement-breakpoint
 ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_buyer_user_id_users_id_fk" FOREIGN KEY ("buyer_user_id") REFERENCES "public"."users"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_order_buyer_fk" FOREIGN KEY ("order_id","buyer_user_id") REFERENCES "public"."orders"("id","buyer_user_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_id_order_unique" UNIQUE("id","order_id");--> statement-breakpoint
 ALTER TABLE "inventory_reservations" ADD CONSTRAINT "inventory_reservations_attempt_order_fk" FOREIGN KEY ("checkout_attempt_id","order_id") REFERENCES "public"."checkout_attempts"("id","order_id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "inventory_events_reservation_terminal_unique" ON "inventory_events" USING btree ("reservation_id") WHERE "inventory_events"."event_type" in ('consume','release') and "inventory_events"."reservation_id" is not null;--> statement-breakpoint
 ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_buyer_idempotency_unique" UNIQUE("buyer_user_id","idempotency_key");--> statement-breakpoint
@@ -140,14 +176,67 @@ ALTER TABLE "inventory_reservations" ADD CONSTRAINT "inventory_reservations_item
 ALTER TABLE "shipments" ADD CONSTRAINT "shipments_order_unique" UNIQUE("order_id");--> statement-breakpoint
 ALTER TABLE "promotions" ADD CONSTRAINT "promotions_version_positive" CHECK ("promotions"."version" > 0);--> statement-breakpoint
 ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_provider_request_hash" CHECK ("checkout_attempts"."provider_request_hash" is null or "checkout_attempts"."provider_request_hash" ~ '^[0-9a-f]{64}$');--> statement-breakpoint
-ALTER TABLE "payment_events" ADD CONSTRAINT "payment_events_unreconciled_refund_shape" CHECK ("payment_events"."event_type" <> 'unreconciled_refund_observed' or ("payment_events"."provider_payment_id" is not null and "payment_events"."amount_minor" > 0 and "payment_events"."idempotency_key" = 'provider-event:' || "payment_events"."provider_event_id"::text));--> statement-breakpoint
+ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_quote_references_coherent" CHECK ((("checkout_attempts"."tax_ready" = true and "checkout_attempts"."tax_quote_reference" is not null and length(btrim("checkout_attempts"."tax_quote_reference")) > 0)
+            or ("checkout_attempts"."tax_ready" = false and "checkout_attempts"."tax_quote_reference" is null))
+          and (("checkout_attempts"."shipping_ready" = true and "checkout_attempts"."shipping_quote_reference" is not null
+                 and length(btrim("checkout_attempts"."shipping_quote_reference")) > 0 and "checkout_attempts"."shipping_service" is not null
+                 and length(btrim("checkout_attempts"."shipping_service")) > 0)
+            or ("checkout_attempts"."shipping_ready" = false and "checkout_attempts"."shipping_quote_reference" is null
+                 and "checkout_attempts"."shipping_service" is null)));--> statement-breakpoint
+ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_status_coherent" CHECK (("checkout_attempts"."status" = 'created' and (
+              ("checkout_attempts"."permitted" = false and "checkout_attempts"."provider" is null
+                and "checkout_attempts"."provider_request_hash" is null and "checkout_attempts"."expires_at" is null)
+              or ("checkout_attempts"."permitted" = true and "checkout_attempts"."provider" is not null
+                and "checkout_attempts"."provider_request_id" is not null and "checkout_attempts"."provider_session_id" is null
+                and "checkout_attempts"."provider_request_hash" is not null and "checkout_attempts"."expires_at" is not null)))
+          or ("checkout_attempts"."status" = 'open' and "checkout_attempts"."permitted" = true
+              and "checkout_attempts"."provider" is not null and "checkout_attempts"."provider_request_id" is not null
+              and "checkout_attempts"."provider_session_id" is not null and "checkout_attempts"."provider_request_hash" is not null
+              and "checkout_attempts"."expires_at" is not null)
+          or ("checkout_attempts"."status" = 'provider_unknown' and "checkout_attempts"."permitted" = true
+              and "checkout_attempts"."provider" is not null and "checkout_attempts"."provider_request_id" is not null
+              and "checkout_attempts"."provider_request_hash" is not null and "checkout_attempts"."expires_at" is not null)
+          or ("checkout_attempts"."status" in ('completed', 'expired') and "checkout_attempts"."permitted" = true
+              and "checkout_attempts"."provider" is not null and "checkout_attempts"."provider_request_id" is not null
+              and "checkout_attempts"."provider_session_id" is not null and "checkout_attempts"."provider_request_hash" is not null
+              and "checkout_attempts"."expires_at" is not null)
+          or ("checkout_attempts"."status" = 'failed' and (
+              ("checkout_attempts"."permitted" = false and "checkout_attempts"."provider" is null
+                and "checkout_attempts"."provider_request_hash" is null and "checkout_attempts"."expires_at" is null)
+              or ("checkout_attempts"."permitted" = true and "checkout_attempts"."provider" is not null
+                and "checkout_attempts"."provider_request_id" is not null and "checkout_attempts"."provider_request_hash" is not null
+                and "checkout_attempts"."expires_at" is not null))));--> statement-breakpoint
+ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_provider_expiry_after_create" CHECK ("checkout_attempts"."expires_at" is null or "checkout_attempts"."expires_at" > "checkout_attempts"."created_at");--> statement-breakpoint
+ALTER TABLE "checkout_attempts" ADD CONSTRAINT "checkout_attempts_provider_coherent" CHECK (("checkout_attempts"."provider" is null and "checkout_attempts"."provider_request_id" is null
+            and "checkout_attempts"."provider_session_id" is null and "checkout_attempts"."provider_request_hash" is null)
+          or ("checkout_attempts"."provider" is not null and length(btrim("checkout_attempts"."provider")) > 0
+            and "checkout_attempts"."provider_request_id" is not null and length(btrim("checkout_attempts"."provider_request_id")) > 0
+            and ("checkout_attempts"."provider_session_id" is null or length(btrim("checkout_attempts"."provider_session_id")) > 0)));--> statement-breakpoint
+ALTER TABLE "payment_events" ADD CONSTRAINT "payment_events_unreconciled_refund_shape" CHECK ("payment_events"."event_type" <> 'unreconciled_refund_observed'
+          or ("payment_events"."provider_payment_id" is not null and "payment_events"."amount_minor" > 0
+            and "payment_events"."idempotency_key" = 'provider_event:' || "payment_events"."provider_event_id"::text || ':unreconciled_refund'));--> statement-breakpoint
+ALTER TABLE "payment_events" ADD CONSTRAINT "payment_events_type_shape" CHECK (("payment_events"."event_type" = 'payment_failed')
+          or ("payment_events"."event_type" in ('payment_verified', 'refund_verified', 'dispute_recorded', 'dispute_resolved')
+            and "payment_events"."provider_payment_id" is not null
+            and length(btrim("payment_events"."provider_payment_id")) > 0 and "payment_events"."amount_minor" > 0)
+          or ("payment_events"."event_type" = 'unreconciled_refund_observed'
+            and "payment_events"."provider_payment_id" is not null and length(btrim("payment_events"."provider_payment_id")) > 0
+            and "payment_events"."amount_minor" > 0
+            and "payment_events"."idempotency_key" = 'provider_event:' || "payment_events"."provider_event_id"::text || ':unreconciled_refund'));--> statement-breakpoint
 ALTER TABLE "provider_events" ADD CONSTRAINT "provider_events_schema_version" CHECK ("provider_events"."schema_version" = 1);--> statement-breakpoint
+ALTER TABLE "provider_events" ADD CONSTRAINT "provider_events_event_type_nonblank" CHECK (length(btrim("provider_events"."event_type")) > 0);--> statement-breakpoint
 ALTER TABLE "provider_events" ADD CONSTRAINT "provider_events_normalized_object" CHECK (jsonb_typeof("provider_events"."normalized_payload") = 'object');--> statement-breakpoint
+ALTER TABLE "provider_events" ADD CONSTRAINT "provider_events_normalized_common_coherent" CHECK ("provider_events"."normalized_payload"->>'providerEventId' = "provider_events"."provider_event_id"
+          and "provider_events"."normalized_payload"->>'eventType' = "provider_events"."event_type"
+          and ("provider_events"."normalized_payload"->>'schemaVersion')::integer = "provider_events"."schema_version"
+          and ("provider_events"."normalized_payload"->>'livemode')::boolean = "provider_events"."livemode");--> statement-breakpoint
 ALTER TABLE "provider_events" ADD CONSTRAINT "provider_events_status_coherent" CHECK (("provider_events"."status" = 'pending'
-            and "provider_events"."lease_token" is null and "provider_events"."processed_at" is null)
+            and "provider_events"."lease_token" is null and "provider_events"."processed_at" is null
+            and "provider_events"."last_error_redacted" is null)
           or ("provider_events"."status" = 'processing'
             and "provider_events"."lease_token" is not null and "provider_events"."lease_expires_at" > "provider_events"."received_at"
-            and "provider_events"."processed_at" is null and "provider_events"."attempt_count" >= 1)
+            and "provider_events"."processed_at" is null and "provider_events"."last_error_redacted" is null
+            and "provider_events"."attempt_count" >= 1)
           or ("provider_events"."status" = 'processed'
             and "provider_events"."lease_token" is null and "provider_events"."processed_at" is not null
             and "provider_events"."last_error_redacted" is null and "provider_events"."attempt_count" >= 1)
@@ -165,6 +254,29 @@ ALTER TABLE "provider_events" ADD CONSTRAINT "provider_events_status_coherent" C
             and "provider_events"."attempt_count" >= 1));--> statement-breakpoint
 ALTER TABLE "refunds" ADD CONSTRAINT "refunds_origin_requester" CHECK (("refunds"."origin" = 'staff_requested' and "refunds"."requested_by_user_id" is not null) or ("refunds"."origin" = 'provider_observed' and "refunds"."requested_by_user_id" is null and "refunds"."provider_event_id" is not null and "refunds"."provider_refund_id" is not null and "refunds"."status" <> 'requested'));--> statement-breakpoint
 ALTER TABLE "refunds" ADD CONSTRAINT "refunds_provider_request_hash" CHECK ("refunds"."provider_request_hash" is null or "refunds"."provider_request_hash" ~ '^[0-9a-f]{64}$');--> statement-breakpoint
+ALTER TABLE "refunds" ADD CONSTRAINT "refunds_attempt_nonnegative" CHECK ("refunds"."attempt_count" >= 0);--> statement-breakpoint
+ALTER TABLE "refunds" ADD CONSTRAINT "refunds_error_nonblank" CHECK ("refunds"."last_error_redacted" is null or length(btrim("refunds"."last_error_redacted")) > 0);--> statement-breakpoint
+ALTER TABLE "refunds" ADD CONSTRAINT "refunds_submission_coherent" CHECK (("refunds"."origin" = 'provider_observed'
+            and "refunds"."provider_request_hash" is null and "refunds"."attempt_count" = 0
+            and "refunds"."submitted_at" is null)
+          or ("refunds"."origin" = 'staff_requested' and (
+            ("refunds"."status" = 'requested' and "refunds"."provider_request_hash" is null
+              and "refunds"."attempt_count" = 0 and "refunds"."submitted_at" is null
+              and "refunds"."last_error_redacted" is null)
+            or ("refunds"."status" in ('submitted', 'succeeded', 'cancelled')
+              and "refunds"."provider_request_hash" is not null and "refunds"."attempt_count" >= 1
+              and "refunds"."submitted_at" is not null and "refunds"."last_error_redacted" is null)
+            or ("refunds"."status" = 'failed' and "refunds"."provider_request_hash" is not null
+              and "refunds"."attempt_count" >= 1 and "refunds"."submitted_at" is not null
+              and "refunds"."last_error_redacted" is not null))));--> statement-breakpoint
+ALTER TABLE "inventory_events" ADD CONSTRAINT "inventory_events_release_shape" CHECK ("inventory_events"."event_type" <> 'release' or (
+        "inventory_events"."reservation_id" is not null and "inventory_events"."order_id" is not null
+        and "inventory_events"."order_item_id" is not null and "inventory_events"."fulfillment_release_id" is null
+      ));--> statement-breakpoint
+ALTER TABLE "inventory_events" ADD CONSTRAINT "inventory_events_consume_shape" CHECK ("inventory_events"."event_type" <> 'consume' or (
+        "inventory_events"."fulfillment_release_id" is not null and "inventory_events"."order_id" is not null
+        and "inventory_events"."order_item_id" is not null and "inventory_events"."reservation_id" is not null
+      ));--> statement-breakpoint
 ALTER TABLE "inventory_reservations" ADD CONSTRAINT "inventory_reservations_state_remaining" CHECK (("inventory_reservations"."state" = 'active' and "inventory_reservations"."quantity_remaining" = "inventory_reservations"."quantity_reserved") or ("inventory_reservations"."state" <> 'active' and "inventory_reservations"."quantity_remaining" = 0));--> statement-breakpoint
 ALTER TABLE "shipments" ADD CONSTRAINT "shipments_state_coherent" CHECK (("shipments"."state" = 'pending' and "shipments"."fulfillment_release_id" is null and "shipments"."handed_off_at" is null and "shipments"."delivered_at" is null)
           or ("shipments"."state" in ('handed_off', 'exception') and "shipments"."fulfillment_release_id" is not null and "shipments"."handed_off_at" is not null and "shipments"."delivered_at" is null)

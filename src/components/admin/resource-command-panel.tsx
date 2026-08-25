@@ -36,6 +36,14 @@ function versionedValue(id: string, expectedUpdatedAt: string): string {
   return JSON.stringify({ id, expectedUpdatedAt });
 }
 
+function promotionValue(
+  id: string,
+  expectedVersion: number,
+  expectedUpdatedAt: string,
+): string {
+  return JSON.stringify({ id, expectedVersion, expectedUpdatedAt });
+}
+
 function datetimeInput(value: string | null | undefined): string {
   return value ? value.slice(0, 16) : "";
 }
@@ -415,7 +423,7 @@ export function ResourceCommandPanel({
         </CommandForm>
       );
     case "promotions": {
-      const promotionOptions = snapshot.items.map((item) => ({ value: versionedValue(item.id, item.updatedAt), label: `${item.code} · ${item.status}` }));
+      const promotionOptions = snapshot.items.map((item) => ({ value: promotionValue(item.id, item.version, item.updatedAt), label: `${item.code} · v${item.version} · ${item.status}` }));
       const promotionFields = (item?: (typeof snapshot.items)[number]) => (
         <>
           <Field label="Promotion code" name="code" defaultValue={item?.code} maxLength={80} />
@@ -436,19 +444,19 @@ export function ResourceCommandPanel({
           <CommandForm action={savePromotionDraftAction} title="Create a promotion draft">{promotionFields()}</CommandForm>
           {snapshot.items.filter((item) => item.status === "draft").map((item) => (
             <CommandForm key={`edit:${item.id}`} action={savePromotionDraftAction} title={`Update promotion draft · ${item.code}`}>
-              <Hidden name="promotionId" value={item.id} /><Hidden name="expectedUpdatedAt" value={item.updatedAt} />
+              <Hidden name="promotionId" value={item.id} /><Hidden name="expectedVersion" value={String(item.version)} /><Hidden name="expectedUpdatedAt" value={item.updatedAt} />
               {promotionFields(item)}
             </CommandForm>
           ))}
-          {promotionOptions.filter((option) => snapshot.items.find((item) => versionedValue(item.id, item.updatedAt) === option.value)?.status === "draft").length ? (
+          {promotionOptions.filter((option) => snapshot.items.find((item) => promotionValue(item.id, item.version, item.updatedAt) === option.value)?.status === "draft").length ? (
             <CommandForm action={activatePromotionAction} title="Activate one canonical promotion">
-              <SelectField label="Draft promotion" name="promotionReference" options={snapshot.items.filter((item) => item.status === "draft").map((item) => ({ value: versionedValue(item.id, item.updatedAt), label: `${item.code} · draft` }))} />
+              <SelectField label="Draft promotion" name="promotionReference" options={snapshot.items.filter((item) => item.status === "draft").map((item) => ({ value: promotionValue(item.id, item.version, item.updatedAt), label: `${item.code} · terms v${item.version} · draft` }))} />
               <p className="info-record">Activation revalidates the kind-specific configuration, schedule, at least one target, and every referenced product.</p>
             </CommandForm>
           ) : null}
           {snapshot.items.some((item) => item.status !== "retired") ? (
             <CommandForm action={retirePromotionAction} title="Retire one promotion">
-              <SelectField label="Non-retired promotion" name="promotionReference" options={snapshot.items.filter((item) => item.status !== "retired").map((item) => ({ value: versionedValue(item.id, item.updatedAt), label: `${item.code} · ${item.status}` }))} />
+              <SelectField label="Non-retired promotion" name="promotionReference" options={snapshot.items.filter((item) => item.status !== "retired").map((item) => ({ value: promotionValue(item.id, item.version, item.updatedAt), label: `${item.code} · terms v${item.version} · ${item.status}` }))} />
             </CommandForm>
           ) : null}
         </div>
@@ -493,12 +501,12 @@ export function ResourceCommandPanel({
       return (
         <div className="grid gap-6">
           <CommandForm action={saveShipmentAction} title="Create pending shipment metadata">
-            <Field label="Order ID with a current issued release" name="orderId" list="known-shipment-orders" />
+            <Field label="Eligible paid order ID" name="orderId" list="known-shipment-orders" />
             <IdDatalist id="known-shipment-orders" values={snapshot.items.map((item) => item.orderId)} />
             <Field label="Carrier" name="carrier" maxLength={100} />
             <Field label="Tracking reference" name="trackingReference" maxLength={200} />
             <Hidden name="expectedUpdatedAt" value="" />
-            <p className="warning-record">Handoff, delivery, release issuance, and inventory effects remain unavailable.</p>
+            <p className="warning-record">Preparation does not authorize handoff. Release issuance, inventory effects, handoff, and delivery remain unavailable.</p>
           </CommandForm>
           {snapshot.items.map((item) => (
             <CommandForm key={item.id} action={saveShipmentAction} title={`Update pending shipment · ${item.orderId}`}>

@@ -67,8 +67,8 @@ export type CatalogClaimRecord = {
 
 export type CatalogPromotionRecord = {
   id: string;
-  code?: string;
-  version?: number;
+  code: string;
+  version: number;
   name: string;
   kind: PromotionKind;
   status: PromotionStatus;

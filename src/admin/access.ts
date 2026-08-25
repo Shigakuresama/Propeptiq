@@ -26,7 +26,7 @@ export const adminResources: readonly AdminResource[] = Object.freeze([
   { slug: "review-requests", label: "Review requests", description: "Pending-only immutable decisions.", capability: "review:decide", operation: "review.decide" },
   { slug: "orders", label: "Orders", description: "Read-only administration in this step.", capability: "order:read:any", operation: "order.read.any" },
   { slug: "refunds", label: "Refund intents", description: "Verified-payment-bounded requested intents only.", capability: "refund:request", operation: "refund.request" },
-  { slug: "shipments", label: "Shipments", description: "Pending metadata only for a current issued release.", capability: "fulfillment:release:consume", operation: "fulfillment.release.consume" },
+  { slug: "shipments", label: "Shipments", description: "Pending preparation metadata only; preparation does not authorize handoff.", capability: "fulfillment:release:consume", operation: "fulfillment.release.consume" },
   { slug: "staff", label: "Staff capabilities", description: "Known capability grants and revocations.", capability: "staff:manage", operation: "staff.manage" },
   { slug: "audit", label: "Audit history", description: "Append-only redacted mutation records.", capability: "staff:manage", operation: "staff.manage" },
 ]);

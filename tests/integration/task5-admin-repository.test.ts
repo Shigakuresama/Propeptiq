@@ -133,13 +133,17 @@ describe("Task 5 PostgreSQL admin repository", () => {
          tax_minor, shipping_minor, total_minor, state)
       VALUES
         ('${ids.order}', '${ids.buyer}', 'active', '${ids.acceptance}', 'CA', 'USD',
-         5000, 0, 0, 0, 5000, 'paid_pending_clearance');
+         5000, 0, 0, 0, 5000, 'paid_pending_fulfillment');
       INSERT INTO provider_events
         (id, provider, provider_event_id, payload_hash, status, attempt_count,
-         received_at, processed_at)
+         received_at, processed_at, event_type, schema_version,
+         normalized_payload, provider_created_at, livemode)
       VALUES
         ('${ids.providerEvent}', 'synthetic-provider', 'evt_synthetic_paid', '${"c".repeat(64)}',
-         'processed', 1, '2026-08-24T10:00:00.000Z', '2026-08-24T10:01:00.000Z');
+         'processed', 1, '2026-08-24T10:00:00.000Z', '2026-08-24T10:01:00.000Z',
+         'checkout.session.completed', 1,
+         '{"providerEventId":"evt_synthetic_paid","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         '2026-08-24T10:00:00.000Z', false);
       INSERT INTO payment_events
         (id, provider_event_id, order_id, event_type, provider_payment_id,
          idempotency_key, amount_minor, currency, occurred_at)
@@ -214,11 +218,13 @@ describe("Task 5 PostgreSQL admin repository", () => {
     ).rejects.toThrow(/stale/i);
     await activatePromotion(repo, context("repo-promotion"), {
       promotionId: ids.promotion,
+      expectedVersion: 1,
       expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
     });
     await expect(
       activatePromotion(repo, context("repo-promotion-stale"), {
         promotionId: ids.promotion,
+        expectedVersion: 1,
         expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
       }),
     ).rejects.toThrow(/stale/i);
@@ -277,6 +283,7 @@ describe("Task 5 PostgreSQL admin repository", () => {
     await expect(
       activatePromotion(repository(), context("repo-invalid-promotion-target"), {
         promotionId: ids.promotion,
+        expectedVersion: 1,
         expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
       }),
     ).rejects.toThrow(/missing or inactive products/i);
@@ -436,8 +443,13 @@ describe("Task 5 PostgreSQL admin repository", () => {
     expect(rows.rows).toEqual([{ refunds: 1, audits: 1 }]);
   });
 
-  it("permits pending shipment metadata only while the joined release is issued and unexpired", async () => {
+  it("prepares pending shipment metadata without minting or requiring a release", async () => {
     const repo = repository();
+    await client.exec(`
+      UPDATE fulfillment_releases
+      SET state = 'expired', expired_at = '2026-08-25T11:00:00.000Z'
+      WHERE id = '${ids.release}'
+    `);
     await expect(
       savePendingShipmentMetadata(repo, context("repo-shipment"), {
         orderId: ids.order,
@@ -446,23 +458,32 @@ describe("Task 5 PostgreSQL admin repository", () => {
         expectedUpdatedAt: null,
       }),
     ).resolves.toMatchObject({ state: "pending" });
-    await client.exec(`
-      UPDATE fulfillment_releases
-      SET state = 'expired', expired_at = '2026-08-25T11:00:00.000Z'
-      WHERE id = '${ids.release}'
-    `);
     await expect(
-      savePendingShipmentMetadata(repo, context("repo-shipment-expired"), {
+      savePendingShipmentMetadata(repo, context("repo-shipment-update"), {
         orderId: ids.order,
         carrier: "Synthetic carrier",
         trackingReference: "SYN-TRACK-2",
         expectedUpdatedAt: now.toISOString(),
       }),
-    ).rejects.toThrow(/issued fulfillment release/i);
-    const shipment = await client.query<{ tracking_reference: string; state: string }>(`
-      SELECT tracking_reference, state FROM shipments
+    ).resolves.toMatchObject({ state: "pending" });
+    const shipment = await client.query<{ tracking_reference: string; state: string; fulfillment_release_id: string | null }>(`
+      SELECT tracking_reference, state, fulfillment_release_id FROM shipments
     `);
-    expect(shipment.rows).toEqual([{ tracking_reference: "SYN-TRACK-1", state: "pending" }]);
+    expect(shipment.rows).toEqual([{
+      tracking_reference: "SYN-TRACK-2",
+      state: "pending",
+      fulfillment_release_id: null,
+    }]);
+
+    await client.exec(`UPDATE orders SET state = 'ready_for_fulfillment' WHERE id = '${ids.order}'`);
+    await expect(
+      savePendingShipmentMetadata(repo, context("repo-shipment-ineligible"), {
+        orderId: ids.order,
+        carrier: "Synthetic carrier",
+        trackingReference: "SYN-TRACK-3",
+        expectedUpdatedAt: now.toISOString(),
+      }),
+    ).rejects.toThrow(/paid pending fulfillment|paid hold/i);
   });
 
   it("requires persisted active staff:manage before a capability grant can commit", async () => {
@@ -738,12 +759,14 @@ describe("Task 5 PostgreSQL admin repository", () => {
     await expect(
       activatePromotion(repo, context("terminal-promotion-reactivate"), {
         promotionId: ids.promotion,
+        expectedVersion: 1,
         expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
       }),
     ).rejects.toThrow(/lifecycle|retired|stale/i);
     await expect(
       retirePromotion(repo, context("terminal-promotion-retire-again"), {
         promotionId: ids.promotion,
+        expectedVersion: 1,
         expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
       }),
     ).rejects.toThrow(/lifecycle|retired|stale/i);
@@ -858,6 +881,7 @@ describe("Task 5 PostgreSQL admin repository", () => {
     await expect(
       activatePromotion(repo, context("promotion-incomplete-activate"), {
         promotionId: draft.id,
+        expectedVersion: draft.version,
         expectedUpdatedAt: draft.updatedAt,
       }),
     ).rejects.toThrow(/canonical shape/i);
@@ -885,6 +909,7 @@ describe("Task 5 PostgreSQL admin repository", () => {
     await expect(
       activatePromotion(repo, context("promotion-untargeted-activate"), {
         promotionId: draft.id,
+        expectedVersion: draft.version,
         expectedUpdatedAt: draft.updatedAt,
       }),
     ).rejects.toThrow(/missing or inactive products/i);
@@ -925,10 +950,15 @@ describe("Task 5 PostgreSQL admin repository", () => {
     const activated = await activatePromotion(
       repo,
       context("promotion-lifecycle-activate"),
-      { promotionId: promotion.id, expectedUpdatedAt: promotion.updatedAt },
+      {
+        promotionId: promotion.id,
+        expectedVersion: promotion.version,
+        expectedUpdatedAt: promotion.updatedAt,
+      },
     );
     await retirePromotion(repo, context("promotion-lifecycle-retire"), {
       promotionId: promotion.id,
+      expectedVersion: promotion.version,
       expectedUpdatedAt: activated.updatedAt,
     });
 
@@ -964,5 +994,161 @@ describe("Task 5 PostgreSQL admin repository", () => {
     expect(new Date(persisted.rows[0]!.endsAt).toISOString()).toBe(
       "2026-09-25T12:00:00.000Z",
     );
+  });
+
+  it("treats canonical promotion terms as versioned semantic values", async () => {
+    const repo = repository();
+    await client.exec(`
+      UPDATE promotions
+      SET configuration = '{"metadata":{"z":2,"a":1},"productIds":["${ids.product}","${ids.product2}"]}'::jsonb
+      WHERE id = '${ids.promotion}'
+    `);
+    const unchanged = await savePromotionDraft(repo, context("promotion-noop"), {
+      promotionId: ids.promotion,
+      expectedVersion: 1,
+      expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
+      code: " syn-bundle ",
+      name: "Reference bundle",
+      kind: "bundle",
+      amountMinor: 8000,
+      basisPoints: null,
+      currency: "usd",
+      configuration: {
+        productIds: [ids.product, ids.product2],
+        metadata: { a: 1, z: 2 },
+      },
+      targets: [{ targetKind: "product", targetId: ids.product }],
+    });
+    expect(unchanged).toEqual({
+      id: ids.promotion,
+      version: 1,
+      updatedAt: "2026-08-24T12:00:00.000Z",
+      changed: false,
+    });
+
+    const targetChange = await savePromotionDraft(repo, context("promotion-target-change"), {
+      promotionId: ids.promotion,
+      expectedVersion: 1,
+      expectedUpdatedAt: unchanged.updatedAt,
+      code: "SYN-BUNDLE",
+      name: "Reference bundle",
+      kind: "bundle",
+      amountMinor: 8000,
+      basisPoints: null,
+      currency: "USD",
+      configuration: {
+        metadata: { a: 1, z: 2 },
+        productIds: [ids.product, ids.product2],
+      },
+      targets: [
+        { targetKind: "policy_group", targetId: ids.group },
+        { targetKind: "product", targetId: ids.product },
+      ],
+    });
+    expect(targetChange).toMatchObject({ version: 2, changed: true });
+
+    const targetOrderNoop = await savePromotionDraft(
+      repo,
+      context("promotion-target-order-noop"),
+      {
+        promotionId: ids.promotion,
+        expectedVersion: 2,
+        expectedUpdatedAt: targetChange.updatedAt,
+        code: "SYN-BUNDLE",
+        name: "Reference bundle",
+        kind: "bundle",
+        amountMinor: 8000,
+        basisPoints: null,
+        currency: "USD",
+        configuration: {
+          productIds: [ids.product, ids.product2],
+          metadata: { z: 2, a: 1 },
+        },
+        targets: [
+          { targetKind: "product", targetId: ids.product },
+          { targetKind: "policy_group", targetId: ids.group },
+        ],
+      },
+    );
+    expect(targetOrderNoop).toMatchObject({ version: 2, changed: false });
+
+    const termChange = await savePromotionDraft(repo, context("promotion-term-change"), {
+      promotionId: ids.promotion,
+      expectedVersion: 2,
+      expectedUpdatedAt: targetChange.updatedAt,
+      code: "SYN-BUNDLE",
+      name: "Reference bundle",
+      kind: "bundle",
+      amountMinor: 8000,
+      basisPoints: null,
+      currency: "USD",
+      configuration: {
+        metadata: { a: 1, z: 2 },
+        productIds: [ids.product2, ids.product],
+      },
+      targets: [
+        { targetKind: "product", targetId: ids.product },
+        { targetKind: "policy_group", targetId: ids.group },
+      ],
+    });
+    expect(termChange).toMatchObject({ version: 3, changed: true });
+
+    const persisted = await client.query<{ version: number; name: string; audits: number; noopAudits: number }>(`
+      SELECT version, name,
+        (SELECT count(*)::int FROM admin_audit
+         WHERE correlation_id IN ('promotion-target-change', 'promotion-term-change')) AS audits,
+        (SELECT count(*)::int FROM admin_audit
+         WHERE correlation_id IN ('promotion-noop', 'promotion-target-order-noop')) AS "noopAudits"
+      FROM promotions WHERE id = '${ids.promotion}'
+    `);
+    expect(persisted.rows).toEqual([{
+      version: 3,
+      name: "Reference bundle",
+      audits: 2,
+      noopAudits: 0,
+    }]);
+  });
+
+  it("does not bump terms version for lifecycle changes and rejects active edits without target loss", async () => {
+    const repo = repository();
+    await activateProduct(repo, context("promotion-version-product"), {
+      productId: ids.product,
+      expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
+    });
+    const activated = await activatePromotion(repo, context("promotion-version-activate"), {
+      promotionId: ids.promotion,
+      expectedVersion: 1,
+      expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
+    });
+    expect(activated.version).toBe(1);
+
+    await expect(
+      savePromotionDraft(repo, context("promotion-active-edit"), {
+        promotionId: ids.promotion,
+        expectedVersion: 1,
+        expectedUpdatedAt: activated.updatedAt,
+        code: "SYN-BUNDLE",
+        name: "Forbidden active edit",
+        kind: "bundle",
+        amountMinor: 8000,
+        basisPoints: null,
+        currency: "USD",
+        configuration: { productIds: [ids.product, ids.product2] },
+        targets: [],
+      }),
+    ).rejects.toThrow(/draft|active/i);
+
+    const retired = await retirePromotion(repo, context("promotion-version-retire"), {
+      promotionId: ids.promotion,
+      expectedVersion: 1,
+      expectedUpdatedAt: activated.updatedAt,
+    });
+    expect(retired.version).toBe(1);
+    const persisted = await client.query<{ version: number; targets: number }>(`
+      SELECT p.version,
+        (SELECT count(*)::int FROM promotion_targets pt WHERE pt.promotion_id = p.id) AS targets
+      FROM promotions p WHERE p.id = '${ids.promotion}'
+    `);
+    expect(persisted.rows).toEqual([{ version: 1, targets: 1 }]);
   });
 });

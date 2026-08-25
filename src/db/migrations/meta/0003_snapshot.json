@@ -1,5 +1,5 @@
 {
-  "id": "36ed9d01-eb6f-458a-a7ff-8b65659279ef",
+  "id": "047f20e0-3732-47bc-b700-ecd7050985f7",
   "prevId": "eb86aca4-d070-4d8c-9e80-84ba0c98b47e",
   "version": "7",
   "dialect": "postgresql",
@@ -1989,9 +1989,21 @@
           "name": "checkout_attempts_provider_request_hash",
           "value": "\"checkout_attempts\".\"provider_request_hash\" is null or \"checkout_attempts\".\"provider_request_hash\" ~ '^[0-9a-f]{64}$'"
         },
+        "checkout_attempts_quote_references_coherent": {
+          "name": "checkout_attempts_quote_references_coherent",
+          "value": "((\"checkout_attempts\".\"tax_ready\" = true and \"checkout_attempts\".\"tax_quote_reference\" is not null and length(btrim(\"checkout_attempts\".\"tax_quote_reference\")) > 0)\n            or (\"checkout_attempts\".\"tax_ready\" = false and \"checkout_attempts\".\"tax_quote_reference\" is null))\n          and ((\"checkout_attempts\".\"shipping_ready\" = true and \"checkout_attempts\".\"shipping_quote_reference\" is not null\n                 and length(btrim(\"checkout_attempts\".\"shipping_quote_reference\")) > 0 and \"checkout_attempts\".\"shipping_service\" is not null\n                 and length(btrim(\"checkout_attempts\".\"shipping_service\")) > 0)\n            or (\"checkout_attempts\".\"shipping_ready\" = false and \"checkout_attempts\".\"shipping_quote_reference\" is null\n                 and \"checkout_attempts\".\"shipping_service\" is null))"
+        },
         "checkout_attempts_provider_coherent": {
           "name": "checkout_attempts_provider_coherent",
-          "value": "(\"checkout_attempts\".\"provider\" is null and \"checkout_attempts\".\"provider_request_id\" is null and \"checkout_attempts\".\"provider_session_id\" is null)\n          or (\"checkout_attempts\".\"provider\" is not null and length(btrim(\"checkout_attempts\".\"provider\")) > 0 and (\"checkout_attempts\".\"provider_request_id\" is not null or \"checkout_attempts\".\"provider_session_id\" is not null))"
+          "value": "(\"checkout_attempts\".\"provider\" is null and \"checkout_attempts\".\"provider_request_id\" is null\n            and \"checkout_attempts\".\"provider_session_id\" is null and \"checkout_attempts\".\"provider_request_hash\" is null)\n          or (\"checkout_attempts\".\"provider\" is not null and length(btrim(\"checkout_attempts\".\"provider\")) > 0\n            and \"checkout_attempts\".\"provider_request_id\" is not null and length(btrim(\"checkout_attempts\".\"provider_request_id\")) > 0\n            and (\"checkout_attempts\".\"provider_session_id\" is null or length(btrim(\"checkout_attempts\".\"provider_session_id\")) > 0))"
+        },
+        "checkout_attempts_status_coherent": {
+          "name": "checkout_attempts_status_coherent",
+          "value": "(\"checkout_attempts\".\"status\" = 'created' and (\n              (\"checkout_attempts\".\"permitted\" = false and \"checkout_attempts\".\"provider\" is null\n                and \"checkout_attempts\".\"provider_request_hash\" is null and \"checkout_attempts\".\"expires_at\" is null)\n              or (\"checkout_attempts\".\"permitted\" = true and \"checkout_attempts\".\"provider\" is not null\n                and \"checkout_attempts\".\"provider_request_id\" is not null and \"checkout_attempts\".\"provider_session_id\" is null\n                and \"checkout_attempts\".\"provider_request_hash\" is not null and \"checkout_attempts\".\"expires_at\" is not null)))\n          or (\"checkout_attempts\".\"status\" = 'open' and \"checkout_attempts\".\"permitted\" = true\n              and \"checkout_attempts\".\"provider\" is not null and \"checkout_attempts\".\"provider_request_id\" is not null\n              and \"checkout_attempts\".\"provider_session_id\" is not null and \"checkout_attempts\".\"provider_request_hash\" is not null\n              and \"checkout_attempts\".\"expires_at\" is not null)\n          or (\"checkout_attempts\".\"status\" = 'provider_unknown' and \"checkout_attempts\".\"permitted\" = true\n              and \"checkout_attempts\".\"provider\" is not null and \"checkout_attempts\".\"provider_request_id\" is not null\n              and \"checkout_attempts\".\"provider_request_hash\" is not null and \"checkout_attempts\".\"expires_at\" is not null)\n          or (\"checkout_attempts\".\"status\" in ('completed', 'expired') and \"checkout_attempts\".\"permitted\" = true\n              and \"checkout_attempts\".\"provider\" is not null and \"checkout_attempts\".\"provider_request_id\" is not null\n              and \"checkout_attempts\".\"provider_session_id\" is not null and \"checkout_attempts\".\"provider_request_hash\" is not null\n              and \"checkout_attempts\".\"expires_at\" is not null)\n          or (\"checkout_attempts\".\"status\" = 'failed' and (\n              (\"checkout_attempts\".\"permitted\" = false and \"checkout_attempts\".\"provider\" is null\n                and \"checkout_attempts\".\"provider_request_hash\" is null and \"checkout_attempts\".\"expires_at\" is null)\n              or (\"checkout_attempts\".\"permitted\" = true and \"checkout_attempts\".\"provider\" is not null\n                and \"checkout_attempts\".\"provider_request_id\" is not null and \"checkout_attempts\".\"provider_request_hash\" is not null\n                and \"checkout_attempts\".\"expires_at\" is not null)))"
+        },
+        "checkout_attempts_provider_expiry_after_create": {
+          "name": "checkout_attempts_provider_expiry_after_create",
+          "value": "\"checkout_attempts\".\"expires_at\" is null or \"checkout_attempts\".\"expires_at\" > \"checkout_attempts\".\"created_at\""
         },
         "checkout_attempts_permitted_coherent": {
           "name": "checkout_attempts_permitted_coherent",
@@ -2174,6 +2186,14 @@
             "order_id",
             "product_id"
           ]
+        },
+        "order_items_id_order_unique": {
+          "name": "order_items_id_order_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "order_id"
+          ]
         }
       },
       "policies": {},
@@ -2337,7 +2357,8 @@
         },
         "kind_snapshot": {
           "name": "kind_snapshot",
-          "type": "text",
+          "type": "promotion_kind",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
@@ -2541,9 +2562,17 @@
           "name": "order_shipping_addresses_postal_format",
           "value": "\"order_shipping_addresses\".\"postal_code\" ~ '^[0-9]{5}(-[0-9]{4})?$'"
         },
+        "order_shipping_addresses_field_lengths": {
+          "name": "order_shipping_addresses_field_lengths",
+          "value": "char_length(\"order_shipping_addresses\".\"recipient_name\") between 1 and 120\n        and char_length(\"order_shipping_addresses\".\"address_line1\") between 1 and 120\n        and (\"order_shipping_addresses\".\"address_line2\" is null or char_length(\"order_shipping_addresses\".\"address_line2\") between 1 and 120)\n        and char_length(\"order_shipping_addresses\".\"city\") between 1 and 100"
+        },
         "order_shipping_addresses_fields_nonblank": {
           "name": "order_shipping_addresses_fields_nonblank",
-          "value": "length(btrim(\"order_shipping_addresses\".\"recipient_name\")) > 0 and length(btrim(\"order_shipping_addresses\".\"address_line1\")) > 0 and length(btrim(\"order_shipping_addresses\".\"city\")) > 0"
+          "value": "length(btrim(\"order_shipping_addresses\".\"recipient_name\")) > 0 and length(btrim(\"order_shipping_addresses\".\"address_line1\")) > 0\n        and (\"order_shipping_addresses\".\"address_line2\" is null or length(btrim(\"order_shipping_addresses\".\"address_line2\")) > 0)\n        and length(btrim(\"order_shipping_addresses\".\"city\")) > 0"
+        },
+        "order_shipping_addresses_no_control_characters": {
+          "name": "order_shipping_addresses_no_control_characters",
+          "value": "\"order_shipping_addresses\".\"recipient_name\" !~ '[[:cntrl:]]'\n        and \"order_shipping_addresses\".\"address_line1\" !~ '[[:cntrl:]]'\n        and (\"order_shipping_addresses\".\"address_line2\" is null or \"order_shipping_addresses\".\"address_line2\" !~ '[[:cntrl:]]')\n        and \"order_shipping_addresses\".\"city\" !~ '[[:cntrl:]]'\n        and \"order_shipping_addresses\".\"state_code\" !~ '[[:cntrl:]]'\n        and \"order_shipping_addresses\".\"postal_code\" !~ '[[:cntrl:]]'\n        and \"order_shipping_addresses\".\"country\" !~ '[[:cntrl:]]'"
         }
       },
       "isRLSEnabled": false
@@ -2900,7 +2929,11 @@
         },
         "payment_events_unreconciled_refund_shape": {
           "name": "payment_events_unreconciled_refund_shape",
-          "value": "\"payment_events\".\"event_type\" <> 'unreconciled_refund_observed' or (\"payment_events\".\"provider_payment_id\" is not null and \"payment_events\".\"amount_minor\" > 0 and \"payment_events\".\"idempotency_key\" = 'provider-event:' || \"payment_events\".\"provider_event_id\"::text)"
+          "value": "\"payment_events\".\"event_type\" <> 'unreconciled_refund_observed'\n          or (\"payment_events\".\"provider_payment_id\" is not null and \"payment_events\".\"amount_minor\" > 0\n            and \"payment_events\".\"idempotency_key\" = 'provider_event:' || \"payment_events\".\"provider_event_id\"::text || ':unreconciled_refund')"
+        },
+        "payment_events_type_shape": {
+          "name": "payment_events_type_shape",
+          "value": "(\"payment_events\".\"event_type\" = 'payment_failed')\n          or (\"payment_events\".\"event_type\" in ('payment_verified', 'refund_verified', 'dispute_recorded', 'dispute_resolved')\n            and \"payment_events\".\"provider_payment_id\" is not null\n            and length(btrim(\"payment_events\".\"provider_payment_id\")) > 0 and \"payment_events\".\"amount_minor\" > 0)\n          or (\"payment_events\".\"event_type\" = 'unreconciled_refund_observed'\n            and \"payment_events\".\"provider_payment_id\" is not null and length(btrim(\"payment_events\".\"provider_payment_id\")) > 0\n            and \"payment_events\".\"amount_minor\" > 0\n            and \"payment_events\".\"idempotency_key\" = 'provider_event:' || \"payment_events\".\"provider_event_id\"::text || ':unreconciled_refund')"
         }
       },
       "isRLSEnabled": false
@@ -2984,8 +3017,7 @@
           "name": "event_type",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'unknown'"
+          "notNull": true
         },
         "schema_version": {
           "name": "schema_version",
@@ -2998,21 +3030,19 @@
           "name": "normalized_payload",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
+          "notNull": true
         },
         "provider_created_at": {
           "name": "provider_created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "livemode": {
           "name": "livemode",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": true,
-          "default": false
+          "notNull": true
         }
       },
       "indexes": {
@@ -3090,15 +3120,23 @@
         },
         "provider_events_status_coherent": {
           "name": "provider_events_status_coherent",
-          "value": "(\"provider_events\".\"status\" = 'pending'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is null)\n          or (\"provider_events\".\"status\" = 'processing'\n            and \"provider_events\".\"lease_token\" is not null and \"provider_events\".\"lease_expires_at\" > \"provider_events\".\"received_at\"\n            and \"provider_events\".\"processed_at\" is null and \"provider_events\".\"attempt_count\" >= 1)\n          or (\"provider_events\".\"status\" = 'processed'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is not null\n            and \"provider_events\".\"last_error_redacted\" is null and \"provider_events\".\"attempt_count\" >= 1)\n          or (\"provider_events\".\"status\" = 'failed'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is null\n            and \"provider_events\".\"last_error_redacted\" is not null and length(btrim(\"provider_events\".\"last_error_redacted\")) > 0\n            and \"provider_events\".\"attempt_count\" >= 1)\n          or (\"provider_events\".\"status\" = 'deferred'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is null\n            and \"provider_events\".\"last_error_redacted\" is not null and length(btrim(\"provider_events\".\"last_error_redacted\")) > 0\n            and \"provider_events\".\"attempt_count\" >= 1)\n          or (\"provider_events\".\"status\" = 'conflict'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is not null\n            and \"provider_events\".\"last_error_redacted\" is not null and length(btrim(\"provider_events\".\"last_error_redacted\")) > 0\n            and \"provider_events\".\"attempt_count\" >= 1)"
+          "value": "(\"provider_events\".\"status\" = 'pending'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is null\n            and \"provider_events\".\"last_error_redacted\" is null)\n          or (\"provider_events\".\"status\" = 'processing'\n            and \"provider_events\".\"lease_token\" is not null and \"provider_events\".\"lease_expires_at\" > \"provider_events\".\"received_at\"\n            and \"provider_events\".\"processed_at\" is null and \"provider_events\".\"last_error_redacted\" is null\n            and \"provider_events\".\"attempt_count\" >= 1)\n          or (\"provider_events\".\"status\" = 'processed'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is not null\n            and \"provider_events\".\"last_error_redacted\" is null and \"provider_events\".\"attempt_count\" >= 1)\n          or (\"provider_events\".\"status\" = 'failed'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is null\n            and \"provider_events\".\"last_error_redacted\" is not null and length(btrim(\"provider_events\".\"last_error_redacted\")) > 0\n            and \"provider_events\".\"attempt_count\" >= 1)\n          or (\"provider_events\".\"status\" = 'deferred'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is null\n            and \"provider_events\".\"last_error_redacted\" is not null and length(btrim(\"provider_events\".\"last_error_redacted\")) > 0\n            and \"provider_events\".\"attempt_count\" >= 1)\n          or (\"provider_events\".\"status\" = 'conflict'\n            and \"provider_events\".\"lease_token\" is null and \"provider_events\".\"processed_at\" is not null\n            and \"provider_events\".\"last_error_redacted\" is not null and length(btrim(\"provider_events\".\"last_error_redacted\")) > 0\n            and \"provider_events\".\"attempt_count\" >= 1)"
         },
         "provider_events_schema_version": {
           "name": "provider_events_schema_version",
           "value": "\"provider_events\".\"schema_version\" = 1"
         },
+        "provider_events_event_type_nonblank": {
+          "name": "provider_events_event_type_nonblank",
+          "value": "length(btrim(\"provider_events\".\"event_type\")) > 0"
+        },
         "provider_events_normalized_object": {
           "name": "provider_events_normalized_object",
           "value": "jsonb_typeof(\"provider_events\".\"normalized_payload\") = 'object'"
+        },
+        "provider_events_normalized_common_coherent": {
+          "name": "provider_events_normalized_common_coherent",
+          "value": "\"provider_events\".\"normalized_payload\"->>'providerEventId' = \"provider_events\".\"provider_event_id\"\n          and \"provider_events\".\"normalized_payload\"->>'eventType' = \"provider_events\".\"event_type\"\n          and (\"provider_events\".\"normalized_payload\"->>'schemaVersion')::integer = \"provider_events\".\"schema_version\"\n          and (\"provider_events\".\"normalized_payload\"->>'livemode')::boolean = \"provider_events\".\"livemode\""
         }
       },
       "isRLSEnabled": false
@@ -3367,6 +3405,18 @@
         "refunds_provider_request_hash": {
           "name": "refunds_provider_request_hash",
           "value": "\"refunds\".\"provider_request_hash\" is null or \"refunds\".\"provider_request_hash\" ~ '^[0-9a-f]{64}$'"
+        },
+        "refunds_attempt_nonnegative": {
+          "name": "refunds_attempt_nonnegative",
+          "value": "\"refunds\".\"attempt_count\" >= 0"
+        },
+        "refunds_error_nonblank": {
+          "name": "refunds_error_nonblank",
+          "value": "\"refunds\".\"last_error_redacted\" is null or length(btrim(\"refunds\".\"last_error_redacted\")) > 0"
+        },
+        "refunds_submission_coherent": {
+          "name": "refunds_submission_coherent",
+          "value": "(\"refunds\".\"origin\" = 'provider_observed'\n            and \"refunds\".\"provider_request_hash\" is null and \"refunds\".\"attempt_count\" = 0\n            and \"refunds\".\"submitted_at\" is null)\n          or (\"refunds\".\"origin\" = 'staff_requested' and (\n            (\"refunds\".\"status\" = 'requested' and \"refunds\".\"provider_request_hash\" is null\n              and \"refunds\".\"attempt_count\" = 0 and \"refunds\".\"submitted_at\" is null\n              and \"refunds\".\"last_error_redacted\" is null)\n            or (\"refunds\".\"status\" in ('submitted', 'succeeded', 'cancelled')\n              and \"refunds\".\"provider_request_hash\" is not null and \"refunds\".\"attempt_count\" >= 1\n              and \"refunds\".\"submitted_at\" is not null and \"refunds\".\"last_error_redacted\" is null)\n            or (\"refunds\".\"status\" = 'failed' and \"refunds\".\"provider_request_hash\" is not null\n              and \"refunds\".\"attempt_count\" >= 1 and \"refunds\".\"submitted_at\" is not null\n              and \"refunds\".\"last_error_redacted\" is not null)))"
         },
         "refunds_confirmation_coherent": {
           "name": "refunds_confirmation_coherent",
@@ -3796,9 +3846,13 @@
           "name": "inventory_events_reservation_context",
           "value": "\"inventory_events\".\"reservation_id\" is null or (\"inventory_events\".\"order_id\" is not null and \"inventory_events\".\"order_item_id\" is not null)"
         },
-        "inventory_events_consume_release": {
-          "name": "inventory_events_consume_release",
-          "value": "\"inventory_events\".\"event_type\" <> 'consume' or (\"inventory_events\".\"fulfillment_release_id\" is not null and \"inventory_events\".\"order_id\" is not null and \"inventory_events\".\"order_item_id\" is not null and \"inventory_events\".\"reservation_id\" is not null)"
+        "inventory_events_release_shape": {
+          "name": "inventory_events_release_shape",
+          "value": "\"inventory_events\".\"event_type\" <> 'release' or (\n        \"inventory_events\".\"reservation_id\" is not null and \"inventory_events\".\"order_id\" is not null\n        and \"inventory_events\".\"order_item_id\" is not null and \"inventory_events\".\"fulfillment_release_id\" is null\n      )"
+        },
+        "inventory_events_consume_shape": {
+          "name": "inventory_events_consume_shape",
+          "value": "\"inventory_events\".\"event_type\" <> 'consume' or (\n        \"inventory_events\".\"fulfillment_release_id\" is not null and \"inventory_events\".\"order_id\" is not null\n        and \"inventory_events\".\"order_item_id\" is not null and \"inventory_events\".\"reservation_id\" is not null\n      )"
         }
       },
       "isRLSEnabled": false
@@ -3965,6 +4019,16 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
+        "inventory_reservations_event_identity_unique": {
+          "name": "inventory_reservations_event_identity_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "order_id",
+            "order_item_id",
+            "lot_id"
+          ]
+        },
         "inventory_reservations_item_lot_unique": {
           "name": "inventory_reservations_item_lot_unique",
           "nullsNotDistinct": false,
@@ -4579,6 +4643,26 @@
         "downstream_effects_attempt_nonnegative": {
           "name": "downstream_effects_attempt_nonnegative",
           "value": "\"downstream_effects\".\"attempt_count\" >= 0"
+        },
+        "downstream_effects_error_nonblank": {
+          "name": "downstream_effects_error_nonblank",
+          "value": "\"downstream_effects\".\"last_error_redacted\" is null or length(btrim(\"downstream_effects\".\"last_error_redacted\")) > 0"
+        },
+        "downstream_effects_lease_pair": {
+          "name": "downstream_effects_lease_pair",
+          "value": "(\"downstream_effects\".\"lease_token\" is null) = (\"downstream_effects\".\"lease_expires_at\" is null)"
+        },
+        "downstream_effects_lease_token_nonblank": {
+          "name": "downstream_effects_lease_token_nonblank",
+          "value": "\"downstream_effects\".\"lease_token\" is null or length(btrim(\"downstream_effects\".\"lease_token\")) > 0"
+        },
+        "downstream_effects_timestamps_coherent": {
+          "name": "downstream_effects_timestamps_coherent",
+          "value": "\"downstream_effects\".\"updated_at\" >= \"downstream_effects\".\"created_at\"\n      and (\"downstream_effects\".\"processed_at\" is null or \"downstream_effects\".\"processed_at\" >= \"downstream_effects\".\"created_at\")"
+        },
+        "downstream_effects_status_coherent": {
+          "name": "downstream_effects_status_coherent",
+          "value": "(\"downstream_effects\".\"status\" = 'pending'\n          and \"downstream_effects\".\"lease_token\" is null and \"downstream_effects\".\"processed_at\" is null\n          and \"downstream_effects\".\"last_error_redacted\" is null)\n      or (\"downstream_effects\".\"status\" = 'processing'\n          and \"downstream_effects\".\"lease_token\" is not null and \"downstream_effects\".\"lease_expires_at\" > \"downstream_effects\".\"updated_at\"\n          and \"downstream_effects\".\"processed_at\" is null and \"downstream_effects\".\"last_error_redacted\" is null\n          and \"downstream_effects\".\"attempt_count\" >= 1)\n      or (\"downstream_effects\".\"status\" = 'processed'\n          and \"downstream_effects\".\"lease_token\" is null and \"downstream_effects\".\"processed_at\" is not null\n          and \"downstream_effects\".\"last_error_redacted\" is null and \"downstream_effects\".\"attempt_count\" >= 1)\n      or (\"downstream_effects\".\"status\" = 'failed'\n          and \"downstream_effects\".\"lease_token\" is null and \"downstream_effects\".\"processed_at\" is null\n          and \"downstream_effects\".\"last_error_redacted\" is not null\n          and length(btrim(\"downstream_effects\".\"last_error_redacted\")) > 0 and \"downstream_effects\".\"attempt_count\" >= 1)"
         }
       },
       "isRLSEnabled": false

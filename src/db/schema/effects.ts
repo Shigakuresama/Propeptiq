@@ -26,5 +26,39 @@ export const downstreamEffects = pgTable("downstream_effects", {
   check("downstream_effects_payload_object", sql`jsonb_typeof(${table.payload}) = 'object'`),
   check("downstream_effects_status", sql`${table.status} in ('pending','processing','processed','failed')`),
   check("downstream_effects_attempt_nonnegative", sql`${table.attemptCount} >= 0`),
+  check(
+    "downstream_effects_error_nonblank",
+    sql`${table.lastErrorRedacted} is null or ${nonblank(table.lastErrorRedacted)}`,
+  ),
+  check(
+    "downstream_effects_lease_pair",
+    sql`(${table.leaseToken} is null) = (${table.leaseExpiresAt} is null)`,
+  ),
+  check(
+    "downstream_effects_lease_token_nonblank",
+    sql`${table.leaseToken} is null or ${nonblank(table.leaseToken)}`,
+  ),
+  check(
+    "downstream_effects_timestamps_coherent",
+    sql`${table.updatedAt} >= ${table.createdAt}
+      and (${table.processedAt} is null or ${table.processedAt} >= ${table.createdAt})`,
+  ),
+  check(
+    "downstream_effects_status_coherent",
+    sql`(${table.status} = 'pending'
+          and ${table.leaseToken} is null and ${table.processedAt} is null
+          and ${table.lastErrorRedacted} is null)
+      or (${table.status} = 'processing'
+          and ${table.leaseToken} is not null and ${table.leaseExpiresAt} > ${table.updatedAt}
+          and ${table.processedAt} is null and ${table.lastErrorRedacted} is null
+          and ${table.attemptCount} >= 1)
+      or (${table.status} = 'processed'
+          and ${table.leaseToken} is null and ${table.processedAt} is not null
+          and ${table.lastErrorRedacted} is null and ${table.attemptCount} >= 1)
+      or (${table.status} = 'failed'
+          and ${table.leaseToken} is null and ${table.processedAt} is null
+          and ${table.lastErrorRedacted} is not null
+          and ${nonblank(table.lastErrorRedacted)} and ${table.attemptCount} >= 1)`,
+  ),
   index("downstream_effects_status_lease_idx").on(table.status, table.leaseExpiresAt),
 ]);

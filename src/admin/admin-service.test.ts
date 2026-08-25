@@ -47,6 +47,7 @@ const principal: Principal = {
 type TestState = {
   productStatus: "draft" | "active" | "retired";
   promotionStatus: "draft" | "active" | "retired";
+  promotionVersion: number;
   coaPublic: boolean;
   buyerStatus: "active" | "review" | "blocked";
   reviewOutcome: "approved" | "rejected" | null;
@@ -63,6 +64,7 @@ function createRepository(options: {
   incompleteBuyer?: boolean;
   promotionName?: string;
   rateCount?: number;
+  shipmentReleaseId?: string | null;
 } = {}): {
   repository: AdminRepository;
   state: TestState;
@@ -70,6 +72,7 @@ function createRepository(options: {
   const state: TestState = {
     productStatus: "draft",
     promotionStatus: "draft",
+    promotionVersion: 1,
     coaPublic: false,
     buyerStatus: "review",
     reviewOutcome: null,
@@ -134,7 +137,12 @@ function createRepository(options: {
       return { id: "claim-a", active: input.active, updatedAt: now.toISOString() };
     },
     async savePromotionDraft() {
-      return { id: "promo-a", updatedAt: now.toISOString() };
+      return {
+        id: "promo-a",
+        version: state.promotionVersion,
+        updatedAt: now.toISOString(),
+        changed: true,
+      };
     },
     async getProductPublicationFacts() {
       return {
@@ -159,6 +167,8 @@ function createRepository(options: {
     async getPromotion() {
       return {
         id: "promo-a",
+        code: "SYN-BUNDLE",
+        version: state.promotionVersion,
         name: options.promotionName ?? "Reference bundle",
         kind: "bundle",
         status: state.promotionStatus,
@@ -174,7 +184,12 @@ function createRepository(options: {
     },
     async setPromotionStatus(_id, status) {
       state.promotionStatus = status;
-      return { id: "promo-a", status, updatedAt: now.toISOString() };
+      return {
+        id: "promo-a",
+        status,
+        version: state.promotionVersion,
+        updatedAt: now.toISOString(),
+      };
     },
     async getCoaDocument() {
       return {
@@ -257,11 +272,13 @@ function createRepository(options: {
       return { id: state.refundId, status: "requested", changed, ...input };
     },
     async getShipmentEligibility() {
+      const releaseId = options.shipmentReleaseId ?? null;
       return {
         orderId: "order-a",
-        releaseId: "release-a",
-        releaseState: "issued",
-        releaseExpiresAt: "2026-08-26T12:00:00.000Z",
+        orderState: "paid_pending_fulfillment",
+        releaseId,
+        releaseState: releaseId === null ? null : "issued",
+        releaseExpiresAt: releaseId === null ? null : "2099-08-25T12:00:00.000Z",
         shipmentState: state.shipment ? "pending" : null,
         shipmentUpdatedAt: state.shipment ? now.toISOString() : null,
       };
@@ -327,6 +344,7 @@ describe("Task 5 admin mutation services", () => {
     });
     await activatePromotion(repository, context("promotion-1"), {
       promotionId: "promo-a",
+      expectedVersion: 1,
       expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
     });
     await publishCoaDocument(repository, context("coa-1"), {
@@ -377,6 +395,7 @@ describe("Task 5 admin mutation services", () => {
     await expect(
       activatePromotion(unsafe.repository, context(), {
         promotionId: "promo-a",
+        expectedVersion: 1,
         expectedUpdatedAt: "2026-08-24T12:00:00.000Z",
       }),
     ).rejects.toThrow(/content policy/i);
@@ -496,7 +515,7 @@ describe("Task 5 admin mutation services", () => {
     expect(JSON.stringify(state.audits[0])).not.toContain("Duplicate approved request");
   });
 
-  it("only saves pending shipment metadata under a currently issued release", async () => {
+  it("saves preparation-only pending shipment metadata without release authority", async () => {
     const { repository, state } = createRepository();
     const result = await savePendingShipmentMetadata(repository, context(), {
       orderId: "order-a",
@@ -506,6 +525,20 @@ describe("Task 5 admin mutation services", () => {
     });
     expect(result.state).toBe("pending");
     expect(state.shipment).toEqual({ carrier: "Research Carrier", trackingReference: "TRACK-001" });
+  });
+
+  it("rejects preparation metadata when a shipment already carries release authority", async () => {
+    const { repository, state } = createRepository({ shipmentReleaseId: "release-a" });
+    await expect(
+      savePendingShipmentMetadata(repository, context(), {
+        orderId: "order-a",
+        carrier: "Research Carrier",
+        trackingReference: "TRACK-001",
+        expectedUpdatedAt: null,
+      }),
+    ).rejects.toThrow(/release authority/i);
+    expect(state.shipment).toBeNull();
+    expect(state.audits).toEqual([]);
   });
 
   it("grants and revokes only a known capability with current MFA and audit", async () => {

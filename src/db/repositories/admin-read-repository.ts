@@ -499,6 +499,7 @@ async function loadSnapshot(
       const result = await boundedRows<{
         id: string;
         code: string;
+        version: number | string;
         name: string;
         kind: "discount" | "bundle" | "subscription" | "loyalty" | "cross_sell";
         status: "draft" | "active" | "retired";
@@ -514,7 +515,7 @@ async function loadSnapshot(
       }, SnapshotItem<"promotions">>(
         client,
         `
-          SELECT pr.id::text AS id, pr.code, pr.name, pr.kind, pr.status,
+          SELECT pr.id::text AS id, pr.code, pr.version, pr.name, pr.kind, pr.status,
                  pr.amount_minor AS "amountMinor", pr.basis_points AS "basisPoints",
                  pr.currency, pr.configuration,
                  COALESCE((
@@ -539,6 +540,7 @@ async function loadSnapshot(
         `,
         (row) => ({
           ...row,
+          version: safeInteger(row.version),
           amountMinor: nullableSafeInteger(row.amountMinor),
           basisPoints: nullableSafeInteger(row.basisPoints),
           configuration: safePromotionConfiguration(row.kind, row.configuration),
@@ -737,10 +739,10 @@ async function loadSnapshot(
       const result = await boundedRows<{
         id: string;
         orderId: string;
-        fulfillmentReleaseId: string;
-        releaseState: "issued" | "revoked" | "expired" | "consumed";
-        releaseVersion: number | string;
-        releaseExpiresAt: Date | string;
+        fulfillmentReleaseId: string | null;
+        releaseState: "issued" | "revoked" | "expired" | "consumed" | null;
+        releaseVersion: number | string | null;
+        releaseExpiresAt: Date | string | null;
         carrier: string;
         trackingReference: string;
         state: "pending" | "handed_off" | "delivered" | "exception";
@@ -759,14 +761,15 @@ async function loadSnapshot(
                  s.handed_off_at AS "handedOffAt", s.delivered_at AS "deliveredAt",
                  s.created_at AS "createdAt", s.updated_at AS "updatedAt"
           FROM shipments s
-          JOIN fulfillment_releases fr ON fr.id = s.fulfillment_release_id
+          LEFT JOIN fulfillment_releases fr ON fr.id = s.fulfillment_release_id
           ORDER BY s.updated_at DESC, s.id DESC
           LIMIT $1
         `,
         (row) => ({
           ...row,
-          releaseVersion: safeInteger(row.releaseVersion),
-          releaseExpiresAt: toIso(row.releaseExpiresAt),
+          releaseVersion:
+            row.releaseVersion === null ? null : safeInteger(row.releaseVersion),
+          releaseExpiresAt: nullableIso(row.releaseExpiresAt),
           handedOffAt: nullableIso(row.handedOffAt),
           deliveredAt: nullableIso(row.deliveredAt),
           createdAt: toIso(row.createdAt),

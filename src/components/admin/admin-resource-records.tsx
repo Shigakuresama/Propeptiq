@@ -166,6 +166,7 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
       records = snapshot.items.map((item) => (
         <RecordCard key={item.id} title={`${item.code} · ${item.name}`} status={item.status} facts={[
           ["Promotion ID", item.id], ["Kind", item.kind.replace("_", " ")],
+          ["Terms version", item.version],
           ["Value", item.amountMinor !== null && item.currency ? formatMoney(item.amountMinor, item.currency) : item.basisPoints !== null ? `${item.basisPoints} basis points` : "Draft value incomplete"],
           ["Configuration", promotionConfiguration(item.configuration)],
           ["Targets", item.targets.length ? item.targets.map((target) => `${target.kind.replace("_", " ")}: ${target.id}`).join("; ") : "No targets — activation blocked"],
@@ -216,7 +217,7 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
     case "shipments":
       records = snapshot.items.map((item) => (
         <RecordCard key={item.id} title={`Shipment · ${item.id}`} status={item.state} facts={[
-          ["Order ID", item.orderId], ["Release", `${item.releaseState} · version ${item.releaseVersion}`],
+          ["Order ID", item.orderId], ["Release", item.releaseState === null ? "Not issued — preparation only" : `${item.releaseState} · version ${item.releaseVersion}`],
           ["Release expires", formatInstant(item.releaseExpiresAt)], ["Carrier", item.carrier],
           ["Tracking reference", item.trackingReference], ["Current version", item.updatedAt],
           ["Handoff confirmation", "Managed only by Task 6"],

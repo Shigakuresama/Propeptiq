@@ -49,11 +49,11 @@ export const providerEvents = pgTable(
       .defaultNow()
       .notNull(),
     processedAt: timestamp("processed_at", { withTimezone: true }),
-    eventType: text("event_type").default("unknown").notNull(),
+    eventType: text("event_type").notNull(),
     schemaVersion: integer("schema_version").default(1).notNull(),
-    normalizedPayload: jsonb("normalized_payload").default({}).notNull(),
-    providerCreatedAt: timestamp("provider_created_at", { withTimezone: true }),
-    livemode: boolean("livemode").default(false).notNull(),
+    normalizedPayload: jsonb("normalized_payload").notNull(),
+    providerCreatedAt: timestamp("provider_created_at", { withTimezone: true }).notNull(),
+    livemode: boolean("livemode").notNull(),
   },
   (table) => [
     unique("provider_events_id_provider_unique").on(table.id, table.provider),
@@ -80,10 +80,12 @@ export const providerEvents = pgTable(
     check(
       "provider_events_status_coherent",
       sql`(${table.status} = 'pending'
-            and ${table.leaseToken} is null and ${table.processedAt} is null)
+            and ${table.leaseToken} is null and ${table.processedAt} is null
+            and ${table.lastErrorRedacted} is null)
           or (${table.status} = 'processing'
             and ${table.leaseToken} is not null and ${table.leaseExpiresAt} > ${table.receivedAt}
-            and ${table.processedAt} is null and ${table.attemptCount} >= 1)
+            and ${table.processedAt} is null and ${table.lastErrorRedacted} is null
+            and ${table.attemptCount} >= 1)
           or (${table.status} = 'processed'
             and ${table.leaseToken} is null and ${table.processedAt} is not null
             and ${table.lastErrorRedacted} is null and ${table.attemptCount} >= 1)
@@ -101,7 +103,15 @@ export const providerEvents = pgTable(
             and ${table.attemptCount} >= 1)`,
     ),
     check("provider_events_schema_version", sql`${table.schemaVersion} = 1`),
+    check("provider_events_event_type_nonblank", nonblank(table.eventType)),
     check("provider_events_normalized_object", sql`jsonb_typeof(${table.normalizedPayload}) = 'object'`),
+    check(
+      "provider_events_normalized_common_coherent",
+      sql`${table.normalizedPayload}->>'providerEventId' = ${table.providerEventId}
+          and ${table.normalizedPayload}->>'eventType' = ${table.eventType}
+          and (${table.normalizedPayload}->>'schemaVersion')::integer = ${table.schemaVersion}
+          and (${table.normalizedPayload}->>'livemode')::boolean = ${table.livemode}`,
+    ),
     index("provider_events_status_lease_idx").on(
       table.status,
       table.leaseExpiresAt,
@@ -142,7 +152,23 @@ export const paymentEvents = pgTable(
       table.orderId,
       table.occurredAt,
     ),
-    check("payment_events_unreconciled_refund_shape", sql`${table.eventType} <> 'unreconciled_refund_observed' or (${table.providerPaymentId} is not null and ${table.amountMinor} > 0 and ${table.idempotencyKey} = 'provider-event:' || ${table.providerEventId}::text)`),
+    check(
+      "payment_events_unreconciled_refund_shape",
+      sql`${table.eventType} <> 'unreconciled_refund_observed'
+          or (${table.providerPaymentId} is not null and ${table.amountMinor} > 0
+            and ${table.idempotencyKey} = 'provider_event:' || ${table.providerEventId}::text || ':unreconciled_refund')`,
+    ),
+    check(
+      "payment_events_type_shape",
+      sql`(${table.eventType} = 'payment_failed')
+          or (${table.eventType} in ('payment_verified', 'refund_verified', 'dispute_recorded', 'dispute_resolved')
+            and ${table.providerPaymentId} is not null
+            and ${nonblank(table.providerPaymentId)} and ${table.amountMinor} > 0)
+          or (${table.eventType} = 'unreconciled_refund_observed'
+            and ${table.providerPaymentId} is not null and ${nonblank(table.providerPaymentId)}
+            and ${table.amountMinor} > 0
+            and ${table.idempotencyKey} = 'provider_event:' || ${table.providerEventId}::text || ':unreconciled_refund')`,
+    ),
   ],
 );
 
@@ -204,6 +230,27 @@ export const refunds = pgTable(
     check("refunds_currency_format", currency(table.currency)),
     check("refunds_origin_requester", sql`(${table.origin} = 'staff_requested' and ${table.requestedByUserId} is not null) or (${table.origin} = 'provider_observed' and ${table.requestedByUserId} is null and ${table.providerEventId} is not null and ${table.providerRefundId} is not null and ${table.status} <> 'requested')`),
     check("refunds_provider_request_hash", sql`${table.providerRequestHash} is null or ${sha256(table.providerRequestHash)}`),
+    check("refunds_attempt_nonnegative", sql`${table.attemptCount} >= 0`),
+    check(
+      "refunds_error_nonblank",
+      sql`${table.lastErrorRedacted} is null or ${nonblank(table.lastErrorRedacted)}`,
+    ),
+    check(
+      "refunds_submission_coherent",
+      sql`(${table.origin} = 'provider_observed'
+            and ${table.providerRequestHash} is null and ${table.attemptCount} = 0
+            and ${table.submittedAt} is null)
+          or (${table.origin} = 'staff_requested' and (
+            (${table.status} = 'requested' and ${table.providerRequestHash} is null
+              and ${table.attemptCount} = 0 and ${table.submittedAt} is null
+              and ${table.lastErrorRedacted} is null)
+            or (${table.status} in ('submitted', 'succeeded', 'cancelled')
+              and ${table.providerRequestHash} is not null and ${table.attemptCount} >= 1
+              and ${table.submittedAt} is not null and ${table.lastErrorRedacted} is null)
+            or (${table.status} = 'failed' and ${table.providerRequestHash} is not null
+              and ${table.attemptCount} >= 1 and ${table.submittedAt} is not null
+              and ${table.lastErrorRedacted} is not null)))`,
+    ),
     check(
       "refunds_confirmation_coherent",
       sql`(${table.status} = 'succeeded' and ${table.confirmedAmountMinor} is not null

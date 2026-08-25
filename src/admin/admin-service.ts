@@ -36,6 +36,8 @@ export type AdminAuditEvent = Readonly<{
 
 export type PromotionRecord = PromotionActivationCandidate & Readonly<{
   id: string;
+  code: string;
+  version: number;
   name: string;
   status: "draft" | "active" | "retired";
   startsAt: string | null;
@@ -45,6 +47,12 @@ export type PromotionRecord = PromotionActivationCandidate & Readonly<{
 }>;
 
 export type DraftSaveResult = Readonly<{ id: string; updatedAt: string }>;
+export type PromotionDraftSaveResult = Readonly<{
+  id: string;
+  version: number;
+  updatedAt: string;
+  changed: boolean;
+}>;
 export type PromotionTargetInput = Readonly<{
   targetKind: "product" | "policy_group";
   targetId: string;
@@ -163,9 +171,9 @@ export type AdminTransaction = Readonly<{
     startsAt: Date | null;
     endsAt: Date | null;
     targets: readonly PromotionTargetInput[];
-    expectedUpdatedAt: string | null;
+    expectedVersion: number | null;
     now: Date;
-  }>) => Promise<DraftSaveResult>;
+  }>) => Promise<PromotionDraftSaveResult>;
   getProductPublicationFacts: (
     productId: string,
   ) => Promise<(ProductPublicationFacts & Readonly<{
@@ -182,9 +190,15 @@ export type AdminTransaction = Readonly<{
   setPromotionStatus: (
     promotionId: string,
     status: "active" | "retired",
+    expectedVersion: number,
     expectedUpdatedAt: string,
     now: Date,
-  ) => Promise<Readonly<{ id: string; status: "active" | "retired"; updatedAt: string }>>;
+  ) => Promise<Readonly<{
+    id: string;
+    status: "active" | "retired";
+    version: number;
+    updatedAt: string;
+  }>>;
   getCoaDocument: (coaDocumentId: string) => Promise<Readonly<{
     id: string;
     storageKey: string;
@@ -263,6 +277,7 @@ export type AdminTransaction = Readonly<{
   }>>;
   getShipmentEligibility: (orderId: string) => Promise<Readonly<{
     orderId: string;
+    orderState: string;
     releaseId: string | null;
     releaseState: "issued" | "revoked" | "expired" | "consumed" | null;
     releaseExpiresAt: string | null;
@@ -271,7 +286,6 @@ export type AdminTransaction = Readonly<{
   }> | null>;
   upsertPendingShipment: (input: Readonly<{
     orderId: string;
-    releaseId: string;
     carrier: string;
     trackingReference: string;
     expectedUpdatedAt: string | null;
@@ -376,6 +390,13 @@ function requireId(value: string, label: string): string {
   return normalized;
 }
 
+function requirePositiveVersion(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+}
+
 function assertSafePublicString(value: string, label: string): void {
   if (!value.trim()) throw new Error(`${label} is required`);
   const result = scanPublicCopy(
@@ -439,15 +460,22 @@ export async function activateProduct(
 export async function activatePromotion(
   repository: AdminRepository,
   context: AdminCommandContext,
-  input: Readonly<{ promotionId: string; expectedUpdatedAt: string }>,
+  input: Readonly<{
+    promotionId: string;
+    expectedVersion: number;
+    expectedUpdatedAt: string;
+  }>,
 ) {
   const principal = await authorizeAndLimit(repository, context, "promotion.manage");
   return authorizedTransaction(repository, context, principal, "promotion.manage", async (tx) => {
     const promotionId = requireId(input.promotionId, "Promotion ID");
+    const expectedVersion = requirePositiveVersion(input.expectedVersion, "Expected terms version");
     const expectedUpdatedAt = requireId(input.expectedUpdatedAt, "Expected promotion version");
     const promotion = await tx.getPromotion(promotionId);
     if (!promotion) throw new Error("Promotion does not exist");
-    if (promotion.updatedAt !== expectedUpdatedAt) throw new Error("Stale promotion write rejected");
+    if (promotion.version !== expectedVersion || promotion.updatedAt !== expectedUpdatedAt) {
+      throw new Error("Stale promotion write rejected");
+    }
     if (promotion.status !== "draft") {
       throw new Error("Only a draft promotion can be activated; retired promotions are terminal");
     }
@@ -465,6 +493,7 @@ export async function activatePromotion(
     const result = await tx.setPromotionStatus(
       promotionId,
       "active",
+      expectedVersion,
       expectedUpdatedAt,
       context.now,
     );
@@ -746,22 +775,26 @@ export async function savePendingShipmentMetadata(
     const facts = await tx.getShipmentEligibility(orderId);
     if (
       !facts ||
-      !facts.releaseId ||
-      facts.releaseState !== "issued" ||
-      !facts.releaseExpiresAt ||
-      new Date(facts.releaseExpiresAt).getTime() <= context.now.getTime()
+      (facts.orderState !== "paid_pending_fulfillment" &&
+        facts.orderState !== "paid_on_hold")
     ) {
-      throw new Error("A current issued fulfillment release is required");
+      throw new Error("Shipment preparation requires paid pending fulfillment or paid hold");
     }
     if (facts.shipmentState !== null && facts.shipmentState !== "pending") {
       throw new Error("Only pending shipment metadata can be changed");
+    }
+    if (
+      facts.releaseId !== null ||
+      facts.releaseState !== null ||
+      facts.releaseExpiresAt !== null
+    ) {
+      throw new Error("Shipment preparation cannot modify release authority");
     }
     if (facts.shipmentUpdatedAt !== input.expectedUpdatedAt) {
       throw new Error("Stale shipment metadata write rejected");
     }
     const result = await tx.upsertPendingShipment({
       orderId,
-      releaseId: facts.releaseId,
       carrier,
       trackingReference,
       expectedUpdatedAt: input.expectedUpdatedAt,
@@ -1173,6 +1206,7 @@ export async function savePromotionDraft(
     startsAt?: string | null;
     endsAt?: string | null;
     targets?: readonly PromotionTargetInput[];
+    expectedVersion?: number;
     expectedUpdatedAt?: string;
   }>,
 ) {
@@ -1196,7 +1230,9 @@ export async function savePromotionDraft(
   const normalizedTargets = targets.map((target) => ({
     targetKind: target.targetKind,
     targetId: requireId(target.targetId, "Promotion target ID"),
-  }));
+  })).toSorted((left, right) =>
+    left.targetKind.localeCompare(right.targetKind) || left.targetId.localeCompare(right.targetId),
+  );
   if (
     new Set(normalizedTargets.map((target) => `${target.targetKind}:${target.targetId}`)).size !==
     normalizedTargets.length
@@ -1216,10 +1252,14 @@ export async function savePromotionDraft(
       startsAt,
       endsAt,
       targets: normalizedTargets,
-      expectedUpdatedAt: input.expectedUpdatedAt ? requireId(input.expectedUpdatedAt, "Expected promotion version") : null,
+      expectedVersion: input.promotionId
+        ? requirePositiveVersion(input.expectedVersion ?? 0, "Expected terms version")
+        : null,
       now: context.now,
     });
-    await tx.appendAudit(audit(principal, context, input.promotionId ? "promotion.draft_updated" : "promotion.draft_created", "promotion", result.id, { kind: input.kind, status: "draft" }));
+    if (result.changed) {
+      await tx.appendAudit(audit(principal, context, input.promotionId ? "promotion.draft_updated" : "promotion.draft_created", "promotion", result.id, { kind: input.kind, status: "draft", version: result.version }));
+    }
     return result;
   });
 }
@@ -1227,12 +1267,22 @@ export async function savePromotionDraft(
 export async function retirePromotion(
   repository: AdminRepository,
   context: AdminCommandContext,
-  input: Readonly<{ promotionId: string; expectedUpdatedAt: string }>,
+  input: Readonly<{
+    promotionId: string;
+    expectedVersion: number;
+    expectedUpdatedAt: string;
+  }>,
 ) {
   const principal = await authorizeAndLimit(repository, context, "promotion.manage");
   return authorizedTransaction(repository, context, principal, "promotion.manage", async (tx) => {
     const id = requireId(input.promotionId, "Promotion ID");
-    const result = await tx.setPromotionStatus(id, "retired", requireId(input.expectedUpdatedAt, "Expected promotion version"), context.now);
+    const result = await tx.setPromotionStatus(
+      id,
+      "retired",
+      requirePositiveVersion(input.expectedVersion, "Expected terms version"),
+      requireId(input.expectedUpdatedAt, "Expected promotion version"),
+      context.now,
+    );
     await tx.appendAudit(audit(principal, context, "promotion.retired", "promotion", id, { status: "retired" }));
     return result;
   });

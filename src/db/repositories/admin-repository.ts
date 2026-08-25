@@ -47,6 +47,8 @@ type ProductRow = {
 
 type PromotionRow = {
   id: string;
+  code: string;
+  version: number | string;
   name: string;
   kind: PromotionRecord["kind"];
   status: PromotionRecord["status"];
@@ -58,6 +60,34 @@ type PromotionRow = {
   endsAt: Date | string | null;
   updatedAt: Date | string;
 };
+
+type PromotionTargetRow = {
+  targetKind: "product" | "policy_group";
+  targetId: string;
+};
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${canonicalJson(nested)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function canonicalTargets(targets: readonly PromotionTargetRow[]): string {
+  return targets
+    .toSorted((left, right) =>
+      left.targetKind.localeCompare(right.targetKind) ||
+      left.targetId.localeCompare(right.targetId),
+    )
+    .map(({ targetKind, targetId }) => `${targetKind}:${targetId}`)
+    .join("|");
+}
 
 type BuyerFactsRow = {
   userId: string;
@@ -652,63 +682,142 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
     },
 
     async savePromotionDraft(input) {
-      const result = input.promotionId === null
-        ? await client.query<{ id: string; updatedAt: Date | string }>(
+      if (input.promotionId === null) {
+        const result = await client.query<{
+          id: string;
+          version: number | string;
+          updatedAt: Date | string;
+        }>(
+          `
+            INSERT INTO promotions
+              (code, version, name, kind, status, amount_minor, basis_points,
+               currency, configuration, starts_at, ends_at,
+               created_at, updated_at)
+            VALUES ($1, 1, $2, $3::promotion_kind, 'draft', $4, $5, $6,
+                    $7::jsonb, $8::timestamptz, $9::timestamptz,
+                    $10::timestamptz, $10::timestamptz)
+            RETURNING id::text AS id, version, updated_at AS "updatedAt"
+          `,
+          [
+            input.code,
+            input.name,
+            input.kind,
+            input.amountMinor,
+            input.basisPoints,
+            input.currency,
+            JSON.stringify(input.configuration),
+            input.startsAt?.toISOString() ?? null,
+            input.endsAt?.toISOString() ?? null,
+            input.now.toISOString(),
+          ],
+        );
+        const row = result.rows[0];
+        if (!row) throw new Error("Promotion draft creation failed");
+        for (const target of input.targets) {
+          await client.query(
             `
-              INSERT INTO promotions
-                (code, name, kind, status, amount_minor, basis_points,
-                 currency, configuration, starts_at, ends_at,
-                 created_at, updated_at)
-              VALUES ($1, $2, $3::promotion_kind, 'draft', $4, $5, $6,
-                      $7::jsonb, $8::timestamptz, $9::timestamptz,
-                      $10::timestamptz, $10::timestamptz)
-              RETURNING id::text AS id, updated_at AS "updatedAt"
+              INSERT INTO promotion_targets
+                (promotion_id, target_kind, product_id, policy_group_id)
+              VALUES
+                ($1::uuid, $2::promotion_target_kind,
+                 CASE WHEN $2 = 'product' THEN $3::uuid ELSE NULL END,
+                 CASE WHEN $2 = 'policy_group' THEN $3::uuid ELSE NULL END)
             `,
-            [
-              input.code,
-              input.name,
-              input.kind,
-              input.amountMinor,
-              input.basisPoints,
-              input.currency,
-              JSON.stringify(input.configuration),
-              input.startsAt?.toISOString() ?? null,
-              input.endsAt?.toISOString() ?? null,
-              input.now.toISOString(),
-            ],
-          )
-        : await client.query<{ id: string; updatedAt: Date | string }>(
-            `
-              UPDATE promotions
-              SET code = $2, name = $3, kind = $4::promotion_kind,
-                  amount_minor = $5, basis_points = $6, currency = $7,
-                  configuration = $8::jsonb, starts_at = $9::timestamptz,
-                  ends_at = $10::timestamptz, updated_at = $11::timestamptz
-              WHERE id = $1::uuid AND status = 'draft'
-                AND updated_at = $12::timestamptz
-              RETURNING id::text AS id, updated_at AS "updatedAt"
-            `,
-            [
-              input.promotionId,
-              input.code,
-              input.name,
-              input.kind,
-              input.amountMinor,
-              input.basisPoints,
-              input.currency,
-              JSON.stringify(input.configuration),
-              input.startsAt?.toISOString() ?? null,
-              input.endsAt?.toISOString() ?? null,
-              input.now.toISOString(),
-              input.expectedUpdatedAt,
-            ],
+            [row.id, target.targetKind, target.targetId],
           );
+        }
+        return {
+          id: row.id,
+          version: asSafeInteger(row.version)!,
+          updatedAt: toIso(row.updatedAt),
+          changed: true,
+        };
+      }
+
+      const currentResult = await client.query<PromotionRow>(
+        `
+          SELECT id::text AS id, code, version, name, kind, status,
+                 amount_minor AS "amountMinor", basis_points AS "basisPoints",
+                 currency, configuration, starts_at AS "startsAt",
+                 ends_at AS "endsAt", updated_at AS "updatedAt"
+          FROM promotions WHERE id = $1::uuid
+          FOR UPDATE
+        `,
+        [input.promotionId],
+      );
+      const current = currentResult.rows[0];
+      const currentVersion = current ? asSafeInteger(current.version) : null;
+      if (!current || currentVersion === null || currentVersion !== input.expectedVersion) {
+        throw new Error("Stale promotion draft write rejected");
+      }
+      if (current.status !== "draft") {
+        throw new Error("Only draft promotion terms can be edited");
+      }
+      const targetResult = await client.query<PromotionTargetRow>(
+        `
+          SELECT target_kind AS "targetKind",
+                 COALESCE(product_id, policy_group_id)::text AS "targetId"
+          FROM promotion_targets
+          WHERE promotion_id = $1::uuid
+          ORDER BY target_kind, COALESCE(product_id, policy_group_id)::text
+        `,
+        [input.promotionId],
+      );
+      const unchanged =
+        current.code === input.code &&
+        current.name === input.name &&
+        current.kind === input.kind &&
+        asSafeInteger(current.amountMinor) === input.amountMinor &&
+        current.basisPoints === input.basisPoints &&
+        current.currency === input.currency &&
+        canonicalJson(current.configuration) === canonicalJson(input.configuration) &&
+        (current.startsAt === null ? null : toIso(current.startsAt)) ===
+          (input.startsAt?.toISOString() ?? null) &&
+        (current.endsAt === null ? null : toIso(current.endsAt)) ===
+          (input.endsAt?.toISOString() ?? null) &&
+        canonicalTargets(targetResult.rows) === canonicalTargets(input.targets);
+      if (unchanged) {
+        return {
+          id: current.id,
+          version: currentVersion,
+          updatedAt: toIso(current.updatedAt),
+          changed: false,
+        };
+      }
+
+      const result = await client.query<{
+        id: string;
+        version: number | string;
+        updatedAt: Date | string;
+      }>(
+        `
+          UPDATE promotions
+          SET code = $2, name = $3, kind = $4::promotion_kind,
+              amount_minor = $5, basis_points = $6, currency = $7,
+              configuration = $8::jsonb, starts_at = $9::timestamptz,
+              ends_at = $10::timestamptz, version = version + 1,
+              updated_at = $11::timestamptz
+          WHERE id = $1::uuid AND status = 'draft' AND version = $12
+          RETURNING id::text AS id, version, updated_at AS "updatedAt"
+        `,
+        [
+          input.promotionId,
+          input.code,
+          input.name,
+          input.kind,
+          input.amountMinor,
+          input.basisPoints,
+          input.currency,
+          JSON.stringify(input.configuration),
+          input.startsAt?.toISOString() ?? null,
+          input.endsAt?.toISOString() ?? null,
+          input.now.toISOString(),
+          input.expectedVersion,
+        ],
+      );
       const row = result.rows[0];
       if (!row) throw new Error("Stale promotion draft write rejected");
-      await client.query(
-        `DELETE FROM promotion_targets WHERE promotion_id = $1::uuid`,
-        [row.id],
-      );
+      await client.query(`DELETE FROM promotion_targets WHERE promotion_id = $1::uuid`, [row.id]);
       for (const target of input.targets) {
         await client.query(
           `
@@ -722,7 +831,12 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
           [row.id, target.targetKind, target.targetId],
         );
       }
-      return { ...row, updatedAt: toIso(row.updatedAt) };
+      return {
+        id: row.id,
+        version: asSafeInteger(row.version)!,
+        updatedAt: toIso(row.updatedAt),
+        changed: true,
+      };
     },
 
     async getProductPublicationFacts(productId) {
@@ -848,7 +962,7 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
     async getPromotion(promotionId) {
       const result = await client.query<PromotionRow>(
         `
-          SELECT id::text AS id, name, kind, status,
+          SELECT id::text AS id, code, version, name, kind, status,
                  amount_minor AS "amountMinor", basis_points AS "basisPoints",
                  currency, configuration, starts_at AS "startsAt",
                  ends_at AS "endsAt", updated_at AS "updatedAt"
@@ -860,6 +974,7 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
       if (!row) return null;
       return {
         ...row,
+        version: asSafeInteger(row.version)!,
         amountMinor: asSafeInteger(row.amountMinor),
         startsAt: row.startsAt === null ? null : toIso(row.startsAt),
         endsAt: row.endsAt === null ? null : toIso(row.endsAt),
@@ -873,25 +988,37 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
       };
     },
 
-    async setPromotionStatus(promotionId, status, expectedUpdatedAt, now) {
+    async setPromotionStatus(
+      promotionId,
+      status,
+      expectedVersion,
+      expectedUpdatedAt,
+      now,
+    ) {
       const result = await client.query<{
         id: string;
         status: "active" | "retired";
+        version: number | string;
         updatedAt: Date | string;
       }>(
         `
           UPDATE promotions
           SET status = $2::promotion_status, updated_at = $3::timestamptz
           WHERE id = $1::uuid AND updated_at = $4::timestamptz
+            AND version = $5
             AND (($2::promotion_status = 'active' AND status = 'draft')
               OR ($2::promotion_status = 'retired' AND status <> 'retired'))
-          RETURNING id::text AS id, status, updated_at AS "updatedAt"
+          RETURNING id::text AS id, status, version, updated_at AS "updatedAt"
         `,
-        [promotionId, status, now.toISOString(), expectedUpdatedAt],
+        [promotionId, status, now.toISOString(), expectedUpdatedAt, expectedVersion],
       );
       const row = result.rows[0];
       if (!row) throw new Error("Stale promotion write rejected");
-      return { ...row, updatedAt: toIso(row.updatedAt) };
+      return {
+        ...row,
+        version: asSafeInteger(row.version)!,
+        updatedAt: toIso(row.updatedAt),
+      };
     },
 
     async getCoaDocument(coaDocumentId) {
@@ -1294,8 +1421,20 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
     },
 
     async getShipmentEligibility(orderId) {
-      const result = await client.query<{
+      const orderResult = await client.query<{
         orderId: string;
+        orderState: string;
+      }>(
+        `
+          SELECT id::text AS "orderId", state::text AS "orderState"
+          FROM orders WHERE id = $1::uuid
+          FOR UPDATE
+        `,
+        [orderId],
+      );
+      const order = orderResult.rows[0];
+      if (!order) return null;
+      const shipmentResult = await client.query<{
         releaseId: string | null;
         releaseState: "issued" | "revoked" | "expired" | "consumed" | null;
         releaseExpiresAt: Date | string | null;
@@ -1303,25 +1442,29 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
         shipmentUpdatedAt: Date | string | null;
       }>(
         `
-          SELECT o.id::text AS "orderId", fr.id::text AS "releaseId",
+          SELECT fr.id::text AS "releaseId",
                  fr.state AS "releaseState", fr.expires_at AS "releaseExpiresAt",
                  s.state AS "shipmentState", s.updated_at AS "shipmentUpdatedAt"
-          FROM orders o
-          LEFT JOIN LATERAL (
-            SELECT * FROM fulfillment_releases current_release
-            WHERE current_release.order_id = o.id
-            ORDER BY (current_release.state = 'issued') DESC, current_release.version DESC
-            LIMIT 1
-          ) fr ON true
-          LEFT JOIN shipments s ON s.fulfillment_release_id = fr.id
-          WHERE o.id = $1::uuid
-          FOR UPDATE OF o
+          FROM shipments s
+          LEFT JOIN fulfillment_releases fr ON fr.id = s.fulfillment_release_id
+          WHERE s.order_id = $1::uuid
+          FOR UPDATE OF s
         `,
         [orderId],
       );
-      const row = result.rows[0];
-      if (!row) return null;
+      const row = shipmentResult.rows[0];
+      if (!row) {
+        return {
+          ...order,
+          releaseId: null,
+          releaseState: null,
+          releaseExpiresAt: null,
+          shipmentState: null,
+          shipmentUpdatedAt: null,
+        };
+      }
       return {
+        ...order,
         ...row,
         releaseExpiresAt:
           row.releaseExpiresAt === null ? null : toIso(row.releaseExpiresAt),
@@ -1338,13 +1481,12 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
                 INSERT INTO shipments
                   (order_id, fulfillment_release_id, carrier, tracking_reference,
                    state, created_at, updated_at)
-                VALUES ($1::uuid, $2::uuid, $3, $4, 'pending', $5::timestamptz, $5::timestamptz)
-                ON CONFLICT (fulfillment_release_id) DO NOTHING
+                VALUES ($1::uuid, NULL, $2, $3, 'pending', $4::timestamptz, $4::timestamptz)
+                ON CONFLICT (order_id) DO NOTHING
                 RETURNING id::text AS id, state
               `,
               [
                 input.orderId,
-                input.releaseId,
                 input.carrier,
                 input.trackingReference,
                 input.now.toISOString(),
@@ -1353,14 +1495,13 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
           : await client.query<{ id: string; state: "pending" }>(
               `
                 UPDATE shipments
-                SET carrier = $3, tracking_reference = $4, updated_at = $5::timestamptz
-                WHERE order_id = $1::uuid AND fulfillment_release_id = $2::uuid
-                  AND state = 'pending' AND updated_at = $6::timestamptz
+                SET carrier = $2, tracking_reference = $3, updated_at = $4::timestamptz
+                WHERE order_id = $1::uuid AND fulfillment_release_id IS NULL
+                  AND state = 'pending' AND updated_at = $5::timestamptz
                 RETURNING id::text AS id, state
               `,
               [
                 input.orderId,
-                input.releaseId,
                 input.carrier,
                 input.trackingReference,
                 input.now.toISOString(),

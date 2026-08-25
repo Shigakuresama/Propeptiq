@@ -108,7 +108,7 @@ export async function loadDatabaseCatalogRecords(
     SELECT promotion_id::text AS "promotionId", target_kind AS "targetKind",
            product_id::text AS "productId", policy_group_id::text AS "policyGroupId"
     FROM promotion_targets
-    ORDER BY promotion_id, id
+    ORDER BY promotion_id, target_kind, COALESCE(product_id, policy_group_id)::text
   `);
 
   return Object.freeze({
