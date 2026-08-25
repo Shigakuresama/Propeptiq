@@ -1,797 +1,386 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  aggregateEligibility,
-  evaluateCheckoutCreation,
-  evaluateJurisdiction,
-  jurisdictionStateToGateStatus,
-  REQUIRED_GATE_KEYS,
-  type GateKey,
-  type GateResult,
-  type JurisdictionEvaluationInput,
-  type JurisdictionRule,
-  type ManualReviewCaseDecision,
+  CHECKOUT_GATES,
+  evaluateBuyerActivation,
+  evaluateCheckout,
+  isAuthoritativeCheckoutDecision,
+  resolveDestination,
+  type CheckoutEvaluationInput,
+  type CheckoutGate,
+  type DestinationRule,
 } from "@/domain/eligibility";
 
-const allGateKeys = [
-  "buyer_verification",
-  "catalog_approval",
-  "product_jurisdiction",
-  "payment_provider",
-  "tax",
-  "shipping",
-  "inventory_lot",
-  "compliance_clearance",
-  "launch_control",
-] as const satisfies readonly GateKey[];
+const reviewSnapshotHash = "a".repeat(64);
 
-function passingGates(): readonly GateResult[] {
-  return allGateKeys.map((key) => ({
-    key,
-    orderLineId:
-      key === "product_jurisdiction" ? "synthetic-line-1" : null,
-    status: "pass",
-    reasonCode: `${key}_passed`,
-    evidenceRefs: [
+function rule(
+  overrides: Partial<DestinationRule> = {},
+): DestinationRule {
+  return {
+    id: "rule-group-ca",
+    version: "policy-v1",
+    active: true,
+    stateCode: "CA",
+    status: "allowed",
+    target: {
+      kind: "policy_group",
+      productPolicyGroupId: "group-1",
+    },
+    ...overrides,
+  };
+}
+
+function destination(
+  rules: readonly DestinationRule[] = [rule()],
+  destinationCode = "ca",
+) {
+  return resolveDestination({
+    productId: "product-1",
+    productPolicyGroupId: "group-1",
+    destinationCode,
+    rules,
+  });
+}
+
+function checkoutInput(
+  overrides: Partial<CheckoutEvaluationInput> = {},
+): CheckoutEvaluationInput {
+  return {
+    authenticated: true,
+    buyerStatus: "active",
+    acceptedAttestationVersion: "attestation-v1",
+    currentAttestationVersion: "attestation-v1",
+    items: [
       {
-        kind: "synthetic_test_evidence",
-        id: `synthetic-${key}`,
-        version: "test-v1",
-        sha256: null,
+        productId: "product-1",
+        active: true,
+        catalogComplete: true,
+        destination: destination(),
+        inventoryAvailable: true,
       },
     ],
-  }));
+    paymentProviderAvailable: true,
+    reviewSnapshotHash: null,
+    reviewDecision: null,
+    ...overrides,
+  };
 }
 
-function aggregate(
-  gates: readonly GateResult[],
-  expectedOrderLineIds: readonly string[] = ["synthetic-line-1"],
-) {
-  return aggregateEligibility(gates, expectedOrderLineIds);
-}
-
-describe("aggregateEligibility", () => {
-  it("allows checkout only when every required gate passes", () => {
-    const gates = passingGates();
-
-    const evaluation = aggregate(gates);
-
-    expect(evaluation.decision).toBe("pass");
-    expect(evaluation.gates).toHaveLength(9);
-    expect(evaluateCheckoutCreation(evaluation)).toMatchObject({
-      permitted: true,
-      decision: "pass",
-      reasonCodes: evaluation.reasonCodes,
-      evidenceRefs: evaluation.evidenceRefs,
-    });
+describe("evaluateBuyerActivation", () => {
+  it("automatically activates a qualified buyer without staff input", () => {
+    expect(
+      evaluateBuyerActivation({
+        emailVerified: true,
+        ageConfirmed21Plus: true,
+        researchPurpose: "in_vitro",
+        acceptedAttestationVersion: "attestation-v1",
+        currentAttestationVersion: "attestation-v1",
+        statusSignal: null,
+      }),
+    ).toEqual({ status: "active", reasons: [] });
   });
 
-  it("allows checkout only from the immutable aggregate produced by this policy boundary", () => {
-    const evaluation = aggregate(passingGates());
-
-    for (const untrusted of [null, { decision: "pass" }, { ...evaluation }]) {
-      expect(evaluateCheckoutCreation(untrusted)).toEqual({
-        permitted: false,
-        decision: "unknown",
-        reasonCodes: [
-          {
-            gate: "launch_control",
-            orderLineId: null,
-            code: "eligibility_evaluation_not_authoritative",
-          },
-        ],
-        evidenceRefs: [],
-        requiredActions: [
-          "deny_checkout",
-          "create_compliance_hold",
-          "route_policy_review",
-        ],
-      });
-    }
-    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(true);
-  });
-
-  it("treats a sparse gate collection as structurally unknown", () => {
-    const gates = [...passingGates()];
-    gates.length += 1;
-
-    const evaluation = aggregate(gates);
-
-    expect(evaluation.decision).toBe("unknown");
-    expect(evaluation.reasonCodes).toContainEqual({
-      gate: "product_jurisdiction",
-      orderLineId: null,
-      code: "unexpected_gate_result",
+  it("fails closed with stable reasons and applies explicit status signals", () => {
+    expect(
+      evaluateBuyerActivation({
+        emailVerified: false,
+        ageConfirmed21Plus: false,
+        researchPurpose: "personal_use" as never,
+        acceptedAttestationVersion: "attestation-old",
+        currentAttestationVersion: "attestation-v1",
+        statusSignal: "review",
+      }),
+    ).toEqual({
+      status: null,
+      reasons: [
+        "email_not_verified",
+        "age_not_confirmed_21_plus",
+        "research_purpose_invalid",
+        "attestation_not_current",
+      ],
     });
-    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
-  });
-
-  it.each([
-    {
-      name: "blocked outranks unknown and manual review",
-      overrides: {
-        buyer_verification: "manual_review",
-        tax: "unknown",
-        shipping: "blocked",
-      },
-      expected: "blocked",
-    },
-    {
-      name: "unknown outranks manual review",
-      overrides: {
-        buyer_verification: "manual_review",
-        tax: "unknown",
-      },
-      expected: "unknown",
-    },
-    {
-      name: "manual review outranks pass",
-      overrides: { buyer_verification: "manual_review" },
-      expected: "manual_review",
-    },
-  ] as const)("enforces precedence: $name", ({ overrides, expected }) => {
-    const gates = passingGates().map((gate) => ({
-      ...gate,
-      status: overrides[gate.key as keyof typeof overrides] ?? gate.status,
-    }));
-
-    const evaluation = aggregate(gates);
-
-    expect(evaluation.decision).toBe(expected);
-    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
-  });
-
-  it("turns missing or duplicate gate results into structured unknown denials", () => {
-    const withoutLaunchControl = passingGates().filter(
-      (gate) => gate.key !== "launch_control",
-    );
-    const missing = aggregate(withoutLaunchControl);
-
-    expect(missing.decision).toBe("unknown");
-    expect(missing.gates).toContainEqual({
-      key: "launch_control",
-      orderLineId: null,
-      status: "unknown",
-      reasonCode: "missing_gate_result",
-      evidenceRefs: [],
-    });
-    expect(missing.reasonCodes).toContainEqual({
-      gate: "launch_control",
-      orderLineId: null,
-      code: "missing_gate_result",
-    });
-    expect(missing.requiredActions).toEqual([
-      "deny_checkout",
-      "create_compliance_hold",
-      "route_policy_review",
-    ]);
-
-    const duplicated = aggregate([
-      ...passingGates(),
-      passingGates()[0]!,
-    ]);
-
-    expect(duplicated.decision).toBe("unknown");
-    expect(duplicated.reasonCodes).toContainEqual({
-      gate: "buyer_verification",
-      orderLineId: null,
-      code: "duplicate_gate_result",
-    });
-    expect(evaluateCheckoutCreation(duplicated).permitted).toBe(false);
-  });
-
-  it.each([
-    {
-      name: "blank reason code",
-      replacement: { reasonCode: "   " },
-    },
-    {
-      name: "missing evidence on a passing gate",
-      replacement: { evidenceRefs: [] },
-    },
-    {
-      name: "malformed evidence hash",
-      replacement: {
-        evidenceRefs: [
-          {
-            kind: "synthetic_test_evidence",
-            id: "synthetic-evidence",
-            version: "test-v1",
-            sha256: "not-a-sha256",
-          },
-        ],
-      },
-    },
-    {
-      name: "unknown runtime status",
-      replacement: { status: "surprise_status" },
-    },
-  ])("fails closed for a $name", ({ replacement }) => {
-    const gates = passingGates().map((gate) =>
-      gate.key === "tax" ? { ...gate, ...replacement } : gate,
-    ) as readonly GateResult[];
-
-    const evaluation = aggregate(gates);
-
-    expect(evaluation.decision).toBe("unknown");
-    expect(evaluation.reasonCodes).toContainEqual({
-      gate: "tax",
-      orderLineId: null,
-      code: "invalid_gate_result",
-    });
-  });
-
-  it("rejects sparse evidence on a passing gate", () => {
-    const sparseEvidenceRefs = Array(1) as unknown as GateResult["evidenceRefs"];
-    const gates = passingGates().map((gate) =>
-      gate.key === "tax"
-        ? { ...gate, evidenceRefs: sparseEvidenceRefs }
-        : gate,
-    );
-
-    const evaluation = aggregate(gates);
-
-    expect(evaluation.decision).toBe("unknown");
-    expect(evaluation.reasonCodes).toContainEqual({
-      gate: "tax",
-      orderLineId: null,
-      code: "invalid_gate_result",
-    });
-    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
-  });
-
-  it("requires exactly one jurisdiction result for every expected order line", () => {
-    const nonJurisdictionGates = passingGates().filter(
-      (gate) => gate.key !== "product_jurisdiction",
-    );
-    const jurisdictionGate = passingGates().find(
-      (gate) => gate.key === "product_jurisdiction",
-    )!;
-    const lineOne = { ...jurisdictionGate, orderLineId: "synthetic-line-1" };
-    const lineTwo = { ...jurisdictionGate, orderLineId: "synthetic-line-2" };
 
     expect(
-      aggregate(
-        [...nonJurisdictionGates, lineOne, lineTwo],
-        ["synthetic-line-1", "synthetic-line-2"],
-      ).decision,
-    ).toBe("pass");
+      evaluateBuyerActivation({
+        emailVerified: true,
+        ageConfirmed21Plus: true,
+        researchPurpose: "analytical",
+        acceptedAttestationVersion: "attestation-v1",
+        currentAttestationVersion: "attestation-v1",
+        statusSignal: "review",
+      }),
+    ).toEqual({ status: "review", reasons: ["buyer_review"] });
 
-    const missing = aggregate(
-      [...nonJurisdictionGates, lineOne],
-      ["synthetic-line-1", "synthetic-line-2"],
-    );
-    expect(missing.decision).toBe("unknown");
-    expect(missing.gates).toContainEqual({
-      key: "product_jurisdiction",
-      orderLineId: "synthetic-line-2",
-      status: "unknown",
-      reasonCode: "missing_gate_result",
-      evidenceRefs: [],
-    });
-
-    const duplicate = aggregate(
-      [...nonJurisdictionGates, lineOne, lineOne, lineTwo],
-      ["synthetic-line-1", "synthetic-line-2"],
-    );
-    expect(duplicate.decision).toBe("unknown");
-    expect(duplicate.reasonCodes).toContainEqual({
-      gate: "product_jurisdiction",
-      orderLineId: "synthetic-line-1",
-      code: "duplicate_gate_result",
-    });
-  });
-
-  it.each([
-    ["an empty set", []],
-    ["a blank line id", ["   "]],
-    ["duplicate line ids", ["synthetic-line-1", "synthetic-line-1"]],
-    ["a non-string line id", [17]],
-  ] as const)("denies checkout for %s expected order-line ids", (_name, ids) => {
-    const evaluation = aggregate(
-      passingGates(),
-      ids as unknown as readonly string[],
-    );
-
-    expect(evaluation.decision).toBe("unknown");
-    expect(evaluation.reasonCodes).toContainEqual({
-      gate: "product_jurisdiction",
-      orderLineId: null,
-      code: "invalid_order_line_scope",
-    });
-    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
-  });
-
-  it("denies checkout for a sparse expected order-line scope without throwing", () => {
-    const sparseExpectedOrderLineIds = Array(1) as unknown as readonly string[];
-
-    const evaluation = aggregate(
-      passingGates(),
-      sparseExpectedOrderLineIds,
-    );
-
-    expect(evaluation.decision).toBe("unknown");
-    expect(evaluation.reasonCodes).toContainEqual({
-      gate: "product_jurisdiction",
-      orderLineId: null,
-      code: "invalid_order_line_scope",
-    });
-    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
-  });
-
-  it("treats a missing runtime reason code as invalid rather than matching undefined", () => {
-    const gates = passingGates().map((gate) =>
-      gate.key === "shipping" ? { ...gate, reasonCode: undefined } : gate,
-    ) as unknown as readonly GateResult[];
-
-    const evaluation = aggregate(gates);
-
-    expect(evaluation.decision).toBe("unknown");
-    expect(evaluation.reasonCodes).toContainEqual({
-      gate: "shipping",
-      orderLineId: null,
-      code: "invalid_gate_result",
-    });
-  });
-
-  it("derives precedence only from normalized gates", () => {
-    const gates = passingGates().map((gate) =>
-      gate.key === "shipping"
-        ? { ...gate, status: "blocked", reasonCode: undefined }
-        : gate,
-    ) as unknown as readonly GateResult[];
-
-    const evaluation = aggregate(gates);
-
-    expect(evaluation.decision).toBe("unknown");
-    expect(evaluation.requiredActions).toContain("route_policy_review");
-  });
-
-  it("returns a deeply immutable evaluation snapshot", () => {
-    const evaluation = aggregate(passingGates());
-    const checkoutDecision = evaluateCheckoutCreation(evaluation);
-
-    expect(Object.isFrozen(evaluation)).toBe(true);
-    expect(Object.isFrozen(evaluation.gates)).toBe(true);
-    expect(Object.isFrozen(evaluation.gates[0])).toBe(true);
-    expect(Object.isFrozen(evaluation.gates[0]!.evidenceRefs)).toBe(true);
-    expect(Object.isFrozen(evaluation.gates[0]!.evidenceRefs[0])).toBe(true);
-    expect(Object.isFrozen(evaluation.reasonCodes)).toBe(true);
-    expect(Object.isFrozen(evaluation.requiredActions)).toBe(true);
-    expect(Object.isFrozen(checkoutDecision)).toBe(true);
-    expect(Object.isFrozen(REQUIRED_GATE_KEYS)).toBe(true);
+    expect(
+      evaluateBuyerActivation({
+        emailVerified: false,
+        ageConfirmed21Plus: false,
+        researchPurpose: null,
+        acceptedAttestationVersion: null,
+        currentAttestationVersion: "attestation-v1",
+        statusSignal: "blocked",
+      }),
+    ).toEqual({ status: "blocked", reasons: ["buyer_blocked"] });
   });
 });
 
-describe("jurisdictionStateToGateStatus", () => {
-  it.each([
-    ["Allowed", "pass"],
-    ["Manual Review", "manual_review"],
-    ["Blocked", "blocked"],
-    ["Unknown", "unknown"],
-  ] as const)("maps %s exactly to %s", (jurisdiction, expected) => {
-    expect(jurisdictionStateToGateStatus(jurisdiction)).toBe(expected);
+describe("resolveDestination", () => {
+  it("exports the exact frozen six-gate order", () => {
+    const gates: readonly CheckoutGate[] = CHECKOUT_GATES;
+
+    expect(gates).toEqual([
+      "account",
+      "attestation",
+      "product",
+      "destination",
+      "inventory",
+      "payment_provider",
+    ]);
+    expect(Object.isFrozen(CHECKOUT_GATES)).toBe(true);
   });
 
-  it("maps every invalid runtime state to unknown", () => {
-    expect(jurisdictionStateToGateStatus("not-a-state")).toBe("unknown");
-    expect(jurisdictionStateToGateStatus(null)).toBe("unknown");
+  it("normalizes states and prefers one exact-product rule over a group rule", () => {
+    const resolution = destination([
+      rule(),
+      rule({
+        id: "rule-product-ca",
+        version: "product-v2",
+        status: "blocked",
+        target: { kind: "product", productId: "product-1" },
+      }),
+    ]);
+
+    expect(resolution).toEqual({
+      status: "blocked",
+      normalizedStateCode: "CA",
+      ruleId: "rule-product-ca",
+      ruleVersion: "product-v2",
+      scope: "product",
+    });
   });
 
-  it.each([
-    ["undefined", undefined],
-    ["a number", 17],
-    ["an object", {}],
-    ["an array", []],
-    ["a blank string", "   "],
-    ["a lowercase allowed variant", "allowed"],
-    ["a case variant", "manual review"],
-    ["a padded variant", " Allowed "],
-  ] as const)("maps %s to unknown", (_name, state) => {
-    expect(jurisdictionStateToGateStatus(state)).toBe("unknown");
+  it("fails unavailable for missing, territory, malformed, or conflicting policy", () => {
+    expect(destination([]).status).toBe("unavailable");
+    expect(destination([rule({ stateCode: "PR" })], "PR").status).toBe(
+      "unavailable",
+    );
+    expect(destination([rule({ version: "" })]).status).toBe("unavailable");
+    expect(
+      destination([rule(), rule({ id: "rule-group-ca-2" })]).status,
+    ).toBe("unavailable");
+  });
+
+  it("returns deeply frozen resolutions", () => {
+    const resolution = destination();
+
+    expect(Object.isFrozen(resolution)).toBe(true);
   });
 });
 
-describe("evaluateJurisdiction", () => {
-  const now = new Date("2026-08-24T12:00:00.000Z");
-  const policyEvidence = {
-    kind: "synthetic_test_policy",
-    id: "synthetic-policy-1",
-    version: "test-v1",
-    sha256: "b".repeat(64),
-  } as const;
-  const decisionEvidence = {
-    kind: "synthetic_test_case_decision",
-    id: "synthetic-case-1",
-    version: "test-v1",
-    sha256: "c".repeat(64),
-  } as const;
+describe("evaluateCheckout", () => {
+  it("permits ordinary qualified checkout without routine evidence or review hashes", () => {
+    const decision = evaluateCheckout(checkoutInput());
 
-  function currentRule(
-    overrides: Partial<JurisdictionRule> = {},
-  ): JurisdictionRule {
-    return {
-      id: "synthetic-rule-1",
-      productId: "synthetic-product-1",
-      destinationCode: "synthetic-destination-1",
-      state: "Allowed",
-      effectiveAt: new Date("2026-08-01T00:00:00.000Z"),
-      expiresAt: new Date("2026-09-01T00:00:00.000Z"),
-      supersededAt: null,
-      integrityVerified: true,
-      evidenceEffectiveAt: new Date("2026-08-01T00:00:00.000Z"),
-      evidenceExpiresAt: new Date("2026-09-01T00:00:00.000Z"),
-      evidenceIntegrityVerified: true,
-      evidenceRefs: [policyEvidence],
-      ...overrides,
-    };
-  }
+    expect(decision).toEqual({
+      permitted: true,
+      reviewRequired: false,
+      reasons: [],
+    });
+    expect(isAuthoritativeCheckoutDecision(decision)).toBe(true);
+  });
 
-  function jurisdictionInput(
-    overrides: Partial<JurisdictionEvaluationInput> = {},
-  ): JurisdictionEvaluationInput {
-    return {
-      now,
-      orderId: "synthetic-order-1",
-      orderLineId: "synthetic-line-1",
-      destinationCode: "synthetic-destination-1",
-      evaluationHash: "a".repeat(64),
-      product: {
-        id: "synthetic-product-1",
-        approved: true,
-        active: true,
-      },
-      rule: currentRule(),
-      caseDecision: null,
-      ...overrides,
-    };
-  }
+  it("orders and deduplicates hard denials by the six gates", () => {
+    const decision = evaluateCheckout(
+      checkoutInput({
+        buyerStatus: "blocked",
+        acceptedAttestationVersion: "attestation-old",
+        items: [
+          {
+            productId: "product-1",
+            active: false,
+            catalogComplete: false,
+            destination: destination([], "PR"),
+            inventoryAvailable: false,
+          },
+          {
+            productId: "product-2",
+            active: false,
+            catalogComplete: false,
+            destination: destination([], "XX"),
+            inventoryAvailable: false,
+          },
+        ],
+        paymentProviderAvailable: false,
+      }),
+    );
 
-  function currentCaseDecision(
-    overrides: Partial<ManualReviewCaseDecision> = {},
-  ): ManualReviewCaseDecision {
-    return {
-      ruleId: "synthetic-rule-1",
-      orderLineId: "synthetic-line-1",
-      outcome: "approved",
-      orderId: "synthetic-order-1",
-      evaluationHash: "a".repeat(64),
-      effectiveAt: new Date("2026-08-24T10:00:00.000Z"),
-      expiresAt: new Date("2026-08-25T10:00:00.000Z"),
-      supersededAt: null,
-      evidenceRefs: [decisionEvidence],
-      ...overrides,
-    };
-  }
-
-  it("passes an approved active product with a current evidence-backed Allowed rule", () => {
-    const result = evaluateJurisdiction(jurisdictionInput());
-
-    expect(result).toEqual({
-      key: "product_jurisdiction",
-      orderLineId: "synthetic-line-1",
-      status: "pass",
-      reasonCode: "jurisdiction_rule_allowed",
-      evidenceRefs: [
-        {
-          ...policyEvidence,
-        },
+    expect(decision).toEqual({
+      permitted: false,
+      reviewRequired: false,
+      reasons: [
+        "buyer_blocked",
+        "attestation_not_current",
+        "product_inactive",
+        "product_catalog_incomplete",
+        "destination_unavailable",
+        "inventory_unavailable",
+        "payment_provider_unavailable",
       ],
     });
   });
 
-  it("rejects sparse evidence on an Allowed rule", () => {
-    const sparseEvidenceRefs = Array(1) as unknown as JurisdictionRule["evidenceRefs"];
-
-    const result = evaluateJurisdiction(
-      jurisdictionInput({
-        rule: currentRule({ evidenceRefs: sparseEvidenceRefs }),
-      }),
-    );
-
-    expect(result).toMatchObject({
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_evidence_missing",
-    });
-  });
-
-  it.each([
-    {
-      name: "an unapproved product",
-      input: jurisdictionInput({
-        product: {
-          id: "synthetic-product-1",
-          approved: false,
+  it("requires exact complete review approval for buyer and destination review", () => {
+    const reviewRule = rule({ status: "review" });
+    const input = checkoutInput({
+      buyerStatus: "review",
+      items: [
+        {
+          productId: "product-1",
           active: true,
+          catalogComplete: true,
+          destination: destination([reviewRule]),
+          inventoryAvailable: true,
+        },
+      ],
+      reviewSnapshotHash,
+      reviewDecision: {
+        reviewSnapshotHash,
+        outcome: "approved",
+        coversBuyerReview: true,
+        destinationRuleIds: ["rule-group-ca"],
+      },
+    });
+
+    expect(evaluateCheckout(input)).toEqual({
+      permitted: true,
+      reviewRequired: false,
+      reasons: [],
+    });
+  });
+
+  it("leaves mismatched or incomplete explicit reviews unmet", () => {
+    const reviewRule = rule({ status: "review" });
+    const base = checkoutInput({
+      buyerStatus: "review",
+      items: [
+        {
+          productId: "product-1",
+          active: true,
+          catalogComplete: true,
+          destination: destination([reviewRule]),
+          inventoryAvailable: true,
+        },
+      ],
+      reviewSnapshotHash,
+    });
+
+    expect(
+      evaluateCheckout({
+        ...base,
+        reviewDecision: {
+          reviewSnapshotHash: "b".repeat(64),
+          outcome: "approved",
+          coversBuyerReview: true,
+          destinationRuleIds: ["rule-group-ca"],
         },
       }),
-      status: "blocked",
-      reasonCode: "product_not_approved",
-    },
-    {
-      name: "an inactive product",
-      input: jurisdictionInput({
-        product: {
-          id: "synthetic-product-1",
-          approved: true,
-          active: false,
+    ).toEqual({
+      permitted: false,
+      reviewRequired: true,
+      reasons: ["buyer_review_required", "destination_review_required"],
+    });
+
+    expect(
+      evaluateCheckout({
+        ...base,
+        reviewDecision: {
+          reviewSnapshotHash,
+          outcome: "approved",
+          coversBuyerReview: false,
+          destinationRuleIds: [],
         },
       }),
-      status: "blocked",
-      reasonCode: "product_not_active",
-    },
-    {
-      name: "a missing exact rule",
-      input: jurisdictionInput({ rule: null }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_missing",
-    },
-    {
-      name: "a rule for another product",
-      input: jurisdictionInput({
-        rule: currentRule({ productId: "synthetic-other-product" }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_scope_mismatch",
-    },
-    {
-      name: "a rule for another destination",
-      input: jurisdictionInput({
-        rule: currentRule({ destinationCode: "synthetic-other-destination" }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_scope_mismatch",
-    },
-    {
-      name: "a future rule",
-      input: jurisdictionInput({
-        rule: currentRule({
-          effectiveAt: new Date("2026-08-25T00:00:00.000Z"),
-        }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_not_current",
-    },
-    {
-      name: "an expired rule",
-      input: jurisdictionInput({
-        rule: currentRule({
-          expiresAt: new Date("2026-08-24T12:00:00.000Z"),
-        }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_not_current",
-    },
-    {
-      name: "a superseded rule",
-      input: jurisdictionInput({
-        rule: currentRule({
-          supersededAt: new Date("2026-08-24T11:00:00.000Z"),
-        }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_not_current",
-    },
-    {
-      name: "a failed rule integrity check",
-      input: jurisdictionInput({
-        rule: currentRule({ integrityVerified: false }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_integrity_failed",
-    },
-    {
-      name: "expired rule evidence",
-      input: jurisdictionInput({
-        rule: currentRule({
-          evidenceExpiresAt: new Date("2026-08-24T12:00:00.000Z"),
-        }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_evidence_not_current",
-    },
-    {
-      name: "failed evidence integrity",
-      input: jurisdictionInput({
-        rule: currentRule({ evidenceIntegrityVerified: false }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_evidence_integrity_failed",
-    },
-    {
-      name: "an evidence-free Allowed rule",
-      input: jurisdictionInput({
-        rule: currentRule({ evidenceRefs: [] }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_evidence_missing",
-    },
-    {
-      name: "an explicit Unknown rule",
-      input: jurisdictionInput({
-        rule: currentRule({ state: "Unknown" }),
-      }),
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_unknown",
-    },
-    {
-      name: "an explicit Blocked rule",
-      input: jurisdictionInput({
-        rule: currentRule({ state: "Blocked" }),
-      }),
-      status: "blocked",
-      reasonCode: "jurisdiction_rule_blocked",
-    },
-    {
-      name: "a Manual Review rule without a case decision",
-      input: jurisdictionInput({
-        rule: currentRule({ state: "Manual Review" }),
-      }),
-      status: "manual_review",
-      reasonCode: "jurisdiction_manual_review_required",
-    },
-  ] as const)("fails closed for $name", ({ input, status, reasonCode }) => {
-    const result = evaluateJurisdiction(input);
-
-    expect(result.status).toBe(status);
-    expect(result.reasonCode).toBe(reasonCode);
+    ).toEqual({
+      permitted: false,
+      reviewRequired: true,
+      reasons: ["buyer_review_required", "destination_review_required"],
+    });
   });
 
-  it("binds a manual-review approval to the exact current order evaluation", () => {
-    const manualRule = currentRule({ state: "Manual Review" });
-    const applicable = evaluateJurisdiction(
-      jurisdictionInput({
-        rule: manualRule,
-        caseDecision: currentCaseDecision(),
+  it("treats a matching rejection as a hard denial", () => {
+    const decision = evaluateCheckout(
+      checkoutInput({
+        buyerStatus: "review",
+        reviewSnapshotHash,
+        reviewDecision: {
+          reviewSnapshotHash,
+          outcome: "rejected",
+          coversBuyerReview: true,
+          destinationRuleIds: [],
+        },
       }),
     );
 
-    expect(applicable.status).toBe("pass");
-    expect(applicable.reasonCode).toBe("manual_review_case_approved");
-    expect(applicable.evidenceRefs).toEqual([
-      policyEvidence,
-      decisionEvidence,
-    ]);
-
-    for (const caseDecision of [
-      currentCaseDecision({ orderId: "synthetic-other-order" }),
-      currentCaseDecision({ evaluationHash: "d".repeat(64) }),
-      currentCaseDecision({
-        expiresAt: new Date("2026-08-24T12:00:00.000Z"),
-      }),
-      currentCaseDecision({
-        supersededAt: new Date("2026-08-24T11:00:00.000Z"),
-      }),
-      currentCaseDecision({ evidenceRefs: [] }),
-    ]) {
-      const result = evaluateJurisdiction(
-        jurisdictionInput({ rule: manualRule, caseDecision }),
-      );
-      expect(result.status).toBe("manual_review");
-      expect(result.reasonCode).toBe("manual_review_case_not_applicable");
-    }
+    expect(decision).toEqual({
+      permitted: false,
+      reviewRequired: false,
+      reasons: ["review_rejected"],
+    });
   });
 
-  it("denies sparse manual-review decision evidence without throwing", () => {
-    const sparseEvidenceRefs = Array(1) as unknown as ManualReviewCaseDecision["evidenceRefs"];
-
-    const result = evaluateJurisdiction(
-      jurisdictionInput({
-        rule: currentRule({ state: "Manual Review" }),
-        caseDecision: currentCaseDecision({
-          evidenceRefs: sparseEvidenceRefs,
-        }),
+  it("suppresses review work whenever another gate hard-denies checkout", () => {
+    const decision = evaluateCheckout(
+      checkoutInput({
+        buyerStatus: "review",
+        items: [
+          {
+            productId: "product-1",
+            active: false,
+            catalogComplete: true,
+            destination: destination([rule({ status: "review" })]),
+            inventoryAvailable: true,
+          },
+        ],
+        reviewSnapshotHash,
       }),
     );
 
-    expect(result).toMatchObject({
-      status: "manual_review",
-      reasonCode: "manual_review_case_not_applicable",
+    expect(decision).toEqual({
+      permitted: false,
+      reviewRequired: false,
+      reasons: ["product_inactive"],
     });
   });
 
-  it("blocks an exact current rejected manual-review case", () => {
-    const result = evaluateJurisdiction(
-      jurisdictionInput({
-        rule: currentRule({ state: "Manual Review" }),
-        caseDecision: currentCaseDecision({ outcome: "rejected" }),
-      }),
-    );
-
-    expect(result.status).toBe("blocked");
-    expect(result.reasonCode).toBe("manual_review_case_rejected");
-  });
-
-  it("does not apply a manual-review decision to another SKU rule or order line", () => {
-    const rule = {
-      ...currentRule({ state: "Manual Review" }),
-      id: "synthetic-rule-1",
-    } as JurisdictionRule;
-
-    for (const caseDecision of [
-      {
-        ...currentCaseDecision(),
-        ruleId: "synthetic-other-rule",
-        orderLineId: "synthetic-line-1",
-      },
-      {
-        ...currentCaseDecision(),
-        ruleId: "synthetic-rule-1",
-        orderLineId: "synthetic-other-line",
-      },
-    ] as readonly ManualReviewCaseDecision[]) {
-      const result = evaluateJurisdiction(
-        jurisdictionInput({ rule, caseDecision }),
-      );
-
-      expect(result.status).toBe("manual_review");
-      expect(result.reasonCode).toBe("manual_review_case_not_applicable");
-    }
-  });
-
-  it("never treats malformed boolean projections as approved or integrity verified", () => {
-    const malformedProduct = jurisdictionInput({
-      product: {
-        id: "synthetic-product-1",
-        approved: "false",
-        active: true,
-      } as unknown as JurisdictionEvaluationInput["product"],
-    });
-    expect(evaluateJurisdiction(malformedProduct)).toMatchObject({
-      status: "unknown",
-      reasonCode: "jurisdiction_input_invalid",
-    });
-
-    const malformedIntegrity = jurisdictionInput({
-      rule: currentRule({
-        integrityVerified: "false" as unknown as boolean,
-      }),
-    });
-    expect(evaluateJurisdiction(malformedIntegrity)).toMatchObject({
-      status: "unknown",
-      reasonCode: "jurisdiction_rule_integrity_failed",
+  it("fails closed for malformed top-level input", () => {
+    expect(evaluateCheckout({ items: [] } as never)).toEqual({
+      permitted: false,
+      reviewRequired: false,
+      reasons: ["checkout_input_invalid"],
     });
   });
 
-  it("never treats an unknown or blank-bound manual decision as approved", () => {
-    const manualRule = currentRule({ state: "Manual Review" });
-    for (const decision of [
-      currentCaseDecision({
-        outcome: "pending" as unknown as ManualReviewCaseDecision["outcome"],
-      }),
-      currentCaseDecision({ orderId: "   " }),
-      currentCaseDecision({ evaluationHash: "   " }),
-    ]) {
-      expect(
-        evaluateJurisdiction(
-          jurisdictionInput({ rule: manualRule, caseDecision: decision }),
-        ),
-      ).toMatchObject({
-        status: "manual_review",
-        reasonCode: "manual_review_case_not_applicable",
-      });
-    }
+  it("rejects structurally identical browser-created decisions", () => {
+    const decision = evaluateCheckout(checkoutInput());
+
+    expect(isAuthoritativeCheckoutDecision({ ...decision })).toBe(false);
+    expect(isAuthoritativeCheckoutDecision(decision)).toBe(true);
   });
 
-  it("freezes copied rule and decision evidence instead of retaining mutable inputs", () => {
-    const mutableRuleEvidence: {
-      kind: string;
-      id: string;
-      version: string;
-      sha256: string | null;
-    } = { ...policyEvidence };
-    const result = evaluateJurisdiction(
-      jurisdictionInput({
-        rule: currentRule({
-          state: "Manual Review",
-          evidenceRefs: [mutableRuleEvidence],
-        }),
-        caseDecision: currentCaseDecision(),
-      }),
-    );
+  it("returns deeply immutable activation and checkout decisions", () => {
+    const activation = evaluateBuyerActivation({
+      emailVerified: true,
+      ageConfirmed21Plus: true,
+      researchPurpose: "educational",
+      acceptedAttestationVersion: "attestation-v1",
+      currentAttestationVersion: "attestation-v1",
+      statusSignal: null,
+    });
+    const decision = evaluateCheckout(checkoutInput());
 
-    mutableRuleEvidence.id = "mutated-after-evaluation";
-    expect(result.evidenceRefs[0]!.id).toBe("synthetic-policy-1");
-    expect(Object.isFrozen(result.evidenceRefs[0])).toBe(true);
+    expect(Object.isFrozen(activation)).toBe(true);
+    expect(Object.isFrozen(activation.reasons)).toBe(true);
+    expect(Object.isFrozen(decision)).toBe(true);
+    expect(Object.isFrozen(decision.reasons)).toBe(true);
   });
 });

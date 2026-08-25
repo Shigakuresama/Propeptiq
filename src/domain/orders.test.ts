@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  evaluateCheckout,
+  type CheckoutEvaluationInput,
+} from "@/domain/eligibility";
+
+import {
   canFulfill,
   transitionOrder,
   transitionPayment,
@@ -12,6 +17,43 @@ import {
   type PaymentEvent,
   type PaymentSnapshot,
 } from "@/domain/orders";
+
+function checkoutDecision(
+  overrides: Partial<CheckoutEvaluationInput> = {},
+) {
+  return evaluateCheckout({
+    authenticated: true,
+    buyerStatus: "active",
+    acceptedAttestationVersion: "attestation-v1",
+    currentAttestationVersion: "attestation-v1",
+    items: [
+      {
+        productId: "product-1",
+        active: true,
+        catalogComplete: true,
+        destination: {
+          status: "allowed",
+          normalizedStateCode: "CA",
+          ruleId: "rule-1",
+          ruleVersion: "policy-v1",
+          scope: "product",
+        },
+        inventoryAvailable: true,
+      },
+    ],
+    paymentProviderAvailable: true,
+    reviewSnapshotHash: null,
+    reviewDecision: null,
+    ...overrides,
+  });
+}
+
+const allowedCheckoutDecision = checkoutDecision();
+const blockedCheckoutDecision = checkoutDecision({ buyerStatus: "blocked" });
+const reviewCheckoutDecision = checkoutDecision({
+  buyerStatus: "review",
+  reviewSnapshotHash: "a".repeat(64),
+});
 
 const draftOrder: OrderSnapshot = {
   state: "draft",
@@ -42,7 +84,7 @@ function paidPendingOrder(): OrderSnapshot {
   if (!eligibility.ok) throw new Error("synthetic test setup failed");
   const ready = transitionOrder(eligibility.value, {
     type: "eligibility_passed",
-    decision: "pass",
+    decision: allowedCheckoutDecision,
   });
   if (!ready.ok) throw new Error("synthetic test setup failed");
   const checkout = transitionOrder(ready.value, { type: "begin_checkout" });
@@ -69,6 +111,36 @@ describe("transitionOrder", () => {
     expect(draftOrder).toEqual(before);
   });
 
+  it("rejects a plain lookalike checkout decision at eligibility progression", () => {
+    const started = transitionOrder(draftOrder, { type: "start_eligibility" });
+    if (!started.ok) throw new Error("synthetic test setup failed");
+
+    expect(
+      transitionOrder(started.value, {
+        type: "eligibility_passed",
+        decision: { ...allowedCheckoutDecision },
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_transition" },
+    });
+  });
+
+  it.each([
+    ["nonpermitted", blockedCheckoutDecision],
+    ["review-required", reviewCheckoutDecision],
+  ] as const)("denies a %s checkout decision at eligibility progression", (_name, decision) => {
+    const started = transitionOrder(draftOrder, { type: "start_eligibility" });
+    if (!started.ok) throw new Error("synthetic test setup failed");
+
+    expect(
+      transitionOrder(started.value, { type: "eligibility_passed", decision }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_transition" },
+    });
+  });
+
   it("follows the verified-payment and released-fulfillment happy path", () => {
     const eligibility = transitionOrder(draftOrder, {
       type: "start_eligibility",
@@ -78,7 +150,7 @@ describe("transitionOrder", () => {
 
     const ready = transitionOrder(eligibility.value, {
       type: "eligibility_passed",
-      decision: "pass",
+      decision: allowedCheckoutDecision,
     });
     expect(ready.ok).toBe(true);
     if (!ready.ok) return;
@@ -97,7 +169,7 @@ describe("transitionOrder", () => {
 
     const released = transitionOrder(paid.value, {
       type: "release_for_fulfillment",
-      decision: "pass",
+      decision: allowedCheckoutDecision,
       paymentEvidenceId: "synthetic-payment-journal-1",
       clearanceEvidenceId: "synthetic-clearance-1",
       fulfillmentReleaseVersion: 1,
@@ -117,7 +189,7 @@ describe("transitionOrder", () => {
       type: "begin_fulfillment",
       now: "2026-08-24T12:00:00.000Z",
       paymentVerified: true,
-      eligibilityDecision: "pass",
+      eligibilityDecision: allowedCheckoutDecision,
       release: issuedRelease,
     } as never);
     expect(inProgress.ok).toBe(true);
@@ -161,7 +233,7 @@ describe("transitionOrder", () => {
 
     const ready = transitionOrder(resumed.value, {
       type: "eligibility_passed",
-      decision: "pass",
+      decision: allowedCheckoutDecision,
     });
     if (!ready.ok) throw new Error("synthetic test setup failed");
     const checkout = transitionOrder(ready.value, { type: "begin_checkout" });
@@ -189,7 +261,7 @@ describe("transitionOrder", () => {
     const paid = paidPendingOrder();
     const held = transitionOrder(paid, {
       type: "post_payment_hold",
-      decision: "unknown",
+      decision: blockedCheckoutDecision,
     });
     expect(held).toMatchObject({
       ok: true,
@@ -199,7 +271,7 @@ describe("transitionOrder", () => {
 
     const released = transitionOrder(held.value, {
       type: "release_for_fulfillment",
-      decision: "pass",
+      decision: allowedCheckoutDecision,
       paymentEvidenceId: "synthetic-payment-journal-1",
       clearanceEvidenceId: "synthetic-clearance-2",
       fulfillmentReleaseVersion: 2,
@@ -222,7 +294,7 @@ describe("transitionOrder", () => {
 
     const reissued = transitionOrder(revoked.value, {
       type: "release_for_fulfillment",
-      decision: "pass",
+      decision: allowedCheckoutDecision,
       paymentEvidenceId: "synthetic-payment-journal-1",
       clearanceEvidenceId: "synthetic-clearance-3",
       fulfillmentReleaseVersion: 3,
@@ -232,7 +304,7 @@ describe("transitionOrder", () => {
       type: "begin_fulfillment",
       now: "2026-08-24T12:00:00.000Z",
       paymentVerified: true,
-      eligibilityDecision: "pass",
+      eligibilityDecision: allowedCheckoutDecision,
       release: {
         ...issuedRelease,
         version: 3,
@@ -310,7 +382,7 @@ describe("transitionOrder", () => {
     (_name, paymentEvidenceId, clearanceEvidenceId, fulfillmentReleaseVersion) => {
       const result = transitionOrder(paidPendingOrder(), {
         type: "release_for_fulfillment",
-        decision: "pass",
+        decision: allowedCheckoutDecision,
         paymentEvidenceId,
         clearanceEvidenceId,
         fulfillmentReleaseVersion,
@@ -457,21 +529,21 @@ describe("transitionOrder", () => {
     [
       "an unverified payment",
       false,
-      "pass",
+      allowedCheckoutDecision,
       issuedRelease,
       "missing_payment_evidence",
     ],
     [
       "a non-pass recheck",
       true,
-      "unknown",
+      blockedCheckoutDecision,
       issuedRelease,
       "eligibility_not_passed",
     ],
     [
       "a revoked release",
       true,
-      "pass",
+      allowedCheckoutDecision,
       {
         state: "revoked",
         version: null,
@@ -486,14 +558,14 @@ describe("transitionOrder", () => {
     [
       "a release for another payment",
       true,
-      "pass",
+      allowedCheckoutDecision,
       { ...issuedRelease, paymentEvidenceId: "synthetic-other-payment" },
       "invalid_release",
     ],
     [
       "an expired release",
       true,
-      "pass",
+      allowedCheckoutDecision,
       issuedRelease,
       "release_not_current",
     ],
@@ -601,7 +673,7 @@ describe("transitionOrder", () => {
       transitionOrder(ready, {
         type: "begin_fulfillment",
         paymentVerified: true,
-        eligibilityDecision: "pass",
+        eligibilityDecision: allowedCheckoutDecision,
         release: {},
         now: "2026-08-24T12:00:00.000Z",
       } as never),
@@ -610,7 +682,7 @@ describe("transitionOrder", () => {
       transitionOrder(ready, {
         type: "begin_fulfillment",
         paymentVerified: true,
-        eligibilityDecision: "pass",
+        eligibilityDecision: allowedCheckoutDecision,
         release: {},
         now: "2026-08-24T12:00:00.000Z",
       } as never),
@@ -718,7 +790,7 @@ describe("transitionOrder", () => {
       { type: "start_eligibility" },
       { type: "place_compliance_hold" },
       { type: "resume_eligibility" },
-      { type: "eligibility_passed", decision: "pass" },
+      { type: "eligibility_passed", decision: allowedCheckoutDecision },
       { type: "begin_checkout" },
       {
         type: "checkout_closed",
@@ -736,10 +808,10 @@ describe("transitionOrder", () => {
         source: "verified_provider_event",
         providerEvidenceId: "synthetic-dispute-event-1",
       } as never,
-      { type: "post_payment_hold", decision: "unknown" },
+      { type: "post_payment_hold", decision: blockedCheckoutDecision },
       {
         type: "release_for_fulfillment",
-        decision: "pass",
+        decision: allowedCheckoutDecision,
         paymentEvidenceId: "synthetic-payment-journal-1",
         clearanceEvidenceId: "synthetic-clearance-2",
         fulfillmentReleaseVersion: 2,
@@ -748,7 +820,7 @@ describe("transitionOrder", () => {
         type: "begin_fulfillment",
         now: "2026-08-24T12:00:00.000Z",
         paymentVerified: true,
-        eligibilityDecision: "pass",
+        eligibilityDecision: allowedCheckoutDecision,
         release: issuedRelease,
       } as never,
       { type: "clearance_revoked", beforeCarrierHandoff: true },
@@ -805,7 +877,7 @@ describe("transitionOrder", () => {
 });
 
 describe("transitionFulfillmentRelease", () => {
-  it("issues a release only with verified payment and all-pass clearance evidence", () => {
+  it("issues a release only with verified payment and an authoritative permitted decision", () => {
     const absent: FulfillmentReleaseSnapshot = {
       state: "absent",
       version: null,
@@ -820,7 +892,7 @@ describe("transitionFulfillmentRelease", () => {
       type: "issue",
       now: "2026-08-24T12:00:00.000Z",
       paymentVerified: true,
-      eligibilityDecision: "pass",
+      eligibilityDecision: allowedCheckoutDecision,
       version: 1,
       paymentEvidenceId: "synthetic-payment-journal-1",
       clearanceEvidenceId: "synthetic-clearance-1",
@@ -844,7 +916,7 @@ describe("transitionFulfillmentRelease", () => {
     ).toBe(true);
   });
 
-  it("allows fulfillment only for verified payment, all-pass recheck, and a current issued release", () => {
+  it("allows fulfillment only for verified payment, an authoritative permitted decision, and a current release", () => {
     const release: FulfillmentReleaseSnapshot = {
       state: "issued",
       version: 1,
@@ -858,11 +930,78 @@ describe("transitionFulfillmentRelease", () => {
     expect(
       canFulfill({
         paymentVerified: true,
-        eligibilityDecision: "pass",
+        eligibilityDecision: allowedCheckoutDecision,
         release,
         now: "2026-08-24T12:00:00.000Z",
       }),
     ).toEqual({ ok: true, value: true });
+  });
+
+  it.each([
+    ["plain lookalike", { ...allowedCheckoutDecision }],
+    ["nonpermitted", blockedCheckoutDecision],
+    ["review-required", reviewCheckoutDecision],
+  ] as const)("denies a %s decision when issuing a fulfillment release", (_name, decision) => {
+    const absent: FulfillmentReleaseSnapshot = {
+      state: "absent",
+      version: null,
+      lastVersion: 0,
+      paymentEvidenceId: null,
+      clearanceEvidenceId: null,
+      clearanceEvidenceHistory: [],
+      expiresAt: null,
+    };
+
+    expect(
+      transitionFulfillmentRelease(absent, {
+        type: "issue",
+        now: "2026-08-24T12:00:00.000Z",
+        paymentVerified: true,
+        eligibilityDecision: decision,
+        version: 1,
+        paymentEvidenceId: "synthetic-payment-journal-1",
+        clearanceEvidenceId: "synthetic-clearance-1",
+        expiresAt: "2026-08-25T12:00:00.000Z",
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "missing_clearance_evidence" },
+    });
+  });
+
+  it.each([
+    ["plain lookalike", { ...allowedCheckoutDecision }],
+    ["nonpermitted", blockedCheckoutDecision],
+    ["review-required", reviewCheckoutDecision],
+  ] as const)("denies a %s decision at the fulfillment recheck", (_name, decision) => {
+    expect(
+      canFulfill({
+        paymentVerified: true,
+        eligibilityDecision: decision,
+        release: issuedRelease,
+        now: "2026-08-24T12:00:00.000Z",
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "eligibility_not_passed" },
+    });
+  });
+
+  it.each([
+    ["plain lookalike", { ...allowedCheckoutDecision }],
+    ["nonpermitted", blockedCheckoutDecision],
+    ["review-required", reviewCheckoutDecision],
+  ] as const)("denies a %s decision at atomic release consumption", (_name, decision) => {
+    expect(
+      transitionFulfillmentRelease(issuedRelease, {
+        type: "consume",
+        now: "2026-08-24T12:00:00.000Z",
+        atomicEligibilityRecheck: decision,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "eligibility_not_passed" },
+    });
   });
 
   it("revokes or expires a release and permits only a newer evidence-backed reissue", () => {
@@ -880,7 +1019,7 @@ describe("transitionFulfillmentRelease", () => {
         type: "issue",
         now: "2026-08-24T12:00:00.000Z",
         paymentVerified: true,
-        eligibilityDecision: "pass",
+        eligibilityDecision: allowedCheckoutDecision,
         version,
         paymentEvidenceId: "synthetic-payment-journal-1",
         clearanceEvidenceId: `synthetic-clearance-${version}`,
@@ -925,7 +1064,7 @@ describe("transitionFulfillmentRelease", () => {
     const consumed = transitionFulfillmentRelease(third.value, {
       type: "consume",
       now: "2026-08-24T12:00:00.000Z",
-      atomicEligibilityRecheck: "pass",
+      atomicEligibilityRecheck: allowedCheckoutDecision,
     });
     expect(consumed).toMatchObject({
       ok: true,
@@ -937,7 +1076,7 @@ describe("transitionFulfillmentRelease", () => {
       transitionFulfillmentRelease(consumed.value, {
         type: "consume",
         now: "2026-08-24T12:01:00.000Z",
-        atomicEligibilityRecheck: "pass",
+        atomicEligibilityRecheck: allowedCheckoutDecision,
       }),
     ).toMatchObject({
       ok: false,
@@ -962,7 +1101,7 @@ describe("transitionFulfillmentRelease", () => {
           type: "issue",
           now: "2026-08-24T12:00:00.000Z",
           paymentVerified: true,
-          eligibilityDecision: "pass",
+          eligibilityDecision: allowedCheckoutDecision,
           version: 1,
           paymentEvidenceId: "synthetic-payment-journal-1",
           clearanceEvidenceId: "synthetic-clearance-1",
@@ -988,7 +1127,7 @@ describe("transitionFulfillmentRelease", () => {
           type: "issue",
           now: "2026-08-25T12:01:00.000Z",
           paymentVerified: true,
-          eligibilityDecision: "pass",
+          eligibilityDecision: allowedCheckoutDecision,
           version: 2,
           paymentEvidenceId: "synthetic-payment-journal-1",
           clearanceEvidenceId: "synthetic-clearance-1",
@@ -1008,7 +1147,7 @@ describe("transitionFulfillmentRelease", () => {
         type: "issue",
         now: "2026-08-24T12:00:00.000Z",
         paymentVerified: true,
-        eligibilityDecision: "pass",
+        eligibilityDecision: allowedCheckoutDecision,
         version,
         paymentEvidenceId: "synthetic-payment-journal-1",
         clearanceEvidenceId,
@@ -1072,7 +1211,7 @@ describe("transitionFulfillmentRelease", () => {
         type: "issue",
         now: "2026-08-24T12:00:00.000Z",
         paymentVerified: true,
-        eligibilityDecision: "pass",
+        eligibilityDecision: allowedCheckoutDecision,
         version: 1,
         paymentEvidenceId: "synthetic-payment-journal-1",
         clearanceEvidenceId: "synthetic-clearance-1",
@@ -1082,11 +1221,11 @@ describe("transitionFulfillmentRelease", () => {
   });
 
   it.each([
-    [false, "pass", issuedRelease, "missing_payment_evidence"],
-    [true, "unknown", issuedRelease, "eligibility_not_passed"],
+    [false, allowedCheckoutDecision, issuedRelease, "missing_payment_evidence"],
+    [true, blockedCheckoutDecision, issuedRelease, "eligibility_not_passed"],
     [
       true,
-      "pass",
+      allowedCheckoutDecision,
       {
         state: "revoked",
         version: null,
@@ -1098,7 +1237,7 @@ describe("transitionFulfillmentRelease", () => {
       },
       "release_not_current",
     ],
-    [true, "pass", { ...issuedRelease, paymentEvidenceId: "   " }, "invalid_snapshot"],
+    [true, allowedCheckoutDecision, { ...issuedRelease, paymentEvidenceId: "   " }, "invalid_snapshot"],
   ] as const)(
     "denies fulfillment when payment=%s, eligibility=%s, or release is invalid",
     (paymentVerified, eligibilityDecision, release, code) => {
@@ -1124,7 +1263,7 @@ describe("transitionFulfillmentRelease", () => {
       expiresAt: null,
     };
 
-    expect(transitionFulfillmentRelease(null as never, { type: "consume", now: "2026-08-24T12:00:00.000Z", atomicEligibilityRecheck: "pass" })).toEqual({
+    expect(transitionFulfillmentRelease(null as never, { type: "consume", now: "2026-08-24T12:00:00.000Z", atomicEligibilityRecheck: allowedCheckoutDecision })).toEqual({
       ok: false,
       error: { code: "invalid_snapshot", state: "unknown", event: "consume" },
     });
@@ -1136,7 +1275,7 @@ describe("transitionFulfillmentRelease", () => {
       transitionFulfillmentRelease("malformed-snapshot" as never, {
         type: "consume",
         now: "2026-08-24T12:00:00.000Z",
-        atomicEligibilityRecheck: "pass",
+        atomicEligibilityRecheck: allowedCheckoutDecision,
       }),
     ).toEqual({
       ok: false,
@@ -1176,7 +1315,7 @@ describe("transitionFulfillmentRelease", () => {
         type: "issue",
         now: "2026-08-24T12:00:00.000Z",
         paymentVerified: "false",
-        eligibilityDecision: "pass",
+        eligibilityDecision: allowedCheckoutDecision,
         version: 1,
         paymentEvidenceId: "synthetic-payment-journal-1",
         clearanceEvidenceId: "synthetic-clearance-1",
@@ -1190,7 +1329,7 @@ describe("transitionFulfillmentRelease", () => {
     expect(
       canFulfill({
         paymentVerified: "false",
-        eligibilityDecision: "pass",
+        eligibilityDecision: allowedCheckoutDecision,
         release: issuedRelease,
         now: "2026-08-24T12:00:00.000Z",
       } as never),

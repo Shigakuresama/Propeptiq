@@ -98,12 +98,12 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 **Primary files:** `src/domain/eligibility.ts`, `authorization.ts`, `content-policy.ts`, `orders.ts`, and their tests.
 
-- [ ] Write failing tests for automatic buyer activation, lightweight checkout, policy-group destination resolution, normal promotions, optional COAs, and single-admin publication.
-- [ ] Replace `REQUIRED_GATE_KEYS` and the current evidence-heavy jurisdiction types with the new interfaces.
-- [ ] Remove routine eligibility/evidence hashes, evidence-integrity requirements, expiry machinery, and automatic hold creation from ordinary checkout while retaining the immutable exact review snapshot hash.
-- [ ] Require MFA only for staff administration, refunds, and fulfillment actions; customer account and order operations require authentication but not MFA.
-- [ ] Change content validation so the site-level research restriction is rendered by layout/product templates rather than required inside every copy candidate.
-- [ ] Preserve the existing money calculations and payment/fulfillment state integrity.
+- [x] Write failing tests for automatic buyer activation, lightweight checkout, policy-group destination resolution, normal promotions, optional COAs, and single-admin publication.
+- [x] Replace `REQUIRED_GATE_KEYS` and the current evidence-heavy jurisdiction types with the new interfaces.
+- [x] Remove routine eligibility/evidence hashes, evidence-integrity requirements, expiry machinery, and automatic hold creation from ordinary checkout while retaining the immutable exact review snapshot hash.
+- [x] Require MFA only for staff administration, refunds, and fulfillment actions; customer account and order operations require authentication but not MFA.
+- [x] Change content validation so the site-level research restriction is rendered by layout/product templates rather than required inside every copy candidate.
+- [x] Preserve the existing money calculations and payment/fulfillment state integrity.
 
 **Validation:** Domain tests demonstrate that ordinary qualified customers pass without staff action while blocked accounts, unavailable destinations, inactive products, and human-use content still fail.
 

@@ -1,4 +1,7 @@
-import type { GateStatus } from "@/domain/eligibility";
+import {
+  isAuthoritativeCheckoutDecision,
+  type CheckoutDecision,
+} from "@/domain/eligibility";
 import type { Result } from "@/domain/result";
 
 export type OrderState =
@@ -28,7 +31,7 @@ export type OrderEvent =
   | Readonly<{ type: "start_eligibility" }>
   | Readonly<{ type: "place_compliance_hold" }>
   | Readonly<{ type: "resume_eligibility" }>
-  | Readonly<{ type: "eligibility_passed"; decision: GateStatus }>
+  | Readonly<{ type: "eligibility_passed"; decision: CheckoutDecision }>
   | Readonly<{ type: "begin_checkout" }>
   | Readonly<{
       type: "checkout_closed";
@@ -48,11 +51,11 @@ export type OrderEvent =
     }>
   | Readonly<{
       type: "post_payment_hold";
-      decision: GateStatus;
+      decision: CheckoutDecision;
     }>
   | Readonly<{
       type: "release_for_fulfillment";
-      decision: "pass";
+      decision: CheckoutDecision;
       paymentEvidenceId: string;
       clearanceEvidenceId: string;
       fulfillmentReleaseVersion: number;
@@ -61,7 +64,7 @@ export type OrderEvent =
       type: "begin_fulfillment";
       now: string;
       paymentVerified: boolean;
-      eligibilityDecision: GateStatus;
+      eligibilityDecision: CheckoutDecision;
       release: FulfillmentReleaseSnapshot;
     }>
   | Readonly<{
@@ -162,7 +165,7 @@ export type FulfillmentReleaseEvent =
       type: "issue";
       now: string;
       paymentVerified: boolean;
-      eligibilityDecision: GateStatus;
+      eligibilityDecision: CheckoutDecision;
       version: number;
       paymentEvidenceId: string;
       clearanceEvidenceId: string;
@@ -173,7 +176,7 @@ export type FulfillmentReleaseEvent =
   | Readonly<{
       type: "consume";
       now: string;
-      atomicEligibilityRecheck: GateStatus;
+      atomicEligibilityRecheck: CheckoutDecision;
     }>;
 
 const orderStates = new Set<OrderState>([
@@ -210,6 +213,16 @@ const releaseStates = new Set<FulfillmentReleaseState>([
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPermittedCheckoutDecision(
+  value: unknown,
+): value is CheckoutDecision {
+  return (
+    isAuthoritativeCheckoutDecision(value) &&
+    value.permitted === true &&
+    value.reviewRequired === false
+  );
 }
 
 function isNonBlankString(value: unknown): value is string {
@@ -470,7 +483,7 @@ export function transitionOrder(
   if (
     snapshot.state === "eligibility_review" &&
     event.type === "eligibility_passed" &&
-    event.decision === "pass"
+    isPermittedCheckoutDecision(event.decision)
   ) {
     return succeed("ready_for_checkout");
   }
@@ -534,7 +547,7 @@ export function transitionOrder(
       snapshot.state === "paid_on_hold") &&
     event.type === "release_for_fulfillment"
   ) {
-    if (event.decision !== "pass") {
+    if (!isPermittedCheckoutDecision(event.decision)) {
       return fail("eligibility_not_passed");
     }
     if (
@@ -562,7 +575,8 @@ export function transitionOrder(
   if (
     snapshot.state === "paid_pending_clearance" &&
     event.type === "post_payment_hold" &&
-    ["manual_review", "blocked", "unknown"].includes(event.decision)
+    isAuthoritativeCheckoutDecision(event.decision) &&
+    !isPermittedCheckoutDecision(event.decision)
   ) {
     return succeed("paid_on_hold", {
       clearanceEvidenceId: null,
@@ -835,7 +849,7 @@ export function transitionFulfillmentRelease(
       return fail("missing_payment_evidence");
     }
     if (
-      event.eligibilityDecision !== "pass" ||
+      !isPermittedCheckoutDecision(event.eligibilityDecision) ||
       !isNonBlankString(event.clearanceEvidenceId)
     ) {
       return fail("missing_clearance_evidence");
@@ -923,7 +937,7 @@ export function transitionFulfillmentRelease(
     if (snapshot.state !== "issued") {
       return fail("release_not_current");
     }
-    if (event.atomicEligibilityRecheck !== "pass") {
+    if (!isPermittedCheckoutDecision(event.atomicEligibilityRecheck)) {
       return fail("eligibility_not_passed");
     }
 
@@ -951,7 +965,7 @@ export function transitionFulfillmentRelease(
 
 export type FulfillmentCheckInput = Readonly<{
   paymentVerified: boolean;
-  eligibilityDecision: GateStatus;
+  eligibilityDecision: CheckoutDecision;
   release: FulfillmentReleaseSnapshot;
   now: string;
 }>;
@@ -988,7 +1002,7 @@ export function canFulfill(
     return fail("missing_payment_evidence");
   }
   if (
-    input.eligibilityDecision !== "pass" ||
+    !isPermittedCheckoutDecision(input.eligibilityDecision) ||
     !isNonBlankString(input.release.clearanceEvidenceId)
   ) {
     return fail("eligibility_not_passed");

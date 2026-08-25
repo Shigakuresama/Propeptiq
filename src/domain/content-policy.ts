@@ -1,27 +1,13 @@
-import type { EvidenceReference } from "@/domain/eligibility";
-
-export type ApprovedEvidenceProjection = Readonly<{
-  reference: EvidenceReference;
-  approvalId: string;
-  approvalVersion: string;
-  integrityVerified: boolean;
-}>;
-
 export type PublicationPolicy = Readonly<{
   version: string;
-  approvalId: string;
-  approvalVersion: string;
-  effectiveAt: string;
-  expiresAt: string | null;
-  integrityVerified: boolean;
-  approvedNegativeDisclaimers: readonly string[];
-  approvedEvidence: readonly ApprovedEvidenceProjection[];
+  activeLotEvidenceIds: readonly string[];
 }>;
 
 export type PublicClaim = Readonly<{
   id: string;
   text: string;
-  evidenceApprovalIds: readonly string[];
+  kind: "ordinary" | "analytical";
+  lotEvidenceIds: readonly string[];
 }>;
 
 export type PublicCopyCandidate = Readonly<{
@@ -31,7 +17,7 @@ export type PublicCopyCandidate = Readonly<{
 
 export type ContentViolationCode =
   | "publication_policy_unavailable"
-  | "approved_disclaimer_missing"
+  | "copy_candidate_invalid"
   | "dosage"
   | "administration"
   | "reconstitution"
@@ -63,95 +49,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isNonBlankString(value: unknown): value is string {
+function isNonBlank(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-function isDenseArray(value: readonly unknown[]): boolean {
+function isDenseArray(value: unknown): value is readonly unknown[] {
+  if (!Array.isArray(value)) return false;
   for (let index = 0; index < value.length; index += 1) {
-    if (!Object.hasOwn(value, index)) {
-      return false;
-    }
+    if (!Object.hasOwn(value, index)) return false;
   }
-
   return true;
-}
-
-function isValidEvidenceProjection(
-  value: unknown,
-): value is ApprovedEvidenceProjection {
-  if (
-    !isRecord(value) ||
-    !isNonBlankString(value.approvalId) ||
-    !isNonBlankString(value.approvalVersion) ||
-    value.integrityVerified !== true ||
-    !isRecord(value.reference)
-  ) {
-    return false;
-  }
-
-  const reference = value.reference;
-  return (
-    isNonBlankString(reference.kind) &&
-    isNonBlankString(reference.id) &&
-    isNonBlankString(reference.version) &&
-    (reference.sha256 === null ||
-      (typeof reference.sha256 === "string" &&
-        /^[a-f0-9]{64}$/.test(reference.sha256)))
-  );
-}
-
-function isCurrentPublicationPolicy(
-  policy: unknown,
-  nowValue: unknown,
-): policy is PublicationPolicy {
-  if (
-    !isRecord(policy) ||
-    typeof nowValue !== "string" ||
-    typeof policy.effectiveAt !== "string" ||
-    !(policy.expiresAt === null || typeof policy.expiresAt === "string") ||
-    !isNonBlankString(policy.version) ||
-    !isNonBlankString(policy.approvalId) ||
-    !isNonBlankString(policy.approvalVersion) ||
-    policy.integrityVerified !== true ||
-    !Array.isArray(policy.approvedNegativeDisclaimers) ||
-    policy.approvedNegativeDisclaimers.length === 0 ||
-    !isDenseArray(policy.approvedNegativeDisclaimers) ||
-    !policy.approvedNegativeDisclaimers.every(
-      (disclaimer) =>
-        isNonBlankString(disclaimer) && normalizeText(disclaimer).length > 0,
-    ) ||
-    !Array.isArray(policy.approvedEvidence) ||
-    !isDenseArray(policy.approvedEvidence) ||
-    !policy.approvedEvidence.every(isValidEvidenceProjection)
-  ) {
-    return false;
-  }
-
-  const now = new Date(nowValue);
-  const effectiveAt = new Date(policy.effectiveAt);
-  const expiresAt = policy.expiresAt === null ? null : new Date(policy.expiresAt);
-  const approvedEvidenceIds = new Set<string>();
-  const approvedEvidenceIsUnique = policy.approvedEvidence.every(
-    ({ approvalId }) => {
-      const isUnique = !approvedEvidenceIds.has(approvalId);
-      approvedEvidenceIds.add(approvalId);
-      return isUnique;
-    },
-  );
-
-  return (
-    Number.isFinite(now.getTime()) &&
-    now.toISOString() === nowValue &&
-    Number.isFinite(effectiveAt.getTime()) &&
-    effectiveAt.toISOString() === policy.effectiveAt &&
-    effectiveAt.getTime() <= now.getTime() &&
-    (expiresAt === null ||
-      (Number.isFinite(expiresAt.getTime()) &&
-        expiresAt.toISOString() === policy.expiresAt &&
-        expiresAt.getTime() > now.getTime())) &&
-    approvedEvidenceIsUnique
-  );
 }
 
 function normalizeText(value: string): string {
@@ -162,6 +69,17 @@ function normalizeText(value: string): string {
     .replace(/[\p{P}\p{S}]+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function isValidPolicy(value: unknown): value is PublicationPolicy {
+  return (
+    isRecord(value) &&
+    isNonBlank(value.version) &&
+    isDenseArray(value.activeLotEvidenceIds) &&
+    value.activeLotEvidenceIds.every(isNonBlank) &&
+    new Set(value.activeLotEvidenceIds).size ===
+      value.activeLotEvidenceIds.length
+  );
 }
 
 const prohibitedPatterns: readonly Readonly<{
@@ -229,10 +147,16 @@ const prohibitedCompactPatterns: readonly Readonly<{
     pattern: /(?:administer|administration|orally|sublingual)/,
   },
   { code: "reconstitution", pattern: /reconstitut/ },
-  { code: "injection", pattern: /(?:inject|subcutaneous|intramuscular|intravenous)/ },
+  {
+    code: "injection",
+    pattern: /(?:inject|subcutaneous|intramuscular|intravenous)/,
+  },
   { code: "treatment", pattern: /(?:treat|cure|prevent|diagnos)/ },
   { code: "weight_loss", pattern: /(?:weightloss|loseweight|fatburn)/ },
-  { code: "bodybuilding", pattern: /(?:bodybuilding|musclegrowth|buildmuscle)/ },
+  {
+    code: "bodybuilding",
+    pattern: /(?:bodybuilding|musclegrowth|buildmuscle)/,
+  },
   { code: "anti_aging", pattern: /antiaging/ },
   { code: "therapeutic", pattern: /therapeutic/ },
   {
@@ -242,11 +166,13 @@ const prohibitedCompactPatterns: readonly Readonly<{
   },
   {
     code: "human_outcome",
-    pattern: /(?:inhumans|forhuman|forpatient|patientoutcome|humanhealth|humanoutcome|humanuse|humanconsumption)/,
+    pattern:
+      /(?:inhumans|forhuman|forpatient|patientoutcome|humanhealth|humanoutcome|humanuse|humanconsumption)/,
   },
   {
     code: "veterinary_outcome",
-    pattern: /(?:veterinary|animalhealth|animaluse|animalconsumption|foranimal|fordog|forcat|forpet)/,
+    pattern:
+      /(?:veterinary|animalhealth|animaluse|animalconsumption|foranimal|fordog|forcat|forpet)/,
   },
   {
     code: "unsupported_claim",
@@ -255,6 +181,14 @@ const prohibitedCompactPatterns: readonly Readonly<{
   },
 ]);
 
+function violation(
+  code: ContentViolationCode,
+  match: string | null,
+  claimId: string | null,
+): ContentViolation {
+  return Object.freeze({ code, match, claimId });
+}
+
 function appendProhibitedViolations(
   normalizedText: string,
   claimId: string | null,
@@ -262,162 +196,111 @@ function appendProhibitedViolations(
 ): void {
   for (const { code, pattern } of prohibitedPatterns) {
     const match = normalizedText.match(pattern)?.[0] ?? null;
-    if (match !== null) {
-      violations.push(Object.freeze({ code, match, claimId }));
-    }
+    if (match !== null) violations.push(violation(code, match, claimId));
   }
 
   const compactText = normalizedText.replace(/\s+/g, "");
   for (const { code, pattern } of prohibitedCompactPatterns) {
     const match = compactText.match(pattern)?.[0] ?? null;
     const alreadyRecorded = violations.some(
-      (violation) => violation.code === code && violation.claimId === claimId,
+      (current) => current.code === code && current.claimId === claimId,
     );
     if (match !== null && !alreadyRecorded) {
-      violations.push(Object.freeze({ code, match, claimId }));
+      violations.push(violation(code, match, claimId));
     }
   }
+}
+
+function result(
+  publishable: boolean,
+  status: ContentScanResult["status"],
+  violations: readonly ContentViolation[],
+  policyVersion: string | null,
+): ContentScanResult {
+  return Object.freeze({
+    publishable,
+    status,
+    violations: Object.freeze([...violations]),
+    policyVersion,
+  });
+}
+
+function isValidCandidateShell(value: unknown): value is PublicCopyCandidate {
+  return (
+    isRecord(value) &&
+    typeof value.text === "string" &&
+    normalizeText(value.text).length > 0 &&
+    isDenseArray(value.claims)
+  );
 }
 
 export function scanPublicCopy(
   candidate: PublicCopyCandidate,
   policy: PublicationPolicy,
-  now: string,
 ): ContentScanResult {
-  if (!isCurrentPublicationPolicy(policy, now)) {
-    return Object.freeze({
-      publishable: false,
-      status: "unknown",
-      violations: Object.freeze([
-        Object.freeze({
-          code: "publication_policy_unavailable" as const,
-          match: null,
-          claimId: null,
-        }),
-      ]),
-      policyVersion: null,
-    });
+  if (!isValidPolicy(policy)) {
+    return result(
+      false,
+      "unknown",
+      [violation("publication_policy_unavailable", null, null)],
+      null,
+    );
   }
-
-  if (!isRecord(candidate) || typeof candidate.text !== "string") {
-    return Object.freeze({
-      publishable: false,
-      status: "blocked",
-      violations: Object.freeze([
-        Object.freeze({
-          code: "approved_disclaimer_missing" as const,
-          match: null,
-          claimId: null,
-        }),
-      ]),
-      policyVersion: policy.version,
-    });
-  }
-
-  const normalizedCopy = normalizeText(candidate.text);
-  const includesApprovedDisclaimer = policy.approvedNegativeDisclaimers.some(
-    (disclaimer) => normalizedCopy.includes(normalizeText(disclaimer)),
-  );
-  if (!includesApprovedDisclaimer) {
-    return Object.freeze({
-      publishable: false,
-      status: "blocked",
-      violations: Object.freeze([
-        Object.freeze({
-          code: "approved_disclaimer_missing" as const,
-          match: null,
-          claimId: null,
-        }),
-      ]),
-      policyVersion: policy.version,
-    });
-  }
-
-  let scannableCopy = normalizedCopy;
-  for (const disclaimer of policy.approvedNegativeDisclaimers) {
-    scannableCopy = scannableCopy.replaceAll(normalizeText(disclaimer), " ");
-  }
-
-  const violations: ContentViolation[] = [];
-  appendProhibitedViolations(scannableCopy, null, violations);
-
-  const approvedEvidenceIds = new Set(
-    policy.approvedEvidence.map(({ approvalId }) => approvalId),
-  );
-  const claims: readonly unknown[] | null = Array.isArray(candidate.claims)
-    ? candidate.claims
-    : null;
-  if (claims === null) {
-    violations.push(
-      Object.freeze({
-        code: "unsupported_claim" as const,
-        match: null,
-        claimId: null,
-      }),
+  if (!isValidCandidateShell(candidate)) {
+    return result(
+      false,
+      "blocked",
+      [violation("copy_candidate_invalid", null, null)],
+      policy.version,
     );
   }
 
-  for (const claim of claims ?? []) {
+  const violations: ContentViolation[] = [];
+  appendProhibitedViolations(normalizeText(candidate.text), null, violations);
+
+  const activeLotEvidenceIds = new Set(policy.activeLotEvidenceIds);
+  for (const claim of candidate.claims as readonly unknown[]) {
     const claimId =
-      isRecord(claim) && isNonBlankString(claim.id) ? claim.id : null;
+      isRecord(claim) && isNonBlank(claim.id) ? claim.id : null;
     if (!isRecord(claim)) {
-      violations.push(
-        Object.freeze({
-          code: "unsupported_claim" as const,
-          match: null,
-          claimId,
-        }),
-      );
+      violations.push(violation("unsupported_claim", null, claimId));
       continue;
     }
 
-    const evidenceApprovalIds = Array.isArray(claim.evidenceApprovalIds)
-      ? claim.evidenceApprovalIds
-      : [];
-    const evidenceIdsAreStrings = evidenceApprovalIds.every(isNonBlankString);
-    const uniqueClaimEvidenceIds = new Set(evidenceApprovalIds);
-    const isSupported =
-      claimId !== null &&
-      isNonBlankString(claim.text) &&
-      normalizeText(claim.text).length > 0 &&
-      evidenceApprovalIds.length > 0 &&
-      isDenseArray(evidenceApprovalIds) &&
-      evidenceIdsAreStrings &&
-      uniqueClaimEvidenceIds.size === evidenceApprovalIds.length &&
-      evidenceApprovalIds.every(
-        (approvalId) =>
-          typeof approvalId === "string" &&
-          approvedEvidenceIds.has(approvalId),
-      );
+    const lotEvidenceIds = claim.lotEvidenceIds;
+    const evidenceProjectionIsValid =
+      isDenseArray(lotEvidenceIds) &&
+      lotEvidenceIds.every(isNonBlank) &&
+      new Set(lotEvidenceIds).size === lotEvidenceIds.length;
+    const claimTextIsValid =
+      typeof claim.text === "string" && normalizeText(claim.text).length > 0;
+    const kindIsValid = claim.kind === "ordinary" || claim.kind === "analytical";
+    const analyticalEvidenceIsValid =
+      claim.kind !== "analytical" ||
+      (evidenceProjectionIsValid &&
+        lotEvidenceIds.length > 0 &&
+        lotEvidenceIds.every((id) => activeLotEvidenceIds.has(id)));
 
-    if (!isSupported) {
-      violations.push(
-        Object.freeze({
-          code: "unsupported_claim" as const,
-          match: null,
-          claimId,
-        }),
-      );
+    if (
+      claimId === null ||
+      !claimTextIsValid ||
+      !kindIsValid ||
+      !evidenceProjectionIsValid ||
+      !analyticalEvidenceIsValid
+    ) {
+      violations.push(violation("unsupported_claim", null, claimId));
     }
-
     if (typeof claim.text === "string") {
-      const normalizedClaim = normalizeText(claim.text);
-      appendProhibitedViolations(normalizedClaim, claimId, violations);
+      appendProhibitedViolations(
+        normalizeText(claim.text),
+        claimId,
+        violations,
+      );
     }
   }
-  if (violations.length > 0) {
-    return Object.freeze({
-      publishable: false,
-      status: "blocked",
-      violations: Object.freeze(violations),
-      policyVersion: policy.version,
-    });
-  }
 
-  return Object.freeze({
-    publishable: true,
-    status: "pass",
-    violations: Object.freeze([]),
-    policyVersion: policy.version,
-  });
+  if (violations.length > 0) {
+    return result(false, "blocked", violations, policy.version);
+  }
+  return result(true, "pass", [], policy.version);
 }

@@ -1,4 +1,8 @@
-import type { JurisdictionState } from "@/domain/eligibility";
+type PlatformJurisdictionDisplayState =
+  | "Allowed"
+  | "Manual Review"
+  | "Blocked"
+  | "Unknown";
 
 export const brand = {
   name: "PROPEPTIQ LABS",
@@ -89,25 +93,25 @@ export const stateMachines = [
 
 export const jurisdictionMatrix = [
   {
-    state: "Allowed" as JurisdictionState,
+    state: "Allowed" as PlatformJurisdictionDisplayState,
     meaning:
       "The SKU, destination, and buyer state have all been approved. Checkout may continue once other gates pass.",
     outcome: "Proceed",
   },
   {
-    state: "Manual Review" as JurisdictionState,
+    state: "Manual Review" as PlatformJurisdictionDisplayState,
     meaning:
       "A human must verify the order. The system keeps the order on hold and does not auto-release it.",
     outcome: "Hold",
   },
   {
-    state: "Blocked" as JurisdictionState,
+    state: "Blocked" as PlatformJurisdictionDisplayState,
     meaning:
       "The SKU or destination is not allowed for this workflow. Checkout stays unavailable.",
     outcome: "Stop",
   },
   {
-    state: "Unknown" as JurisdictionState,
+    state: "Unknown" as PlatformJurisdictionDisplayState,
     meaning:
       "The jurisdiction has not been classified yet. The default behavior is to block and request review.",
     outcome: "Default deny",
