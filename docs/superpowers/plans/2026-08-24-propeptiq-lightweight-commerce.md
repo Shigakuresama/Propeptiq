@@ -131,12 +131,12 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 5: Implement Lightweight Accounts and Administration
 
-- [ ] At checkout, require Clerk email verification, age confirmation, purpose selector, and the current attestation version.
-- [ ] Automatically activate the buyer after successful completion.
-- [ ] Build customer account/order history without organization application workflows.
-- [ ] Build one-admin CRUD for products, lots, COAs, policy groups, destination rules, promotions, buyer status, review requests, orders, refunds, and shipments.
-- [ ] Require Clerk MFA for staff routes but remove per-action reauthentication and dual approval.
-- [ ] Append concise audit events for catalog publication, destination changes, buyer blocks/reviews, refunds, and shipment actions.
+- [x] At checkout, require Clerk email verification, age confirmation, purpose selector, and the current attestation version.
+- [x] Automatically activate the buyer after successful completion.
+- [x] Build customer account/order history without organization application workflows.
+- [x] Build one-admin CRUD for products, lots, COAs, policy groups, destination rules, promotions, buyer status, review requests, orders, refunds, and shipments.
+- [x] Require Clerk MFA for staff routes but remove per-action reauthentication and dual approval.
+- [x] Append concise audit events for catalog publication, destination changes, buyer blocks/reviews, refunds, and shipment actions.
 
 **Validation:** A new customer can become checkout-eligible without staff intervention; blocked/review accounts cannot bypass their status; non-admin users cannot access staff routes.
 
