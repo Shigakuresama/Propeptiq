@@ -1,7 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  poweredByHeader: false,
+  typedRoutes: true,
+  experimental: {
+    taint: true,
+  },
 };
 
 export default nextConfig;
