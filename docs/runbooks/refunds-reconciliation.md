@@ -8,7 +8,7 @@
 4. Persist the refund request before calling the provider.
 5. Call the provider through the server adapter; never enter card/payment secrets into PROPEPTIQ.
 6. Append provider result/event. Treat redirect/dashboard appearance as secondary evidence; authoritative provider state is required.
-7. Move to `Refunded` only after verified provider evidence.
+7. Derive `Partially Refunded` when verified cumulative refunds are below the paid balance, and `Refunded` only when verified cumulative refunds equal the paid balance. Never classify a partial refund as a full refund.
 8. Reconcile inventory/shipment and send the approved transactional notice.
 
 If a refund call times out, retrieve state by idempotency/provider reference before retrying.

@@ -290,7 +290,7 @@ npm run test:integration
 - [ ] Treat cart input as product ID and requested quantity only; reload approved product, current price, lot availability, buyer, organization, and destination on the server.
 - [ ] Evaluate buyer, catalog, jurisdiction, provider, tax, shipping, inventory, compliance, and launch gates independently and persist a versioned snapshot.
 - [ ] Any block denies; unknown or manual review creates/updates a hold and denies hosted checkout.
-- [ ] An approved, unexpired exact-case manual-review decision may convert only its matching buyer/product/destination/purpose/policy gate to pass; it never changes the base jurisdiction rule.
+- [ ] An approved, unexpired exact-case manual-review decision may convert only its matching draft order and immutable eligibility-evaluation hash to pass; cart/quantity/destination/purpose/policy changes require a new evaluation and decision, and the base jurisdiction rule never changes.
 - [ ] Require the current checkout attestation and persist its exact version.
 - [ ] Create the order, price snapshot, reservation, and provider-session intent transactionally with an idempotency key.
 - [ ] Use Stripe hosted Checkout only when adapter mode and database launch gate both permit it; pass server-derived amounts and correlation metadata.

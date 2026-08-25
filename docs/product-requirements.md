@@ -94,7 +94,7 @@ May manage staff access and launch controls. Cannot edit append-only history and
 ### 4.4 Payment and fulfillment
 
 1. Webhook endpoint reads the raw body and verifies the provider signature.
-2. Unique provider event ID is stored before processing; duplicates return success without repeating side effects.
+2. Unique provider event ID and payload hash are stored before processing. Only same-hash events already processed/ignored return success without repeating side effects; failed or stale attempts resume idempotently, and hash conflicts are rejected and alerted.
 3. Append-only payment journal records the event and correlated order.
 4. Server verifies payment status and amount/currency against the order snapshot.
 5. Eligibility is re-evaluated after payment. A changed/unknown gate yields `Paid on hold`, not fulfillment.

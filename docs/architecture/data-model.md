@@ -74,7 +74,7 @@ Product publication requires an approved product version. A purity value can app
 | `eligibility_evaluations` | Immutable aggregate snapshot | records every independent gate and input version |
 | `compliance_cases` | Holds/manual review | open/approved/rejected/expired; reason/evidence |
 | `compliance_decisions` | Append-only case decisions | actor, capability, reason, evidence, step-up time |
-| `manual_review_case_decisions` | Exact-case resolution for a base manual-review rule | buyer/org + product + destination + purpose/policy version + expiry; append-only; approval passes only this case |
+| `manual_review_case_decisions` | Exact-case resolution for a base manual-review rule | order + immutable eligibility-evaluation hash + expiry; append-only; approval passes only that unchanged order snapshot |
 
 Independent gate keys:
 
