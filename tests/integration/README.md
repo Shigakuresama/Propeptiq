@@ -6,7 +6,14 @@ schema, foreign-key, uniqueness, enum, and row-check behavior without database
 credentials.
 
 PGlite is not evidence for real PostgreSQL concurrency, locking, transaction
-isolation, or deployment behavior. The guarded external-PostgreSQL lane remains
-future Task 6/7 work and requires both an isolated `TEST_DATABASE_URL` and the
-explicit test-target confirmation. No shared, preview, or production database
-is an acceptable test target.
+isolation, or deployment behavior. A separate checkout-contention lane is
+available as `npm run test:postgres:checkout`; it is excluded from both normal
+unit and PGlite integration suites.
+
+The contention lane requires a separately prepared, fully migrated, disposable
+PostgreSQL database plus both a narrowly test-scoped `TEST_DATABASE_URL` and
+exact `TEST_DATABASE_CONFIRMATION=isolated-test-database`. Its guard rejects
+shared/main/live/production-looking targets before creating a pool. The lane
+uses deterministic synthetic UUID fixtures and deletes only those exact rows;
+it never drops or resets a schema. No shared, preview, or production database
+is an acceptable target.

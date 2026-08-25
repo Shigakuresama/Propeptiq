@@ -54,6 +54,7 @@ const configNames = [
   "nx.json",
   "vitest.config.ts",
   "vitest.integration.config.ts",
+  "vitest.postgres.config.ts",
   "playwright.config.ts",
   "eslint.config.mjs",
   "next.config.ts",

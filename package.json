@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:postgres:checkout": "vitest run --config vitest.postgres.config.ts",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
     "test:e2e": "playwright test",
