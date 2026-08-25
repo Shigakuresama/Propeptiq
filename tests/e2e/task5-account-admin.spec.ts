@@ -43,6 +43,16 @@ test("preserves exact cart IDs and quantities through fixed sign-in and checkout
   });
 });
 
+test("ignores a hostile sign-in return query and returns only to the fixed checkout route", async ({ page }) => {
+  await page.goto("/sign-in?returnTo=https%3A%2F%2Fevil.example%2Fcapture");
+  await expect(page.getByText("For legitimate laboratory and research use only.", { exact: true })).toBeVisible();
+  await expect(page.locator("main#main-content")).toHaveCount(1);
+  await page.getByRole("radio", { name: "Fixed new customer" }).check();
+  await page.getByRole("button", { name: "Continue to checkout" }).click();
+  await expect(page).toHaveURL(/\/checkout$/);
+  expect(new URL(page.url()).origin).toBe("http://127.0.0.1:4631");
+});
+
 test("activates a new customer only after the verified account facts and current attestation are submitted", async ({ page }) => {
   await signInAs(page, "Fixed new customer");
   await page.getByRole("checkbox", { name: "I confirm that I am at least 21 years old." }).check();
@@ -81,7 +91,7 @@ test("keeps a blocked customer read-only while retaining own account and order r
 test("shows precise admin gates for non-admin, missing-MFA, and missing-capability principals", async ({ page }) => {
   await signInAs(page, "Fixed non-administrator");
   await page.goto("/admin");
-  await expect(page.getByRole("heading", { name: "Multi-factor authentication is not configured" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Required capability is not granted" })).toBeVisible();
 
   await signInAs(page, "Fixed administrator without MFA");
   await page.goto("/admin");
@@ -96,7 +106,10 @@ test("one capable administrator can mutate a local resource and read its redacte
   await signInAs(page, "Fixed capable administrator");
   await page.goto("/admin/products");
   await expect(page.getByRole("heading", { name: "Products" })).toBeVisible();
-  await page.getByRole("button", { name: "Submit guarded command" }).click();
+  // Production contract: each command form has an accessible name matching its
+  // lifecycle command, so adding another CRUD form cannot retarget this proof.
+  const productCommand = page.getByRole("form", { name: "Activate one verified product" });
+  await productCommand.getByRole("button", { name: "Submit guarded command" }).click();
   await expect(page).toHaveURL(/\/admin\/products\?result=saved$/);
   await expect(page.getByRole("status")).toContainText("confirm the resource or audit read-back");
   await page.goto("/admin/audit");
@@ -130,9 +143,22 @@ test("account and admin interaction supports keyboard focus, reduced motion, min
   await page.emulateMedia({ reducedMotion: "reduce" });
   await signInAs(page, "Fixed capable administrator");
   await page.goto("/admin");
+  await expect(page.getByText("For legitimate laboratory and research use only.", { exact: true })).toBeVisible();
+  await expect(page.locator("main#main-content")).toHaveCount(1);
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
+  await expect(page.evaluate(() => {
+    const element = document.activeElement;
+    if (!(element instanceof HTMLElement)) return false;
+    const styles = getComputedStyle(element);
+    return styles.outlineStyle !== "none" || styles.boxShadow !== "none";
+  })).toBe(true);
   await expect(page.locator("p.text-base").first()).toHaveCSS("font-size", "16px");
+  await expect(page.evaluate(() => {
+    const body = getComputedStyle(document.body);
+    const root = getComputedStyle(document.documentElement);
+    return body.animationDuration === "0s" && body.transitionDuration === "0s" && root.scrollBehavior === "auto";
+  })).toBe(true);
   const targets = await page.getByRole("link").evaluateAll((links) => links.map((link) => {
     const box = link.getBoundingClientRect();
     return { width: box.width, height: box.height };
@@ -140,7 +166,12 @@ test("account and admin interaction supports keyboard focus, reduced motion, min
   expect(targets.filter((target) => target.width > 0 && target.height > 0).every((target) => target.width >= 44 && target.height >= 44)).toBe(true);
   await page.setViewportSize({ width: 1024, height: 900 });
   await page.goto("/account");
+  await expect(page.getByText("For legitimate laboratory and research use only.", { exact: true })).toBeVisible();
+  await expect(page.locator("main#main-content")).toHaveCount(1);
   await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+  // This is a CSS-zoom reflow proxy for 200% text scaling, not literal browser zoom.
   await expect(page.getByRole("heading", { name: "Verified account record" })).toBeVisible();
+  const zoomOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(zoomOverflow).toBeLessThanOrEqual(1);
   await expect(page.locator("main#main-content")).toHaveAttribute("id", "main-content");
 });
