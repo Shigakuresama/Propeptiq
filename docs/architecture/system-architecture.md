@@ -105,7 +105,8 @@ flowchart TD
   Ship[Authorized fulfillment action]
 
   Webhook --> Dedup
-  Dedup -->|duplicate| Journal
+  Dedup -->|processed duplicate| Ack[Acknowledge; no new effects]
+  Dedup -->|failed or stale lease| Verify
   Dedup -->|new| Verify
   Verify --> Journal
   Journal --> Recheck
@@ -122,7 +123,9 @@ The redirect/success page never enters this flow.
 - Order creation, price snapshots, eligibility snapshot references, and initial inventory reservation occur in one transaction.
 - Unique idempotency constraints protect application mutations and provider session creation.
 - Webhook event insertion uses a unique `(provider, provider_event_id)` constraint.
+- Inbox processing uses retryable states and expiring leases; row existence alone never makes a failed event successful.
 - Fulfillment release has a unique `order_id` and a consumed timestamp; consuming and inventory allocation occur atomically.
+- Release issue/revoke/expire/consume events are append-only; consumption rechecks current eligibility so a revoked release cannot ship.
 - Inventory is an append-only ledger. Available quantity is derived/materialized under transaction and may never go negative.
 - Review decisions, attestations, payment journal, inventory ledger, and audit events are append-only.
 

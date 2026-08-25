@@ -57,12 +57,17 @@ Each product/jurisdiction rule contains:
 
 Expired or superseded rules do not fall back to `Allowed`; they evaluate `Unknown` until replaced.
 
+An exact-case manual-review decision is a separate, append-only record scoped to the buyer principal/organization, product, destination, intended-use version, and underlying policy version. An approved, unexpired decision converts only that case’s product-jurisdiction gate to `PASS`; it does not change the base `Manual Review` rule or authorize another buyer/order. A rejected decision yields `Blocked`. A missing, expired, superseded, or mismatched case decision remains `Manual Review` or `Unknown` and cannot proceed.
+
 ## 6. Evaluation algorithm
 
 ```text
 if product is not approved and active: Blocked
 if no active exact product + destination rule: Unknown
 if rule evidence is expired or integrity check fails: Unknown
+if rule is Manual Review and no exact current case decision exists: Manual Review
+if exact case decision is rejected: Blocked
+if exact case decision is approved and matches buyer, product, destination, purpose, and policy version: Pass for this gate
 otherwise use the exact rule value
 evaluate provider, tax, buyer, shipping, lot, compliance, and launch gates independently
 if any gate is Blocked: aggregate Blocked

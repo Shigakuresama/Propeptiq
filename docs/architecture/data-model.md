@@ -74,6 +74,7 @@ Product publication requires an approved product version. A purity value can app
 | `eligibility_evaluations` | Immutable aggregate snapshot | records every independent gate and input version |
 | `compliance_cases` | Holds/manual review | open/approved/rejected/expired; reason/evidence |
 | `compliance_decisions` | Append-only case decisions | actor, capability, reason, evidence, step-up time |
+| `manual_review_case_decisions` | Exact-case resolution for a base manual-review rule | buyer/org + product + destination + purpose/policy version + expiry; append-only; approval passes only this case |
 
 Independent gate keys:
 
@@ -93,15 +94,16 @@ Each gate result is `PASS`, `MANUAL_REVIEW`, `BLOCKED`, or `UNKNOWN`. Aggregatio
 
 | Table | Purpose | Critical constraints |
 |---|---|---|
-| `carts` | Authenticated organization draft | no anonymous owner |
+| `carts` | Authenticated individual or organization draft | exactly one individual owner or organization owner; no anonymous owner |
 | `cart_items` | Product/quantity selection | browser price is not stored as authority |
 | `orders` | Durable commercial workflow | integer totals, destination snapshot, eligibility reference, state |
 | `order_items` | Product/lot/price snapshot | immutable after checkout creation |
 | `checkout_attempts` | Hosted session attempts | idempotency key, provider session ID, status |
-| `provider_webhook_events` | Deduplication/inbox | unique provider/event ID, payload hash, processing state |
+| `provider_webhook_events` | Recoverable deduplication/inbox | unique provider/event ID, payload hash, processing state/attempt/lease; failed or stale events remain retryable |
 | `payment_journal` | Append-only normalized payment events | amount/currency/status/provider reference |
 | `refund_requests` | Authorized refund workflow | reason, amount, capability, idempotency |
-| `fulfillment_releases` | One-time release evidence | unique order; payment journal and clearance references |
+| `fulfillment_releases` | One-time release evidence | unique order; payment journal and clearance references; current state derived from append-only release events |
+| `fulfillment_release_events` | Issue/revoke/expire/consume history | append-only; only an active unexpired release may be consumed once |
 | `shipments` | Fulfillment result | release required; actual carrier/tracking only |
 
 Order states:
@@ -118,18 +120,31 @@ stateDiagram-v2
   CheckoutPending --> PaidPendingClearance: verified webhook
   PaidPendingClearance --> PaidOnHold: any gate not pass
   PaidPendingClearance --> ReadyForFulfillment: all gates pass
+  ReadyForFulfillment --> PaidOnHold: clearance changed; revoke release
   ReadyForFulfillment --> FulfillmentInProgress
+  FulfillmentInProgress --> PaidOnHold: clearance changed before carrier handoff; revoke release
   FulfillmentInProgress --> Fulfilled
   Draft --> Cancelled
   EligibilityReview --> Cancelled
   ComplianceHold --> Cancelled
   PaymentFailed --> Cancelled
-  PaidOnHold --> RefundPending
-  ReadyForFulfillment --> RefundPending
-  RefundPending --> Refunded: verified provider event
 ```
 
-No transition to a paid state originates from the browser redirect.
+No transition to a paid state originates from the browser redirect. A restrictive policy or clearance change appends a release-revocation event before shipment can proceed. Release consumption rechecks the current derived release state and eligibility in the same transaction; a previously issued but revoked/expired release cannot authorize fulfillment.
+
+Refund status is a separate financial state derived from the append-only journal:
+
+```mermaid
+stateDiagram-v2
+  [*] --> Unpaid
+  Unpaid --> Paid: verified provider event
+  Paid --> RefundPending: authorized request
+  RefundPending --> PartiallyRefunded: verified cumulative refund below paid balance
+  RefundPending --> Refunded: verified cumulative refund equals paid balance
+  PartiallyRefunded --> RefundPending: additional authorized request
+  Paid --> Disputed: verified provider event
+  PartiallyRefunded --> Disputed: verified provider event
+```
 
 ## 7. Operations and audit
 

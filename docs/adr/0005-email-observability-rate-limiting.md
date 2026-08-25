@@ -11,7 +11,7 @@ The system needs transactional notices, operational traces/logs, alertable secur
 
 Use Resend behind a transactional-email interface and durable outbox. Use structured JSON logs with explicit redaction, `@vercel/otel`, Vercel Observability, and Vercel Firewall rate limits. Application-level actor/organization/resource limits and idempotency protect sensitive mutations beyond coarse IP limits.
 
-Email failure never reverses a durable decision/payment event; the outbox retries idempotently. Logs/traces contain correlation IDs, not secrets, document content, card data, or unnecessary PII. Audit records remain in Postgres.
+Email failure never reverses a durable decision/payment event. A scheduled, authenticated outbox worker acquires expiring leases, sends with a stable provider idempotency key, records attempts, retries with bounded exponential backoff, and moves exhausted messages to a dead-letter state that alerts operators. Logs/traces contain correlation IDs, not secrets, document content, card data, or unnecessary PII. Audit records remain in Postgres.
 
 ## Consequences
 

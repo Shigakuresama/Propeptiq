@@ -9,7 +9,7 @@
 - **Database integration:** migrations, constraints, tenant scoping, append-only triggers, concurrency, unique idempotency/event/release rules.
 - **Provider contract:** disabled adapters, Stripe signature/idempotency mapping, Blob authorization, Resend outbox behavior.
 - **Component/accessibility:** forms, status displays, empty/loading/error states, keyboard/focus, reduced motion.
-- **Browser:** public pages, protected-route denial, applicant flow, reviewer flow, catalog empty state, checkout denial, success-page read-only behavior, responsive layouts.
+- **Browser:** public pages, protected-route denial, positive synthetic applicant submission, positive authorized reviewer decision, cross-tenant/reviewer denial, catalog empty state, checkout denial, success-page read-only behavior, responsive layouts.
 - **Operational:** backup restore, reconciliation exception detection, incident/hold/refund runbooks.
 
 Test data is clearly labeled synthetic and exists only under test directories/isolated resources. Production migrations do not seed products, prices, labs, COAs, purity, stock, approvals, or customer identities.

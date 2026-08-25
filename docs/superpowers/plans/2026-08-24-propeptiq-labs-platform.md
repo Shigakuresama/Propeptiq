@@ -159,6 +159,9 @@ npm run test:integration
 - Create: `src/lib/server/authorization/authorize.ts`
 - Create: `src/lib/server/dal/*.ts`
 - Create: `src/lib/server/dal/dal.test.ts`
+- Create: `src/app/api/webhooks/clerk/route.ts`
+- Create: `src/lib/server/auth/clerk-lifecycle.ts`
+- Create: `src/lib/server/auth/clerk-reconciliation.ts`
 - Create: `src/proxy.ts`
 - Update: `src/app/layout.tsx`
 
@@ -167,6 +170,8 @@ npm run test:integration
 - [ ] Require all production users to enroll MFA through Clerk configuration and require recent reverification for approvals, suspensions, catalog publication, jurisdiction publication, refunds, staff grants, and launch-gate changes.
 - [ ] Use route protection only as a first layer; every server action/route/DAL method reauthorizes.
 - [ ] Require organization ID in every organization-scoped DAL call and verify membership/capability inside the query/transaction.
+- [ ] Ingest signed Clerk lifecycle webhooks through a recoverable unique inbox; project identity/membership changes without granting business approval, and immediately deny verified revocations.
+- [ ] Add a reconciliation report for Clerk/Neon user, organization, invitation, and membership drift; inconsistencies deny rather than widen access.
 - [ ] Add negative tests for anonymous, wrong-organization, suspended, insufficient-capability, and stale-reverification callers.
 
 **Validation:**
@@ -186,6 +191,7 @@ npm run typecheck
 - Create: `src/app/catalog/page.tsx`
 - Create: `src/app/catalog/[slug]/page.tsx`
 - Create: `src/app/research-use-policy/page.tsx`
+- Create: `src/app/quality-records/page.tsx`
 - Create: `src/app/access/page.tsx`
 - Create: `src/components/site/**`
 - Create: `src/components/ui/**`
@@ -198,6 +204,7 @@ npm run typecheck
 - [ ] Build original components inspired by the references’ clinical clarity and category scanning, without copying assets, prose, product lists, or human-use framing.
 - [ ] Render only approved public product/category/lot fields from the DAL; the initial catalog must show a polished, truthful empty state rather than sample merchandise.
 - [ ] Product routes return not-found for missing/unpublished records and never reveal private COA object locations.
+- [ ] Provide a truthful Quality Records explanation/lookup empty state; render lot/COA data only from approved public records.
 - [ ] Keep cart/checkout entry unavailable to anonymous, unapproved, or catalog-empty users.
 - [ ] Add component/accessibility tests for landmarks, headings, focus, no prohibited phrases, empty/error/loading states, and 375px overflow.
 
@@ -283,9 +290,11 @@ npm run test:integration
 - [ ] Treat cart input as product ID and requested quantity only; reload approved product, current price, lot availability, buyer, organization, and destination on the server.
 - [ ] Evaluate buyer, catalog, jurisdiction, provider, tax, shipping, inventory, compliance, and launch gates independently and persist a versioned snapshot.
 - [ ] Any block denies; unknown or manual review creates/updates a hold and denies hosted checkout.
+- [ ] An approved, unexpired exact-case manual-review decision may convert only its matching buyer/product/destination/purpose/policy gate to pass; it never changes the base jurisdiction rule.
 - [ ] Require the current checkout attestation and persist its exact version.
 - [ ] Create the order, price snapshot, reservation, and provider-session intent transactionally with an idempotency key.
 - [ ] Use Stripe hosted Checkout only when adapter mode and database launch gate both permit it; pass server-derived amounts and correlation metadata.
+- [ ] Keep the restricted Stripe operations client available for webhooks, retrieval, reconciliation, disputes, and refunds whenever validated provider credentials exist, even if new checkout is closed.
 - [ ] Keep the disabled adapter as the safe default and show a truthful unavailable/hold state.
 - [ ] Test browser-total tampering, stale price/policy, replay, concurrency, unknown jurisdiction, inventory race, and disabled/live-mode disagreements.
 
@@ -309,18 +318,19 @@ npm run test:integration
 - Create: `src/lib/server/fulfillment/releases.ts`
 - Create: `src/lib/server/email/provider.ts`
 - Create: `src/lib/server/email/outbox.ts`
+- Create: `src/lib/server/email/worker.ts`
 - Create: `src/lib/server/email/resend.ts`
 - Create: `src/lib/server/payments/webhook.test.ts`
 - Create: `src/lib/server/fulfillment/releases.test.ts`
 
 - [ ] Read the raw webhook body, verify the Stripe signature before parsing/trusting fields, and store unique provider event ID plus payload hash.
-- [ ] Deduplicate in a transaction; acknowledge duplicates without repeating journal, inventory, email, or fulfillment side effects.
+- [ ] Use recoverable inbox states and expiring leases: only processed/ignored same-hash duplicates are acknowledged; failed/stale events resume idempotently, and payload-hash conflicts reject/alert.
 - [ ] Append payment journal entries and verify order, amount, currency, customer/provider metadata, and terminal status.
 - [ ] Re-evaluate current eligibility after verified payment; adverse change produces `paid_on_hold` and no release.
-- [ ] Mint a one-time fulfillment release only when verified payment and current clearance both exist; consume it atomically with lot allocation/shipment evidence.
+- [ ] Mint a one-time fulfillment release only when verified payment and current clearance both exist; append revoke/expire/consume events, and recheck eligibility atomically so a revoked release cannot allocate or ship.
 - [ ] Make the result/success page read-only; it fetches current order status and cannot alter payment or fulfillment.
-- [ ] Implement refund request/confirmation/journal/reconciliation with capability, recent MFA, reason, idempotency, and provider evidence.
-- [ ] Use an email outbox so retried business transactions do not duplicate messages; disabled email is safe and observable.
+- [ ] Implement partial/full refund request/confirmation/journal/reconciliation with capability, recent MFA, reason, refundable-balance validation, idempotency, and provider evidence.
+- [ ] Use an email outbox plus lease/backoff/dead-letter worker so retried business transactions do not duplicate messages; disabled email is safe and observable.
 - [ ] Test invalid signature, replay, out-of-order event, amount mismatch, paid-on-hold, duplicate email, refund replay, and consumed release.
 
 **Validation:**
@@ -340,6 +350,8 @@ npm run test:integration
 - Create: `src/lib/server/rate-limit/*.ts`
 - Create: `src/app/api/health/route.ts`
 - Create: `src/app/api/readiness/route.ts`
+- Create: `src/app/api/internal/outbox/route.ts`
+- Create: `vercel.json`
 - Update: `next.config.ts`
 - Create: `scripts/verify-backup-config.mjs`
 - Create: `scripts/reconcile-payments.mjs`
@@ -350,6 +362,7 @@ npm run test:integration
 - [ ] Configure CSP and security headers compatible with Clerk and hosted providers; document any allowed origin.
 - [ ] Keep health public and shallow; readiness must not disclose dependencies or secrets and must fail when an enabled critical dependency is unavailable.
 - [ ] Implement read-only operational scripts for payment reconciliation and backup configuration validation with explicit environment safeguards.
+- [ ] Protect the scheduled outbox endpoint with a server secret; lease bounded batches, retry with exponential backoff, dead-letter exhausted messages, and alert without exposing recipient data.
 - [ ] Test redaction, rate-limit fail-closed behavior, health/readiness disclosure, and unsafe-environment refusal.
 
 **Validation:**
@@ -394,6 +407,8 @@ npm run build
 - Create: `tests/e2e/public.spec.ts`
 - Create: `tests/e2e/accessibility.spec.ts`
 - Create: `tests/e2e/denial-paths.spec.ts`
+- Create: `tests/e2e/applicant-flow.spec.ts`
+- Create: `tests/e2e/reviewer-flow.spec.ts`
 - Create: `docs/release/2026-08-24-readiness-report.md`
 - Update: `README.md`
 - Update: relevant runbooks and ADRs with implementation evidence

@@ -25,3 +25,7 @@ All authorization is centralized in server-only `requirePrincipal`/`requireCapab
 - Custom auth: rejected due to security/maintenance risk.
 - Auth.js: viable but would require more MFA/organization/admin lifecycle work.
 - Clerk-only authorization: rejected because business approval/compliance is application data.
+
+## Lifecycle synchronization
+
+Signed Clerk webhooks feed a unique, retryable lifecycle inbox for user, organization, invitation, and membership changes. Processing never grants application approval or staff capability; it only projects identity/membership lifecycle facts and immediately removes effective access after a verified revocation. A scheduled read-only reconciliation compares Clerk identities/memberships with the Neon projection and opens exceptions without silently widening access. Until a new or inconsistent membership is reconciled and approved by application policy, authorization denies it.

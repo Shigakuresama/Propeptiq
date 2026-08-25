@@ -66,7 +66,7 @@ Foundational surfaces use semantic shadcn tokens. Status colors are reserved for
 
 ### Public navigation
 
-Logo/wordmark, Research Catalog, Quality Records, Researcher Access, Research-Use Policy, and account control. On mobile, use a shadcn Sheet. Do not present a cart to unauthenticated or ineligible users.
+Logo/wordmark, Research Catalog, Quality Records, Researcher Access, Research-Use Policy, and account control. `Quality Records` routes to a real public explanation/lookup surface and shows no batch claim or COA unless an approved public lot record exists. On mobile, use a shadcn Sheet. Do not present a cart to unauthenticated or ineligible users.
 
 ### Evidence strip
 

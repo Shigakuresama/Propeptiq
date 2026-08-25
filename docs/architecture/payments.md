@@ -34,7 +34,7 @@ interface PaymentProvider {
 }
 ```
 
-`DisabledPaymentProvider` is the production-safe default. It never fabricates success. `StripeCheckoutProvider` is constructed only with validated server secrets and an open payment launch gate.
+`DisabledPaymentProvider` is the production-safe default when provider credentials are absent. It never fabricates success. Validated Stripe credentials enable a restricted provider operations client for webhook verification, session retrieval, reconciliation, disputes, and refunds even while new checkout is closed. Creating a new hosted session additionally requires the separate evidence-backed payment launch gate. Closing checkout must never disable processing or remediation for sessions and payments already in flight.
 
 ## 3. Server-calculated order
 
@@ -44,7 +44,7 @@ If tax or shipping cannot be authoritatively calculated, the gate is `Unknown` a
 
 ## 4. Checkout creation
 
-1. Require authenticated approved principal and organization scope.
+1. Require an authenticated approved principal acting either individually or within an authorized organization scope.
 2. Require current checkout attestation.
 3. Require all independent gates `PASS`.
 4. Reserve eligible lot inventory atomically with an expiry.
@@ -57,11 +57,14 @@ Allowed payment methods and countries are configured explicitly after provider a
 
 ## 5. Webhook inbox and journal
 
-The route reads the raw request body, requires the Stripe signature header, and calls the SDK’s signature verifier with the endpoint secret. It then inserts `(provider, provider_event_id, payload_hash)` under a unique constraint.
+The route reads the raw request body, requires the Stripe signature header, and calls the SDK’s signature verifier with the endpoint secret. It then inserts `(provider, provider_event_id, payload_hash)` under a unique constraint with processing state, attempt count, retry time, lease owner/expiry, and last redacted error.
 
-- Duplicate event: return success after confirming the stored payload hash matches.
-- New event: append a normalized payment journal row, transition the order under lock, and mark the inbox event processed in one durable transaction where possible.
-- Handler failure: retain failure metadata and return an error so Stripe retries.
+- Duplicate with a different payload hash: reject, alert, and do not process.
+- Duplicate already `PROCESSED` or intentionally `IGNORED`: return success without repeating any effect.
+- Duplicate in `RECEIVED`/`FAILED`, or `PROCESSING` with an expired lease: acquire a processing lease and resume idempotently; it is not acknowledged as harmless merely because the inbox row exists.
+- Duplicate with a current processing lease: return a retryable non-success response unless the first worker completes and the event can be re-read as `PROCESSED`.
+- New or retryable event: append the unique normalized journal effect, transition the order under lock, enqueue unique outbox effects, and mark the inbox event `PROCESSED` in one transaction.
+- Handler failure: record redacted failure metadata and next-attempt state, release/expire the lease, and return an error so Stripe retries. Journal/event uniqueness makes partial retry safe.
 
 Handled baseline events include Checkout completion, asynchronous success/failure if later enabled, expiration, payment failure, refund update, and dispute/chargeback signals. Unrecognized signed events are journaled as ignored, not treated as success.
 
@@ -87,11 +90,11 @@ The success URL may include the Checkout Session ID only to retrieve and display
 
 Refund workflow:
 
-1. Finance operator selects order/payment and enters a reason and amount.
+1. Finance operator selects order/payment and enters a reason and amount no greater than the current refundable balance.
 2. Server checks capability, recent MFA, current refundable balance, compliance/fulfillment state, and policy.
 3. Durable refund request and idempotency record are created before provider call.
 4. Provider refund is requested with idempotency key.
-5. Result/event is appended to payment journal; order reaches `Refunded` only from verified provider evidence.
+5. Result/event is appended to the payment journal. Verified cumulative refunded amount determines `PARTIALLY_REFUNDED` versus `REFUNDED`; a partial refund never marks the entire order fully refunded.
 6. Inventory, shipment interception, email, and accounting follow-up are explicit runbook actions, not hidden side effects.
 
 The final return/refund policy and approval thresholds are unresolved launch decisions.
