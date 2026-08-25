@@ -31,8 +31,8 @@
 
 | Requested capability | Planning status | Required completion evidence |
 |---|---|---|
-| `ui-typography` | Applied to the two-font Newsreader/Geist system, readable measures, hierarchy, punctuation, and copy guardrails | Responsive rendered typography and accessibility review |
-| `ui-ux-pro-max` | Applied; the generic glassmorphism recommendation was rejected in favor of the evidence-led clinical archive direction | Approved responsive design and UI audit |
+| `ui-typography` | Applied to the two-font Newsreader/Geist system, readable measures, hierarchy, punctuation, and responsive handoff | Responsive rendered typography and accessibility review |
+| `ui-ux-pro-max` | Applied; mismatched vibrant/block and earlier generic glassmorphism recommendations were rejected in favor of the evidence-led clinical archive direction | Approved responsive design and UI audit |
 | `web-design-guidelines` | Scheduled as the final implementation review gate | Current guideline fetch and issue-by-issue remediation |
 | `vercel-react-view-transitions` | Restricted to meaningful list/detail continuity with reduced-motion fallback | Progressive-enhancement and fallback tests; no decorative motion |
 | `vercel:shadcn` | Selected for accessible locally owned UI primitives | Component installation review and keyboard/state tests |
@@ -40,7 +40,7 @@
 | Superdesign | Project and desktop draft version 3 created and audited; **awaiting user approval** | Approval recorded in `docs/design/superdesign-review.md` before UI implementation |
 | Chrome / agent-browser | Used for direct reference-site and rendered-draft inspection | Later local and Vercel Preview QA at 375, 768, 1024, and 1440 pixels |
 | Sites | Evaluated for the requested workflow; Vinext/Cloudflare production scaffolding conflicts with the later binding Next.js/Vercel requirement | Sites may support design/preview only; canonical production target remains Vercel per ADR 0001 |
-| Data visualization | A separate chart/dashboard is not justified without real data; the Proof Rail is the minimal useful provenance visualization | Only implement visualizations that expose real lot/evidence relationships |
+| Data visualization | A separate chart/dashboard is not justified without real data; `docs/design/responsive-public-ui.md` defines the Proof Rail as the minimal useful provenance visualization | Only implement visualizations that expose real lot/evidence relationships |
 
 ## 3. Current hold
 

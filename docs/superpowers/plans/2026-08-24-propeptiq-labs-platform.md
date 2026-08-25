@@ -211,13 +211,17 @@ npm run typecheck
 - Create: `src/app/access/page.tsx`
 - Create: `src/components/site/**`
 - Create: `src/components/ui/**`
+- Create: `src/components/site/site-header.test.tsx`
+- Create: `src/components/site/proof-rail.test.tsx`
 - Create: `src/lib/server/dal/public-catalog.ts`
 - Create: `src/lib/presentation/catalog.ts`
 - Create: `src/app/catalog/catalog.test.tsx`
 - Review: `docs/design/superdesign-review.md`
+- Review: `docs/design/responsive-public-ui.md`
 - Review: `design-system/MASTER.md`
 
 - [ ] Confirm the Superdesign approval record names an exact approved draft version before editing any public UI file.
+- [ ] Record user approval of an exact `responsive-v*` handoff version, then apply its route/state contract; document any necessary deviation and its accessibility/compliance rationale.
 - [ ] Read the typography CSS/entity references before writing CSS and the shadcn instructions before composing UI primitives.
 - [ ] Implement the approved off-white, ink, moss, Newsreader/Geist design system with CSS variables, semantic HTML, visible focus, AA contrast, responsive layout, and reduced-motion support.
 - [ ] Build original components inspired by the references’ clinical clarity and category scanning, without copying assets, prose, product lists, or human-use framing.
@@ -225,7 +229,9 @@ npm run typecheck
 - [ ] Product routes return not-found for missing/unpublished records and never reveal private COA object locations.
 - [ ] Provide a truthful Quality Records explanation/lookup empty state; render lot/COA data only from approved public records.
 - [ ] Keep cart/checkout entry unavailable to anonymous, unapproved, or catalog-empty users.
-- [ ] Add component/accessibility tests for landmarks, headings, focus, no prohibited phrases, empty/error/loading states, and 375px overflow.
+- [ ] Add component/accessibility tests for landmarks, sequential headings, Proof Rail ordered-list/state/link semantics, and public loading/empty/safe-error states.
+- [ ] Test the 375px Sheet trigger name/expanded state, focus trap, Escape close, trigger-focus restoration, keyboard-operable destinations, visible research-use restriction, and absence of cart/checkout for anonymous or ineligible states.
+- [ ] Test public surfaces at 375px and 1024px for overflow and content order, including a 200% zoom layout check; final cross-viewport ownership remains in Task 12.
 
 **Validation:**
 
@@ -339,6 +345,7 @@ npm run test:integration
 - Create: `src/lib/server/email/outbox.ts`
 - Create: `src/lib/server/email/worker.ts`
 - Create: `src/lib/server/email/resend.ts`
+- Create: `src/lib/server/email/content.test.ts`
 - Create: `src/lib/server/payments/webhook.test.ts`
 - Create: `src/lib/server/fulfillment/releases.test.ts`
 
@@ -350,6 +357,7 @@ npm run test:integration
 - [ ] Make the result/success page read-only; it fetches current order status and cannot alter payment or fulfillment.
 - [ ] Implement partial/full refund request/confirmation/journal/reconciliation with capability, recent MFA, reason, refundable-balance validation, idempotency, and provider evidence.
 - [ ] Use an email outbox plus lease/backoff/dead-letter worker so retried business transactions do not duplicate messages; disabled email is safe and observable.
+- [ ] Require every transactional email subject/body projection to pass the current publication-content policy before enqueueing; test prohibited human/veterinary, administration, outcome, and unsupported-claim language with synthetic policy evidence.
 - [ ] Test invalid signature, replay, out-of-order event, amount mismatch, paid-on-hold, duplicate email, refund replay, and consumed release.
 
 **Validation:**
@@ -404,6 +412,7 @@ node scripts/verify-backup-config.mjs
 - Update: `src/app/globals.css`
 - Update: `next.config.ts`
 - Create: `src/components/navigation/view-transition-link.test.tsx`
+- Create: `tests/content/publication-surfaces.test.ts`
 
 - [ ] Read the Satori limitations and view-transition implementation/CSS/Next.js guidance before editing.
 - [ ] Generate original Satori imagery from text, simple gradients, and CSS-compatible shapes; use no competitor assets and no unsupported product/quality claims.
@@ -411,6 +420,7 @@ node scripts/verify-backup-config.mjs
 - [ ] Use the current supported Next.js view-transition approach only for subtle same-site navigation/progressive enhancement.
 - [ ] Respect `prefers-reduced-motion`, preserve focus/history/scroll behavior, avoid transitioning sensitive user data, and keep navigation correct when the API is unavailable.
 - [ ] Test metadata content, protected-route exclusion, reduced motion, and fallback navigation.
+- [ ] Use one shared publication-surface test to scan rendered public copy, image alt text, metadata, JSON-LD, and Satori/Open Graph strings through the current content policy; email projections are owned by Task 9.
 
 **Validation:**
 
@@ -434,9 +444,9 @@ npm run build
 
 - [ ] Run the complete quality gate from a clean install and record exact versions, commands, exit codes, migration IDs, and any environment-blocked checks.
 - [ ] Use synthetic isolated identities/data only; never trigger live payments, email, storage writes, notifications, or fulfillment.
-- [ ] In Chrome, validate `/`, `/catalog`, `/research-use-policy`, `/access`, and all locally reachable denial/status paths at 1440, 768, and 375 widths.
+- [ ] In Chrome, validate `/`, `/catalog`, `/quality-records`, `/research-use-policy`, `/access`, and all locally reachable denial/status paths at 1440, 1024, 768, and 375 widths, plus 200% zoom at 375 and 1024.
 - [ ] Compare the rendered public experience against the exact approved Superdesign version and record material deviations and their accessibility/compliance rationale.
-- [ ] Verify keyboard-only navigation, visible focus, reduced motion, no horizontal overflow, readable empty/error states, and WCAG-oriented automated accessibility checks.
+- [ ] Verify keyboard-only navigation, skip link, mobile Sheet focus trap/Escape/focus restoration, visible focus, reduced motion, no horizontal overflow, DOM/visual order, Proof Rail semantics, readable empty/error states, and WCAG-oriented automated accessibility checks.
 - [ ] Confirm product/catalog/price/COA tables remain empty unless the owner supplied and approved real records.
 - [ ] Confirm payment mode remains disabled and no production launch gate is open without evidence.
 - [ ] Run a skeptical code/security review and resolve every high/medium correctness finding before completion.

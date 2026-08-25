@@ -99,6 +99,7 @@ npm run db:migrate
 - Product and acceptance criteria: `docs/product-requirements.md`
 - Binding requirement traceability: `docs/requirements-traceability.md`
 - Superdesign review and approval record: `docs/design/superdesign-review.md`
+- Responsive public UI handoff: `docs/design/responsive-public-ui.md`
 - Pre-implementation review and acceptance blockers: `docs/reviews/pre-implementation-review.md`
 - Current source register: `docs/sources.md`
 - Reference-site/product taxonomy audit: `docs/research/reference-site-audit.md`

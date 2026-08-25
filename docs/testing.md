@@ -51,6 +51,7 @@ Focused tests run during development; the full set runs before completion/deploy
 
 - Chromium desktop at 1440px and 1024px.
 - Chromium tablet/mobile at 768px and 375px.
+- 200% zoom at 1024px and 375px, verifying no obscured, truncated, overlapping, or horizontally scrolling required content.
 - Keyboard-only navigation and visible focus.
 - Reduced-motion emulation.
 - Cross-browser smoke in current Firefox/Safari through the chosen CI/device service before commerce launch.
