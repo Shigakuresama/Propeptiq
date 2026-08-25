@@ -71,13 +71,13 @@ Expected: only ADR 0001 may mention why Vinext/Cloudflare was rejected; no runti
 - Create: `src/env.ts`
 - Create: `src/env.test.ts`
 
-- [ ] Read installed Next.js guides for project structure, server/client components, mutation/data security, route handlers, authentication, environment variables, metadata/OG, instrumentation, testing, production checklist, proxy, and view transitions.
-- [ ] Install exact direct dependencies for Clerk, Neon, Drizzle, Stripe, Blob, Resend, OpenTelemetry, Zod, server-only, Radix/shadcn primitives, and class composition; add focused test/dev dependencies.
-- [ ] Add scripts for the implemented toolchain: `lint`, `typecheck`, `test`, `test:watch`, `test:integration`, `test:e2e`, `build`, and `verify`.
-- [ ] Enable strict TypeScript and preserve Next.js generated settings.
-- [ ] Implement typed environment parsing with capability modes `disabled | test | live`; public-only builds require no provider secrets.
-- [ ] Make production reject live commerce unless explicit runtime mode and configuration are present; database launch gates will still be required later.
-- [ ] Write tests before implementation for public-only defaults, malformed values, incomplete test configuration, and incomplete live configuration.
+- [x] Read installed Next.js guides for project structure, server/client components, mutation/data security, route handlers, authentication, environment variables, metadata/OG, instrumentation, testing, production checklist, proxy, and view transitions.
+- [x] Install exact direct dependencies for Clerk, Neon, Drizzle, Stripe, Blob, Resend, OpenTelemetry, Zod, server-only, Radix/shadcn primitives, and class composition; add focused test/dev dependencies.
+- [x] Add scripts for the implemented toolchain: `lint`, `typecheck`, `test`, `test:watch`, `test:integration`, `test:e2e`, `build`, and `verify`.
+- [x] Enable strict TypeScript and preserve Next.js generated settings.
+- [x] Implement typed environment parsing with capability modes `disabled | test | live`; public-only builds require no provider secrets.
+- [x] Make production reject live commerce unless explicit runtime mode and configuration are present; database launch gates will still be required later.
+- [x] Write tests before implementation for public-only defaults, malformed values, incomplete test configuration, and incomplete live configuration.
 
 **Validation:**
 
