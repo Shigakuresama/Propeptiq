@@ -86,7 +86,7 @@ test("keeps a blocked customer read-only while retaining own account and order r
   await page.goto("/account/orders");
   await expect(page.getByText("Order local-order-blocked", { exact: true })).toBeVisible();
   await page.goto("/checkout");
-  await expect(page.getByRole("alert")).toContainText("blocked");
+  await expect(page.getByRole("alert").filter({ hasText: "blocked" })).toContainText("blocked");
   await expect(page.getByRole("button", { name: /Update account facts|Complete verified account/i })).toHaveCount(0);
 });
 
