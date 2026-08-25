@@ -122,8 +122,9 @@ test("labels order, refund, and shipment pages as Task 6 unavailable surfaces", 
   await signInAs(page, "Fixed capable administrator");
   for (const resource of ["orders", "refunds", "shipments"]) {
     await page.goto(`/admin/${resource}`);
-    await expect(page.getByText("Task 6 boundary:", { exact: false })).toBeVisible();
-    await expect(page.getByText(/provider refund submission|release issuance|delivery effects remain unavailable/i)).toBeVisible();
+    const task6Boundary = page.locator(".warning-record").filter({ hasText: "Task 6 boundary:" });
+    await expect(task6Boundary).toBeVisible();
+    await expect(task6Boundary).toContainText(/provider refund submission|release issuance|delivery effects remain unavailable/i);
   }
 });
 
