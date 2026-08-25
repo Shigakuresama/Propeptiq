@@ -23,6 +23,7 @@ export type OrderState =
   | "cancelled";
 
 export type OrderSnapshot = Readonly<{
+  orderId: string;
   state: OrderState;
   paymentEvidenceId: string | null;
   reviewRequestId: string | null;
@@ -154,6 +155,7 @@ export type FulfillmentReleaseState =
   | "consumed";
 
 export type FulfillmentReleaseSnapshot = Readonly<{
+  orderId: string;
   state: FulfillmentReleaseState;
   version: number | null;
   lastVersion: number;
@@ -262,7 +264,11 @@ function isPositiveSafeInteger(value: unknown): value is number {
 }
 
 function isValidOrderSnapshot(value: unknown): value is OrderSnapshot {
-  if (!isRecord(value) || !orderStates.has(value.state as OrderState)) {
+  if (
+    !isRecord(value) ||
+    !isNonBlankString(value.orderId) ||
+    !orderStates.has(value.state as OrderState)
+  ) {
     return false;
   }
   if (
@@ -379,6 +385,7 @@ function isValidFulfillmentReleaseSnapshot(
 ): value is FulfillmentReleaseSnapshot {
   if (
     !isRecord(value) ||
+    !isNonBlankString(value.orderId) ||
     !releaseStates.has(value.state as FulfillmentReleaseState) ||
     !isNonnegativeSafeInteger(value.lastVersion) ||
     !(value.version === null || isPositiveSafeInteger(value.version)) ||
@@ -567,6 +574,7 @@ export function transitionOrder(
   ) {
     if (
       !isAuthoritativeFulfillmentDecision(event.decision) ||
+      event.decision.orderId !== snapshot.orderId ||
       event.decision.permitted
     ) {
       return fail("invalid_fulfillment_decision");
@@ -586,7 +594,10 @@ export function transitionOrder(
     snapshot.state === "paid_on_hold" &&
     event.type === "clear_fulfillment_hold"
   ) {
-    if (!isPermittedFulfillmentDecision(event.decision)) {
+    if (
+      !isPermittedFulfillmentDecision(event.decision) ||
+      event.decision.orderId !== snapshot.orderId
+    ) {
       return fail("invalid_fulfillment_decision");
     }
     if (event.decision.verifiedPaymentEventId !== snapshot.paymentEvidenceId) {
@@ -601,7 +612,10 @@ export function transitionOrder(
     snapshot.state === "paid_pending_fulfillment" &&
     event.type === "release_for_fulfillment"
   ) {
-    if (!isPermittedFulfillmentDecision(event.decision)) {
+    if (
+      !isPermittedFulfillmentDecision(event.decision) ||
+      event.decision.orderId !== snapshot.orderId
+    ) {
       return fail("invalid_fulfillment_decision");
     }
     if (
@@ -627,7 +641,10 @@ export function transitionOrder(
     snapshot.state === "ready_for_fulfillment" &&
     event.type === "begin_fulfillment"
   ) {
-    if (!isPermittedFulfillmentDecision(event.decision)) {
+    if (
+      !isPermittedFulfillmentDecision(event.decision) ||
+      event.decision.orderId !== snapshot.orderId
+    ) {
       return fail("invalid_fulfillment_decision");
     }
     if (!isCanonicalInstant(event.now)) return fail("invalid_release");
@@ -636,6 +653,7 @@ export function transitionOrder(
     }
     if (
       event.release.state !== "issued" ||
+      event.release.orderId !== snapshot.orderId ||
       snapshot.fulfillmentReleaseVersion === null ||
       event.release.version !== snapshot.fulfillmentReleaseVersion ||
       event.release.paymentEvidenceId !== snapshot.paymentEvidenceId ||
@@ -662,6 +680,7 @@ export function transitionOrder(
       parsedHandoff.getTime() > parsedRecordedAt.getTime() ||
       !isValidFulfillmentReleaseSnapshot(consumedRelease) ||
       consumedRelease.state !== "consumed" ||
+      consumedRelease.orderId !== snapshot.orderId ||
       consumedRelease.version !== snapshot.fulfillmentReleaseVersion ||
       consumedRelease.paymentEvidenceId !== snapshot.paymentEvidenceId ||
       consumedRelease.reviewRequestId !== snapshot.reviewRequestId
@@ -868,7 +887,10 @@ export function transitionFulfillmentRelease(
       snapshot.state === "expired") &&
     event.type === "issue"
   ) {
-    if (!isPermittedFulfillmentDecision(event.decision)) {
+    if (
+      !isPermittedFulfillmentDecision(event.decision) ||
+      event.decision.orderId !== snapshot.orderId
+    ) {
       return fail("invalid_fulfillment_decision");
     }
     if (!isNonBlankString(event.paymentEvidenceId)) {
@@ -897,6 +919,7 @@ export function transitionFulfillmentRelease(
     return Object.freeze({
       ok: true,
       value: Object.freeze({
+        orderId: snapshot.orderId,
         state: "issued",
         version: event.version,
         lastVersion: event.version,
@@ -955,7 +978,10 @@ export function transitionFulfillmentRelease(
     if (snapshot.state !== "issued") {
       return fail("release_not_current");
     }
-    if (!isPermittedFulfillmentDecision(event.decision)) {
+    if (
+      !isPermittedFulfillmentDecision(event.decision) ||
+      event.decision.orderId !== snapshot.orderId
+    ) {
       return fail("invalid_fulfillment_decision");
     }
 

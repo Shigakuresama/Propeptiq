@@ -43,9 +43,12 @@ const allowedCheckoutDecision = evaluateCheckout({
 describe("Task 6A lean order and fulfillment-release contracts", () => {
   const now = "2026-08-24T12:00:00.000Z";
   const expiresAt = "2026-08-24T13:00:00.000Z";
+  const orderId = "synthetic-order-1";
+  const otherOrderId = "synthetic-order-2";
   const paymentEvidenceId = "synthetic-payment-event-1";
 
   const leanDraft = {
+    orderId,
     state: "draft",
     paymentEvidenceId: null,
     reviewRequestId: null,
@@ -57,7 +60,7 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
   const fulfillmentInput = (
     overrides: Partial<FulfillmentInput> = {},
   ): FulfillmentInput => ({
-    orderId: "synthetic-order-1",
+    orderId,
     verifiedPaymentEventId: paymentEvidenceId,
     refundPending: false,
     confirmedRefundAmountMinor: 0,
@@ -116,6 +119,7 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
 
   const absentRelease = (): FulfillmentReleaseSnapshot =>
     ({
+      orderId,
       state: "absent",
       version: null,
       lastVersion: 0,
@@ -123,6 +127,129 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
       reviewRequestId: null,
       expiresAt: null,
     }) as unknown as FulfillmentReleaseSnapshot;
+
+  it("binds every fulfillment decision and release to exactly one order", () => {
+    const crossOrderPermitted = permittedFulfillment({ orderId: otherOrderId });
+    const crossOrderDenied = deniedFulfillment({
+      orderId: otherOrderId,
+      refundPending: true,
+    });
+    const held = {
+      ...leanDraft,
+      state: "paid_on_hold",
+      paymentEvidenceId,
+    } as OrderSnapshot;
+    const ready = {
+      ...leanDraft,
+      state: "ready_for_fulfillment",
+      paymentEvidenceId,
+      fulfillmentReleaseVersion: 1,
+      lastFulfillmentReleaseVersion: 1,
+    } as OrderSnapshot;
+    const inProgress = {
+      ...ready,
+      state: "fulfillment_in_progress",
+    } as OrderSnapshot;
+    const sameOrderIssued = {
+      orderId,
+      state: "issued",
+      version: 1,
+      lastVersion: 1,
+      paymentEvidenceId,
+      reviewRequestId: null,
+      expiresAt,
+    } as FulfillmentReleaseSnapshot;
+    const crossOrderIssued = {
+      ...sameOrderIssued,
+      orderId: otherOrderId,
+    } as FulfillmentReleaseSnapshot;
+
+    expect(
+      transitionOrder(paidPending(), {
+        type: "post_payment_hold",
+        decision: crossOrderDenied,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_fulfillment_decision" },
+    });
+    expect(
+      transitionOrder(held, {
+        type: "clear_fulfillment_hold",
+        decision: crossOrderPermitted,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_fulfillment_decision" },
+    });
+    expect(
+      transitionOrder(paidPending(), {
+        type: "release_for_fulfillment",
+        decision: crossOrderPermitted,
+        paymentEvidenceId,
+        fulfillmentReleaseVersion: 1,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_fulfillment_decision" },
+    });
+    expect(
+      transitionOrder(ready, {
+        type: "begin_fulfillment",
+        now,
+        decision: crossOrderPermitted,
+        release: sameOrderIssued,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_fulfillment_decision" },
+    });
+    expect(
+      transitionFulfillmentRelease(absentRelease(), {
+        type: "issue",
+        now,
+        decision: crossOrderPermitted,
+        version: 1,
+        paymentEvidenceId,
+        expiresAt,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_fulfillment_decision" },
+    });
+    expect(
+      transitionFulfillmentRelease(sameOrderIssued, {
+        type: "consume",
+        now,
+        decision: crossOrderPermitted,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_fulfillment_decision" },
+    });
+    expect(
+      transitionOrder(ready, {
+        type: "begin_fulfillment",
+        now,
+        decision: permittedFulfillment(),
+        release: crossOrderIssued,
+      }),
+    ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
+    expect(
+      transitionOrder(inProgress, {
+        type: "carrier_handoff",
+        carrierHandoffAt: "2026-08-24T12:10:00.000Z",
+        recordedAt: "2026-08-24T12:11:00.000Z",
+        consumedRelease: {
+          ...crossOrderIssued,
+          state: "consumed",
+        },
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_carrier_handoff" },
+    });
+  });
 
   it("returns a deeply frozen snapshot-plus-incident result for ordinary transitions", () => {
     const result = transitionOrder(leanDraft, { type: "start_eligibility" });
@@ -333,6 +460,7 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
     expect(result).toEqual({
       ok: true,
       value: {
+        orderId,
         state: "issued",
         version: 1,
         lastVersion: 1,
@@ -341,6 +469,8 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
         expiresAt,
       },
     });
+    if (!result.ok) return;
+    expect(Object.isFrozen(result.value)).toBe(true);
     expect(
       transitionFulfillmentRelease(absentRelease(), {
         type: "issue",
@@ -374,6 +504,7 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
     expect(revoked).toMatchObject({
       ok: true,
       value: {
+        orderId,
         state: "revoked",
         version: null,
         lastVersion: 1,
@@ -387,7 +518,10 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
       now,
       decision: permittedFulfillment(),
     } as never);
-    expect(consumed).toMatchObject({ ok: true, value: { state: "consumed" } });
+    expect(consumed).toMatchObject({
+      ok: true,
+      value: { orderId, state: "consumed" },
+    });
     if (!consumed.ok) return;
     expect(
       transitionFulfillmentRelease(consumed.value, {
@@ -404,7 +538,10 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
         type: "expire",
         now: expiresAt,
       }),
-    ).toMatchObject({ ok: true, value: { state: "expired", lastVersion: 1 } });
+    ).toMatchObject({
+      ok: true,
+      value: { orderId, state: "expired", lastVersion: 1 },
+    });
   });
 
   it("rejects expired, payment-mismatched, and review-mismatched release consumption", () => {
@@ -414,6 +551,7 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
       reviewRequestId: "synthetic-review-1",
     });
     const release = {
+      orderId,
       state: "issued",
       version: 2,
       lastVersion: 2,
@@ -533,6 +671,34 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
     });
   });
 
+  it.each([undefined, "", "   "])(
+    "rejects the nonblank order binding %j on both snapshot types",
+    (invalidOrderId) => {
+      expect(
+        transitionOrder(
+          { ...leanDraft, orderId: invalidOrderId } as unknown as OrderSnapshot,
+          { type: "start_eligibility" },
+        ),
+      ).toMatchObject({ ok: false, error: { code: "invalid_snapshot" } });
+      expect(
+        transitionFulfillmentRelease(
+          {
+            ...absentRelease(),
+            orderId: invalidOrderId,
+          } as unknown as FulfillmentReleaseSnapshot,
+          {
+            type: "issue",
+            now,
+            decision: permittedFulfillment(),
+            version: 1,
+            paymentEvidenceId,
+            expiresAt,
+          },
+        ),
+      ).toMatchObject({ ok: false, error: { code: "invalid_snapshot" } });
+    },
+  );
+
   it("accepts an active reservation after provider failure but rejects invalid payment authority", () => {
     const failed = {
       ...leanDraft,
@@ -620,6 +786,7 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
       lastFulfillmentReleaseVersion: 1,
     } as OrderSnapshot;
     const wrongRelease = {
+      orderId,
       state: "issued",
       version: 2,
       lastVersion: 2,
