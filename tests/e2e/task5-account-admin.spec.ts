@@ -150,14 +150,14 @@ test("account and admin interaction supports keyboard focus, reduced motion, min
   await expect(page.locator("main#main-content")).toHaveCount(1);
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
-  await expect(page.evaluate(() => {
+  expect(await page.evaluate(() => {
     const element = document.activeElement;
     if (!(element instanceof HTMLElement)) return false;
     const styles = getComputedStyle(element);
     return styles.outlineStyle !== "none" || styles.boxShadow !== "none";
   })).toBe(true);
   await expect(page.locator("p.text-base").first()).toHaveCSS("font-size", "16px");
-  await expect(page.evaluate(() => {
+  expect(await page.evaluate(() => {
     const body = getComputedStyle(document.body);
     const root = getComputedStyle(document.documentElement);
     return body.animationDuration === "0s" && body.transitionDuration === "0s" && root.scrollBehavior === "auto";
