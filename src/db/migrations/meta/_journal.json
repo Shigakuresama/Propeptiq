@@ -22,6 +22,13 @@
       "when": 1787662062333,
       "tag": "0002_lumpy_jigsaw",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787684116900,
+      "tag": "0003_freezing_nekra",
+      "breakpoints": true
     }
   ]
 }

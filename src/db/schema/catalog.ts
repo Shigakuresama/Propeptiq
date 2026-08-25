@@ -266,6 +266,7 @@ export const promotions = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     code: text("code").notNull(),
+    version: integer("version").default(1).notNull(),
     name: text("name").notNull(),
     kind: promotionKindEnum("kind").notNull(),
     status: promotionStatusEnum("status").default("draft").notNull(),
@@ -280,6 +281,8 @@ export const promotions = pgTable(
   },
   (table) => [
     unique("promotions_code_unique").on(table.code),
+    unique("promotions_id_version_unique").on(table.id, table.version),
+    check("promotions_version_positive", sql`${table.version} > 0`),
     check("promotions_code_nonblank", nonblank(table.code)),
     check("promotions_name_nonblank", nonblank(table.name)),
     check(

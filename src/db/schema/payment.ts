@@ -1,9 +1,11 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  boolean,
   foreignKey,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -16,6 +18,7 @@ import { orders } from "./commerce";
 import {
   paymentEventTypeEnum,
   providerEventStatusEnum,
+  refundOriginEnum,
   refundStatusEnum,
 } from "./enums";
 import {
@@ -46,6 +49,11 @@ export const providerEvents = pgTable(
       .defaultNow()
       .notNull(),
     processedAt: timestamp("processed_at", { withTimezone: true }),
+    eventType: text("event_type").default("unknown").notNull(),
+    schemaVersion: integer("schema_version").default(1).notNull(),
+    normalizedPayload: jsonb("normalized_payload").default({}).notNull(),
+    providerCreatedAt: timestamp("provider_created_at", { withTimezone: true }),
+    livemode: boolean("livemode").default(false).notNull(),
   },
   (table) => [
     unique("provider_events_id_provider_unique").on(table.id, table.provider),
@@ -82,8 +90,18 @@ export const providerEvents = pgTable(
           or (${table.status} = 'failed'
             and ${table.leaseToken} is null and ${table.processedAt} is null
             and ${table.lastErrorRedacted} is not null and ${nonblank(table.lastErrorRedacted)}
+            and ${table.attemptCount} >= 1)
+          or (${table.status} = 'deferred'
+            and ${table.leaseToken} is null and ${table.processedAt} is null
+            and ${table.lastErrorRedacted} is not null and ${nonblank(table.lastErrorRedacted)}
+            and ${table.attemptCount} >= 1)
+          or (${table.status} = 'conflict'
+            and ${table.leaseToken} is null and ${table.processedAt} is not null
+            and ${table.lastErrorRedacted} is not null and ${nonblank(table.lastErrorRedacted)}
             and ${table.attemptCount} >= 1)`,
     ),
+    check("provider_events_schema_version", sql`${table.schemaVersion} = 1`),
+    check("provider_events_normalized_object", sql`jsonb_typeof(${table.normalizedPayload}) = 'object'`),
     index("provider_events_status_lease_idx").on(
       table.status,
       table.leaseExpiresAt,
@@ -124,6 +142,7 @@ export const paymentEvents = pgTable(
       table.orderId,
       table.occurredAt,
     ),
+    check("payment_events_unreconciled_refund_shape", sql`${table.eventType} <> 'unreconciled_refund_observed' or (${table.providerPaymentId} is not null and ${table.amountMinor} > 0 and ${table.idempotencyKey} = 'provider-event:' || ${table.providerEventId}::text)`),
   ],
 );
 
@@ -134,9 +153,7 @@ export const refunds = pgTable(
     orderId: uuid("order_id")
       .notNull()
       .references(() => orders.id, { onDelete: "restrict" }),
-    requestedByUserId: uuid("requested_by_user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "restrict" }),
+    requestedByUserId: uuid("requested_by_user_id").references(() => users.id, { onDelete: "restrict" }),
     verifiedPaymentEventId: uuid("verified_payment_event_id").notNull(),
     provider: text("provider").notNull(),
     providerEventId: uuid("provider_event_id"),
@@ -151,6 +168,11 @@ export const refunds = pgTable(
       .defaultNow()
       .notNull(),
     confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    origin: refundOriginEnum("origin").default("staff_requested").notNull(),
+    providerRequestHash: text("provider_request_hash"),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    lastErrorRedacted: text("last_error_redacted"),
   },
   (table) => [
     unique("refunds_idempotency_unique").on(table.idempotencyKey),
@@ -180,6 +202,8 @@ export const refunds = pgTable(
       sql`${table.confirmedAmountMinor} is null or (${safePositiveMoney(table.confirmedAmountMinor)} and ${table.confirmedAmountMinor} <= ${table.requestedAmountMinor})`,
     ),
     check("refunds_currency_format", currency(table.currency)),
+    check("refunds_origin_requester", sql`(${table.origin} = 'staff_requested' and ${table.requestedByUserId} is not null) or (${table.origin} = 'provider_observed' and ${table.requestedByUserId} is null and ${table.providerEventId} is not null and ${table.providerRefundId} is not null and ${table.status} <> 'requested')`),
+    check("refunds_provider_request_hash", sql`${table.providerRequestHash} is null or ${sha256(table.providerRequestHash)}`),
     check(
       "refunds_confirmation_coherent",
       sql`(${table.status} = 'succeeded' and ${table.confirmedAmountMinor} is not null

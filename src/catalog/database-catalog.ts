@@ -98,7 +98,7 @@ export async function loadDatabaseCatalogRecords(
     ORDER BY created_at, id
   `);
   const promotions = await database.query<RawPromotion>(`
-    SELECT id::text AS "id", name, kind, status,
+    SELECT id::text AS "id", code, version, name, kind, status,
            amount_minor AS "amountMinor", basis_points AS "basisPoints", currency,
            starts_at AS "startsAt", ends_at AS "endsAt", configuration
     FROM promotions

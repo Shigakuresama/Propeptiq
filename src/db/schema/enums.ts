@@ -55,7 +55,7 @@ export const orderStateEnum = pgEnum("order_state", [
   "ready_for_checkout",
   "checkout_pending",
   "payment_failed",
-  "paid_pending_clearance",
+  "paid_pending_fulfillment",
   "paid_on_hold",
   "ready_for_fulfillment",
   "fulfillment_in_progress",
@@ -65,6 +65,7 @@ export const orderStateEnum = pgEnum("order_state", [
 export const checkoutAttemptStatusEnum = pgEnum("checkout_attempt_status", [
   "created",
   "open",
+  "provider_unknown",
   "completed",
   "expired",
   "failed",
@@ -79,12 +80,16 @@ export const providerEventStatusEnum = pgEnum("provider_event_status", [
   "processing",
   "processed",
   "failed",
+  "deferred",
+  "conflict",
 ]);
 export const paymentEventTypeEnum = pgEnum("payment_event_type", [
   "payment_verified",
   "payment_failed",
   "refund_verified",
   "dispute_recorded",
+  "dispute_resolved",
+  "unreconciled_refund_observed",
 ]);
 export const reservationStateEnum = pgEnum("reservation_state", [
   "active",
@@ -105,6 +110,10 @@ export const refundStatusEnum = pgEnum("refund_status", [
   "succeeded",
   "failed",
   "cancelled",
+]);
+export const refundOriginEnum = pgEnum("refund_origin", [
+  "staff_requested",
+  "provider_observed",
 ]);
 export const reviewOutcomeEnum = pgEnum("review_outcome", [
   "approved",

@@ -33,6 +33,11 @@ const rawServerEnvSchema = z.object({
   PAYMENTS_MODE: capabilityMode.default("disabled"),
   STORAGE_MODE: capabilityMode.default("disabled"),
   EMAIL_MODE: capabilityMode.default("disabled"),
+  COMMERCE_LIVE_CAPABILITY: z.enum(["disabled", "enabled"]).default("disabled"),
+  PAYMENTS_LIVE_CAPABILITY: z.enum(["disabled", "enabled"]).default("disabled"),
+  TAX_MODE: capabilityMode.default("disabled"),
+  SHIPPING_MODE: capabilityMode.default("disabled"),
+  FULFILLMENT_MODE: capabilityMode.default("disabled"),
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: nonBlank.optional(),
   CLERK_SECRET_KEY: nonBlank.optional(),
   CLERK_WEBHOOK_SIGNING_SECRET: nonBlank.optional(),
@@ -69,6 +74,9 @@ const modeKeys = [
   "PAYMENTS_MODE",
   "STORAGE_MODE",
   "EMAIL_MODE",
+  "TAX_MODE",
+  "SHIPPING_MODE",
+  "FULFILLMENT_MODE",
 ] as const satisfies ReadonlyArray<keyof ServerEnv>;
 
 function addRequiredIssue(
@@ -341,12 +349,7 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
   }
 
   if (env.PAYMENTS_MODE === "live") {
-    const dependencies = [
-      "AUTH_MODE",
-      "DATABASE_MODE",
-      "STORAGE_MODE",
-      "EMAIL_MODE",
-    ] as const;
+    const dependencies = ["DATABASE_MODE"] as const;
 
     for (const dependency of dependencies) {
       if (env[dependency] !== "live") {
@@ -356,6 +359,18 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
           message: `PAYMENTS_MODE=live requires ${dependency}=live`,
         });
       }
+    }
+  }
+
+  if (env.COMMERCE_LIVE_CAPABILITY === "enabled") {
+    for (const dependency of ["AUTH_MODE", "DATABASE_MODE", "TAX_MODE", "SHIPPING_MODE", "FULFILLMENT_MODE"] as const) {
+      if (env[dependency] !== "live") context.addIssue({ code: "custom", path: [dependency], message: `COMMERCE_LIVE_CAPABILITY=enabled requires ${dependency}=live` });
+    }
+    if (env.CATALOG_DEMO_MODE !== "disabled") context.addIssue({ code: "custom", path: ["CATALOG_DEMO_MODE"], message: "COMMERCE_LIVE_CAPABILITY requires demo catalog disabled" });
+  }
+  if (env.PAYMENTS_LIVE_CAPABILITY === "enabled") {
+    for (const dependency of ["DATABASE_MODE", "PAYMENTS_MODE"] as const) {
+      if (env[dependency] !== "live") context.addIssue({ code: "custom", path: [dependency], message: `PAYMENTS_LIVE_CAPABILITY=enabled requires ${dependency}=live` });
     }
   }
 });

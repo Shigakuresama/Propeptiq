@@ -12,7 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { destinationPolicies, productPrices, products } from "./catalog";
+import { destinationPolicies, productPrices, products, promotions } from "./catalog";
 import {
   buyerStatusEnum,
   checkoutAttemptStatusEnum,
@@ -53,6 +53,7 @@ export const orders = pgTable(
   },
   (table) => [
     unique("orders_id_buyer_unique").on(table.id, table.buyerUserId),
+    unique("orders_id_destination_state_unique").on(table.id, table.destinationStateCode),
     foreignKey({
       columns: [table.attestationAcceptanceId, table.buyerUserId],
       foreignColumns: [attestationAcceptances.id, attestationAcceptances.userId],
@@ -105,6 +106,7 @@ export const orderItems = pgTable(
       table.orderId,
       table.productId,
     ),
+    unique("order_items_id_order_unique").on(table.id, table.orderId),
     foreignKey({
       columns: [table.productPriceId, table.productId],
       foreignColumns: [productPrices.id, productPrices.productId],
@@ -136,6 +138,7 @@ export const checkoutAttempts = pgTable(
     orderId: uuid("order_id")
       .notNull()
       .references(() => orders.id, { onDelete: "restrict" }),
+    buyerUserId: uuid("buyer_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
     idempotencyKey: text("idempotency_key").notNull(),
     requestHash: text("request_hash").notNull(),
     status: checkoutAttemptStatusEnum("status").default("created").notNull(),
@@ -154,12 +157,17 @@ export const checkoutAttempts = pgTable(
     provider: text("provider"),
     providerRequestId: text("provider_request_id"),
     providerSessionId: text("provider_session_id"),
+    providerRequestHash: text("provider_request_hash"),
+    taxQuoteReference: text("tax_quote_reference"),
+    shippingQuoteReference: text("shipping_quote_reference"),
+    shippingService: text("shipping_service"),
     createdAt: createdAt(),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
   },
   (table) => [
-    unique("checkout_attempts_idempotency_key_unique").on(table.idempotencyKey),
-    unique("checkout_attempts_request_hash_unique").on(table.requestHash),
+    unique("checkout_attempts_buyer_idempotency_unique").on(table.buyerUserId, table.idempotencyKey),
+    unique("checkout_attempts_id_order_unique").on(table.id, table.orderId),
+    foreignKey({ columns: [table.orderId, table.buyerUserId], foreignColumns: [orders.id, orders.buyerUserId], name: "checkout_attempts_order_buyer_fk" }).onDelete("restrict"),
     unique("checkout_attempts_provider_request_unique").on(
       table.provider,
       table.providerRequestId,
@@ -170,6 +178,7 @@ export const checkoutAttempts = pgTable(
     ),
     check("checkout_attempts_idempotency_nonblank", nonblank(table.idempotencyKey)),
     check("checkout_attempts_request_hash", sha256(table.requestHash)),
+    check("checkout_attempts_provider_request_hash", sql`${table.providerRequestHash} is null or ${sha256(table.providerRequestHash)}`),
     check(
       "checkout_attempts_provider_coherent",
       sql`(${table.provider} is null and ${table.providerRequestId} is null and ${table.providerSessionId} is null)
@@ -186,3 +195,55 @@ export const checkoutAttempts = pgTable(
     ),
   ],
 );
+
+export const orderPromotionApplications = pgTable("order_promotion_applications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  orderId: uuid("order_id").notNull().references(() => orders.id, { onDelete: "cascade" }),
+  promotionId: uuid("promotion_id").notNull(),
+  promotionVersion: integer("promotion_version").notNull(),
+  codeSnapshot: text("code_snapshot").notNull(),
+  nameSnapshot: text("name_snapshot").notNull(),
+  kindSnapshot: text("kind_snapshot").notNull(),
+  appliedDiscountMinor: money("applied_discount_minor").notNull(),
+  createdAt: createdAt(),
+}, (table) => [
+  unique("order_promotion_applications_id_order_unique").on(table.id, table.orderId),
+  unique("order_promotion_applications_order_promotion_unique").on(table.orderId, table.promotionId),
+  foreignKey({ columns: [table.promotionId, table.promotionVersion], foreignColumns: [promotions.id, promotions.version], name: "order_promotion_applications_promotion_version_fk" }).onDelete("restrict"),
+  check("order_promotion_applications_discount_nonnegative", safeNonnegativeMoney(table.appliedDiscountMinor)),
+  check("order_promotion_applications_code_nonblank", nonblank(table.codeSnapshot)),
+  check("order_promotion_applications_name_nonblank", nonblank(table.nameSnapshot)),
+  check("order_promotion_applications_version_positive", sql`${table.promotionVersion} > 0`),
+]);
+
+export const orderPromotionAllocations = pgTable("order_promotion_allocations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  applicationId: uuid("application_id").notNull(),
+  orderId: uuid("order_id").notNull(),
+  orderItemId: uuid("order_item_id").notNull(),
+  allocatedDiscountMinor: money("allocated_discount_minor").notNull(),
+}, (table) => [
+  unique("order_promotion_allocations_application_item_unique").on(table.applicationId, table.orderItemId),
+  foreignKey({ columns: [table.applicationId, table.orderId], foreignColumns: [orderPromotionApplications.id, orderPromotionApplications.orderId], name: "order_promotion_allocations_application_order_fk" }).onDelete("cascade"),
+  foreignKey({ columns: [table.orderItemId, table.orderId], foreignColumns: [orderItems.id, orderItems.orderId], name: "order_promotion_allocations_item_order_fk" }).onDelete("restrict"),
+  check("order_promotion_allocations_discount_nonnegative", safeNonnegativeMoney(table.allocatedDiscountMinor)),
+]);
+
+export const orderShippingAddresses = pgTable("order_shipping_addresses", {
+  orderId: uuid("order_id").primaryKey().references(() => orders.id, { onDelete: "cascade" }),
+  recipientName: text("recipient_name").notNull(),
+  addressLine1: text("address_line1").notNull(),
+  addressLine2: text("address_line2"),
+  city: text("city").notNull(),
+  stateCode: text("state_code").notNull(),
+  postalCode: text("postal_code").notNull(),
+  country: text("country").default("US").notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (table) => [
+  foreignKey({ columns: [table.orderId, table.stateCode], foreignColumns: [orders.id, orders.destinationStateCode], name: "order_shipping_addresses_order_state_fk" }).onDelete("cascade"),
+  check("order_shipping_addresses_country_us", sql`${table.country} = 'US'`),
+  check("order_shipping_addresses_state_format", stateCode(table.stateCode)),
+  check("order_shipping_addresses_postal_format", sql`${table.postalCode} ~ '^[0-9]{5}(-[0-9]{4})?$'`),
+  check("order_shipping_addresses_fields_nonblank", sql`${nonblank(table.recipientName)} and ${nonblank(table.addressLine1)} and ${nonblank(table.city)}`),
+]);

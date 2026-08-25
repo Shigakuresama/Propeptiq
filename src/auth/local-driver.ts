@@ -794,7 +794,7 @@ const adminRepository: AdminRepository = {
 const localOrders: readonly OrderDetail[] = Object.freeze([
   {
     id: localOrderId,
-    state: "paid_pending_clearance",
+    state: "paid_pending_fulfillment",
     currency: "USD",
     totalMinor: 2400,
     createdAt: "2026-08-24T12:00:00.000Z",

@@ -24,3 +24,10 @@ The `0002` lineage migration follows the same fail-closed rule for a populated
 payment event for the same order before applying it. The existing
 `provider_event_id` remains reserved for the later refund-provider response;
 it is not reused as source-payment lineage.
+
+Migration `0003` is source-only in this task. It is not authorized to inspect,
+apply to, or reconcile an external database. Its first-statement preflight
+refuses populated `orders` or `provider_events` because structured addresses,
+buyer-scoped attempts, exact quote/expiry facts, and normalized provider events
+cannot be reconstructed honestly. A populated commerce chain requires a
+separately authorized reconciliation migration.

@@ -16,7 +16,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import { destinationPolicies, lots } from "./catalog";
-import { orderItems, orders } from "./commerce";
+import { checkoutAttempts, orderItems, orders } from "./commerce";
 import {
   buyerStatusEnum,
   fulfillmentReleaseStateEnum,
@@ -158,6 +158,7 @@ export const inventoryReservations = pgTable(
   "inventory_reservations",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    checkoutAttemptId: uuid("checkout_attempt_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     orderId: uuid("order_id").notNull(),
     orderItemId: uuid("order_item_id").notNull(),
@@ -166,23 +167,19 @@ export const inventoryReservations = pgTable(
     quantityReserved: integer("quantity_reserved").notNull(),
     quantityRemaining: integer("quantity_remaining").notNull(),
     state: reservationStateEnum("state").default("active").notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (table) => [
-    unique("inventory_reservations_event_identity_unique").on(
-      table.id,
-      table.orderId,
-      table.orderItemId,
-      table.lotId,
-    ),
+    unique("inventory_reservations_item_lot_unique").on(table.orderItemId, table.lotId),
     unique("inventory_reservations_idempotency_unique").on(table.idempotencyKey),
     foreignKey({
       columns: [table.orderItemId, table.orderId, table.productId],
       foreignColumns: [orderItems.id, orderItems.orderId, orderItems.productId],
       name: "inventory_reservations_item_order_product_fk",
     }).onDelete("restrict"),
+    foreignKey({ columns: [table.checkoutAttemptId, table.orderId], foreignColumns: [checkoutAttempts.id, checkoutAttempts.orderId], name: "inventory_reservations_attempt_order_fk" }).onDelete("restrict"),
     foreignKey({
       columns: [table.lotId, table.productId],
       foreignColumns: [lots.id, lots.productId],
@@ -193,6 +190,7 @@ export const inventoryReservations = pgTable(
       "inventory_reservations_quantity_bounds",
       sql`${table.quantityReserved} > 0 and ${table.quantityRemaining} >= 0 and ${table.quantityRemaining} <= ${table.quantityReserved}`,
     ),
+    check("inventory_reservations_state_remaining", sql`(${table.state} = 'active' and ${table.quantityRemaining} = ${table.quantityReserved}) or (${table.state} <> 'active' and ${table.quantityRemaining} = 0)`),
     index("inventory_reservations_lot_state_idx").on(table.lotId, table.state),
   ],
 );
@@ -222,10 +220,10 @@ export const inventoryEvents = pgTable(
   },
   (table) => [
     unique("inventory_events_idempotency_unique").on(table.idempotencyKey),
-    uniqueIndex("inventory_events_reservation_consume_unique")
+    uniqueIndex("inventory_events_reservation_terminal_unique")
       .on(table.reservationId)
       .where(
-        sql`${table.eventType} = 'consume' and ${table.reservationId} is not null`,
+        sql`${table.eventType} in ('consume','release') and ${table.reservationId} is not null`,
       ),
     foreignKey({
       columns: [table.reservationId, table.orderId, table.orderItemId, table.lotId],
@@ -264,7 +262,7 @@ export const shipments = pgTable(
     orderId: uuid("order_id")
       .notNull()
       .references(() => orders.id, { onDelete: "restrict" }),
-    fulfillmentReleaseId: uuid("fulfillment_release_id").notNull(),
+    fulfillmentReleaseId: uuid("fulfillment_release_id"),
     carrier: text("carrier").notNull(),
     trackingReference: text("tracking_reference").notNull(),
     state: shipmentStateEnum("state").default("pending").notNull(),
@@ -274,6 +272,7 @@ export const shipments = pgTable(
     updatedAt: updatedAt(),
   },
   (table) => [
+    unique("shipments_order_unique").on(table.orderId),
     unique("shipments_fulfillment_release_unique").on(table.fulfillmentReleaseId),
     unique("shipments_carrier_tracking_unique").on(
       table.carrier,
@@ -288,9 +287,9 @@ export const shipments = pgTable(
     check("shipments_tracking_nonblank", nonblank(table.trackingReference)),
     check(
       "shipments_state_coherent",
-      sql`(${table.state} = 'pending' and ${table.handedOffAt} is null and ${table.deliveredAt} is null)
-          or (${table.state} in ('handed_off', 'exception') and ${table.handedOffAt} is not null and ${table.deliveredAt} is null)
-          or (${table.state} = 'delivered' and ${table.handedOffAt} is not null and ${table.deliveredAt} is not null and ${table.deliveredAt} >= ${table.handedOffAt})`,
+      sql`(${table.state} = 'pending' and ${table.fulfillmentReleaseId} is null and ${table.handedOffAt} is null and ${table.deliveredAt} is null)
+          or (${table.state} in ('handed_off', 'exception') and ${table.fulfillmentReleaseId} is not null and ${table.handedOffAt} is not null and ${table.deliveredAt} is null)
+          or (${table.state} = 'delivered' and ${table.fulfillmentReleaseId} is not null and ${table.handedOffAt} is not null and ${table.deliveredAt} is not null and ${table.deliveredAt} >= ${table.handedOffAt})`,
     ),
   ],
 );
