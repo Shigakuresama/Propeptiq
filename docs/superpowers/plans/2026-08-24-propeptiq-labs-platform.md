@@ -15,6 +15,7 @@
 - Treat `C:\Users\Sergio\Documents\Peptides\propeptiq-labs-app` as the only application repository after Task 0. The worker-created `propeptiq-labs-site` is an incompatible Vinext/Cloudflare experiment and is not an implementation source.
 - Read `AGENTS.md` and the relevant installed Next.js 16 documentation before editing application code.
 - Preserve the user-authored `.codex`, `.superdesign`, and reference-design artifacts outside the application repository.
+- Do not resume any remaining implementation task until `docs/design/superdesign-review.md` records user approval of an exact Superdesign draft version. Approval affects interface direction only and never opens a commerce launch gate.
 - Never seed or display invented products, prices, purity, laboratories, certifications, COAs, inventory, testimonials, legal permissions, or provider approval.
 - Synthetic entities are allowed only in test files and must be visibly labeled as test data.
 - Use `server-only` boundaries for secrets, provider SDKs, authorization, and data access.
@@ -23,6 +24,15 @@
 - Record exact validation commands and evidence. A skipped or environment-blocked check is not a pass.
 
 ---
+
+## Current execution hold
+
+- [x] Binding business, architecture, security, payment, compliance, jurisdiction, deployment, testing, and runbook documentation is present.
+- [x] Superdesign project `14bb848e-b774-4091-8f92-6a9cdf2b47ac`, desktop draft `d5bd0bcf-c086-499d-904c-4eb8581d2bb4`, version 3 was generated and audited for invented operating facts and researcher/organization scope.
+- [x] The preserved scaffold/domain draft received a read-only pre-implementation review; its current failures and request-changes ruling are recorded in `docs/reviews/pre-implementation-review.md`.
+- [ ] The user approves version 3 or requests a revision, and the decision is recorded in `docs/design/superdesign-review.md`.
+
+Until the final checkbox is complete, all implementation tasks below remain paused. Existing uncommitted Task 2 work is preserved but is not accepted evidence of completion.
 
 ## Task 0: Establish the canonical repository and accept only reviewed artifacts
 
@@ -37,13 +47,13 @@
 - Create: `propeptiq-labs-app/design-system/MASTER.md`
 - Update: `propeptiq-labs-app/README.md`
 
-- [ ] Inventory both worker-created scaffolds and record which files are accepted, replaced, or discarded.
-- [ ] Verify the absolute path of `propeptiq-labs-site`, then remove that known worker-generated duplicate without touching `.codex`, `.superdesign`, `brand`, `design-system`, or root documentation.
-- [ ] Copy the approved product, architecture, ADR, compliance, security, deployment, testing, runbook, source, and design-system documents into the canonical repository.
-- [ ] Replace thin/conflicting scaffold documents with the approved versions.
-- [ ] Add ignore rules for `.env*` except `.env.example`, `node_modules`, `.next`, coverage, Playwright artifacts, local databases, editor files, and generated secrets.
-- [ ] Initialize Git in the canonical repository only; verify `git status --short` cannot stage credentials, dependencies, build output, or external reference artifacts.
-- [ ] Commit the plan-first baseline only after the repository contents match the approved documentation.
+- [x] Inventory both worker-created scaffolds and record which files are accepted, replaced, or discarded.
+- [x] Verify the absolute path of `propeptiq-labs-site`, then quarantine that known worker-generated duplicate without touching `.codex`, `.superdesign`, `brand`, `design-system`, or root documentation.
+- [x] Copy the approved product, architecture, ADR, compliance, security, deployment, testing, runbook, source, and design-system documents into the canonical repository.
+- [x] Replace thin/conflicting scaffold documents with the approved versions.
+- [x] Add ignore rules for `.env*` except `.env.example`, `node_modules`, `.next`, coverage, Playwright artifacts, local databases, editor files, and generated secrets.
+- [x] Initialize Git in the canonical repository only; verify `git status --short` cannot stage credentials, dependencies, build output, or external reference artifacts.
+- [x] Commit the plan-first baseline only after the repository contents match the approved documentation.
 
 **Validation:**
 
@@ -53,7 +63,7 @@ git check-ignore .env.local node_modules .next
 rg -n "propeptiq-labs-site|vinext|Cloudflare" README.md docs design-system
 ```
 
-Expected: only ADR 0001 may mention why Vinext/Cloudflare was rejected; no runtime dependency or hosting instruction points to it.
+Expected: ADR 0001, the scaffold audit, traceability ledger, and this historical plan may mention why Vinext/Cloudflare was rejected; no runtime dependency or hosting instruction points to it.
 
 ## Task 1: Lock the current framework contract and quality toolchain
 
@@ -94,6 +104,7 @@ npm run build
 
 - Create: `src/domain/eligibility.ts`
 - Create: `src/domain/eligibility.test.ts`
+- Create: `src/domain/result.ts`
 - Create: `src/domain/authorization.ts`
 - Create: `src/domain/authorization.test.ts`
 - Create: `src/domain/money.ts`
@@ -111,7 +122,10 @@ npm run build
 - [ ] Implement integer-minor-unit price calculation with checked quantity, currency consistency, and immutable price snapshots.
 - [ ] Implement explicit order/payment/compliance/fulfillment state transition functions; invalid transitions return typed errors and never mutate input.
 - [ ] Implement prohibited-copy checks for dosage, administration, treatment, human/veterinary outcome, and unsupported-claim language as a publication defense-in-depth control.
+- [ ] Close every issue in `docs/reviews/pre-implementation-review.md`, including explicit `human use`/`human consumption` adversarial copy, malformed persisted-enum handling, required strong-auth rows, verified dispute transitions, and atomic fulfillment-release consumption.
+- [ ] Make price/tax/shipping inputs structurally distinct from browser request data and prove that only a server-resolved authoritative snapshot can reach the calculator.
 - [ ] Use table/property-style tests to prove every missing/error path denies and every invalid transition fails.
+- [ ] Follow the binding contracts and configurable-limit boundaries in `docs/architecture/domain-policies.md`; do not invent a currency, quantity limit, SKU rule, or approval.
 
 **Validation:**
 
@@ -200,7 +214,10 @@ npm run typecheck
 - Create: `src/lib/server/dal/public-catalog.ts`
 - Create: `src/lib/presentation/catalog.ts`
 - Create: `src/app/catalog/catalog.test.tsx`
+- Review: `docs/design/superdesign-review.md`
+- Review: `design-system/MASTER.md`
 
+- [ ] Confirm the Superdesign approval record names an exact approved draft version before editing any public UI file.
 - [ ] Read the typography CSS/entity references before writing CSS and the shadcn instructions before composing UI primitives.
 - [ ] Implement the approved off-white, ink, moss, Newsreader/Geist design system with CSS variables, semantic HTML, visible focus, AA contrast, responsive layout, and reduced-motion support.
 - [ ] Build original components inspired by the references’ clinical clarity and category scanning, without copying assets, prose, product lists, or human-use framing.
@@ -418,6 +435,7 @@ npm run build
 - [ ] Run the complete quality gate from a clean install and record exact versions, commands, exit codes, migration IDs, and any environment-blocked checks.
 - [ ] Use synthetic isolated identities/data only; never trigger live payments, email, storage writes, notifications, or fulfillment.
 - [ ] In Chrome, validate `/`, `/catalog`, `/research-use-policy`, `/access`, and all locally reachable denial/status paths at 1440, 768, and 375 widths.
+- [ ] Compare the rendered public experience against the exact approved Superdesign version and record material deviations and their accessibility/compliance rationale.
 - [ ] Verify keyboard-only navigation, visible focus, reduced motion, no horizontal overflow, readable empty/error states, and WCAG-oriented automated accessibility checks.
 - [ ] Confirm product/catalog/price/COA tables remain empty unless the owner supplied and approved real records.
 - [ ] Confirm payment mode remains disabled and no production launch gate is open without evidence.

@@ -27,6 +27,7 @@ type Principal = {
   clerkUserId: string
   organizationId: string | null
   clerkOrganizationId: string | null
+  status: 'active' | 'incomplete' | 'suspended'
   capabilities: readonly Capability[]
   authentication: {
     authenticatedAt: Date
@@ -60,18 +61,22 @@ type Capability =
 
 Role names are conveniences; server checks target exact capabilities and resource scope.
 
+`compliance:decide` covers hold placement/release and exact-case decisions. The server still authorizes the exact operation and resource relation independently and requires step-up evidence.
+
 ## 4. Central enforcement
 
-`requirePrincipal()` rejects missing/incomplete/suspended identity. `requireCapability(capability, resource)` checks capability, organization ownership, resource state, and—when sensitive—recent strong authentication. DAL functions require a `Principal`; they do not accept raw Clerk IDs from route code.
+`requirePrincipal()` rejects missing/incomplete/suspended identity. `requireOperation(operation, resource)` loads the immutable operation policy, checks its exact capability and permitted resource relation, and—when the operation is sensitive—requires current server-loaded strong-auth policy plus recent strong authentication. DAL functions require a `Principal`; they do not accept raw Clerk IDs from route code.
+
+Resource authorization declares one relation: owner actor, matching organization, or deliberately capability-only staff scope. A server-owned operation matrix fixes the capability, allowed relation, and step-up requirement; route callers cannot override it. Missing/malformed policy or scope denies. Cross-organization staff access never derives from a buyer role or client-provided organization ID. The strong-auth policy is an evidence-backed server configuration with bounded age; missing/expired/unsafe configuration disables sensitive operations.
 
 Example interface:
 
 ```ts
-export async function requireCapability(
+export async function requireOperation(
   principal: Principal,
-  capability: Capability,
+  operation: AuthorizationOperation,
   resource: ResourceScope,
-  options?: { requireRecentMfa?: boolean },
+  context: { now: Date; strongAuthPolicy: StrongAuthPolicy | null },
 ): Promise<AuthorizedPrincipal>
 ```
 

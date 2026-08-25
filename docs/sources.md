@@ -35,6 +35,7 @@ These sources do not establish that any PROPEPTIQ SKU is legal in any jurisdicti
 - Neon branching/backups overview: https://neon.com/docs/introduction/branching
 - Drizzle migrations: https://orm.drizzle.team/docs/migrations
 - Vercel Blob security/private storage: https://vercel.com/docs/vercel-blob/security
+- Vercel Private Blob general-availability update (the official page retains its original public-beta URL slug): https://vercel.com/changelog/private-storage-for-vercel-blob-now-available-in-public-beta
 - Vercel Firewall rate limiting: https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting
 - Vercel Observability: https://vercel.com/docs/observability
 - Vercel tracing/OpenTelemetry: https://vercel.com/docs/tracing

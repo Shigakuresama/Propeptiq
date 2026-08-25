@@ -57,7 +57,7 @@ Each product/jurisdiction rule contains:
 
 Expired or superseded rules do not fall back to `Allowed`; they evaluate `Unknown` until replaced.
 
-An exact-case manual-review decision is a separate, append-only record scoped to the draft order and immutable eligibility-evaluation hash, which bind the buyer principal/organization, product and quantity, destination, intended-use version, and underlying policy version. An approved, unexpired decision converts only that order snapshot’s product-jurisdiction gate to `PASS`; it does not change the base `Manual Review` rule or authorize another buyer, order, or changed cart. A rejected decision yields `Blocked`. A missing, expired, superseded, or mismatched case decision remains `Manual Review` or `Unknown` and cannot proceed.
+An exact-case manual-review decision is a separate, append-only record scoped to the draft order, exact order item, exact product-jurisdiction rule, and immutable eligibility-evaluation hash, which bind the buyer principal/organization, product and quantity, destination, intended-use version, and underlying policy version. An approved, unexpired decision converts only that order line’s unchanged product-jurisdiction gate to `PASS`; it does not change the base `Manual Review` rule or authorize another SKU line, buyer, order, or changed cart. A rejected decision yields `Blocked`. A missing, expired, superseded, or mismatched case decision remains `Manual Review` or `Unknown` and cannot proceed.
 
 ## 6. Evaluation algorithm
 
@@ -67,7 +67,7 @@ if no active exact product + destination rule: Unknown
 if rule evidence is expired or integrity check fails: Unknown
 if rule is Manual Review and no exact current case decision exists: Manual Review
 if exact case decision is rejected: Blocked
-if exact case decision is approved and matches order + immutable eligibility-evaluation hash: Pass for this gate
+if exact case decision is approved and matches order + order item + jurisdiction rule + immutable eligibility-evaluation hash: Pass for this one gate
 otherwise use the exact rule value
 evaluate provider, tax, buyer, shipping, lot, compliance, and launch gates independently
 if any gate is Blocked: aggregate Blocked

@@ -11,6 +11,7 @@
 - All organization-owned rows include `organization_id`; every DAL query scopes it explicitly.
 - Regulatory/compliance evidence records include source, decision maker, effective date, optional expiry/review date, and content/version hash.
 - Append-only tables are protected by application code and database triggers that reject update/delete.
+- Domain/database state values use lowercase `snake_case`; user-facing labels are presentation mappings. Evidence-reference hashes, when present, are lowercase SHA-256 hex.
 
 ## 2. Identity and organization
 
@@ -70,11 +71,11 @@ Product publication requires an approved product version. A purity value can app
 |---|---|---|
 | `jurisdictions` | State/DC/territory codes and class | data identity only; not permission |
 | `jurisdiction_policy_versions` | Immutable policy release | effective interval, approver, evidence hash |
-| `product_jurisdiction_rules` | SKU + destination decision | value `ALLOWED`, `MANUAL_REVIEW`, `BLOCKED`, or `UNKNOWN`; unique per active policy version |
+| `product_jurisdiction_rules` | SKU + destination decision | stored value `allowed`, `manual_review`, `blocked`, or `unknown`; unique per active policy version; presentation maps to the required title-cased values |
 | `eligibility_evaluations` | Immutable aggregate snapshot | records every independent gate and input version |
 | `compliance_cases` | Holds/manual review | open/approved/rejected/expired; reason/evidence |
 | `compliance_decisions` | Append-only case decisions | actor, capability, reason, evidence, step-up time |
-| `manual_review_case_decisions` | Exact-case resolution for a base manual-review rule | order + immutable eligibility-evaluation hash + expiry; append-only; approval passes only that unchanged order snapshot |
+| `manual_review_case_decisions` | Exact-case resolution for one base manual-review rule and order line | order + order item + exact jurisdiction-rule ID + immutable eligibility-evaluation hash + expiry; append-only; approval passes only that unchanged SKU-line snapshot |
 
 Independent gate keys:
 
@@ -89,6 +90,8 @@ Independent gate keys:
 - `launch_control`
 
 Each gate result is `PASS`, `MANUAL_REVIEW`, `BLOCKED`, or `UNKNOWN`. Aggregation order is `BLOCKED` > `UNKNOWN` > `MANUAL_REVIEW` > `PASS`; only all-`PASS` may create hosted checkout.
+
+The pure domain representation uses lowercase equivalents. Exactly one result for every listed gate is required; missing, duplicate, malformed, or evaluator-error results become `unknown`. Unknown and manual-review results create a compliance hold, while unknown also routes the responsible gap to policy review. See `domain-policies.md`.
 
 ## 6. Cart, order, payment, and fulfillment
 
@@ -116,10 +119,11 @@ stateDiagram-v2
   ComplianceHold --> EligibilityReview: approved or evidence changed
   EligibilityReview --> ReadyForCheckout: all gates pass
   ReadyForCheckout --> CheckoutPending
-  CheckoutPending --> PaymentFailed
+  CheckoutPending --> PaymentFailed: verified failure or authoritative session expiration
   CheckoutPending --> PaidPendingClearance: verified webhook
   PaidPendingClearance --> PaidOnHold: any gate not pass
   PaidPendingClearance --> ReadyForFulfillment: all gates pass
+  PaidOnHold --> ReadyForFulfillment: fresh all-pass evaluation and current release
   ReadyForFulfillment --> PaidOnHold: clearance changed; revoke release
   ReadyForFulfillment --> FulfillmentInProgress
   FulfillmentInProgress --> PaidOnHold: clearance changed before carrier handoff; revoke release
@@ -130,7 +134,7 @@ stateDiagram-v2
   PaymentFailed --> Cancelled
 ```
 
-No transition to a paid state originates from the browser redirect. A restrictive policy or clearance change appends a release-revocation event before shipment can proceed. Release consumption rechecks the current derived release state and eligibility in the same transaction; a previously issued but revoked/expired release cannot authorize fulfillment.
+No transition to a paid state originates from the browser redirect. A restrictive policy or clearance change appends a release-revocation event before shipment can proceed. Release consumption rechecks the current derived release state and eligibility in the same transaction; a previously issued but revoked/expired release cannot authorize fulfillment. A revoked or expired release may be re-issued only with fresh all-pass clearance and a new release-event version; a consumed release is terminal.
 
 Refund status is a separate financial state derived from the append-only journal:
 

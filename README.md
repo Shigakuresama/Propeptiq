@@ -1,10 +1,12 @@
 # PROPEPTIQ LABS
 
-PROPEPTIQ LABS is a production-oriented, compliance-first commerce platform for legitimate laboratory and research use. It is not a human-use or veterinary-use storefront.
+PROPEPTIQ LABS is planned as a production-capable, compliance-first commerce platform for legitimate laboratory and research use. It is not a human-use or veterinary-use storefront. The current repository is a documentation-first scaffold and partial, unaccepted domain draft—not a production-ready application.
 
 ## Current status
 
 The application is being built from a new workspace. Production commerce is intentionally disabled until every launch gate in this repository is backed by current documentary evidence and an accountable approval.
+
+The current execution state is **planning/design hold**. The binding architecture documentation is present and Superdesign desktop draft version 3 is ready for user review. No further implementation proceeds until that visual direction is approved or revised; existing uncommitted domain work remains paused for independent review.
 
 This repository uses four evidence labels:
 
@@ -26,9 +28,9 @@ This repository uses four evidence labels:
 - Product identity, purity, test method, lot, and COA claims render only from approved records and actual batch evidence.
 - The repository contains no invented saleable products, prices, inventory, purity values, laboratories, certifications, testimonials, approvals, or shipping permissions.
 
-## Selected stack
+## Proposed baseline stack
 
-The baseline stack is:
+The selected implementation baseline is listed below. Vendor accounts, production configuration, operational controls, and end-to-end behavior remain unverified launch gates until their corresponding implementation tasks and evidence are complete.
 
 - Next.js App Router with React and strict TypeScript
 - Tailwind CSS and shadcn/ui on Radix primitives
@@ -63,18 +65,20 @@ npm run dev
 
 The default local state keeps authentication-dependent operations, external messages, object writes, and payments disabled until real development credentials are configured. Never commit `.env.local` or paste secrets into issues, documentation, tests, or chat.
 
-Quality gates:
+Currently defined quality commands:
 
 ```powershell
 npm run lint
 npm run typecheck
 npm test
+npm run test:integration
 npm run test:e2e
 npm run build
-npm run db:check
 ```
 
-Database changes follow this sequence:
+The current pre-implementation quality status is recorded in `docs/reviews/pre-implementation-review.md`; a listed command is not evidence that it currently passes.
+
+Task 3 will add the following database commands only with their real guarded implementations. They do not exist yet:
 
 ```powershell
 npm run db:generate
@@ -93,6 +97,9 @@ npm run db:migrate
 ## Documentation map
 
 - Product and acceptance criteria: `docs/product-requirements.md`
+- Binding requirement traceability: `docs/requirements-traceability.md`
+- Superdesign review and approval record: `docs/design/superdesign-review.md`
+- Pre-implementation review and acceptance blockers: `docs/reviews/pre-implementation-review.md`
 - Current source register: `docs/sources.md`
 - Reference-site/product taxonomy audit: `docs/research/reference-site-audit.md`
 - System boundaries and diagrams: `docs/architecture/system-architecture.md`
