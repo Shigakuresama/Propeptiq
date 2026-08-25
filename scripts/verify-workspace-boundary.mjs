@@ -54,6 +54,7 @@ const configNames = [
   "nx.json",
   "vitest.config.ts",
   "vitest.integration.config.ts",
+  "playwright.config.ts",
   "eslint.config.mjs",
   "next.config.ts",
   "tsconfig.json",
@@ -62,9 +63,17 @@ const configFiles = configNames.filter((name) => existsSync(resolve(worktreeRoot
 const configText = configFiles.map((name) => readFileSync(resolve(worktreeRoot, name), "utf8")).join("\n");
 assert(!markerPattern.test(configText), "package/workspace/tool configuration references the quarantined scaffold");
 assert(Object.keys(packageJson).includes("scripts"), "package.json scripts are missing");
+const playwrightText = readFileSync(resolve(worktreeRoot, "playwright.config.ts"), "utf8");
+const testDirMatch = playwrightText.match(/testDir:\s*["']([^"']+)["']/u);
+assert(testDirMatch?.[1], "Playwright testDir is missing");
+const e2eRoot = resolve(worktreeRoot, testDirMatch[1]);
+assert(isInside(worktreeRoot, e2eRoot), `Playwright testDir escapes the worktree root: ${e2eRoot}`);
+assert(!isInside(quarantineRoot, e2eRoot) && !isInside(e2eRoot, quarantineRoot),
+  "Playwright testDir overlaps the quarantined sibling");
 
 console.log(`PASS workspace root: ${worktreeRoot}`);
 console.log(`PASS canonical root: ${canonicalRoot}`);
 console.log(`PASS quarantine sibling: ${quarantinePath}`);
+console.log(`PASS Playwright e2e root: ${e2eRoot}`);
 console.log(`PASS config scope: ${configFiles.join(", ")}`);
 console.log("PASS quarantine excluded from package, workspace, search, build, lint, and test roots");
