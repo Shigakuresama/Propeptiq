@@ -115,17 +115,17 @@ npm run build
 - Create: `src/domain/content-policy.test.ts`
 - Remove/replace after comparison: `src/lib/policy.ts`
 
-- [ ] Define exact jurisdiction states `Allowed`, `Manual Review`, `Blocked`, and `Unknown`; represent non-jurisdiction gates with explicit pass/manual/block/unknown results.
-- [ ] Implement deterministic aggregate precedence: any block denies; otherwise any unknown denies/routes review; otherwise any manual-review result holds; only all passes allow.
-- [ ] Return structured reason codes and evidence references, never a bare boolean.
-- [ ] Implement capability/resource authorization with organization scope and deny-by-default behavior.
-- [ ] Implement integer-minor-unit price calculation with checked quantity, currency consistency, and immutable price snapshots.
-- [ ] Implement explicit order/payment/compliance/fulfillment state transition functions; invalid transitions return typed errors and never mutate input.
-- [ ] Implement prohibited-copy checks for dosage, administration, treatment, human/veterinary outcome, and unsupported-claim language as a publication defense-in-depth control.
-- [ ] Close every issue in `docs/reviews/pre-implementation-review.md`, including explicit `human use`/`human consumption` adversarial copy, malformed persisted-enum handling, required strong-auth rows, verified dispute transitions, and atomic fulfillment-release consumption.
-- [ ] Make price/tax/shipping inputs structurally distinct from browser request data and prove that only a server-resolved authoritative snapshot can reach the calculator.
-- [ ] Use table/property-style tests to prove every missing/error path denies and every invalid transition fails.
-- [ ] Follow the binding contracts and configurable-limit boundaries in `docs/architecture/domain-policies.md`; do not invent a currency, quantity limit, SKU rule, or approval.
+- [x] Define exact jurisdiction states `Allowed`, `Manual Review`, `Blocked`, and `Unknown`; represent non-jurisdiction gates with explicit pass/manual/block/unknown results.
+- [x] Implement deterministic aggregate precedence: any block denies; otherwise any unknown denies/routes review; otherwise any manual-review result holds; only all passes allow.
+- [x] Return structured reason codes and evidence references, never a bare boolean.
+- [x] Implement capability/resource authorization with organization scope and deny-by-default behavior.
+- [x] Implement integer-minor-unit price calculation with checked quantity, currency consistency, and immutable price snapshots.
+- [x] Implement explicit order/payment/compliance/fulfillment state transition functions; invalid transitions return typed errors and never mutate input.
+- [x] Implement prohibited-copy checks for dosage, administration, treatment, human/veterinary outcome, and unsupported-claim language as a publication defense-in-depth control.
+- [x] Close every issue in `docs/reviews/pre-implementation-review.md`, including explicit `human use`/`human consumption` adversarial copy, malformed persisted-enum handling, required strong-auth rows, verified dispute transitions, and atomic fulfillment-release consumption.
+- [x] Make price/tax/shipping inputs structurally distinct from browser request data and prove that only a server-resolved authoritative snapshot can reach the calculator.
+- [x] Use table/property-style tests to prove every missing/error path denies and every invalid transition fails.
+- [x] Follow the binding contracts and configurable-limit boundaries in `docs/architecture/domain-policies.md`; do not invent a currency, quantity limit, SKU rule, or approval.
 
 **Validation:**
 

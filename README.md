@@ -1,12 +1,12 @@
 # PROPEPTIQ LABS
 
-PROPEPTIQ LABS is planned as a production-capable, compliance-first commerce platform for legitimate laboratory and research use. It is not a human-use or veterinary-use storefront. The current repository is a documentation-first scaffold and partial, unaccepted domain draft—not a production-ready application.
+PROPEPTIQ LABS is planned as a production-capable, compliance-first commerce platform for legitimate laboratory and research use. It is not a human-use or veterinary-use storefront. The current repository contains the approved requirements, an accepted pure-domain policy layer, and a partial application scaffold—not a production-ready application.
 
 ## Current status
 
 The application is being built from a new workspace. Production commerce is intentionally disabled until every launch gate in this repository is backed by current documentary evidence and an accountable approval.
 
-The visual implementation hold was released when the user approved Superdesign desktop version 3 and responsive handoff `responsive-v1` on 2026-08-24. Implementation is active on the feature branch. The uncommitted Task 2 pure-domain candidate has passed its focused independent review and current unit/build gate (`npm run verify`) and is next for formal acceptance; integration and browser suites do not exist yet.
+The visual implementation hold was released when the user approved Superdesign desktop version 3 and responsive handoff `responsive-v1` on 2026-08-24. Implementation is active on the feature branch. Task 2's fail-closed pure-domain policies are committed and independently accepted through `51fcefd`; the current gate passes lint, strict type checking, 299 unit tests, and the production build. Database integration and browser suites do not exist yet.
 
 This repository uses four evidence labels:
 

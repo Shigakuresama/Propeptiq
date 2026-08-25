@@ -44,7 +44,7 @@
 
 ## 3. Current execution state
 
-The requirements and architecture documentation are present. The user explicitly approved Superdesign desktop version 3 and `responsive-v1` at `2026-08-24T20:54:54-07:00`, releasing the visual implementation hold. The existing uncommitted Task 2 pure-domain candidate is independently approved in its focused scope and passes the current unit/build gate (`npm run verify`), but still requires formal task acceptance. Integration and browser suites do not exist yet, and the design decision does not prove or open any database, identity, provider, commerce, operational, or production launch gate.
+The requirements and architecture documentation are present. The user explicitly approved Superdesign desktop version 3 and `responsive-v1` at `2026-08-24T20:54:54-07:00`, releasing the visual implementation hold. Task 2's committed pure-domain layer is independently accepted through `51fcefd` and passes the current unit/build gate (`npm run verify`, 299 tests). Integration and browser suites do not exist yet, and neither the design approval nor Task 2 acceptance proves or opens any database, identity, provider, commerce, operational, or production launch gate.
 
 ## 4. Production launch decision
 
