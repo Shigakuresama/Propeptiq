@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Newsreader } from "next/font/google";
 import type { ReactNode } from "react";
 
-import { SiteFooter } from "@/components/site/site-footer";
-import { SiteHeader } from "@/components/site/site-header";
+import { CartProvider } from "@/cart/cart-provider";
 import { cn } from "@/lib/utils";
 
 import "./globals.css";
@@ -21,12 +20,20 @@ const newsreader = Newsreader({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.APP_ORIGIN ?? "http://localhost:3000"),
   title: {
-    default: "PROPEPTIQ LABS — Research Materials Governed by Evidence",
+    default: "PROPEPTIQ LABS — Research-Use Catalog",
     template: "%s | PROPEPTIQ LABS",
   },
   description:
-    "A compliance-first research-materials platform for verified researchers and organizations. For legitimate laboratory and research use only; not for human or veterinary use.",
+    "A public research-use catalog and anonymous cart. For legitimate laboratory and research use only; not for human or veterinary use.",
+  openGraph: {
+    type: "website",
+    siteName: "PROPEPTIQ LABS",
+    title: "PROPEPTIQ LABS — Research-Use Catalog",
+    description:
+      "For legitimate laboratory and research use only. Not for human or veterinary use.",
+  },
   robots: {
     index: false,
     follow: false,
@@ -35,14 +42,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" className={cn(geist.variable, newsreader.variable)}>
+    <html
+      lang="en"
+      data-scroll-behavior="smooth"
+      className={cn(geist.variable, newsreader.variable)}
+    >
       <body className="min-h-svh bg-canvas font-sans text-ink antialiased">
-        <a className="skip-link" href="#main-content">
-          Skip to main content
-        </a>
-        <SiteHeader />
-        {children}
-        <SiteFooter />
+        <CartProvider>{children}</CartProvider>
       </body>
     </html>
   );

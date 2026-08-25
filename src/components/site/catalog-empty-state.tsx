@@ -1,4 +1,4 @@
-import { ArrowUpRight, LibraryBig } from "lucide-react";
+import { LibraryBig } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
@@ -20,29 +20,19 @@ export function CatalogEmptyState({ headingLevel = "h2" }: { headingLevel?: "h1"
           id="catalog-empty-heading"
           className="mt-3 font-heading text-3xl leading-tight text-ink sm:text-4xl"
         >
-          No research materials are currently approved for sale.
+          No active catalog records are currently available.
         </Heading>
         <p className="mt-4 leading-7 text-muted-ink">
-          Products, categories, prices, inventory, and evidence records will appear
-          only after the corresponding business and compliance approvals exist.
+          Production remains empty until a separately verified catalog source is connected.
         </p>
       </div>
       <div className="flex flex-wrap gap-3 lg:justify-end">
         <Button
           asChild
-          className="h-11 rounded-full bg-ink px-5 text-canvas hover:bg-slate"
-        >
-          <Link href="/access">
-            Review access
-            <ArrowUpRight aria-hidden="true" />
-          </Link>
-        </Button>
-        <Button
-          asChild
           variant="outline"
           className="h-11 rounded-full border-ink/20 bg-transparent px-5 text-ink hover:bg-moss-soft/60"
         >
-          <Link href="/research-use-policy">Read policy</Link>
+          <Link href="/research-use-policy">Read research-use policy</Link>
         </Button>
       </div>
     </section>

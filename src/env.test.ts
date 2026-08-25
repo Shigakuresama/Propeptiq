@@ -8,6 +8,7 @@ describe("parseServerEnv", () => {
 
     expect(env).toMatchObject({
       APP_ENV: "local",
+      CATALOG_DEMO_MODE: "disabled",
       AUTH_MODE: "disabled",
       DATABASE_MODE: "disabled",
       PAYMENTS_MODE: "disabled",
@@ -172,4 +173,31 @@ describe("parseServerEnv", () => {
       }),
     ).toThrow(/test mode is not permitted in production/);
   });
+
+  it("rejects catalog demo mode for the production application environment", () => {
+    expect(() =>
+      parseServerEnv({
+        APP_ENV: "production",
+        APP_ORIGIN: "https://research.example.test",
+        CATALOG_DEMO_MODE: "enabled",
+      }),
+    ).toThrow(/CATALOG_DEMO_MODE.*production/);
+  });
+
+  it.each([
+    ["VERCEL_ENV", "production"],
+    ["VERCEL_TARGET_ENV", "production"],
+  ] as const)(
+    "rejects catalog demo mode for production deployment identity %s",
+    (identityKey, identityValue) => {
+      expect(() =>
+        parseServerEnv({
+          APP_ENV: "preview",
+          APP_ORIGIN: "https://preview.example.test",
+          CATALOG_DEMO_MODE: "enabled",
+          [identityKey]: identityValue,
+        }),
+      ).toThrow(/CATALOG_DEMO_MODE.*production/);
+    },
+  );
 });

@@ -119,13 +119,13 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 4: Build the Public Storefront and Demo Catalog
 
-- [ ] Implement `/`, `/catalog`, `/catalog/[slug]`, `/cart`, `/research-use-policy`, and `/quality-records` using the approved off-white/ink/moss, Newsreader/Geist system and Proof Rail. A future `/research-use` route may only redirect to `/research-use-policy`.
-- [ ] Add a development/test catalog adapter containing clearly labeled fixtures; `CATALOG_DEMO_MODE` must hard-fail in production.
-- [ ] Keep production catalog data empty until a real manifest is imported.
-- [ ] Allow anonymous visitors to view approved products, prices, promotions, and add product IDs/quantities to a local cart.
-- [ ] Preserve the cart through Clerk sign-in; never trust locally stored price, discount, inventory, or eligibility data.
-- [ ] Implement discounts, bundles, subscriptions, loyalty display, and related-product recommendations from server records.
-- [ ] Render COA/testing claims only when the active lot contains the corresponding evidence.
+- [x] Implement `/`, `/catalog`, `/catalog/[slug]`, `/cart`, `/research-use-policy`, and `/quality-records` using the approved off-white/ink/moss, Newsreader/Geist system and Proof Rail. A future `/research-use` route may only redirect to `/research-use-policy`.
+- [x] Add a development/test catalog adapter containing clearly labeled fixtures; `CATALOG_DEMO_MODE` must hard-fail in production.
+- [x] Keep production catalog data empty until a real manifest is imported.
+- [x] Allow anonymous visitors to view approved products, prices, promotions, and add product IDs/quantities to a local cart.
+- [x] Preserve the cart through Clerk sign-in; never trust locally stored price, discount, inventory, or eligibility data.
+- [x] Implement discounts, bundles, subscriptions, loyalty display, and related-product recommendations from server records.
+- [x] Render COA/testing claims only when the active lot contains the corresponding evidence.
 
 **Validation:** Anonymous browsing/cart works; demo data is visibly marked and impossible to enable in production; mobile and 200% zoom checks pass.
 

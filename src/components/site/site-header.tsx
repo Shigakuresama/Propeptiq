@@ -1,8 +1,9 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import { Menu, ShoppingBag, UserRound } from "lucide-react";
 import Link from "next/link";
 
+import { useCart } from "@/cart/cart-provider";
 import { BrandMark } from "@/components/site/brand-mark";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,22 +22,25 @@ import {
 } from "@/lib/site-content";
 
 export function SiteHeader() {
+  const { itemCount } = useCart();
+
   return (
-    <>
-      <div className="border-b border-border bg-ink px-4 py-2 text-center text-xs leading-5 text-canvas sm:px-6">
+    <header className="persistent-chrome">
+      <div className="restriction-bar border-b border-border bg-ink px-4 py-2 text-center text-canvas sm:px-6">
         <span>{researchRestrictions[0]}</span>{" "}
         <span className="text-canvas/70">{researchRestrictions[1]}</span>
       </div>
-      <header className="sticky top-0 z-40 border-b border-border/90 bg-canvas/95 backdrop-blur-md">
-        <div className="site-container flex h-[4.75rem] items-center gap-3">
+      <div className="border-b border-border bg-canvas">
+        <div className="site-container flex min-h-[4.75rem] items-center gap-2 py-2 sm:gap-3">
           <Link
             href="/"
             aria-label={`${siteName} home`}
             className="group flex min-w-0 items-center gap-2.5 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-canvas"
           >
             <BrandMark className="transition-transform duration-200 ease-out group-hover:rotate-12 motion-reduce:transform-none" />
-            <span className="truncate text-[0.72rem] font-semibold tracking-[0.11em] text-ink sm:text-[0.78rem]">
-              {siteName}
+            <span className="truncate text-[0.7rem] font-semibold tracking-[0.11em] text-ink sm:text-[0.78rem]">
+              <span className="sm:hidden">PROPEPTIQ</span>
+              <span className="hidden sm:inline">{siteName}</span>
             </span>
           </Link>
 
@@ -52,13 +56,23 @@ export function SiteHeader() {
             ))}
           </nav>
 
-          <Button
-            asChild
-            variant="outline"
-            className="ml-auto h-11 rounded-full border-ink/20 bg-transparent px-4 text-ink hover:bg-moss-soft/60 min-[1180px]:ml-3"
+          <Link
+            href="/cart"
+            aria-label={`Cart, ${itemCount} requested unit${itemCount === 1 ? "" : "s"}`}
+            className="ml-auto inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-[1180px]:ml-3 sm:px-3"
           >
-            <Link href="/access">Account</Link>
-          </Button>
+            <ShoppingBag aria-hidden="true" className="size-4" />
+            <span className="hidden sm:inline">Cart</span>
+            <span className="cart-count" aria-hidden="true">{itemCount}</span>
+          </Link>
+
+          <Link
+            href="/cart?checkout=sign-in"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-3"
+          >
+            <UserRound aria-hidden="true" className="size-4" />
+            <span>Sign in</span>
+          </Link>
 
           <Sheet>
             <SheetTrigger asChild>
@@ -98,11 +112,28 @@ export function SiteHeader() {
                     </Link>
                   </SheetClose>
                 ))}
+                <SheetClose asChild>
+                  <Link
+                    href="/cart"
+                    className="flex min-h-12 items-center justify-between rounded-xl px-3 py-3 font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <span>Cart</span>
+                    <span>{itemCount}</span>
+                  </Link>
+                </SheetClose>
+                <SheetClose asChild>
+                  <Link
+                    href="/cart?checkout=sign-in"
+                    className="flex min-h-12 items-center rounded-xl px-3 py-3 font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    Sign in <span className="ml-2 text-xs text-muted-ink">Not connected</span>
+                  </Link>
+                </SheetClose>
               </nav>
             </SheetContent>
           </Sheet>
         </div>
-      </header>
-    </>
+      </div>
+    </header>
   );
 }

@@ -2,6 +2,8 @@ import { z } from "zod";
 
 const capabilityMode = z.enum(["disabled", "test", "live"]);
 const appEnvironment = z.enum(["local", "preview", "production"]);
+const catalogDemoMode = z.enum(["disabled", "enabled"]);
+const vercelEnvironment = z.enum(["development", "preview", "production"]);
 const nonBlank = z.string().trim().min(1);
 const urlValue = nonBlank.pipe(z.url());
 const postgresUrl = urlValue.refine(
@@ -19,6 +21,9 @@ const postgresUrl = urlValue.refine(
 const rawServerEnvSchema = z.object({
   APP_ENV: appEnvironment.default("local"),
   APP_ORIGIN: urlValue.optional(),
+  CATALOG_DEMO_MODE: catalogDemoMode.default("disabled"),
+  VERCEL_ENV: vercelEnvironment.optional(),
+  VERCEL_TARGET_ENV: nonBlank.optional(),
   AUTH_MODE: capabilityMode.default("disabled"),
   DATABASE_MODE: capabilityMode.default("disabled"),
   PAYMENTS_MODE: capabilityMode.default("disabled"),
@@ -121,6 +126,19 @@ function looksProductionScopedDatabase(value: string): boolean {
 }
 
 const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
+  const productionDeployment =
+    env.APP_ENV === "production" ||
+    env.VERCEL_ENV === "production" ||
+    env.VERCEL_TARGET_ENV?.trim().toLowerCase() === "production";
+
+  if (env.CATALOG_DEMO_MODE === "enabled" && productionDeployment) {
+    context.addIssue({
+      code: "custom",
+      path: ["CATALOG_DEMO_MODE"],
+      message: "CATALOG_DEMO_MODE cannot be enabled for a production identity",
+    });
+  }
+
   requireFields(env, context, "AUTH_MODE", [
     "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
     "CLERK_SECRET_KEY",

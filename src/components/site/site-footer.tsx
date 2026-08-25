@@ -24,8 +24,8 @@ export function SiteFooter() {
             Research materials, governed by evidence.
           </p>
           <p className="mt-5 max-w-[62ch] text-sm leading-6 text-canvas/70">
-            {researchRestrictions[0]} {researchRestrictions[1]} Access and
-            eligibility remain subject to documented review.
+            {researchRestrictions[0]} {researchRestrictions[1]} Catalog and cart facts
+            are reloaded from authoritative server records.
           </p>
         </div>
 
@@ -34,11 +34,17 @@ export function SiteFooter() {
             <Link
               key={item.href}
               href={item.href}
-              className="rounded-md px-2 py-2 text-sm text-canvas/75 transition-colors duration-200 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
+              className="inline-flex min-h-11 min-w-11 items-center rounded-md px-2 py-2 text-sm text-canvas/75 transition-colors duration-200 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
             >
               {item.label}
             </Link>
           ))}
+          <Link
+            href="/cart"
+            className="inline-flex min-h-11 min-w-11 items-center rounded-md px-2 py-2 text-sm text-canvas/75 transition-colors duration-200 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
+          >
+            Cart
+          </Link>
         </nav>
       </div>
     </footer>
