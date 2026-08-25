@@ -12,7 +12,7 @@ Production settings:
 - Prefer authenticator app/passkey-capable methods; backup codes enabled. SMS is not the sole administrative factor.
 - Disable uncontrolled organization creation/invitations unless the approval workflow explicitly permits them.
 - Treat incomplete session tasks as unauthenticated for protected routes.
-- Require recent strict MFA reverification for approvals, suspensions, catalog publication, jurisdiction changes, launch-gate changes, refunds, and staff grants.
+- Require recent strict MFA reverification for application review, payment reconciliation, approvals, suspensions, catalog publication, jurisdiction changes, launch-gate changes, refunds, and staff grants. Reverification must be no earlier than the active session's authentication time.
 - Use separate development and production Clerk instances.
 
 Clerk proves identity and organization context. It does not prove researcher status, SKU eligibility, jurisdiction legality, payment-provider eligibility, tax status, shipping eligibility, or compliance clearance.
@@ -44,6 +44,7 @@ The adapter validates Clerk identifiers, then loads the actor, organization memb
 ```ts
 type Capability =
   | 'application:read:self'
+  | 'application:read:organization'
   | 'application:submit:self'
   | 'application:review'
   | 'compliance:decide'
@@ -51,10 +52,12 @@ type Capability =
   | 'catalog:publish'
   | 'jurisdiction:manage'
   | 'order:read:self'
+  | 'order:read:organization'
   | 'order:read:any'
   | 'payment:reconcile'
   | 'refund:request'
   | 'fulfillment:release:consume'
+  | 'membership:manage:organization'
   | 'staff:manage'
   | 'launch-gate:manage'
 ```
@@ -67,7 +70,7 @@ Role names are conveniences; server checks target exact capabilities and resourc
 
 `requirePrincipal()` rejects missing/incomplete/suspended identity. `requireOperation(operation, resource)` loads the immutable operation policy, checks its exact capability and permitted resource relation, and—when the operation is sensitive—requires current server-loaded strong-auth policy plus recent strong authentication. DAL functions require a `Principal`; they do not accept raw Clerk IDs from route code.
 
-Resource authorization declares one relation: owner actor, matching organization, or deliberately capability-only staff scope. A server-owned operation matrix fixes the capability, allowed relation, and step-up requirement; route callers cannot override it. Missing/malformed policy or scope denies. Cross-organization staff access never derives from a buyer role or client-provided organization ID. The strong-auth policy is an evidence-backed server configuration with bounded age; missing/expired/unsafe configuration disables sensitive operations.
+Resource authorization declares one relation: owner actor, matching organization, or deliberately capability-only staff scope. Capability-only resources also project the subject actor, subject organization, and creator actor when applicable; missing context denies reviewer/applicant and drafter/publisher checks. A server-owned operation matrix fixes the capability, allowed relation, separation rule, and step-up requirement; route callers cannot override it. Missing/malformed policy or scope denies. Cross-organization staff access never derives from a buyer role or client-provided organization ID. The strong-auth policy is an evidence-backed server configuration with bounded age; the server adapter supplies a separate approved platform ceiling, and missing/expired/unsafe configuration disables sensitive operations.
 
 Example interface:
 
@@ -76,7 +79,11 @@ export async function requireOperation(
   principal: Principal,
   operation: AuthorizationOperation,
   resource: ResourceScope,
-  context: { now: Date; strongAuthPolicy: StrongAuthPolicy | null },
+  context: {
+    now: Date
+    strongAuthPolicy: StrongAuthPolicy | null
+    strongAuthMaximumAgeCeilingMs: number | null
+  },
 ): Promise<AuthorizedPrincipal>
 ```
 

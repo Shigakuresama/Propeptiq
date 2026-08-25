@@ -52,6 +52,7 @@ Each product/jurisdiction rule contains:
 - legal/compliance approver,
 - effective timestamp,
 - review/expiry timestamp,
+- evidence effective/review interval and integrity status,
 - policy version/content hash,
 - superseded rule reference where applicable.
 

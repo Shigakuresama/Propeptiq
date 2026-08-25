@@ -2,13 +2,13 @@
 
 **Reviewed:** 2026-08-24
 
-**Verdict:** **REQUEST CHANGES**
+**Verdict:** **PURE-DOMAIN CANDIDATE APPROVED; FORMAL ACCEPTANCE PAUSED**
 
-**Scope:** Preserved starter UI/API code and the current uncommitted `src/domain/` draft. This is a read-only acceptance review; it does not approve or advance formal implementation.
+**Scope:** Preserved starter UI/API code and the current uncommitted `src/domain/` draft. The focused approval applies only to the pure Task 2 policy candidate. It does not approve the starter UI/API, accept Task 2 into history, advance later implementation tasks, or open a production launch gate.
 
 ## Why this review exists
 
-The repository contains useful partial work created around the planning and Superdesign approval gates. It is preserved to avoid losing work, but it cannot become an accidental production decision. The exact Superdesign v3 and `responsive-v1` handoff still require approval before public UI implementation, and the domain draft must pass the safety gates below before Task 2 can be accepted.
+The repository contains useful partial work created around the planning and Superdesign approval gates. It is preserved to avoid losing work, but it cannot become an accidental production decision. The exact Superdesign v3 and `responsive-v1` handoff still require approval before any implementation task resumes. The domain candidate has now passed its focused pure-policy safety review, but it remains uncommitted and formally unaccepted while that execution hold is open.
 
 ## Reproducible quality snapshot
 
@@ -16,9 +16,9 @@ Fresh checks against the current unstaged snapshot produced:
 
 | Check | Result |
 |---|---|
-| `npm test` | Passed: 6 files, 241 tests |
-| `npm run typecheck` | Passed |
-| `npm run lint` | Passed with the zero-warning gate |
+| `npm run verify` | Passed: zero-warning lint, strict typecheck, 6 test files / 296 tests, and the Next.js 16.3.2 production build |
+| `npm audit --omit=dev` | Passed: 0 vulnerabilities |
+| `npm audit` | Reports 4 moderate advisories in the development-only `drizzle-kit` → `@esbuild-kit` → `esbuild` path; the suggested change is a semver-major downgrade, so no forced remediation was applied |
 | `git diff --check` | Passed; line-ending conversion warnings only |
 | `npm run test:integration` | Failed: no integration test files exist |
 | `npm run test:e2e -- --list` | Failed: no Playwright tests exist |
@@ -36,25 +36,22 @@ The following findings from the first review have been addressed in the current 
 5. Payment disputes now transition both payment and order state, release issuance checks canonical current expiry, and order fulfillment binds a release snapshot to payment, clearance, and version evidence.
 6. Money inputs are separated by server-authority markers and malformed values are rejected before arithmetic.
 
-These are implementation observations, not production launch approvals. The draft remains uncommitted and unaccepted.
+These are implementation observations, not production launch approvals. The draft remains uncommitted and formally unaccepted under the visual hold.
 
-## Remaining pure-domain blockers
+## Closed pure-domain blockers
 
-### P0 — prohibited-copy format-character bypass
+The independent review ran in multiple adversarial passes. The final bounded re-review returned **READY** with no remaining Critical/P1 fail-open defect in the pure scope. Current regressions demonstrate:
 
-`normalizeText()` and the compact-pattern pass do not remove Unicode format characters. Direct synthetic invocations show both `Human\u200buse.` and `Animal\u200buse.` pass publication when an approved negative disclaimer is present. Add normalization and regression cases for zero-width and other format-character obfuscation across every binding prohibited category. The scanner remains defense in depth and never substitutes for legal or scientific approval.
+1. Unicode control/format characters and punctuation fragmentation cannot hide prohibited injection, human-use, animal-use, guarantee, or related language. Approved disclaimers and structured claim text must remain nonempty after normalization.
+2. `canCreateCheckout()` accepts only the immutable aggregate instance emitted by the policy boundary. Null, partial, cloned, and deserialized caller-shaped `pass` projections deny and must be re-aggregated from current server inputs.
+3. Missing, duplicate, unexpected, malformed, sparse, or incomplete gate/evidence/order-line arrays resolve to `unknown` or another typed denial without throwing. Sparse capability, currency, publication-policy, and claim-evidence arrays also deny.
+4. Null, scalar, array, and representative malformed-object authorization, order, payment, release, fulfillment, and publication inputs return typed denials rather than throwing.
+5. Runtime jurisdiction values map exactly; every invalid value maps to `unknown`. Payment verification requires the exact boolean `true`, and malformed gate decisions or clearance-revocation booleans cannot transition state.
+6. A verified dispute replay against `paid_on_hold` idempotently preserves the hold and cleared release binding; browser-supplied dispute evidence still denies.
 
-### P1 — caller-shaped checkout decision is trusted
+The final order strictness, sparse-array, normalized-empty disclaimer/claim, and related hardening changes have witnessed failing-test-then-passing-test evidence from this review cycle. Some earlier shared-workspace repairs appeared concurrently before their automated regression was first run. Their pre-fix behavior was reproduced directly and their current regression behavior is verified, but no Git-verifiable automated RED phase exists for those earlier changes; this review does not claim otherwise.
 
-`canCreateCheckout()` currently returns `true` for a fabricated `{ decision: "pass" }` value and throws for `null`. It must consume an opaque server-produced result or validate the complete aggregate, including every required gate, expected order-line scope, evidence bindings, and structural-denial rules.
-
-### P1 — malformed runtime events throw
-
-Direct calls with valid snapshots and `null` events throw before returning a typed denial in `transitionOrder()`, `transitionPayment()`, and `transitionFulfillmentRelease()`; `canFulfill(null)` also throws. Every exported boundary must validate unknown runtime input before reading discriminants or nested values and must fail closed without throwing.
-
-### P1 — exported jurisdiction mapper has no invalid-runtime result
-
-`jurisdictionStateToGateStatus("INVALID")` returns JavaScript `undefined` despite its declared `GateStatus` result. Accept `unknown` at this boundary and return the domain state `unknown` for every invalid runtime value.
+This focused approval does not prove database transactionality, webhook authenticity, persistence, or browser behavior. The scanner remains defense in depth and never substitutes for legal or scientific approval.
 
 ## Required system-level evidence still absent
 
@@ -74,16 +71,17 @@ Until these adapters and transactions exist, caller-provided booleans or evidenc
 - `src/app/api/health/route.ts` exposes internal launch-gate count and jurisdiction-state data. It remains unaccepted legacy scaffold code and must become a neutral shallow/liveness response during its scheduled implementation task.
 - `src/app/layout.tsx` and `src/app/globals.css` still use the rejected Outfit/navy-gold starter direction. They are not evidence of design-system compliance and must remain untouched until Superdesign approval is recorded.
 
-## Task 2 acceptance gate
+## Task 2 candidate gate
 
-Task 2 cannot be marked complete until:
+The current pure-policy candidate now demonstrates:
 
-1. every remaining P0/P1 pure-domain blocker above has a failing regression test followed by a verified fix;
-2. `npm run lint`, `npm run typecheck`, and `npm test` all exit zero on the accepted snapshot;
-3. prohibited-copy tests cover normalization and obfuscation for every binding prohibited category;
-4. malformed runtime inputs deny or return `unknown` without throwing;
-5. results and nested evidence arrays are immutable;
-6. the planned database/provider/integration boundaries are implemented and tested in their owning tasks; and
-7. a fresh adversarial review finds no remaining fail-open path.
+1. current regression coverage for every identified P0/P1 pure-domain blocker, with the test-history limitation above explicitly preserved;
+2. passing lint, strict typecheck, 296 unit tests, production build, dependency audit, and whitespace validation;
+3. prohibited-copy normalization and adversarial obfuscation coverage;
+4. fail-closed malformed and sparse runtime behavior;
+5. immutable result and nested evidence snapshots; and
+6. a final independent bounded re-review with no remaining Critical/P1 defect in the focused scope.
+
+The Task 2 plan checkboxes remain intentionally unmarked while the current execution hold is open. After the user approves or revises the exact design direction, this candidate can be accepted as one reviewed snapshot. Database/provider/integration proofs remain mandatory in Tasks 3, 8, and 9 and for final completion; they are not implied by the pure-policy approval.
 
 Passing this gate still does not open any catalog, jurisdiction, payment-provider, tax, shipping, fulfillment, security, backup, or production launch gate.

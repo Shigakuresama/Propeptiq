@@ -91,7 +91,7 @@ Independent gate keys:
 
 Each gate result is `PASS`, `MANUAL_REVIEW`, `BLOCKED`, or `UNKNOWN`. Aggregation order is `BLOCKED` > `UNKNOWN` > `MANUAL_REVIEW` > `PASS`; only all-`PASS` may create hosted checkout.
 
-The pure domain representation uses lowercase equivalents. Exactly one result for every listed gate is required; missing, duplicate, malformed, or evaluator-error results become `unknown`. Unknown and manual-review results create a compliance hold, while unknown also routes the responsible gap to policy review. See `domain-policies.md`.
+The pure domain representation uses lowercase equivalents. Exactly one result is required for every non-jurisdiction gate and every expected order line requires its own line-bound `product_jurisdiction` result. Missing, duplicate, unexpected, malformed, or evaluator-error results become `unknown`; an empty/malformed expected-line set cannot pass. Unknown and manual-review results create a compliance hold, while unknown also routes the responsible gap to policy review. See `domain-policies.md`.
 
 ## 6. Cart, order, payment, and fulfillment
 
@@ -135,6 +135,8 @@ stateDiagram-v2
 ```
 
 No transition to a paid state originates from the browser redirect. A restrictive policy or clearance change appends a release-revocation event before shipment can proceed. Release consumption rechecks the current derived release state and eligibility in the same transaction; a previously issued but revoked/expired release cannot authorize fulfillment. A revoked or expired release may be re-issued only with fresh all-pass clearance and a new release-event version; a consumed release is terminal.
+
+A verified provider dispute transitions any paid, unfulfilled order to `paid_on_hold`, clears its active release binding, and transactionally appends the release revocation when one exists. A browser report cannot trigger this transition, and a carrier-handed-off/fulfilled order remains terminal in this initial graph.
 
 Refund status is a separate financial state derived from the append-only journal:
 

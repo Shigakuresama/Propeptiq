@@ -1,4 +1,4 @@
-import type { JurisdictionState } from "@/lib/policy";
+import type { JurisdictionState } from "@/domain/eligibility";
 
 export const brand = {
   name: "PROPEPTIQ LABS",
