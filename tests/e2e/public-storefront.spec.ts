@@ -83,7 +83,15 @@ test("anonymous catalog to cart flow survives reload and preserves only IDs and 
     }),
   ).toHaveValue("1");
   await page.getByRole("button", { name: "Continue to sign in" }).click();
-  await expect(page.getByRole("status")).toContainText("Sign-in checkout is not connected yet");
+  await expect(page).toHaveURL(/\/sign-in$/);
+  expect(
+    await page.evaluate(() =>
+      JSON.parse(window.localStorage.getItem("propeptiq.cart.v1") ?? "null"),
+    ),
+  ).toEqual({
+    version: 1,
+    items: [{ productId: "demo-product-alpha", quantity: 1 }],
+  });
 
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations).toEqual([]);

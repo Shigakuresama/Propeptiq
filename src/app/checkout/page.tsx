@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { accountAccessReason } from "@/account/access";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
@@ -31,8 +32,9 @@ function ClosedState({ reason }: { reason: string }) {
 
 export default async function CheckoutPage() {
   const request = await getRequestIdentity();
-  const repositories = getRequestRepositories(request);
   const reason = accountAccessReason(request);
+  if (reason === "signed_out") redirect("/sign-in");
+  const repositories = getRequestRepositories(request);
   const principal = request.principal;
   const [account, attestation] =
     reason === null && repositories && principal
