@@ -1,48 +1,41 @@
 # Superdesign Direction Review
 
-**Status:** **Approved.** Desktop draft version 3 and responsive handoff `responsive-v1` were explicitly approved by the user in the Codex task on 2026-08-24.
+**Visual status:** Approved desktop-v3; preserved.
 
-## Artifact
+**Behavioral status:** `responsive-v2` supersedes prior public-access behavior only.
+
+## Historical approval record
 
 - Project: [PROPEPTIQ LABS — Compliance-First Research Platform](https://superdesign.dev/teams/b106707a-9e03-4ac3-a09e-62198818f5b8/projects/14bb848e-b774-4091-8f92-6a9cdf2b47ac)
 - Draft: `d5bd0bcf-c086-499d-904c-4eb8581d2bb4`
-- Current version: `3`
-- Review preview: [Evidence-Led Research Governance](https://p.superdesign.dev/draft/d5bd0bcf-c086-499d-904c-4eb8581d2bb4)
-- Repository design system: `design-system/MASTER.md`
-- External Superdesign authoring brief: `C:\Users\Sergio\Documents\Peptides\.superdesign\design-system.md`
-
-## Proposed direction
-
-The direction is “clinical archive meets premium industrial design”: off-white canvas, near-black editorial type, restrained moss accents, low-shadow record surfaces, compact pill actions, a dark footer, and generous whitespace. Provn informs the visual restraint only. Amino Club informs proof-record structure only. No brand identity, asset, product, price, claim, category, or promotional device is copied.
-
-The signature pattern is the **Proof Rail**, which connects material identity, analytical method, lot, and COA state. It is an information pattern rather than a decorative chart.
-
-## Truthfulness review completed
-
-Version 1 was rejected because generated copy implied an unapproved registry-verification method, active catalog-review operations, a fictional record ID/version, and an incorrect copyright year. Version 2 removed those details. Version 3 also corrects the account model from institution-only language to verified researcher-or-organization access, enumerates the separate eligibility gates, makes unknown explicitly block checkout, removes unresolved COA-access and support-channel assumptions, keeps the catalog explicitly empty, and states that fulfillment requires verified payment plus current compliance clearance.
-
-The draft remains a visual prototype. Its hash links are not route definitions, and its prose is not automatically approved production copy. During implementation, replace or remove any statement that is not supported by the binding product requirements and an approved business record.
-
-## Approval questions
-
-The user should review three things:
-
-1. Overall visual tone: calm archival/editorial versus a denser technical presentation.
-2. Hero balance: large Newsreader statement versus the document-record composition.
-3. Proof Rail: whether the identity → method → lot → COA relationship should remain the signature motif.
-
-## Approval record
-
+- Approved desktop version: `3`
+- Preview: [Evidence-Led Research Governance](https://p.superdesign.dev/draft/d5bd0bcf-c086-499d-904c-4eb8581d2bb4)
 - Decision: `Approved`
-- Approved version: `3`
 - Approved by: `User in Codex task`
 - Approved at: `2026-08-24T20:54:54-07:00`
-- Revision notes: `Desktop v3 and responsive-v1 approved as submitted.`
+- Original revision note: `Desktop v3 and responsive-v1 approved as submitted.`
 
-The approved `responsive-v1` handoff defines the 375px, 768px, 1024px, and 1440px adaptations for implementation. Approval does not open any business, catalog, jurisdiction, payment, or fulfillment launch gate.
+This record preserves the historical visual approval. The earlier account-first/empty-catalog behavioral assumptions are no longer binding.
 
-## Responsive preflight
+## Preserved visual direction
 
-The version 3 preview was inspected at a 375 × 812 viewport. Its measured document width matched the viewport (`scrollWidth` 375px), so no horizontal overflow was observed. The hero typography remained readable, but the header exposed only the brand and Account action; it did not provide a mobile navigation menu.
+Retain the “clinical archive meets premium industrial design” direction: off-white canvas, near-black editorial type, restrained moss accents, low-shadow record surfaces, compact pill actions, dark footer, generous whitespace, and Newsreader/Geist typography. Reference sites informed visual restraint and proof-record structure only; no identity, asset, product, price, claim, category, or promotion is copied.
 
-That is a required responsive adaptation after visual approval, not an approved omission. The implementation must provide an accessible, keyboard-operable mobile menu using the locally owned shadcn/Radix primitives, preserve a visible research-use restriction, and be rechecked at 375px, 768px, 1024px, and 1440px with reduced motion and zoom before the UI task can pass.
+The Proof Rail remains the signature relationship connecting material identity, analytical method, lot, and COA state. It is an ordered information pattern, not a performance chart. Real records determine displayed facts.
+
+## Historical truthfulness review
+
+Earlier generated versions were rejected for invented verification operations, record identifiers, and other unsupported facts. Version 3 removed those inventions and was approved as a visual prototype. Its routes and prose were never production facts. Historical prototype text does not override the current requirements, catalog policy, or `responsive-v2`.
+
+## Binding `responsive-v2` behavior
+
+- Anonymous visitors may browse active products, prices, and truthful promotions and build a cart.
+- Account creation, age 21+ confirmation, structured research purpose, and the current attestation occur at checkout; preserve the cart through sign-in.
+- `/research-use-policy` remains canonical; a future `/research-use` route may only redirect to it.
+- Product/price/promotion/lot/COA display comes from active real records. Production stays truthfully empty where those records are absent.
+- The responsive navigation exposes Catalog, Quality Records, Research-Use Policy, Cart, and Account/Sign in and keeps the research-use restriction visible.
+- The exact responsive/accessibility contract is `docs/design/responsive-public-ui.md`.
+
+## Scope of approval
+
+Desktop-v3 approval authorizes the visual system. `responsive-v2` authorizes public-commerce behavior and responsive adaptation. Neither establishes real catalog facts, legal destination permission, tax/shipping configuration, fulfillment readiness, or payment-provider acceptance; those external inputs remain unresolved until verified by their owners.

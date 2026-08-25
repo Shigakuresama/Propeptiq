@@ -1,50 +1,30 @@
-# Runbook: Compliance Holds
+# Explicit Review and Paid-Order Holds
 
-## Hold sources
+## When review exists
 
-- Researcher/application manual review, rejection, suspension, or expiry.
-- Product/jurisdiction `Manual Review`, `Blocked`, `Unknown`, expired, or conflicting policy.
-- Payment-provider, tax, shipping, lot/inventory, catalog, or launch-control gate not passing.
-- Suspicious/nonresearch intended-use signal or prohibited human/veterinary-use request.
-- Evidence integrity, COA, catalog, payment, or identity mismatch.
+Create a review request only when `buyer.status === "review"` or a resolved destination rule is exactly `review`. Missing, blocked, unavailable, malformed, or territory policy denies checkout without opening a review request.
 
-## Place a hold
+The review request contains an immutable hash of the exact buyer, cart product/quantity/version facts, attestation version, and normalized destination. It contains concise reason codes and no speculative applicant-document workflow.
 
-1. Create/reuse a case scoped to actor/organization/product/destination/order.
-2. Record reason code, factual description, triggering gate/policy version, evidence references, and correlation ID.
-3. Move affected unpaid order to `ComplianceHold`; paid order to `PaidOnHold`.
-4. Revoke/withhold fulfillment release. Do not cancel/refund automatically unless approved policy requires it.
-5. Notify the buyer only with an approved neutral template; do not disclose detection rules or make legal conclusions.
+## Review procedure
 
-## Review
+1. Authenticate with the required review capability and current MFA.
+2. Load the immutable snapshot, current buyer status, current attestation version, and destination result.
+3. Confirm the request still hashes to the checkout snapshot. If any input changed, close it as invalidated and require a new request only if the new facts still explicitly resolve `review`.
+4. Record approve or deny with a concise reason and audit event. The decision never edits the destination rule.
+5. Read back the immutable decision and exact hash. Approval authorizes only that snapshot.
 
-1. Reviewer authenticates with required capability and recent strong authentication.
-2. Confirm the exact identity, organization, product, destination, order/payment, attestation, and policy versions.
-3. Validate evidence from the approved source of truth; do not rely on notes/screenshots alone.
-4. Choose one outcome:
-   - request permitted additional evidence,
-   - approve this scoped case with effective/expiry time,
-   - reject/block with reason,
-   - suspend account and affected orders,
-   - escalate to policy/legal/incident review.
-5. Append the decision; never overwrite the triggering event or prior decision.
+A buyer block or any cart, buyer-status, attestation, or destination change invalidates an earlier approval.
 
-## Release
+## Paid-order hold
 
-Release is allowed only when every independent gate re-evaluates `PASS`. A reviewer cannot override a `Blocked` or `Unknown` legal/provider/tax/shipping gate with a generic approval. A paid order receives a fulfillment release only after the post-payment re-evaluation references the new decision.
+Before fulfillment, place a paid order on hold when verified payment, active order/buyer hold, inventory, buyer status, product status, or destination allowance no longer passes. Record the changed fact and correlation ID. Do not restart an unrelated enrollment or review process.
 
-## Rejection/suspension
+To release:
 
-- Deny new checkout immediately.
-- Preserve access to required order/refund/appeal information.
-- Review existing unfulfilled paid orders for refund.
-- Revoke staff/buyer sessions if security risk exists.
-- Record scope, reason, effective time, evidence, reviewer, and review/appeal path.
+1. Verify the underlying fact from its authoritative source.
+2. Confirm payment remains verified and the order is not refunded/disputed.
+3. Re-run the current fulfillment checks.
+4. Consume one fulfillment release with an idempotency key and append an audit event.
 
-## Human/veterinary-use signal
-
-Stop the transaction, do not provide use guidance, retain only the minimum approved evidence, and escalate under the content/compliance incident policy. Review related public/support copy for a systemic intended-use issue.
-
-## Closure evidence
-
-Decision history is complete; policy versions/evidence are current; affected orders have a consistent state; required refund/communication tasks are completed; no fulfillment release exists unless all gates pass.
+If legality, catalog, tax/shipping, warehouse, or provider facts are unresolved, keep the order held and escalate to the accountable external owner. Software does not decide those inputs.

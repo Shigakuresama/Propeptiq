@@ -1,88 +1,31 @@
-# Product-by-Jurisdiction Matrix
+# Destination Policy
 
-**Status:** Architecture approved for implementation; all product decisions are unresolved and therefore default to `Unknown`.
+**Status:** Binding resolution contract; not a legal determination or a complete state survey.
 
-## 1. Scope
+## External input
 
-Initial geographic scope is the 50 U.S. states and Washington, D.C., only where each SKU and destination are actually allowed. U.S. territories are outside the initial automatic-approval scope and require an explicit policy; absent policy remains `Unknown`.
+Qualified counsel must supply an approved U.S. state allowlist for the real SKU manifest. No state is presumed allowed. U.S. territories are unavailable in V1. The repository does not claim that any current state/SKU combination is lawful.
 
-Wyoming is only a provisional entity-formation candidate. Entity formation does not determine product legality or create a peptide-law exemption.
+## Rule model
 
-## 2. Decision values
+An active destination rule targets either an exact product/state pair or a product-policy-group/state pair and resolves to `allowed`, `review`, or `blocked`. Rules carry an effective version and activation state. A product belongs to one active policy group.
 
-| Value | Meaning | Checkout behavior |
-|---|---|---|
-| `Allowed` | Current evidence-backed policy permits this SKU to this destination, subject to all other gates | Continue evaluating |
-| `Manual Review` | A reviewer must decide this exact buyer/SKU/destination case | Create hold; no checkout |
-| `Blocked` | Current policy prohibits the transaction | Deny; no checkout |
-| `Unknown` | Evidence/policy is absent, expired, contradictory, or evaluator failed | Deny and route for policy review; no checkout |
+## Deterministic resolution
 
-There is no implicit `Allowed`, wildcard allow, “rest of U.S.” allow, or fallback from a neighboring jurisdiction.
+For every product in the cart and the normalized U.S. destination state:
 
-## 3. Jurisdiction identity set
+1. use the active exact product/state override when present;
+2. otherwise use the active product-policy-group/state rule when present;
+3. otherwise resolve `unavailable`.
 
-The database may seed jurisdiction identity codes/names for validation, but identity rows do not grant permission. Product rules are separate records. The initial product-rule set is empty, which evaluates to `Unknown` for every product/destination combination.
+Any territory resolves `unavailable`. A cart is destination-allowed only when every product resolves `allowed` or has a matching valid review decision for an explicit `review` result. Any `blocked` or `unavailable` result denies checkout.
 
-States/DC identity scope: AL, AK, AZ, AR, CA, CO, CT, DE, FL, GA, HI, ID, IL, IN, IA, KS, KY, LA, ME, MD, MA, MI, MN, MS, MO, MT, NE, NV, NH, NJ, NM, NY, NC, ND, OH, OK, OR, PA, RI, SC, SD, TN, TX, UT, VT, VA, WA, WV, WI, WY, and DC.
+Missing, inactive, malformed, or conflicting data fails closed and does not automatically create review work. An exact `blocked` override cannot fall through to a group allowance.
 
-Territory identity records may include AS, GU, MP, PR, and VI, but no automatic rule is inferred. A future approved policy may choose `Manual Review` for territories.
+## Explicit review
 
-## 4. Separate gates
+Review is requested only when a product's resolved rule is exactly `review` or the buyer status is `review`. An approval is immutable and bound to the exact buyer/cart/destination snapshot hash. A cart, buyer-status, attestation, or destination change invalidates the approval. Review never changes the underlying destination rule.
 
-The matrix does not collapse these questions:
+## Operations
 
-1. **Product legality:** Is this SKU lawful for the destination under the actual facts?
-2. **Payment-provider eligibility:** Will the approved provider process this catalog/transaction?
-3. **Tax:** Is registration/nexus/configuration complete and can tax be authoritatively calculated?
-4. **Buyer verification:** Is this researcher/organization currently approved for the SKU/purpose?
-5. **Shipping:** Is the address/service/product combination approved and operationally supported?
-6. **Inventory/lot:** Is a released, documented lot available?
-7. **Compliance clearance:** Is there no active hold and is the evidence current?
-
-Each produces its own result/evidence. The aggregate passes only when every gate passes.
-
-## 5. Policy record
-
-Each product/jurisdiction rule contains:
-
-- product and jurisdiction identifiers,
-- decision value,
-- reason code and plain-language rationale,
-- evidence/source references,
-- legal/compliance approver,
-- effective timestamp,
-- review/expiry timestamp,
-- evidence effective/review interval and integrity status,
-- policy version/content hash,
-- superseded rule reference where applicable.
-
-Expired or superseded rules do not fall back to `Allowed`; they evaluate `Unknown` until replaced.
-
-An exact-case manual-review decision is a separate, append-only record scoped to the draft order, exact order item, exact product-jurisdiction rule, and immutable eligibility-evaluation hash, which bind the buyer principal/organization, product and quantity, destination, intended-use version, and underlying policy version. An approved, unexpired decision converts only that order line’s unchanged product-jurisdiction gate to `PASS`; it does not change the base `Manual Review` rule or authorize another SKU line, buyer, order, or changed cart. A rejected decision yields `Blocked`. A missing, expired, superseded, or mismatched case decision remains `Manual Review` or `Unknown` and cannot proceed.
-
-## 6. Evaluation algorithm
-
-```text
-if product is not approved and active: Blocked
-if no active exact product + destination rule: Unknown
-if rule evidence is expired or integrity check fails: Unknown
-if rule is Manual Review and no exact current case decision exists: Manual Review
-if exact case decision is rejected: Blocked
-if exact case decision is approved and matches order + order item + jurisdiction rule + immutable eligibility-evaluation hash: Pass for this one gate
-otherwise use the exact rule value
-evaluate provider, tax, buyer, shipping, lot, compliance, and launch gates independently
-if any gate is Blocked: aggregate Blocked
-else if any gate is Unknown: aggregate Unknown
-else if any gate is Manual Review: aggregate Manual Review
-else aggregate Allowed/Pass
-```
-
-Checkout and post-payment fulfillment re-evaluate using current policy while retaining the original snapshot for audit.
-
-## 7. Operations
-
-- Policy changes require authorized review, recent MFA, reason, evidence, and append-only audit history.
-- Changes from Allowed to a restrictive state immediately block new checkout and place unpaid/paid-unfulfilled affected orders on hold.
-- A batch report enumerates products with missing, expiring, or contradictory rules; it never auto-fills them.
-- Customer support cannot override the matrix.
-- Legal counsel must approve the actual SKU/destination matrix before any production sale.
+One MFA-authenticated administrator may import and publish counsel-supplied rules with an audit event. Legal analysis and expansion decisions remain outside the application. A missing counsel-approved allowlist keeps production checkout unavailable rather than initiating an internal legal workflow.

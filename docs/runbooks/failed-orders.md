@@ -1,60 +1,25 @@
-# Runbook: Failed Orders
+# Failed Orders
 
-## Trigger
+## Classify the failure
 
-Use for checkout-creation failure, provider failure/expiry, amount mismatch, webhook-processing failure, inventory reservation failure, or fulfillment-release failure.
+- **Before hosted checkout:** account/attestation/product/destination/inventory/provider gate denied, explicit review required, or tax/shipping prerequisite unavailable.
+- **Hosted checkout creation:** provider request failed or timed out with an unknown outcome.
+- **After provider interaction:** cancelled, expired, payment failed, webhook delayed/invalid/conflicting, or internal/provider state disagrees.
+- **After payment:** inventory, buyer, product, destination, refund/dispute, or fulfillment readiness changed.
 
-## Safety rules
+## Procedure
 
-- Never infer payment from a success page, customer report, email, or screenshot.
-- Never re-charge by manually creating a second session without resolving idempotency/provider state.
-- Never release fulfillment while any gate is not `PASS`.
-- Do not edit payment/inventory/audit journal rows.
+1. Locate the order/attempt with its internal ID, correlation ID, idempotency key, and provider IDs. Do not use customer identity alone.
+2. Inspect authoritative order, gate reasons, tax/shipping prerequisite result, provider event/hash, payment journal, and inventory events.
+3. For an unknown provider-create outcome, query by the existing idempotency/reference before retrying. Never create a second session speculatively.
+4. For invalid signatures, preserve redacted delivery metadata and do not apply business effects.
+5. For a duplicate event with the same hash, acknowledge without reapplying effects. A changed hash for the same provider event ID is an incident.
+6. Release a stale inventory reservation once with its idempotency key when no payable session/order needs it.
+7. If payment is verified but current fulfillment checks fail, place the order on the narrow paid-order hold and follow `compliance-holds.md`.
+8. Read back order, payment, inventory, refund, and hold state before communicating the outcome.
 
-## Triage
+Missing or blocked destination policy denies and does not create review. An explicit review state follows the exact-snapshot review procedure. Do not modify eligibility or payment history merely to let a retry pass.
 
-1. Open a case with environment, order ID, correlation ID, timestamp, and symptom; avoid raw PII/secrets.
-2. Read the order, eligibility snapshot, checkout attempts, provider event inbox, payment journal, inventory reservation, compliance case, and fulfillment release.
-3. Retrieve authoritative provider Checkout/payment state through the server-side finance tool/adapter.
-4. Classify:
-   - no provider session created,
-   - open/expired/unpaid session,
-   - paid but webhook missing/failed,
-   - payment mismatch,
-   - paid on compliance hold,
-   - released but inventory/fulfillment failed,
-   - unknown/contradictory evidence.
+## Closure
 
-## Resolution
-
-### No session / creation failed
-
-Release stale inventory reservation idempotently, preserve failure evidence, correct the root cause, and let the buyer create a new attempt only after eligibility is re-evaluated.
-
-### Open or expired/unpaid
-
-Do not mark paid. Expire/reconcile the session through the provider if appropriate, release reservation after authoritative expiry, and record the outcome.
-
-### Provider paid, internal webhook absent/failed
-
-Disable fulfillment for the order, verify the exact provider event/session/payment/amount/currency, repair the handler, and replay through the normal signed/provider-supported path or reconciliation command. Confirm one journal effect and one clearance evaluation.
-
-### Amount/currency/customer mismatch
-
-Place finance/compliance hold, disable fulfillment, preserve payload hashes and provider references, escalate as an incident, and follow the refund decision process. Do not “correct” snapshots to match the payment.
-
-### Paid on compliance hold
-
-Follow `compliance-holds.md`. Payment does not change the hold decision. If unresolved within the approved window, initiate an authorized refund.
-
-### Fulfillment failure after release
-
-Do not create a second release. Inspect release consumption and inventory ledger atomically. If not consumed, retry the authorized operation idempotently; if partially consumed, open an incident and reconcile physical inventory before action.
-
-## Closure evidence
-
-- Provider and internal states agree.
-- Reservation/inventory ledger is balanced.
-- No duplicate charge, journal event, email, or release exists.
-- Buyer communication, if required, uses an approved template and contains no sensitive/internal detail.
-- Root cause, corrective action, and follow-up owner are recorded.
+Record the root cause, affected IDs, provider evidence used, idempotent mutations, inventory outcome, customer communication status, remaining risk, and follow-up owner. A redirect, dashboard screenshot, or absent error is not proof of payment.

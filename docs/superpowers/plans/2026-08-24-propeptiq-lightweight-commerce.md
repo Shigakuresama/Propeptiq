@@ -66,7 +66,7 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 - Resolve destinations using exact product/state override, then approved product-policy-group/state rule, then `unavailable`. Missing policy does not create a compliance case automatically.
 - Keep manual review only when `buyer.status === "review"` or an explicit destination rule is `review`. No automated risk-scoring system or routine manual queue.
-- Permit a single MFA-authenticated administrator to publish products, destination rules, promotions, and catalog copy. Remove two-person publication, evidence hashes, evidence expiration, separation-of-duties enforcement, and per-action reverification.
+- Permit a single MFA-authenticated administrator to publish products, destination rules, promotions, and catalog copy. Remove chained publication, routine catalog/jurisdiction evidence hashes and expiration, role-separation enforcement, and repeated action confirmation. Retain the immutable exact review snapshot hash defined below.
 - Require a core product record, price, packaging/form, traceable inventory lot, policy group, and approved destination before activation. COAs and analytical evidence are optional unless the page makes purity, sterility, testing, laboratory, or accreditation claims.
 - Permit truthful discounts, bundles, subscriptions, loyalty rewards, and cross-sells. All prices and discounts are recalculated server-side. Scarcity/countdown messaging may appear only when backed by real inventory or an actual promotion end time.
 - Keep neutral scientific citations permissible, but separate them from purchase CTAs and do not convert them into seller-authored human outcome, efficacy, or usage claims.
@@ -85,12 +85,12 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 1: Replace the Strict Specification
 
-- [ ] Rewrite the product requirements, catalog policy, jurisdiction policy, authorization model, data-model documentation, and runbooks around the lightweight decisions above.
-- [ ] Supersede the old plan rather than editing its strict tasks piecemeal.
-- [ ] Record `responsive-v2`: retain desktop-v3 styling while allowing public catalog, prices, promotions, and anonymous cart access.
-- [ ] Change “verified researcher approval” language to “research-use account and checkout attestation.”
-- [ ] Remove blanket bans on promotions, subscriptions, bundles, and cross-sells.
-- [ ] Clearly label legal review, real catalog data, destination allowlist, tax configuration, fulfillment operation, and payment-provider acceptance as external launch inputs—not elaborate application workflows.
+- [x] Rewrite the product requirements, catalog policy, jurisdiction policy, authorization model, data-model documentation, and runbooks around the lightweight decisions above.
+- [x] Supersede the old plan rather than editing its strict tasks piecemeal.
+- [x] Record `responsive-v2`: retain desktop-v3 styling while allowing public catalog, prices, promotions, and anonymous cart access.
+- [x] Change “verified researcher approval” language to “research-use account and checkout attestation.”
+- [x] Remove blanket bans on promotions, subscriptions, bundles, and cross-sells.
+- [x] Clearly label legal review, real catalog data, destination allowlist, tax configuration, fulfillment operation, and payment-provider acceptance as external launch inputs—not elaborate application workflows.
 
 **Validation:** Repository search finds no binding requirement for pre-approval, document upload, two-person publication, per-action reverification, or a complete 50-state matrix.
 
@@ -100,7 +100,7 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 - [ ] Write failing tests for automatic buyer activation, lightweight checkout, policy-group destination resolution, normal promotions, optional COAs, and single-admin publication.
 - [ ] Replace `REQUIRED_GATE_KEYS` and the current evidence-heavy jurisdiction types with the new interfaces.
-- [ ] Remove exact-case evaluation hashes, evidence-integrity requirements, expiry machinery, and automatic hold creation from routine checkout.
+- [ ] Remove routine eligibility/evidence hashes, evidence-integrity requirements, expiry machinery, and automatic hold creation from ordinary checkout while retaining the immutable exact review snapshot hash.
 - [ ] Require MFA only for staff administration, refunds, and fulfillment actions; customer account and order operations require authentication but not MFA.
 - [ ] Change content validation so the site-level research restriction is rendered by layout/product templates rather than required inside every copy candidate.
 - [ ] Preserve the existing money calculations and payment/fulfillment state integrity.
@@ -119,7 +119,7 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 4: Build the Public Storefront and Demo Catalog
 
-- [ ] Implement `/`, `/catalog`, `/catalog/[slug]`, `/cart`, `/research-use`, and `/quality-records` using the approved off-white/ink/moss, Newsreader/Geist system and Proof Rail.
+- [ ] Implement `/`, `/catalog`, `/catalog/[slug]`, `/cart`, `/research-use-policy`, and `/quality-records` using the approved off-white/ink/moss, Newsreader/Geist system and Proof Rail. A future `/research-use` route may only redirect to `/research-use-policy`.
 - [ ] Add a development/test catalog adapter containing clearly labeled fixtures; `CATALOG_DEMO_MODE` must hard-fail in production.
 - [ ] Keep production catalog data empty until a real manifest is imported.
 - [ ] Allow anonymous visitors to view approved products, prices, promotions, and add product IDs/quantities to a local cart.

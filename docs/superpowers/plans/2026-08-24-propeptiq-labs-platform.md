@@ -1,3 +1,5 @@
+> **SUPERSEDED — NON-AUTHORITATIVE:** This strict plan is retained only as historical implementation evidence. Do not execute or treat any requirement below as current. The sole active plan is [`2026-08-24-propeptiq-lightweight-commerce.md`](2026-08-24-propeptiq-lightweight-commerce.md), and current binding requirements are in [`../../product-requirements.md`](../../product-requirements.md).
+
 # PROPEPTIQ LABS Platform Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

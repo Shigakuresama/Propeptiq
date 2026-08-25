@@ -1,29 +1,31 @@
-# ADR 0003: Database, Object Storage, and Migration Strategy
+# ADR 0003: Lean Relational Storage and Versioned Migrations
 
-- **Date:** 2026-08-24
-- **Status:** Accepted for implementation; production resources gated
+**Status:** Accepted, revised for V1 lightweight commerce on 2026-08-24.
 
 ## Context
 
-The platform requires relational integrity, transactions, append-only journals, tenant scoping, versioned policy/catalog records, inventory, lot/COA linkage, private evidence files, and recoverability.
+The application needs transactional money/inventory behavior, versioned prices and attestations, deterministic destination rules, replay-safe provider events, exact review snapshots, and recoverability without modeling external business approvals as database workflows.
 
 ## Decision
 
-Use Neon PostgreSQL with the Neon serverless driver and Drizzle ORM. Drizzle schema and reviewed, versioned SQL migrations are committed. Runtime uses a least-privilege application role; migrations use a separate owner role. Immutable business journals receive database triggers preventing update/delete by the application path.
+Use Neon PostgreSQL with the Neon serverless driver and Drizzle ORM. Commit reviewed, ordered SQL migrations. Runtime uses a least-privilege role; migrations use a separate owner role.
 
-Use private Vercel Blob stores for application evidence, approved product media, and COAs. Persist object metadata, SHA-256, authorization, and version/lot linkage in Postgres; deliver private objects through authenticated server routes.
+Retain the lean records named in `docs/architecture/data-model.md`, including versioned attestations/prices, checkout attempts, provider/payment events, refunds, inventory events, immutable review snapshots, fulfillment releases, shipments, and admin audit.
 
-Use Neon point-in-time recovery plus scheduled encrypted logical backups outside the primary database failure domain and periodic restore tests.
+Use Vercel Blob only for actual approved product media and optional lot/COA files. Store object metadata and lot linkage in Postgres. Serve nonpublic objects through authorized server routes; public COA projection is explicit.
+
+## Integrity
+
+- Use unique constraints and transactions for provider event identity, payment effects, inventory reservation/consumption, refunds, and shipment/release consumption.
+- Preserve immutable order references to price and attestation versions.
+- Restrict mutation/deletion of journals through the application role.
+- Make migrations forward-safe, reject unknown schema state, and test against an isolated database before promotion.
+- Backups, point-in-time recovery, and restore exercises are environment controls, not substitutes for business journals.
+
+## Deliberate omissions
+
+V1 does not store organization tenants/memberships, applicant files, identity material, jurisdiction substantiation chains, database launch-gate approvals, or publication-role choreography. Qualified legal review, catalog manifest, destination allowlist, tax/shipping setup, fulfillment operation, and provider acceptance remain external inputs; missing inputs keep application paths unavailable.
 
 ## Consequences
 
-- PostgreSQL supports the required transactions/constraints/audit relationships.
-- Serverless HTTP is efficient for one-shot queries; multi-statement transactional operations must use a transaction-capable connection path.
-- Private object delivery consumes function bandwidth and requires explicit access checks.
-- Backup retention/RPO/RTO depend on selected production plans and must be proven.
-
-## Alternatives
-
-- SQLite/D1: rejected because the binding requirement selects Neon PostgreSQL and the transaction/operations model is Postgres-oriented.
-- Public object URLs: rejected for applicant evidence and nonpublic COAs.
-- Browser storage: rejected as nonauthoritative.
+The schema stays focused on commerce integrity and replay safety. Adding a record requires a demonstrated invariant, query, retention owner, and migration/restore path; speculative workflow records are rejected.

@@ -1,10 +1,20 @@
-# Operational Runbooks
+# Operations Runbooks
 
-Runbooks are executed only by authorized roles against the intended environment. Every action uses a correlation/incident/case ID and appends evidence; no operator edits journal history directly.
+These runbooks operate the lightweight commerce model:
 
-- `failed-orders.md` — checkout/payment/fulfillment failures.
-- `compliance-holds.md` — place, review, release, reject, suspend, and post-payment holds.
-- `refunds-reconciliation.md` — refunds and provider/internal reconciliation.
-- `incidents-and-recovery.md` — security, data, provider, and recovery response.
+- `compliance-holds.md`: explicit buyer/destination review and changed-fact paid-order holds.
+- `failed-orders.md`: checkout/payment/order failures and inventory release.
+- `refunds-reconciliation.md`: idempotent refunds and provider reconciliation.
+- `incidents-and-recovery.md`: containment, recovery, credential response, and immutable-journal preservation.
 
-Actual on-call contacts, escalation thresholds, refund limits, carrier procedures, and legal contacts are unresolved launch gates. Before production, the operator configuration must name accountable people without committing personal contact details to the public repository.
+## Shared rules
+
+- Use an authorized individual staff account with current MFA for staff, refund, and fulfillment mutations.
+- Work from server records and authoritative provider evidence, never browser values, redirect state, or screenshots alone.
+- Preserve correlation IDs and immutable payment, inventory, review, refund, fulfillment, shipment, and audit records.
+- Apply the narrowest safe mutation and read it back. Never edit history to make systems agree.
+- Redact secrets, addresses, attestation text, provider payloads, and unnecessary PII from tickets/logs.
+- One capable administrator may perform catalog/destination/promotion publication. No additional actor is an operational prerequisite.
+- Escalate legal SKU/destination questions, catalog truth, tax/shipping setup, warehouse operation, and provider acceptance to their external owners; do not create substitute application state.
+
+Every closure record states the affected IDs, facts inspected, mutation/idempotency key, read-back result, unresolved risk, owner, and timestamp.

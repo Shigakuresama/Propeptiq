@@ -1,89 +1,40 @@
-# Catalog and Compliance Policy
+# Catalog and Claims Policy
 
-**Status:** Binding product behavior. No saleable catalog is currently approved.
+**Status:** Binding V1 policy.
 
-## 1. Purpose boundary
+## Production data
 
-PROPEPTIQ LABS serves only legitimate laboratory and research use. Products are not for human consumption, human use, veterinary use, food use, diagnosis, treatment, cure, mitigation, prevention, or alteration of human/animal structure or function.
+The production catalog starts empty. A real import manifest is the only source for products, versioned prices, packages/forms, suppliers, lots, inventory, and COAs. Competitor, reference-site, or invented values may exist only as clearly labeled test fixtures and must be impossible to enable in production.
 
-This boundary is enforced through account approval, catalog approval, content review, eligibility evaluation, checkout attestation, compliance holds, and fulfillment release. Footer text or a checkbox alone is insufficient.
+## Product activation
 
-## 2. Catalog manifest
+A product may become active only when server records contain:
 
-Every proposed SKU enters through a versioned catalog manifest containing:
+1. a core product identity and research-use presentation;
+2. an active versioned price;
+3. a package/form;
+4. a traceable lot with available inventory;
+5. a product policy group; and
+6. at least one resolved allowed state destination.
 
-- internal product ID and proposed public name,
-- supplier/manufacturer evidence reference,
-- verified identity and source for CAS number if shown,
-- formulation and package/label evidence,
-- storage instructions supported by supplier/stability evidence,
-- approved research-only description,
-- prohibited-content review,
-- price-book record and currency,
-- payment-provider eligibility evidence,
-- product-by-jurisdiction policy version,
-- tax/shipping classifications,
-- actual lot and inventory record,
-- COA/test records and object hashes,
-- approver, approval timestamp, effective date, and review/expiry date.
+One administrator with an authorized staff capability and current MFA may activate or publish the record. Publication appends an audit event. No additional administrator action is part of V1 publication.
 
-An absent field is not filled with a generic claim. Fields that are optional for publication are omitted; required evidence gaps block publication.
+## Claims
 
-## 3. Lot and COA policy
+- Prohibit human or veterinary outcomes, dosing, administration, reconstitution, treatment, structure/function, and surrounding human-use positioning across names, imagery, navigation, citations, merchandising, and support copy.
+- A research-use disclaimer does not rescue a page whose overall presentation supplies human-use evidence. The [FDA warning letter](https://www.fda.gov/inspections-compliance-enforcement-and-criminal-investigations/warning-letters/usapeptidecom-696885-02262025) is the confirmed enforcement example used for this boundary.
+- Objective express or implied advertising claims must be truthful, not misleading, and adequately substantiated before publication, including the overall impression described by the [FTC guidance](https://www.ftc.gov/business-guidance/resources/health-products-compliance-guidance).
+- Purity, sterility, testing, method, laboratory, accreditation, or similar analytical claims require corresponding active lot evidence. If the evidence is absent, omit the claim; ordinary product identity and truthful merchandising do not themselves require a COA.
+- Neutral scientific citations may appear only when accurate, contextualized, and separated from product purchase actions so they do not become seller-authored outcome or usage claims.
 
-- Purity and analytical results are lot-level facts, never universal product promises.
-- A visible purity value must reference the exact approved lot result, analytical method, source document, and document hash.
-- COAs use private object storage by default and are served through an authorization route. Public release, if later chosen, is an explicit per-document approval.
-- Replacing a COA creates a new object/version; it never mutates the evidence attached to an historical order.
-- Lot release, quarantine, recall, exhaustion, and expiration are explicit states.
-- Inventory is ledger-based and tied to a released lot.
-- Laboratory names, accreditation, methods, and certifications are displayed only when the actual source document and verification support them.
+## Merchandising
 
-## 4. Content rules
+Truthful discounts, bundles, subscription offers, loyalty, and cross-sells are allowed when active server records define them. The server recalculates price and discount. Inventory scarcity requires real inventory; a countdown requires an actual promotion end time. Do not invent testimonials, popularity, urgency, laboratory marks, certifications, or shipping promises.
 
-### Allowed when verified
+## Provider boundary
 
-- Chemical/peptide identity.
-- CAS number with authoritative source.
-- Formulation and quantity as labeled.
-- Lot/batch identifier.
-- Analytical method and actual result from the linked lot record.
-- Storage conditions supported by evidence.
-- Approved COA and test-document access.
-- Neutral research-use restriction and purchasing eligibility language.
+The [Stripe FAQ](https://support.stripe.com/questions/prohibited-and-restricted-businesses-list-faqs) states that research peptides need preventive measures against nonresearch purchasers and that Stripe's activation review determines support. The application enforces the research-use account, attestation, product, and destination controls, but payment-provider acceptance remains an unresolved external launch input.
 
-### Prohibited
+## Failure behavior
 
-- Dosage, cycling, reconstitution, injection, administration, or route-of-use guidance.
-- Human or veterinary treatment, disease, weight-loss, bodybuilding, anti-aging, sexual, cognitive, recovery, longevity, or other outcome claims.
-- Structure/function claims for humans or animals.
-- Human/veterinary testimonials, reviews, before/after material, influencers, or community content implying use.
-- “Pharmaceutical grade,” “medical grade,” “safe,” “guaranteed,” certification, accreditation, purity, sterility, or quality claims without exact evidence.
-- Scarcity, countdowns, urgency, promotional bundles, subscriptions, cross-sells, or recommendations until separately approved—and never where they encourage nonresearch use.
-- Scientific literature summaries that convert the product presentation into human-use intent.
-
-The FDA warning letters in `docs/sources.md` demonstrate why research-use labels do not cure surrounding human-directed claims.
-
-## 5. Publication workflow and separation of duties
-
-1. Catalog manager creates a draft manifest.
-2. Evidence validator confirms required fields and hashes.
-3. Compliance reviewer reviews copy, intended-use risk, provider eligibility, and jurisdiction coverage.
-4. A publisher distinct from the drafter approves a version.
-5. Publication activates exactly that immutable version for its effective interval.
-6. Material evidence changes create a new version and can automatically hold affected checkout/order flows.
-
-No application seed inserts products/categories/prices. Test fixtures are labeled test-only and cannot run in production migrations.
-
-## 6. Buyer controls
-
-- Only approved, unexpired, unsuspended researcher/organization accounts can evaluate checkout.
-- Approval records exact intended-use attestation and evidence.
-- Checkout requires a fresh attestation tied to the order and wording version.
-- Suspicious purpose language, consumer-style behavior, invalid organization evidence, policy mismatch, or manual-review jurisdiction creates a hold.
-- Rejection/suspension has an appeal/re-review path without erasing history.
-- Staff cannot advise on human/veterinary use; such requests are declined and logged/escalated under the incident policy.
-
-## 7. Launch status
-
-The current catalog status is **closed**. No SKU, price, lot, COA, supplier, lab, inventory, category, or destination permission in competitor/reference material is approved for PROPEPTIQ.
+Missing manifest data, required activation fields, destination allowance, claim evidence, or provider enablement keeps the affected product or checkout unavailable. The application never creates substitute facts or a synthetic approval record.

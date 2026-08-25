@@ -1,96 +1,50 @@
-# Deployment, Environments, Migrations, Rollback, and Backups
+# Environments, Deployment, and Recovery
 
-**Status:** Proposed operating model. No production project or credentials are assumed to exist.
+## Environment separation
 
-## 1. Environments
-
-| Environment | Data/providers | Allowed behavior |
+| Environment | Data and providers | Allowed use |
 |---|---|---|
-| Local | local/test-only identities and nonproduction database branch; external providers disabled unless explicitly configured | development and automated tests; never real fulfillment |
-| Preview | isolated Clerk/Neon/Blob/Resend/Stripe test resources | review with synthetic test identities; no live payment, customer message, or shipment |
-| Production | dedicated least-privilege resources and secrets | public read paths initially; commerce only after launch gates |
+| Local/test | isolated database and clearly labeled test fixtures; provider fakes/test modes | automated and manual development only |
+| Preview | isolated Clerk/Neon/Blob/email/Stripe test resources and synthetic identities/catalog | controlled review; no live payment, customer message, or shipment |
+| Production | separately scoped production resources and real imported records | enabled only where verified external inputs and application controls pass |
 
-Never share production database credentials, Clerk instance, Stripe live keys, Blob token, or email sender credentials with Preview.
+Never share production credentials or customer data with Local/Preview. Production demo/test catalog mode must hard-fail.
 
-## 2. Vercel deployment
+## External activation inputs
 
-- `main` is the production source branch after Git is initialized and protections are configured.
-- Every change receives lint, strict typecheck, tests, migration check, build, and browser validation.
-- Preview deployments use safe provider modes and no production data.
-- Production promotion requires an approved change record when schema, compliance policy, payments, or fulfillment changes.
-- Structured logs and OpenTelemetry instrumentation are active before commerce activation.
-- Vercel Firewall rules are configured and observed in Preview before Production.
+Production commerce remains unavailable until accountable owners provide and verify:
 
-## 3. Configuration validation
+- qualified legal review and a counsel-approved real SKU/state allowlist;
+- real manifest data for products, prices, packages, suppliers, lots, inventory, and any COAs;
+- tax configuration and shipping-service availability;
+- an operating fulfillment process; and
+- payment-provider acceptance and production enablement.
 
-The application validates configuration by environment and capability:
+These are deployment inputs and owner evidence, not database approval workflows. Missing catalog/destination inputs keep affected products unavailable; missing tax/shipping/provider inputs deny checkout; missing fulfillment readiness prevents release.
 
-- Public-only mode can build without external credentials and shows commerce unavailable.
-- Protected identity mode requires Clerk keys/configuration.
-- Database mode requires the intended Neon URL and runtime role.
-- Storage/email providers require their server tokens only when enabled.
-- Payment mode defaults `disabled`; `test` requires test keys; `live` additionally requires open database launch gates and live-provider evidence.
-- Production rejects wildcard/localhost origins and unsafe debug flags.
+## Promotion and migration
 
-## 4. Migrations
+Use reviewed commits, protected production deployment, environment-specific secrets, guarded ordered migrations, and a pre-deploy backup/restore plan. Run the documented release commands against the exact commit. Never infer a passed integration, external decision, or live behavior from local lint/tests.
 
-1. Change the Drizzle schema and a focused migration test.
-2. Generate versioned SQL.
-3. Inspect SQL for locks, rewrites, destructive operations, privilege changes, and append-only protections.
-4. Apply to an isolated Neon branch restored from representative schema/data.
-5. Run application tests and migration verification.
-6. Record forward and rollback/roll-forward procedure.
-7. Create/verify recovery point.
-8. Apply production migration with explicit target and monitoring.
+## Safe modes
 
-Application releases use expand/migrate/contract sequencing for incompatible changes. Destructive column/table removal is a later release only after code no longer reads/writes it and retention approval exists.
+- Provider mode defaults disabled; test uses test resources; live requires verified provider acceptance/configuration.
+- Catalog projection defaults empty when real records are absent.
+- Destination defaults unavailable when no active rule resolves.
+- Tax/shipping absence denies hosted checkout.
+- Fulfillment release remains disabled when the operating process or application prerequisites are unavailable.
 
-## 5. Rollback
+## Recovery
 
-- UI/application regression without schema incompatibility: promote the last known-good deployment.
-- Forward-compatible schema issue: deploy a roll-forward migration rather than destructive reversal.
-- Data-corruption risk: stop protected writes/payment/fulfillment via launch gates, capture evidence, choose point-in-time branch/restore, reconcile provider events, and only then resume.
-- Payment webhook regression: retain signed event retries/inbox, disable checkout, deploy fix, replay/reconcile idempotently.
-- Compliance-policy regression: move affected gate to closed/Unknown and hold unfulfilled orders.
+1. Stop the narrow affected mutation path (checkout, webhook side effects, refunds, publication, or fulfillment).
+2. Preserve correlation IDs, redacted logs, provider event IDs/hashes, deployment/commit/migration IDs, and relevant immutable journals.
+3. Rotate exposed credentials and revoke affected staff sessions when applicable.
+4. Restore or branch the database from an identified point, then reconcile provider/payment/inventory/refund/shipment events idempotently.
+5. Validate integrity and replay safety in isolation before resuming.
+6. Resume only the affected capability after owner approval and record the incident/recovery evidence.
 
-Rollback never deletes audit/payment/decision history.
+Do not delete journals or fabricate records to force systems to agree. Restore tests must verify order/payment/inventory/refund/review/shipment invariants and access denial.
 
-## 6. Backups and recovery
+## Rollback
 
-Baseline:
-
-- Neon point-in-time recovery/branching configured with retention appropriate to the selected plan.
-- Scheduled logical PostgreSQL backup encrypted and stored outside the primary database failure domain.
-- Private object storage versioning/retention policy for approved product media and COAs.
-- Source/migrations in version control.
-- Provider exports/reconciliation preserve external payment references.
-
-Proposed objectives until business impact analysis approves them:
-
-- Database RPO: 15 minutes or better.
-- Database RTO: 4 hours or better.
-- COA/media RPO: object-version durability; recovery verified quarterly.
-
-These are proposed engineering targets, not confirmed vendor commitments. Production plan selection must prove they are achievable.
-
-## 7. Restore drill
-
-At least quarterly and before commerce launch:
-
-1. Restore database to an isolated branch/time.
-2. Validate schema version and row counts/hashes for critical journals.
-3. Validate application read paths with isolated credentials.
-4. Restore representative private objects and verify hashes/authorization.
-5. Reconcile a controlled set of payment references without causing provider writes.
-6. Record achieved RPO/RTO, gaps, owner, and remediation.
-7. Destroy isolated recovery credentials/resources after evidence is retained.
-
-## 8. Release gate checklist
-
-- Required primary-source/vendor facts rechecked.
-- Approved migration and recovery point.
-- All automated gates green.
-- Accessibility/responsive/browser verification complete.
-- Observability, alerts, and rate limits verified.
-- Secrets/roles reviewed.
-- Payment/catalog/jurisdiction/tax/shipping/fulfillment gates remain closed unless their actual evidence is approved.
+Application rollback does not automatically reverse a database migration or provider effect. Prefer forward fixes; use a reviewed data migration when needed. A rollback must preserve compatibility with the deployed schema and journals, then rerun scoped verification and reconciliation before resuming writes.

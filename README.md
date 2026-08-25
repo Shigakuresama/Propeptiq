@@ -1,136 +1,52 @@
 # PROPEPTIQ LABS
 
-PROPEPTIQ LABS is planned as a production-capable, compliance-first commerce platform for legitimate laboratory and research use. It is not a human-use or veterinary-use storefront. The current repository contains the approved requirements, an accepted pure-domain policy layer, and a partial application scaffold—not a production-ready application.
+PROPEPTIQ LABS is a U.S.-only, research-use commerce application. The active product contract is the lightweight specification in `docs/product-requirements.md`; the sole active implementation plan is `docs/superpowers/plans/2026-08-24-propeptiq-lightweight-commerce.md`.
 
-## Current status
+## V1 experience
 
-The application is being built from a new workspace. Production commerce is intentionally disabled until every launch gate in this repository is backed by current documentary evidence and an accountable approval.
+- Anonymous visitors may browse the active catalog, see server-backed prices and promotions, and build a local cart.
+- Checkout requires a Clerk-verified email, age 21+ confirmation, a structured research purpose, and the current versioned research-use attestation.
+- Completing those steps creates an `active` individual buyer without routine staff approval or uploaded identity or organization material.
+- An optional organization-name profile field is descriptive only; V1 has no organization tenancy or membership authorization.
+- Checkout remains server-authoritative for account, attestation, product, destination, inventory, payment-provider enablement, price, discount, tax, and shipping facts.
+- One MFA-authenticated administrator may manage and publish catalog, destination, promotion, refund, and fulfillment records.
 
-The visual implementation hold was released when the user approved Superdesign desktop version 3 and responsive handoff `responsive-v1` on 2026-08-24. Implementation is active on the feature branch. Task 2's fail-closed pure-domain policies are committed and independently accepted through `51fcefd`; the current gate passes lint, strict type checking, 299 unit tests, and the production build. Database integration and browser suites do not exist yet.
+## Non-negotiable boundaries
 
-This repository uses four evidence labels:
+- Human or veterinary outcomes, dosing, administration, reconstitution, treatment positioning, and surrounding human-use evidence are prohibited. The canonical policy route is `/research-use-policy`; a future `/research-use` route may only redirect there.
+- Production products, prices, lots, suppliers, and COAs come only from a real import manifest. Competitor or invented data is limited to clearly labeled test fixtures.
+- Destination resolution is exact product/state override, then active product-policy-group/state rule, then `unavailable`. Territories are unavailable.
+- Server code recalculates prices and discounts. Hosted card collection, signed webhook verification, idempotency, payment-event journaling, and read-only success pages remain required.
+- Truthful discounts, bundles, subscription offers, loyalty, and cross-sells are permitted from active server records. Scarcity and countdowns require real inventory or a real promotion end time.
 
-- **Confirmed:** directly required by the project objective, observed in the repository, or supported by a cited primary source.
-- **Proposed:** an architecture or operating choice selected for implementation but not a business/legal fact.
-- **Unresolved:** a decision that requires an owner and evidence before activation.
-- **Launch gate:** a condition that must block a production capability until resolved.
+## Confirmed source boundaries
 
-## Non-negotiable behavior
+- The [FDA warning letter](https://www.fda.gov/inspections-compliance-enforcement-and-criminal-investigations/warning-letters/usapeptidecom-696885-02262025) records that research-only statements did not overcome surrounding website evidence of intended human use in that enforcement matter.
+- The [FTC Health Products Compliance Guidance](https://www.ftc.gov/business-guidance/resources/health-products-compliance-guidance) says advertising must be truthful and not misleading and that objective claims, express or implied, need adequate substantiation before dissemination; the overall impression matters.
+- The [Stripe restricted-business FAQ](https://support.stripe.com/questions/prohibited-and-restricted-businesses-list-faqs) says research peptides require preventive measures that keep them inaccessible to purchasers seeking nonresearch use, and Stripe's account-activation review determines support.
 
-- Products are for legitimate laboratory/research use only—not for human consumption, human use, or veterinary use.
-- No dosage, reconstitution, injection, treatment, weight-loss, bodybuilding, anti-aging, therapeutic, structure/function, or human-outcome claims.
-- No guest checkout.
-- Researcher or organization approval, intended-use attestation, product eligibility, destination eligibility, compliance clearance, verified payment, and fulfillment release are separate gates.
-- Missing jurisdiction policy resolves to `Unknown`; `Unknown` never permits checkout.
-- Prices and totals are calculated on the server from active catalog records.
-- Card details are collected only through hosted checkout.
-- A signed, deduplicated provider webhook—not a success-page redirect—establishes payment status.
-- Product identity, purity, test method, lot, and COA claims render only from approved records and actual batch evidence.
-- The repository contains no invented saleable products, prices, inventory, purity values, laboratories, certifications, testimonials, approvals, or shipping permissions.
+These sources do not decide whether any PROPEPTIQ SKU or destination is lawful or whether Stripe will accept this business.
 
-## Proposed baseline stack
+## External launch inputs
 
-The selected implementation baseline is listed below. Vendor accounts, production configuration, operational controls, and end-to-end behavior remain unverified launch gates until their corresponding implementation tasks and evidence are complete.
+Production commerce fails closed until owners supply and verify qualified legal review, a real catalog manifest, a counsel-approved state allowlist, tax configuration, shipping-service configuration, an operating fulfillment process, and payment-provider acceptance. These are external inputs, not application approval workflows or fabricated database records.
 
-- Next.js App Router with React and strict TypeScript
-- Tailwind CSS and shadcn/ui on Radix primitives
-- Clerk managed authentication and Organizations; production MFA required, with server-side step-up checks for sensitive administrative actions
-- Neon PostgreSQL through the Neon serverless driver
-- Drizzle ORM and versioned SQL migrations
-- A centralized server-only data access/authorization layer
-- Stripe-hosted Checkout behind a provider abstraction and disabled-by-default launch gate
-- Private Vercel Blob storage for approved product media and lot-level COAs
-- Resend transactional email behind a provider abstraction
-- Vercel environments, Firewall rate limiting, structured JSON logs, and OpenTelemetry/Vercel Observability
-- Neon point-in-time recovery plus tested logical backup/restore procedures
-- Vitest, Testing Library, Playwright, and accessibility checks
-
-Architecture decisions and vendor constraints are recorded in `docs/adr/` and `docs/architecture/`.
-
-## Local setup
-
-Prerequisites:
-
-- Node.js 24.x
-- npm 11.x
-- PostgreSQL access only when exercising database-backed routes
-
-After the scaffold is present:
+## Local verification
 
 ```powershell
-npm install
-Copy-Item .env.example .env.local
-npm run dev
-```
-
-The default local state keeps authentication-dependent operations, external messages, object writes, and payments disabled until real development credentials are configured. Never commit `.env.local` or paste secrets into issues, documentation, tests, or chat.
-
-Currently defined quality commands:
-
-```powershell
-npm run lint
-npm run typecheck
+npm run verify:workspace-boundary
 npm test
-npm run test:integration
-npm run test:e2e
-npm run build
+npm run lint
+git diff --check
 ```
 
-The current pre-implementation quality evidence and its exact scope limits are recorded in `docs/reviews/pre-implementation-review.md`; a listed command is not evidence that an unimplemented system boundary passes.
+These commands prove their stated local scopes only; they do not prove legal approval, provider acceptance, production readiness, or live integrations.
 
-Task 3 will add the following database commands only with their real guarded implementations. They do not exist yet:
+## Binding documentation
 
-```powershell
-npm run db:generate
-npm run db:check
-npm run db:migrate
-```
-
-`db:migrate` must target the intended environment explicitly. Production migrations require the deployment runbook and a verified restore point.
-
-## Environment boundaries
-
-- **Local:** no production data or credentials; external providers default disabled.
-- **Preview:** isolated Clerk/Neon/provider resources, synthetic test identities, no real fulfillment, no live payment credentials.
-- **Production:** separately scoped secrets, protected branch/deployment, reviewed migrations, monitoring/alerts, backup verification, and all launch gates satisfied.
-
-## Documentation map
-
-- Product and acceptance criteria: `docs/product-requirements.md`
-- Binding requirement traceability: `docs/requirements-traceability.md`
-- Superdesign review and approval record: `docs/design/superdesign-review.md`
-- Responsive public UI handoff: `docs/design/responsive-public-ui.md`
-- Pre-implementation review and acceptance blockers: `docs/reviews/pre-implementation-review.md`
-- Current source register: `docs/sources.md`
-- Reference-site/product taxonomy audit: `docs/research/reference-site-audit.md`
-- System boundaries and diagrams: `docs/architecture/system-architecture.md`
-- Data model and invariants: `docs/architecture/data-model.md`
-- Authentication and authorization: `docs/architecture/authentication-authorization.md`
-- Payments, webhooks, refunds, and reconciliation: `docs/architecture/payments.md`
-- Catalog and compliance policy: `docs/compliance/catalog-policy.md`
-- Jurisdiction matrix: `docs/compliance/jurisdiction-matrix.md`
-- Threat model and secrets: `docs/security/threat-model.md`
-- Environments, migrations, rollback, and backups: `docs/deployment/environments-and-recovery.md`
-- Test strategy: `docs/testing.md`
-- Operational runbooks: `docs/runbooks/`
-- Implementation plan: `docs/superpowers/plans/2026-08-24-propeptiq-labs-platform.md`
-
-## Unresolved decisions
-
-No source currently establishes the final SKU catalog, business-entity state, warehouse/fulfillment state, licenses, approved shipping matrix, tax registrations/nexus, production email domain, provider accounts, or return/refund policy. Wyoming is only a provisional formation candidate and confers no peptide-law exemption.
-
-These decisions are represented as explicit launch gates; they are not filled with defaults.
-
-## Production launch gates
-
-Production sale and fulfillment remain blocked until, at minimum:
-
-1. Counsel approves the entity, each SKU, intended-use presentation, and product-by-jurisdiction matrix.
-2. Actual suppliers, lots, test evidence, COAs, product media, labels, and inventory are approved and loaded.
-3. Stripe or the selected provider confirms the actual business/catalog is supportable; live credentials alone are not approval.
-4. Tax registrations/nexus, shipping services, warehouse controls, returns, and refund procedures are approved.
-5. Clerk production settings, required MFA, admin assignments, and organization enrollment controls are verified.
-6. Production secrets, rate limits, alerts, backups, restore tests, audit protections, and incident contacts are verified.
-7. End-to-end controlled tests prove that blocked/unknown eligibility cannot pay and paid-but-held orders cannot fulfill.
-
-This repository is engineering documentation and software, not legal advice. Legal and regulatory decisions require qualified counsel with the actual catalog and operating facts.
+- Product requirements: `docs/product-requirements.md`
+- Traceability: `docs/requirements-traceability.md`
+- Catalog and destination policy: `docs/compliance/`
+- Architecture and ADRs: `docs/architecture/`, `docs/adr/`
+- Security, testing, deployment, and operations: `docs/security/`, `docs/testing.md`, `docs/deployment/`, `docs/runbooks/`
+- Visual system and responsive behavior: `design-system/MASTER.md`, `docs/design/responsive-public-ui.md`

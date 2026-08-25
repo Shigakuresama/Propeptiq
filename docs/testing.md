@@ -1,75 +1,38 @@
-# Test Strategy
+# Testing Strategy
 
-**Status:** Binding verification plan.
+## Test layers
 
-## 1. Test layers
+- **Domain unit tests:** automatic buyer activation, exact gate decisions/reason codes, destination precedence, explicit review snapshots, content/publication policy, price/promotion calculations, order/payment/inventory/refund/fulfillment transitions.
+- **Repository integration tests:** Drizzle queries and constraints against an isolated database, guarded migrations, provider event/hash uniqueness, concurrent inventory/refund/shipment behavior.
+- **Adapter contract tests:** Clerk verification projection, Stripe raw-body signature verification and idempotency, Blob authorization, email outbox behavior.
+- **Component/browser tests:** public catalog/prices/promotions/cart, preserved cart through sign-in, account attestation, own-order authorization, staff MFA/capability denial, read-only success route, safe empty/error states.
+- **Responsive/accessibility tests:** 375px, 768px, 1024px, and 1440px; keyboard-only; visible focus; reduced motion; 200% zoom; no horizontal overflow; accessible navigation sheet and Proof Rail.
 
-- **Unit:** pure domain state transitions, eligibility aggregation, pricing, capability policy, content rules, redaction.
-- **Property/table tests:** all gate combinations, state-machine transition matrix, integer totals, inventory invariants.
-- **Database integration:** migrations, constraints, tenant scoping, append-only triggers, concurrency, unique idempotency/event/release rules.
-- **Provider contract:** disabled adapters, Stripe signature/idempotency mapping, Blob authorization, Resend outbox behavior.
-- **Component/accessibility:** forms, status displays, empty/loading/error states, keyboard/focus, reduced motion.
-- **Browser:** public pages, protected-route denial, positive synthetic applicant submission, positive authorized reviewer decision, cross-tenant/reviewer denial, catalog empty state, checkout denial, success-page read-only behavior, responsive layouts.
-- **Operational:** backup restore, reconciliation exception detection, incident/hold/refund runbooks.
+## Required negative cases
 
-Test data is clearly labeled synthetic and exists only under test directories/isolated resources. Production migrations do not seed products, prices, labs, COAs, purity, stock, approvals, or customer identities.
+- Unverified email, under-21/no confirmation, invalid purpose, or stale/missing attestation.
+- Buyer `blocked`; buyer `review` without matching exact snapshot; snapshot changed by cart, buyer status, attestation, or destination.
+- Territory, exact blocked product override, blocked group rule, or missing destination rule; missing policy does not create review.
+- Inactive product/price/lot, insufficient inventory, missing allowed destination, or analytical claim without corresponding evidence.
+- Production test-fixture/demo mode, browser price/promotion tampering, unavailable tax/shipping, disabled/unaccepted provider.
+- Invalid webhook signature, duplicate event, same event ID with conflicting hash, out-of-order event, success-page refresh.
+- Concurrent over-reservation, over-refund, or duplicate fulfillment release/shipment.
+- Cross-user order/object access, nonstaff route access, missing MFA, insufficient staff capability.
+- Human/veterinary outcome, dosing, administration, reconstitution, treatment, or misleading overall-impression content.
 
-## 2. Required denial tests
+## Documentation checks
 
-- Anonymous checkout.
-- Unapproved, rejected, suspended, or expired buyer.
-- Wrong organization/resource ID.
-- Missing/expired/Unknown/manual-review/blocked jurisdiction rule.
-- Closed provider/tax/shipping/catalog/launch gate.
-- Missing/expired lot or COA approval.
-- Browser price/name/total manipulation.
-- Stale attestation or policy version.
-- Missing/replayed/invalid webhook signature.
-- Duplicate/concurrent provider event.
-- Payment amount/currency/customer mismatch.
-- Success-page attempt to mutate payment.
-- Paid order with changed compliance state.
-- Fulfillment without/after consumed release.
-- Admin action without capability or recent strong authentication.
+The binding-document search covers README, design-system, active requirements/traceability, compliance, architecture, ADRs, security, testing, deployment, runbooks, and design contracts. It may exclude files explicitly labeled historical or superseded. Findings must distinguish a prohibited active requirement from text that explicitly rejects that requirement.
 
-## 3. Quality commands
+## Local gate and evidence
+
+For documentation-only Task 1, run:
 
 ```powershell
-npm run lint
-npm run typecheck
+npm run verify:workspace-boundary
 npm test
-npm run test:integration
-npm run test:e2e
-npm run build
-npm run db:check
+npm run lint
 git diff --check
 ```
 
-Focused tests run during development; the full set runs before completion/deployment. A skipped test is not a pass and must state why, owner, and gate impact.
-
-## 4. Browser matrix
-
-- Chromium desktop at 1440px and 1024px.
-- Chromium tablet/mobile at 768px and 375px.
-- 200% zoom at 1024px and 375px, verifying no obscured, truncated, overlapping, or horizontally scrolling required content.
-- Keyboard-only navigation and visible focus.
-- Reduced-motion emulation.
-- Cross-browser smoke in current Firefox/Safari through the chosen CI/device service before commerce launch.
-
-## 5. Accessibility
-
-- Semantic landmarks/headings and labeled controls.
-- WCAG 2.2 AA contrast and focus appearance.
-- Error summary plus inline associations.
-- Status not communicated by color alone.
-- Dialog/Sheet focus trap and return.
-- Touch targets and no horizontal scroll at 375px.
-- Automated axe checks plus manual keyboard/screen-reader smoke.
-
-## 6. Payment verification
-
-Use Stripe test/sandbox only after provider adapter implementation. Generate valid test signatures with official tooling/SDK; never hardcode live keys. Verify duplicate and out-of-order events, retries after transient failure, asynchronous states if enabled, refunds, disputes, and reconciliation. No real customer/staff notification or shipment is triggered by tests.
-
-## 7. Completion evidence
-
-The release report records exact commands, exit codes, relevant browser routes/viewports, migration IDs, and unresolved environment-dependent checks. Production claims are made only from production evidence, never inferred from local tests.
+Later release work also needs strict TypeScript, database generation/check/integration tests, browser tests, production build, dependency audit, migration review, and environment-specific checks. A skipped or unavailable command is not a pass. Record exact commands, exit codes, test counts where printed, routes/viewports exercised, and unresolved external checks. Local results never establish legal or provider approval.
