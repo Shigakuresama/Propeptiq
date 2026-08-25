@@ -75,11 +75,11 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 0: Stop Duplication and Establish the New Baseline
 
-- [ ] Wait for **PROPEPTIQ canonical baseline checkpoint** to finish its current atomic work; require every dirty file under `src/db`, `src/components`, tests, and package files to be committed or explicitly handed off.
-- [ ] Preserve its current branch and commits; do not overwrite or discard in-progress Task 3/UI work.
-- [ ] Archive **Build PROPEPTIQ LABS website** after recording that its research was absorbed.
-- [ ] Create an isolated `feat/propeptiq-lightweight-commerce` worktree from the latest accepted canonical checkpoint.
-- [ ] Record `_agent-quarantine/propeptiq-labs-site` as non-authoritative and excluded from search, build, lint, and test scopes.
+- [x] Wait for **PROPEPTIQ canonical baseline checkpoint** to finish its current atomic work; require every dirty file under `src/db`, `src/components`, tests, and package files to be committed or explicitly handed off. See [`task-0-consolidation-record.md`](../../research/task-0-consolidation-record.md).
+- [x] Preserve its current branch and commits; do not overwrite or discard in-progress Task 3/UI work. See [`task-0-consolidation-record.md`](../../research/task-0-consolidation-record.md).
+- [x] Archive **Build PROPEPTIQ LABS website** after recording that its research was absorbed. See [`task-0-consolidation-record.md`](../../research/task-0-consolidation-record.md).
+- [x] Create an isolated `feat/propeptiq-lightweight-commerce` worktree from the latest accepted canonical checkpoint. See [`task-0-consolidation-record.md`](../../research/task-0-consolidation-record.md).
+- [x] Record `_agent-quarantine/propeptiq-labs-site` as non-authoritative and excluded from search, build, lint, and test scopes. See [`task-0-consolidation-record.md`](../../research/task-0-consolidation-record.md) and run `npm run verify:workspace-boundary`.
 
 **Validation:** Clean canonical status, one active owner, quarantine absent from package/workspace configuration.
 

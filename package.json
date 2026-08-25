@@ -13,8 +13,9 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
+    "verify:workspace-boundary": "node scripts/verify-workspace-boundary.mjs",
     "audit:prod": "npm audit --omit=dev",
-    "verify": "run-s lint typecheck test build"
+    "verify": "run-s verify:workspace-boundary lint typecheck test build"
   },
   "dependencies": {
     "@clerk/nextjs": "7.8.1",
