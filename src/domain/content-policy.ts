@@ -244,6 +244,30 @@ function analyticalMarkerMatches(
 
 type TextRange = Readonly<{ start: number; end: number }>;
 
+type NormalizedCopy = Readonly<{
+  text: string;
+  statementRanges: readonly TextRange[];
+}>;
+
+function normalizeCopyWithStatements(value: string): NormalizedCopy {
+  const statements = value
+    .normalize("NFKC")
+    .split(/[!?;\r\n\u2028\u2029]+|(?<!\d)\.|\.(?!\d)/u)
+    .map(normalizeText)
+    .filter((statement) => statement.length > 0);
+  const statementRanges: TextRange[] = [];
+  let text = "";
+
+  for (const statement of statements) {
+    if (text.length > 0) text += " ";
+    const start = text.length;
+    text += statement;
+    statementRanges.push({ start, end: text.length });
+  }
+
+  return { text, statementRanges };
+}
+
 function containedTextRanges(
   text: string,
   containedText: string,
@@ -334,7 +358,8 @@ export function scanPublicCopy(
   }
 
   const violations: ContentViolation[] = [];
-  const normalizedCopy = normalizeText(candidate.text);
+  const { text: normalizedCopy, statementRanges } =
+    normalizeCopyWithStatements(candidate.text);
   const topLevelAnalyticalMarkers = analyticalMarkerMatches(normalizedCopy);
   const coveredAnalyticalRanges: TextRange[] = [];
   const allocatedContainedRanges = new Set<string>();
@@ -354,8 +379,11 @@ export function scanPublicCopy(
       isDenseArray(lotEvidenceIds) &&
       lotEvidenceIds.every(isNonBlank) &&
       new Set(lotEvidenceIds).size === lotEvidenceIds.length;
-    const normalizedClaimText =
-      typeof claim.text === "string" ? normalizeText(claim.text) : "";
+    const normalizedClaim =
+      typeof claim.text === "string"
+        ? normalizeCopyWithStatements(claim.text)
+        : null;
+    const normalizedClaimText = normalizedClaim?.text ?? "";
     const claimTextIsValid = normalizedClaimText.length > 0;
     const kindIsValid = claim.kind === "ordinary" || claim.kind === "analytical";
     const claimAnalyticalMarkers = analyticalMarkerMatches(normalizedClaimText);
@@ -382,19 +410,24 @@ export function scanPublicCopy(
       kindIsValid &&
       evidenceProjectionIsValid &&
       analyticalEvidenceIsValid &&
-      claimAnalyticalMarkers.length > 0
+      claimAnalyticalMarkers.length > 0 &&
+      normalizedClaim?.statementRanges.length === 1
     ) {
-      const containedRange = containedTextRanges(
+      const containedRanges = containedTextRanges(
         normalizedCopy,
         normalizedClaimText,
-      ).find(
-        ({ start, end }) => !allocatedContainedRanges.has(`${start}:${end}`),
+      ).filter(({ start, end }) =>
+        statementRanges.some(
+          (statement) => statement.start <= start && statement.end >= end,
+        ),
       );
-      if (containedRange !== undefined) {
-        allocatedContainedRanges.add(
-          `${containedRange.start}:${containedRange.end}`,
-        );
-        coveredAnalyticalRanges.push(containedRange);
+      const containedRange = containedRanges[0];
+      if (containedRanges.length === 1 && containedRange !== undefined) {
+        const rangeKey = `${containedRange.start}:${containedRange.end}`;
+        if (!allocatedContainedRanges.has(rangeKey)) {
+          allocatedContainedRanges.add(rangeKey);
+          coveredAnalyticalRanges.push(containedRange);
+        }
       }
     }
     if (typeof claim.text === "string") {

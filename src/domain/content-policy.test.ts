@@ -172,6 +172,32 @@ describe("scanPublicCopy", () => {
     );
   });
 
+  it("blocks one broad evidence-backed claim spanning two analytical statements", () => {
+    const text = "Lot A is 99% pure. Lot B is 50% pure.";
+    const result = scanPublicCopy(
+      candidate({
+        text,
+        claims: [
+          {
+            id: "broad-purity-claim",
+            text,
+            kind: "analytical",
+            lotEvidenceIds: ["lot-evidence-1"],
+          },
+        ],
+      }),
+      policy,
+    );
+
+    expect(result).toMatchObject({ publishable: false, status: "blocked" });
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        code: "unsupported_claim",
+        claimId: null,
+      }),
+    );
+  });
+
   it("allows two purity statements when each has contained evidence-backed coverage", () => {
     expect(
       scanPublicCopy(
@@ -237,12 +263,11 @@ describe("scanPublicCopy", () => {
       policy,
     );
 
-    expect(result.violations).toContainEqual(
-      expect.objectContaining({
-        code: "unsupported_claim",
-        claimId: null,
-      }),
-    );
+    expect(
+      result.violations.filter(
+        ({ code, claimId }) => code === "unsupported_claim" && claimId === null,
+      ),
+    ).toHaveLength(2);
   });
 
   it("does not treat neutral laboratory-research wording as an analytical claim", () => {
