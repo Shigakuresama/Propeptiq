@@ -20,9 +20,10 @@ Any missing or changed fact denies creation. Browser totals, provider redirect p
 ## Webhooks and journal
 
 - Verify the provider signature against the raw request body before parsing business fields.
-- Store each provider event ID once with a payload hash. Replay of the same ID/hash returns success without duplicate effects; the same ID with a different hash is an incident.
-- Append payment state changes to `payment_events`; never mutate payment state from the success page.
-- Perform order, inventory, email, refund, and fulfillment side effects with their own idempotency keys.
+- Store each provider event ID once with its payload hash, durable status (`pending`, `processing`, `processed`, or `failed`), attempt count, lease token, and lease expiry. The first handler persists `pending`, then atomically claims it by transitioning to `processing` with a lease token and expiry. A crash before the claim leaves a reclaimable `pending` event.
+- A same-ID/same-hash replay returns idempotent success only when status is `processed`. A replay in `pending` or `failed`, or with an expired `processing` lease, safely resumes or reclaims processing. A concurrent replay under an unexpired lease must not receive terminal success unless the original worker completes. The same ID with a different hash is a conflict and incident.
+- In one transaction, append payment state changes to `payment_events`, apply required internal state transitions, durably enqueue downstream effects, and mark the provider event `processed`. A failure leaves or marks the event retryable; never mutate payment state from the success page.
+- Perform inventory, email, refund, and fulfillment effects with their own idempotency keys. Retried or reclaimed processing may not duplicate any effect.
 - Preserve unknown event types safely for reconciliation without treating them as payment success.
 
 ## Refunds

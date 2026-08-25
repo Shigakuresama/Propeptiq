@@ -20,11 +20,13 @@ A buyer block or any cart, buyer-status, attestation, or destination change inva
 
 Before fulfillment, place a paid order on hold when verified payment, active order/buyer hold, inventory, buyer status, product status, or destination allowance no longer passes. Record the changed fact and correlation ID. Do not restart an unrelated enrollment or review process.
 
-To release:
+To clear the hold:
 
 1. Verify the underlying fact from its authoritative source.
 2. Confirm payment remains verified and the order is not refunded/disputed.
-3. Re-run the current fulfillment checks.
-4. Consume one fulfillment release with an idempotency key and append an audit event.
+3. Re-run the current fulfillment checks to confirm the hold's reason is resolved.
+4. Clear only the hold and append an audit event. Do not create or consume a fulfillment release while clearing the hold.
+
+At the actual fulfillment/shipment action, re-run all current release checks and atomically create/consume the fulfillment release with the shipment transaction and idempotency key. Clearing a hold never reserves or exhausts that consume-once authority.
 
 If legality, catalog, tax/shipping, warehouse, or provider facts are unresolved, keep the order held and escalate to the accountable external owner. Software does not decide those inputs.

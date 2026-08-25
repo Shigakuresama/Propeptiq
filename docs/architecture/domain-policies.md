@@ -39,18 +39,18 @@ Normalize a U.S. state and reject territories. Resolve active exact product/stat
 
 ## Checkout evaluation
 
-- `account`: authenticated buyer exists and status is `active`; `review` marks review required, `blocked` denies.
+- `account`: an authenticated `active` buyer passes. A buyer in `review` passes only when the current exact snapshot has a matching approved immutable review decision that covers the buyer-review reason; otherwise review is required. `blocked` denies.
 - `attestation`: exact current version is accepted.
 - `product`: each item is active and its required catalog facts are present.
-- `destination`: every item is allowed or has a valid exact-snapshot review decision.
+- `destination`: every item resolves `allowed`, or every explicit `review` result is covered by the matching approved immutable review decision for the current exact snapshot. `blocked`, missing, and `unavailable` results deny and cannot be overridden by a review decision.
 - `inventory`: requested units can be reserved.
 - `payment_provider`: the configured provider is accepted and enabled for this environment/business.
 
-Return stable reason codes in `reasons`. `permitted` is true only when all six gates pass and no review is required. Checkout creation separately requires valid tax configuration and an available shipping service.
+Return stable reason codes in `reasons`. An approved decision may satisfy the buyer-review reason, one or more destination-review reasons, or both for its identical snapshot. When it covers every explicit review reason and all other gates pass, `reviewRequired` is false and `permitted` may be true. When an explicit review reason lacks a matching approval, `reviewRequired` is true and `permitted` is false. Checkout creation separately requires valid tax configuration and an available shipping service.
 
 ## Review
 
-Create review work only for buyer status `review` or destination result `review`. Hash canonical buyer, cart product/quantity/version facts, attestation version, and normalized destination. The decision is immutable and valid only for the identical hash. Any input change invalidates it.
+Create review work only for buyer status `review` or destination result `review`. Hash canonical buyer, cart product/quantity/version facts, attestation version, and normalized destination. The decision is immutable and valid only for the identical hash. A matching approval satisfies the explicitly configured buyer `review` and/or destination `review` reasons for that snapshot only; it does not mutate the underlying buyer status or destination rule. Any input change invalidates it. `blocked`, missing, and `unavailable` facts never become review and cannot be overridden by the decision.
 
 ## Publication and claims
 
