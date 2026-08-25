@@ -338,7 +338,7 @@ describe("lean database migration", () => {
     await insertCommerceFixture(client);
     await insertSecondUserAcceptance(client);
 
-    await expectRejected(
+    await client.exec(
       client,
       `INSERT INTO orders
          (buyer_user_id, buyer_status_snapshot, attestation_acceptance_id,
@@ -505,41 +505,41 @@ describe("lean database migration", () => {
 
     await client.exec(`
       INSERT INTO checkout_attempts
-        (order_id, idempotency_key, request_hash, account_gate, attestation_gate,
+        (id, order_id, buyer_user_id, idempotency_key, request_hash, account_gate, attestation_gate,
          product_gate, destination_gate, inventory_gate, payment_provider_gate,
          permitted, review_required, tax_ready, shipping_ready)
       VALUES
-        ('${ids.order}', 'checkout-key-1', '${hashE}', 'pass', 'pass',
+        ('00000000-0000-4000-8000-000000000080', '${ids.order}', '${ids.user}', 'checkout-key-1', '${hashE}', 'pass', 'pass',
          'pass', 'pass', 'pass', 'pass', true, false, true, true);
     `);
     await expectRejected(
       client,
       `INSERT INTO checkout_attempts
-         (order_id, idempotency_key, request_hash, account_gate, attestation_gate,
+         (order_id, buyer_user_id, idempotency_key, request_hash, account_gate, attestation_gate,
           product_gate, destination_gate, inventory_gate, payment_provider_gate,
           permitted, review_required, tax_ready, shipping_ready)
        VALUES
-         ('${ids.order}', 'checkout-key-1', '${hashF}', 'pass', 'pass',
+         ('${ids.order}', '${ids.user}', 'checkout-key-1', '${hashF}', 'pass', 'pass',
           'pass', 'pass', 'pass', 'pass', true, false, true, true)`,
     );
     await expectRejected(
       client,
       `INSERT INTO checkout_attempts
-         (order_id, idempotency_key, request_hash, account_gate, attestation_gate,
+         (order_id, buyer_user_id, idempotency_key, request_hash, account_gate, attestation_gate,
           product_gate, destination_gate, inventory_gate, payment_provider_gate,
           permitted, review_required, tax_ready, shipping_ready)
        VALUES
-         ('${ids.order}', 'checkout-key-2', '${hashE}', 'pass', 'pass',
+         ('${ids.order}', '${ids.user}', 'checkout-key-2', '${hashE}', 'pass', 'pass',
           'pass', 'pass', 'pass', 'pass', true, false, true, true)`,
     );
 
     await client.exec(`
       INSERT INTO inventory_reservations
-        (idempotency_key, order_id, order_item_id, product_id, lot_id,
-         quantity_reserved, quantity_remaining, state)
+        (checkout_attempt_id, idempotency_key, order_id, order_item_id, product_id, lot_id,
+         quantity_reserved, quantity_remaining, state, expires_at)
       VALUES
-        ('reservation-key-1', '${ids.order}', '${ids.item}', '${ids.product}',
-         '${ids.lot}', 1, 1, 'active');
+        ('00000000-0000-4000-8000-000000000080', 'reservation-key-1', '${ids.order}', '${ids.item}', '${ids.product}',
+         '${ids.lot}', 1, 1, 'active', now() + interval '1 hour');
     `);
     await expectRejected(
       client,
@@ -744,6 +744,8 @@ describe("lean database migration", () => {
       "processing",
       "processed",
       "failed",
+      "deferred",
+      "conflict",
     ]);
     expect(labelsFor("research_purpose")).toEqual([
       "in_vitro",
@@ -885,10 +887,12 @@ describe("lean database migration", () => {
 
     expect(result.rows).toEqual([
       { table_name: "attestation_versions", column_name: "content_hash" },
+      { table_name: "checkout_attempts", column_name: "provider_request_hash" },
       { table_name: "checkout_attempts", column_name: "request_hash" },
       { table_name: "coa_documents", column_name: "evidence_hash" },
       { table_name: "provider_events", column_name: "payload_hash" },
       { table_name: "rate_limit_windows", column_name: "scope_hash" },
+      { table_name: "refunds", column_name: "provider_request_hash" },
       { table_name: "review_requests", column_name: "snapshot_hash" },
     ]);
   });
@@ -898,11 +902,11 @@ describe("lean database migration", () => {
     await insertCommerceFixture(client);
     const result = await client.query<{ reasons: string[] }>(`
       INSERT INTO checkout_attempts
-        (order_id, idempotency_key, request_hash, account_gate, attestation_gate,
+        (order_id, buyer_user_id, idempotency_key, request_hash, account_gate, attestation_gate,
          product_gate, destination_gate, inventory_gate, payment_provider_gate,
          permitted, review_required, reasons, tax_ready, shipping_ready)
       VALUES
-        ('${ids.order}', 'checkout-array-key', '${hashE}', 'blocked', 'pass',
+        ('${ids.order}', '${ids.user}', 'checkout-array-key', '${hashE}', 'blocked', 'pass',
          'pass', 'pass', 'pass', 'pass', false, false,
          ARRAY['account_inactive']::text[], true, true)
       RETURNING reasons
@@ -1005,11 +1009,11 @@ describe("lean database migration", () => {
          'Synthetic product two', 'sealed vial', 'USD', 3500, 1, 3500, 0, 3500);
 
       INSERT INTO inventory_reservations
-        (id, idempotency_key, order_id, order_item_id, product_id, lot_id,
-         quantity_reserved, quantity_remaining, state)
+        (id, checkout_attempt_id, idempotency_key, order_id, order_item_id, product_id, lot_id,
+         quantity_reserved, quantity_remaining, state, expires_at)
       VALUES
-        ('${ids.reservation}', 'reservation-coherent', '${ids.order}', '${ids.item}',
-         '${ids.product}', '${ids.lot}', 1, 1, 'active');
+        ('${ids.reservation}', '00000000-0000-4000-8000-000000000080', 'reservation-coherent', '${ids.order}', '${ids.item}',
+         '${ids.product}', '${ids.lot}', 1, 1, 'active', now() + interval '1 hour');
     `);
 
     await expectRejected(
