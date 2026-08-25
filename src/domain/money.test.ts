@@ -26,6 +26,17 @@ const validInput = {
       quantity: 2,
     },
   ],
+  discount: {
+    authority: "server_calculated_discount",
+    amountMinor: 250,
+    currency: "USD",
+    allocations: [
+      {
+        productId: "synthetic-product-1",
+        discountMinor: 250,
+      },
+    ],
+  },
   tax: {
     authority: "server_calculated_tax",
     amountMinor: 100,
@@ -50,9 +61,10 @@ describe("calculateOrderTotals", () => {
       value: {
         currency: "USD",
         subtotalMinor: 2_500,
+        discountMinor: 250,
         taxMinor: 100,
         shippingMinor: 250,
-        totalMinor: 2_850,
+        totalMinor: 2_600,
         lines: [
           {
             productId: "synthetic-product-1",
@@ -61,10 +73,183 @@ describe("calculateOrderTotals", () => {
             unitAmountMinor: 1_250,
             currency: "USD",
             quantity: 2,
-            lineTotalMinor: 2_500,
+            subtotalMinor: 2_500,
+            discountMinor: 250,
+            totalMinor: 2_250,
           },
         ],
       },
+    });
+  });
+
+  it("requires exact dense discount coverage and derives net line totals", () => {
+    const secondLine = {
+      ...validInput.lines[0],
+      productId: "synthetic-product-2",
+      priceBookId: "synthetic-price-2",
+      unitAmountMinor: 500,
+      quantity: 1,
+    } as const;
+    const result = calculateOrderTotals(
+      {
+        ...validInput,
+        lines: [secondLine, validInput.lines[0]],
+        discount: {
+          ...validInput.discount,
+          amountMinor: 300,
+          allocations: [
+            { productId: "synthetic-product-1", discountMinor: 250 },
+            { productId: "synthetic-product-2", discountMinor: 50 },
+          ],
+        },
+      },
+      syntheticPolicy,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        subtotalMinor: 3_000,
+        discountMinor: 300,
+        totalMinor: 3_050,
+        lines: [
+          {
+            productId: "synthetic-product-2",
+            subtotalMinor: 500,
+            discountMinor: 50,
+            totalMinor: 450,
+          },
+          {
+            productId: "synthetic-product-1",
+            subtotalMinor: 2_500,
+            discountMinor: 250,
+            totalMinor: 2_250,
+          },
+        ],
+      },
+    });
+  });
+
+  it.each([
+    [
+      "missing allocation",
+      [{ productId: "synthetic-product-2", discountMinor: 250 }],
+      "discount.allocations",
+    ],
+    [
+      "duplicate allocation",
+      [
+        { productId: "synthetic-product-1", discountMinor: 125 },
+        { productId: "synthetic-product-1", discountMinor: 125 },
+      ],
+      "discount.allocations[1].productId",
+    ],
+    [
+      "negative allocation",
+      [{ productId: "synthetic-product-1", discountMinor: -1 }],
+      "discount.allocations[0].discountMinor",
+    ],
+    [
+      "allocation above subtotal",
+      [{ productId: "synthetic-product-1", discountMinor: 2_501 }],
+      "discount.allocations[0].discountMinor",
+    ],
+  ] as const)("rejects %s", (_name, allocations, field) => {
+    expect(
+      calculateOrderTotals(
+        {
+          ...validInput,
+          discount: { ...validInput.discount, allocations },
+        } as OrderTotalsInput,
+        syntheticPolicy,
+      ),
+    ).toEqual({
+      ok: false,
+      error: { code: "invalid_amount", field },
+    });
+  });
+
+  it("rejects sparse allocations and a declared discount that does not equal them", () => {
+    const sparse = [
+      { productId: "synthetic-product-1", discountMinor: 250 },
+    ];
+    sparse.length = 2;
+    expect(
+      calculateOrderTotals(
+        {
+          ...validInput,
+          discount: { ...validInput.discount, allocations: sparse },
+        },
+        syntheticPolicy,
+      ),
+    ).toEqual({
+      ok: false,
+      error: { code: "invalid_amount", field: "discount.allocations" },
+    });
+
+    expect(
+      calculateOrderTotals(
+        {
+          ...validInput,
+          discount: { ...validInput.discount, amountMinor: 251 },
+        },
+        syntheticPolicy,
+      ),
+    ).toEqual({
+      ok: false,
+      error: { code: "invalid_amount", field: "discount.amountMinor" },
+    });
+  });
+
+  it("rejects zero final totals but permits fully discounted merchandise with positive shipping", () => {
+    const fullyDiscounted = {
+      ...validInput,
+      lines: [{ ...validInput.lines[0], unitAmountMinor: 100, quantity: 1 }],
+      discount: {
+        ...validInput.discount,
+        amountMinor: 100,
+        allocations: [
+          { productId: "synthetic-product-1", discountMinor: 100 },
+        ],
+      },
+      tax: { ...validInput.tax, amountMinor: 0 },
+      shipping: { ...validInput.shipping, amountMinor: 0 },
+    };
+    expect(calculateOrderTotals(fullyDiscounted, syntheticPolicy)).toEqual({
+      ok: false,
+      error: { code: "zero_total_not_supported", field: "totalMinor" },
+    });
+    expect(
+      calculateOrderTotals(
+        {
+          ...fullyDiscounted,
+          shipping: { ...fullyDiscounted.shipping, amountMinor: 1 },
+        },
+        syntheticPolicy,
+      ),
+    ).toMatchObject({
+      ok: true,
+      value: { subtotalMinor: 100, discountMinor: 100, totalMinor: 1 },
+    });
+  });
+
+  it("rejects duplicate price-line product IDs and sparse price lines", () => {
+    expect(
+      calculateOrderTotals(
+        { ...validInput, lines: [validInput.lines[0], validInput.lines[0]] },
+        syntheticPolicy,
+      ),
+    ).toEqual({
+      ok: false,
+      error: { code: "invalid_identifier", field: "lines[1].productId" },
+    });
+    const sparse = [validInput.lines[0]];
+    sparse.length = 2;
+    expect(
+      calculateOrderTotals({ ...validInput, lines: sparse }, syntheticPolicy),
+    ).toEqual({
+      ok: false,
+      error: { code: "invalid_line_count", field: "lines" },
     });
   });
 
@@ -256,7 +441,7 @@ describe("calculateOrderTotals", () => {
     );
     expect(multiplication).toEqual({
       ok: false,
-      error: { code: "arithmetic_overflow", field: "lines[0].lineTotalMinor" },
+      error: { code: "arithmetic_overflow", field: "lines[0].subtotalMinor" },
     });
 
     const addition = calculateOrderTotals(
@@ -271,6 +456,13 @@ describe("calculateOrderTotals", () => {
         ],
         tax: { ...validInput.tax, amountMinor: 100, currency: "USD" },
         shipping: { ...validInput.shipping, amountMinor: 100, currency: "USD" },
+        discount: {
+          ...validInput.discount,
+          amountMinor: 0,
+          allocations: [
+            { productId: "synthetic-product-1", discountMinor: 0 },
+          ],
+        },
       },
       {
         ...syntheticPolicy,
@@ -286,7 +478,7 @@ describe("calculateOrderTotals", () => {
   it("rejects a valid total above the approved order limit", () => {
     const result = calculateOrderTotals(validInput, {
       ...syntheticPolicy,
-      maximumOrderAmountMinor: 2_849,
+      maximumOrderAmountMinor: 2_599,
     });
 
     expect(result).toEqual({
@@ -312,8 +504,22 @@ describe("calculateOrderTotals", () => {
       "lines[0]",
     ],
     [
+      "a missing discount component",
+      {
+        lines: validInput.lines,
+        tax: validInput.tax,
+        shipping: validInput.shipping,
+      },
+      "invalid_amount",
+      "discount",
+    ],
+    [
       "a missing tax component",
-      { lines: validInput.lines, shipping: validInput.shipping },
+      {
+        lines: validInput.lines,
+        discount: validInput.discount,
+        shipping: validInput.shipping,
+      },
       "invalid_amount",
       "tax",
     ],
@@ -399,6 +605,17 @@ describe("calculateOrderTotals", () => {
         lines: [{ ...validInput.lines[0], authority: "browser_claimed_price" }],
       },
       "lines[0].authority",
+    ],
+    [
+      "a caller discount marker",
+      {
+        ...validInput,
+        discount: {
+          ...validInput.discount,
+          authority: "browser_claimed_discount",
+        },
+      },
+      "discount.authority",
     ],
     [
       "a caller tax marker",

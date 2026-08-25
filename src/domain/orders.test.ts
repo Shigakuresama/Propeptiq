@@ -1,1344 +1,737 @@
 import { describe, expect, it } from "vitest";
 
+import { evaluateCheckout } from "@/domain/eligibility";
 import {
-  evaluateCheckout,
-  type CheckoutEvaluationInput,
-} from "@/domain/eligibility";
-
+  evaluateFulfillment,
+  type FulfillmentInput,
+} from "@/domain/fulfillment";
 import {
-  canFulfill,
   transitionOrder,
   transitionPayment,
   transitionFulfillmentRelease,
   type FulfillmentReleaseSnapshot,
   type OrderEvent,
   type OrderSnapshot,
-  type OrderState,
   type PaymentEvent,
   type PaymentSnapshot,
 } from "@/domain/orders";
 
-function checkoutDecision(
-  overrides: Partial<CheckoutEvaluationInput> = {},
-) {
-  return evaluateCheckout({
-    authenticated: true,
-    buyerStatus: "active",
-    acceptedAttestationVersion: "attestation-v1",
-    currentAttestationVersion: "attestation-v1",
-    items: [
-      {
-        productId: "product-1",
-        active: true,
-        catalogComplete: true,
-        destination: {
-          status: "allowed",
-          normalizedStateCode: "CA",
-          ruleId: "rule-1",
-          ruleVersion: "policy-v1",
-          scope: "product",
-        },
-        inventoryAvailable: true,
+const allowedCheckoutDecision = evaluateCheckout({
+  authenticated: true,
+  buyerStatus: "active",
+  acceptedAttestationVersion: "attestation-v1",
+  currentAttestationVersion: "attestation-v1",
+  items: [
+    {
+      productId: "synthetic-product-1",
+      active: true,
+      catalogComplete: true,
+      destination: {
+        status: "allowed",
+        normalizedStateCode: "CA",
+        ruleId: "synthetic-rule-1",
+        ruleVersion: "policy-v1",
+        scope: "product",
       },
-    ],
-    paymentProviderAvailable: true,
-    reviewSnapshotHash: null,
-    reviewDecision: null,
+      inventoryAvailable: true,
+    },
+  ],
+  paymentProviderAvailable: true,
+  reviewSnapshotHash: null,
+  reviewDecision: null,
+});
+describe("Task 6A lean order and fulfillment-release contracts", () => {
+  const now = "2026-08-24T12:00:00.000Z";
+  const expiresAt = "2026-08-24T13:00:00.000Z";
+  const paymentEvidenceId = "synthetic-payment-event-1";
+
+  const leanDraft = {
+    state: "draft",
+    paymentEvidenceId: null,
+    reviewRequestId: null,
+    fulfillmentReleaseVersion: null,
+    lastFulfillmentReleaseVersion: 0,
+    carrierHandoffAt: null,
+  } as unknown as OrderSnapshot;
+
+  const fulfillmentInput = (
+    overrides: Partial<FulfillmentInput> = {},
+  ): FulfillmentInput => ({
+    orderId: "synthetic-order-1",
+    verifiedPaymentEventId: paymentEvidenceId,
+    refundPending: false,
+    confirmedRefundAmountMinor: 0,
+    paymentDisputed: false,
+    orderHoldActive: false,
+    buyerStatus: "active",
+    buyerReviewCovered: false,
+    productsActive: true,
+    destinationStatus: "allowed",
+    destinationReviewCovered: false,
+    inventoryReservationsComplete: true,
+    reservedLotsAvailable: true,
+    shipmentMetadataPresent: true,
+    fulfillmentCapabilityEnabled: true,
+    reviewRequestId: null,
     ...overrides,
   });
-}
 
-const allowedCheckoutDecision = checkoutDecision();
-const blockedCheckoutDecision = checkoutDecision({ buyerStatus: "blocked" });
-const reviewCheckoutDecision = checkoutDecision({
-  buyerStatus: "review",
-  reviewSnapshotHash: "a".repeat(64),
-});
+  const permittedFulfillment = (overrides: Partial<FulfillmentInput> = {}) =>
+    evaluateFulfillment(fulfillmentInput(overrides));
+  const deniedFulfillment = (overrides: Partial<FulfillmentInput>) =>
+    evaluateFulfillment(fulfillmentInput(overrides));
 
-const draftOrder: OrderSnapshot = {
-  state: "draft",
-  paymentEvidenceId: null,
-  clearanceEvidenceId: null,
-  fulfillmentReleaseVersion: null,
-  lastFulfillmentReleaseVersion: 0,
-  carrierHandoffAt: null,
-};
+  function expectOrderSuccess(
+    snapshot: OrderSnapshot,
+    event: unknown,
+  ): OrderSnapshot {
+    const result = transitionOrder(snapshot, event as OrderEvent);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(`synthetic transition failed: ${result.error.code}`);
+    const value = result.value as unknown as {
+      snapshot: OrderSnapshot;
+      requiredIncidents: readonly string[];
+    };
+    expect(value.requiredIncidents).toEqual([]);
+    return value.snapshot;
+  }
 
-const issuedRelease: FulfillmentReleaseSnapshot = {
-  state: "issued",
-  version: 1,
-  lastVersion: 1,
-  paymentEvidenceId: "synthetic-payment-journal-1",
-  clearanceEvidenceId: "synthetic-clearance-1",
-  clearanceEvidenceHistory: ["synthetic-clearance-1"],
-  expiresAt: "2026-08-25T12:00:00.000Z",
-};
-
-const consumedRelease: FulfillmentReleaseSnapshot = {
-  ...issuedRelease,
-  state: "consumed",
-};
-
-function paidPendingOrder(): OrderSnapshot {
-  const eligibility = transitionOrder(draftOrder, { type: "start_eligibility" });
-  if (!eligibility.ok) throw new Error("synthetic test setup failed");
-  const ready = transitionOrder(eligibility.value, {
-    type: "eligibility_passed",
-    decision: allowedCheckoutDecision,
-  });
-  if (!ready.ok) throw new Error("synthetic test setup failed");
-  const checkout = transitionOrder(ready.value, { type: "begin_checkout" });
-  if (!checkout.ok) throw new Error("synthetic test setup failed");
-  const paid = transitionOrder(checkout.value, {
-    type: "payment_verified",
-    source: "verified_provider_event",
-    paymentEvidenceId: "synthetic-payment-journal-1",
-  });
-  if (!paid.ok) throw new Error("synthetic test setup failed");
-  return paid.value;
-}
-
-describe("transitionOrder", () => {
-  it("starts eligibility review from a draft without mutating the input", () => {
-    const before = structuredClone(draftOrder);
-
-    const result = transitionOrder(draftOrder, { type: "start_eligibility" });
-
-    expect(result).toEqual({
-      ok: true,
-      value: { ...draftOrder, state: "eligibility_review" },
-    });
-    expect(draftOrder).toEqual(before);
-  });
-
-  it("rejects a plain lookalike checkout decision at eligibility progression", () => {
-    const started = transitionOrder(draftOrder, { type: "start_eligibility" });
-    if (!started.ok) throw new Error("synthetic test setup failed");
-
-    expect(
-      transitionOrder(started.value, {
-        type: "eligibility_passed",
-        decision: { ...allowedCheckoutDecision },
-      }),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "invalid_transition" },
-    });
-  });
-
-  it.each([
-    ["nonpermitted", blockedCheckoutDecision],
-    ["review-required", reviewCheckoutDecision],
-  ] as const)("denies a %s checkout decision at eligibility progression", (_name, decision) => {
-    const started = transitionOrder(draftOrder, { type: "start_eligibility" });
-    if (!started.ok) throw new Error("synthetic test setup failed");
-
-    expect(
-      transitionOrder(started.value, { type: "eligibility_passed", decision }),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "invalid_transition" },
-    });
-  });
-
-  it("follows the verified-payment and released-fulfillment happy path", () => {
-    const eligibility = transitionOrder(draftOrder, {
-      type: "start_eligibility",
-    });
-    expect(eligibility.ok).toBe(true);
-    if (!eligibility.ok) return;
-
-    const ready = transitionOrder(eligibility.value, {
+  function checkoutPending(): OrderSnapshot {
+    const eligibility = expectOrderSuccess(leanDraft, { type: "start_eligibility" });
+    const ready = expectOrderSuccess(eligibility, {
       type: "eligibility_passed",
       decision: allowedCheckoutDecision,
     });
-    expect(ready.ok).toBe(true);
-    if (!ready.ok) return;
+    return expectOrderSuccess(ready, { type: "begin_checkout" });
+  }
 
-    const checkout = transitionOrder(ready.value, { type: "begin_checkout" });
-    expect(checkout.ok).toBe(true);
-    if (!checkout.ok) return;
-
-    const paid = transitionOrder(checkout.value, {
+  function paidPending(): OrderSnapshot {
+    return expectOrderSuccess(checkoutPending(), {
       type: "payment_verified",
       source: "verified_provider_event",
-      paymentEvidenceId: "synthetic-payment-journal-1",
+      paymentEvidenceId,
+      reservationDisposition: "active",
     });
-    expect(paid.ok).toBe(true);
-    if (!paid.ok) return;
+  }
 
-    const released = transitionOrder(paid.value, {
-      type: "release_for_fulfillment",
-      decision: allowedCheckoutDecision,
-      paymentEvidenceId: "synthetic-payment-journal-1",
-      clearanceEvidenceId: "synthetic-clearance-1",
-      fulfillmentReleaseVersion: 1,
-    });
-    expect(released).toMatchObject({
-      ok: true,
-      value: {
-        state: "ready_for_fulfillment",
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId: "synthetic-clearance-1",
-        fulfillmentReleaseVersion: 1,
-      },
-    });
-    if (!released.ok) return;
-
-    const inProgress = transitionOrder(released.value, {
-      type: "begin_fulfillment",
-      now: "2026-08-24T12:00:00.000Z",
-      paymentVerified: true,
-      eligibilityDecision: allowedCheckoutDecision,
-      release: issuedRelease,
-    } as never);
-    expect(inProgress.ok).toBe(true);
-    if (!inProgress.ok) return;
-
-    const fulfilled = transitionOrder(inProgress.value, {
-      type: "carrier_handoff",
-      carrierHandoffAt: "2026-08-24T12:00:00.000Z",
-      recordedAt: "2026-08-24T12:00:00.000Z",
-      consumedRelease,
-    } as never);
-
-    expect(fulfilled).toMatchObject({
-      ok: true,
-      value: {
-        state: "fulfilled",
-        carrierHandoffAt: "2026-08-24T12:00:00.000Z",
-      },
-    });
-  });
-
-  it("routes pre-payment review holds and authoritative Checkout expiration", () => {
-    const eligibility = transitionOrder(draftOrder, {
-      type: "start_eligibility",
-    });
-    expect(eligibility.ok).toBe(true);
-    if (!eligibility.ok) return;
-
-    const held = transitionOrder(eligibility.value, {
-      type: "place_compliance_hold",
-    });
-    expect(held).toMatchObject({ ok: true, value: { state: "compliance_hold" } });
-    if (!held.ok) return;
-
-    const resumed = transitionOrder(held.value, { type: "resume_eligibility" });
-    expect(resumed).toMatchObject({
-      ok: true,
-      value: { state: "eligibility_review" },
-    });
-    if (!resumed.ok) return;
-
-    const ready = transitionOrder(resumed.value, {
-      type: "eligibility_passed",
-      decision: allowedCheckoutDecision,
-    });
-    if (!ready.ok) throw new Error("synthetic test setup failed");
-    const checkout = transitionOrder(ready.value, { type: "begin_checkout" });
-    if (!checkout.ok) throw new Error("synthetic test setup failed");
-
-    const expired = transitionOrder(checkout.value, {
-      type: "checkout_closed",
-      source: "verified_provider_event",
-      reason: "checkout_expired",
-      providerEvidenceId: "synthetic-provider-event-1",
-    } as never);
-    expect(expired).toMatchObject({
-      ok: true,
-      value: { state: "payment_failed" },
-    });
-    if (!expired.ok) return;
-
-    expect(transitionOrder(expired.value, { type: "cancel" })).toMatchObject({
-      ok: true,
-      value: { state: "cancelled" },
-    });
-  });
-
-  it("recovers a paid hold only through fresh clearance and a new release", () => {
-    const paid = paidPendingOrder();
-    const held = transitionOrder(paid, {
-      type: "post_payment_hold",
-      decision: blockedCheckoutDecision,
-    });
-    expect(held).toMatchObject({
-      ok: true,
-      value: { state: "paid_on_hold", paymentEvidenceId: "synthetic-payment-journal-1" },
-    });
-    if (!held.ok) return;
-
-    const released = transitionOrder(held.value, {
-      type: "release_for_fulfillment",
-      decision: allowedCheckoutDecision,
-      paymentEvidenceId: "synthetic-payment-journal-1",
-      clearanceEvidenceId: "synthetic-clearance-2",
-      fulfillmentReleaseVersion: 2,
-    });
-    if (!released.ok) throw new Error("synthetic test setup failed");
-
-    const revoked = transitionOrder(released.value, {
-      type: "clearance_revoked",
-      beforeCarrierHandoff: true,
-    });
-    expect(revoked).toMatchObject({
-      ok: true,
-      value: {
-        state: "paid_on_hold",
-        clearanceEvidenceId: null,
-        fulfillmentReleaseVersion: null,
-      },
-    });
-    if (!revoked.ok) return;
-
-    const reissued = transitionOrder(revoked.value, {
-      type: "release_for_fulfillment",
-      decision: allowedCheckoutDecision,
-      paymentEvidenceId: "synthetic-payment-journal-1",
-      clearanceEvidenceId: "synthetic-clearance-3",
-      fulfillmentReleaseVersion: 3,
-    });
-    if (!reissued.ok) throw new Error("synthetic test setup failed");
-    const inProgress = transitionOrder(reissued.value, {
-      type: "begin_fulfillment",
-      now: "2026-08-24T12:00:00.000Z",
-      paymentVerified: true,
-      eligibilityDecision: allowedCheckoutDecision,
-      release: {
-        ...issuedRelease,
-        version: 3,
-        lastVersion: 3,
-        clearanceEvidenceId: "synthetic-clearance-3",
-        clearanceEvidenceHistory: [
-          "synthetic-clearance-1",
-          "synthetic-clearance-2",
-          "synthetic-clearance-3",
-        ],
-      },
-    } as never);
-    if (!inProgress.ok) throw new Error("synthetic test setup failed");
-
-    expect(
-      transitionOrder(inProgress.value, {
-        type: "clearance_revoked",
-        beforeCarrierHandoff: true,
-      }),
-    ).toMatchObject({ ok: true, value: { state: "paid_on_hold" } });
-  });
-
-  it.each([
-    [
-      "browser-reported Checkout closure",
-      {
-        type: "checkout_closed",
-        source: "browser_redirect",
-        reason: "checkout_expired",
-        providerEvidenceId: "synthetic-provider-event-1",
-      },
-      "missing_payment_evidence",
-    ],
-    [
-      "blank provider evidence",
-      {
-        type: "checkout_closed",
-        source: "verified_provider_event",
-        reason: "checkout_expired",
-        providerEvidenceId: "   ",
-      },
-      "missing_payment_evidence",
-    ],
-    [
-      "unknown closure reason",
-      {
-        type: "checkout_closed",
-        source: "verified_provider_event",
-        reason: "browser_cancelled",
-        providerEvidenceId: "synthetic-provider-event-1",
-      },
-      "invalid_transition",
-    ],
-  ] as const)("rejects %s", (_name, event, code) => {
-    const paid = paidPendingOrder();
-    const checkout = {
-      ...draftOrder,
-      state: "checkout_pending" as const,
-    };
-
-    expect(transitionOrder(checkout, event as never)).toEqual({
-      ok: false,
-      error: { code, state: "checkout_pending", event: "checkout_closed" },
-    });
-    expect(paid.state).toBe("paid_pending_clearance");
-  });
-
-  it.each([
-    ["wrong payment evidence", "other-payment", "synthetic-clearance-2", 2],
-    ["blank payment evidence", "   ", "synthetic-clearance-2", 2],
-    ["blank clearance evidence", "synthetic-payment-journal-1", "   ", 2],
-    ["stale release version", "synthetic-payment-journal-1", "synthetic-clearance-2", 0],
-  ] as const)(
-    "rejects a fulfillment release with %s",
-    (_name, paymentEvidenceId, clearanceEvidenceId, fulfillmentReleaseVersion) => {
-      const result = transitionOrder(paidPendingOrder(), {
-        type: "release_for_fulfillment",
-        decision: allowedCheckoutDecision,
-        paymentEvidenceId,
-        clearanceEvidenceId,
-        fulfillmentReleaseVersion,
-      });
-
-      expect(result.ok).toBe(false);
-    },
-  );
-
-  it.each([
-    ["paid_pending_clearance", null, null, 0],
-    ["paid_on_hold", null, null, 1],
-    ["ready_for_fulfillment", "synthetic-clearance-1", 1, 1],
-    ["fulfillment_in_progress", "synthetic-clearance-1", 1, 1],
-  ] as const)(
-    "places %s on hold after a verified dispute",
-    (state, clearanceEvidenceId, fulfillmentReleaseVersion, lastVersion) => {
-      const snapshot: OrderSnapshot = {
-        state,
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId,
-        fulfillmentReleaseVersion,
-        lastFulfillmentReleaseVersion: lastVersion,
-        carrierHandoffAt: null,
-      };
-
-      expect(
-        transitionOrder(snapshot, {
-          type: "payment_disputed",
-          source: "verified_provider_event",
-          providerEvidenceId: "synthetic-dispute-event-1",
-        } as never),
-      ).toMatchObject({
-        ok: true,
-        value: {
-          state: "paid_on_hold",
-          paymentEvidenceId: "synthetic-payment-journal-1",
-          clearanceEvidenceId: null,
-          fulfillmentReleaseVersion: null,
-        },
-      });
-    },
-  );
-
-  it("does not place an order on dispute hold from browser evidence", () => {
-    expect(
-      transitionOrder(paidPendingOrder(), {
-        type: "payment_disputed",
-        source: "browser_redirect",
-        providerEvidenceId: "synthetic-dispute-event-1",
-      } as never),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "missing_payment_evidence" },
-    });
-  });
-
-  it("keeps a repeated verified dispute on the same restrictive paid hold snapshot", () => {
-    const paid = paidPendingOrder();
-    const first = transitionOrder(paid, {
-      type: "payment_disputed",
-      source: "verified_provider_event",
-      providerEvidenceId: "synthetic-dispute-event-1",
-    } as never);
-    expect(first).toMatchObject({
-      ok: true,
-      value: {
-        state: "paid_on_hold",
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId: null,
-        fulfillmentReleaseVersion: null,
-      },
-    });
-    if (!first.ok) return;
-
-    const second = transitionOrder(first.value, {
-      type: "payment_disputed",
-      source: "verified_provider_event",
-      providerEvidenceId: "synthetic-dispute-event-2",
-    } as never);
-
-    expect(second).toEqual(first);
-  });
-
-  it("requires the exact consumed release before carrier handoff", () => {
-    const inProgress: OrderSnapshot = {
-      state: "fulfillment_in_progress",
-      paymentEvidenceId: "synthetic-payment-journal-1",
-      clearanceEvidenceId: "synthetic-clearance-1",
-      fulfillmentReleaseVersion: 1,
-      lastFulfillmentReleaseVersion: 1,
-      carrierHandoffAt: null,
-    };
-
-    for (const release of [
-      issuedRelease,
-      { ...consumedRelease, version: 2, lastVersion: 2 },
-      { ...consumedRelease, paymentEvidenceId: "other-payment" },
-      { ...consumedRelease, clearanceEvidenceId: "other-clearance" },
-    ]) {
-      expect(
-        transitionOrder(inProgress, {
-          type: "carrier_handoff",
-          carrierHandoffAt: "2026-08-24T12:00:00.000Z",
-          recordedAt: "2026-08-24T12:00:00.000Z",
-          consumedRelease: release,
-        } as never),
-      ).toMatchObject({
-        ok: false,
-        error: { code: "invalid_carrier_handoff" },
-      });
-    }
-  });
-
-  it("rejects a future or malformed carrier handoff timestamp", () => {
-    const inProgress: OrderSnapshot = {
-      state: "fulfillment_in_progress",
-      paymentEvidenceId: "synthetic-payment-journal-1",
-      clearanceEvidenceId: "synthetic-clearance-1",
-      fulfillmentReleaseVersion: 1,
-      lastFulfillmentReleaseVersion: 1,
-      carrierHandoffAt: null,
-    };
-
-    for (const carrierHandoffAt of [
-      "not-a-date",
-      "2026-08-24T12:01:00.000Z",
-    ]) {
-      expect(
-        transitionOrder(inProgress, {
-          type: "carrier_handoff",
-          carrierHandoffAt,
-          recordedAt: "2026-08-24T12:00:00.000Z",
-          consumedRelease,
-        } as never),
-      ).toMatchObject({
-        ok: false,
-        error: { code: "invalid_carrier_handoff" },
-      });
-    }
-  });
-
-  it.each([
-    [
-      "an unverified payment",
-      false,
-      allowedCheckoutDecision,
-      issuedRelease,
-      "missing_payment_evidence",
-    ],
-    [
-      "a non-pass recheck",
-      true,
-      blockedCheckoutDecision,
-      issuedRelease,
-      "eligibility_not_passed",
-    ],
-    [
-      "a revoked release",
-      true,
-      allowedCheckoutDecision,
-      {
-        state: "revoked",
-        version: null,
-        lastVersion: 1,
-        paymentEvidenceId: null,
-        clearanceEvidenceId: null,
-        clearanceEvidenceHistory: ["synthetic-clearance-1"],
-        expiresAt: null,
-      },
-      "release_not_current",
-    ],
-    [
-      "a release for another payment",
-      true,
-      allowedCheckoutDecision,
-      { ...issuedRelease, paymentEvidenceId: "synthetic-other-payment" },
-      "invalid_release",
-    ],
-    [
-      "an expired release",
-      true,
-      allowedCheckoutDecision,
-      issuedRelease,
-      "release_not_current",
-    ],
-  ] as const)(
-    "does not begin fulfillment with %s",
-    (_name, paymentVerified, eligibilityDecision, release, code) => {
-      const ready: OrderSnapshot = {
-        state: "ready_for_fulfillment",
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId: "synthetic-clearance-1",
-        fulfillmentReleaseVersion: 1,
-        lastFulfillmentReleaseVersion: 1,
-        carrierHandoffAt: null,
-      };
-
-      expect(
-        transitionOrder(ready, {
-          type: "begin_fulfillment",
-          now:
-            _name === "an expired release"
-              ? "2026-08-25T12:00:00.000Z"
-              : "2026-08-24T12:00:00.000Z",
-          paymentVerified,
-          eligibilityDecision,
-          release,
-        } as never),
-      ).toMatchObject({ ok: false, error: { code } });
-    },
-  );
-
-  it("fails closed for a malformed order snapshot", () => {
-    const malformed = {
-      ...draftOrder,
-      lastFulfillmentReleaseVersion: -1,
-    };
-
-    expect(
-      transitionOrder(malformed, { type: "start_eligibility" }),
-    ).toMatchObject({ ok: false, error: { code: "invalid_snapshot" } });
-  });
-
-  it("returns structured denials for null and scalar order transition inputs", () => {
-    expect(transitionOrder(null as never, { type: "start_eligibility" })).toEqual({
-      ok: false,
-      error: {
-        code: "invalid_snapshot",
-        state: "unknown",
-        event: "start_eligibility",
-      },
-    });
-    expect(transitionOrder(draftOrder, null as never)).toEqual({
-      ok: false,
-      error: {
-        code: "invalid_transition",
-        state: "draft",
-        event: "unknown",
-      },
-    });
-    expect(
-      transitionOrder("malformed-snapshot" as never, {
-        type: "start_eligibility",
-      }),
-    ).toEqual({
-      ok: false,
-      error: {
-        code: "invalid_snapshot",
-        state: "unknown",
-        event: "start_eligibility",
-      },
-    });
-    expect(transitionOrder(draftOrder, 17 as never)).toEqual({
-      ok: false,
-      error: {
-        code: "invalid_transition",
-        state: "draft",
-        event: "unknown",
-      },
-    });
-  });
-
-  it("returns an invalid-snapshot denial for an object order snapshot", () => {
-    expect(transitionOrder({} as never, {} as never)).toEqual({
-      ok: false,
-      error: { code: "invalid_snapshot", state: "unknown", event: "unknown" },
-    });
-  });
-
-  it("returns an invalid-snapshot denial for an array order snapshot", () => {
-    expect(transitionOrder([] as never, [] as never)).toEqual({
-      ok: false,
-      error: { code: "invalid_snapshot", state: "unknown", event: "unknown" },
-    });
-  });
-
-  it("returns a typed denial for a malformed nested fulfillment release", () => {
-    const ready: OrderSnapshot = {
-      state: "ready_for_fulfillment",
-      paymentEvidenceId: "synthetic-payment-journal-1",
-      clearanceEvidenceId: "synthetic-clearance-1",
-      fulfillmentReleaseVersion: 1,
-      lastFulfillmentReleaseVersion: 1,
-      carrierHandoffAt: null,
-    };
-    expect(() =>
-      transitionOrder(ready, {
-        type: "begin_fulfillment",
-        paymentVerified: true,
-        eligibilityDecision: allowedCheckoutDecision,
-        release: {},
-        now: "2026-08-24T12:00:00.000Z",
-      } as never),
-    ).not.toThrow();
-    expect(
-      transitionOrder(ready, {
-        type: "begin_fulfillment",
-        paymentVerified: true,
-        eligibilityDecision: allowedCheckoutDecision,
-        release: {},
-        now: "2026-08-24T12:00:00.000Z",
-      } as never),
-    ).toEqual({
-      ok: false,
-      error: {
-        code: "invalid_snapshot",
-        state: "ready_for_fulfillment",
-        event: "begin_fulfillment",
-      },
-    });
-  });
-
-  it("rejects malformed post-payment decisions instead of treating them as holds", () => {
-    expect(
-      transitionOrder(paidPendingOrder(), {
-        type: "post_payment_hold",
-        decision: "not-a-gate-status",
-      } as never),
-    ).toEqual({
-      ok: false,
-      error: {
-        code: "invalid_transition",
-        state: "paid_pending_clearance",
-        event: "post_payment_hold",
-      },
-    });
-  });
-
-  it("rejects malformed clearance-revocation booleans", () => {
-    const ready: OrderSnapshot = {
-      state: "ready_for_fulfillment",
-      paymentEvidenceId: "synthetic-payment-journal-1",
-      clearanceEvidenceId: "synthetic-clearance-1",
-      fulfillmentReleaseVersion: 1,
-      lastFulfillmentReleaseVersion: 1,
-      carrierHandoffAt: null,
-    };
-
-    expect(
-      transitionOrder(ready, {
-        type: "clearance_revoked",
-        beforeCarrierHandoff: "true",
-      } as never),
-    ).toEqual({
-      ok: false,
-      error: {
-        code: "invalid_transition",
-        state: "ready_for_fulfillment",
-        event: "clearance_revoked",
-      },
-    });
-  });
-
-  it("returns frozen transition results and snapshots", () => {
-    const result = transitionOrder(draftOrder, { type: "start_eligibility" });
-
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(result.ok && Object.isFrozen(result.value)).toBe(true);
-  });
-
-  it("rejects every event outside the documented order transition matrix", () => {
-    const states: readonly OrderState[] = [
-      "draft",
-      "eligibility_review",
-      "compliance_hold",
-      "ready_for_checkout",
-      "checkout_pending",
-      "payment_failed",
-      "paid_pending_clearance",
-      "paid_on_hold",
-      "ready_for_fulfillment",
-      "fulfillment_in_progress",
-      "fulfilled",
-      "cancelled",
-    ];
-    const snapshotFor = (state: OrderState): OrderSnapshot => {
-      if (state === "paid_pending_clearance" || state === "paid_on_hold") {
-        return {
-          ...draftOrder,
-          state,
-          paymentEvidenceId: "synthetic-payment-journal-1",
-          lastFulfillmentReleaseVersion:
-            state === "paid_on_hold" ? 1 : 0,
-        };
-      }
-      if (
-        state === "ready_for_fulfillment" ||
-        state === "fulfillment_in_progress" ||
-        state === "fulfilled"
-      ) {
-        return {
-          state,
-          paymentEvidenceId: "synthetic-payment-journal-1",
-          clearanceEvidenceId: "synthetic-clearance-1",
-          fulfillmentReleaseVersion: 1,
-          lastFulfillmentReleaseVersion: 1,
-          carrierHandoffAt:
-            state === "fulfilled" ? "2026-08-24T12:00:00.000Z" : null,
-        };
-      }
-      return { ...draftOrder, state };
-    };
-    const events: readonly OrderEvent[] = [
-      { type: "start_eligibility" },
-      { type: "place_compliance_hold" },
-      { type: "resume_eligibility" },
-      { type: "eligibility_passed", decision: allowedCheckoutDecision },
-      { type: "begin_checkout" },
-      {
-        type: "checkout_closed",
-        source: "verified_provider_event",
-        reason: "checkout_expired",
-        providerEvidenceId: "synthetic-provider-event-1",
-      },
-      {
-        type: "payment_verified",
-        source: "verified_provider_event",
-        paymentEvidenceId: "synthetic-payment-journal-1",
-      },
-      {
-        type: "payment_disputed",
-        source: "verified_provider_event",
-        providerEvidenceId: "synthetic-dispute-event-1",
-      } as never,
-      { type: "post_payment_hold", decision: blockedCheckoutDecision },
-      {
-        type: "release_for_fulfillment",
-        decision: allowedCheckoutDecision,
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId: "synthetic-clearance-2",
-        fulfillmentReleaseVersion: 2,
-      },
-      {
-        type: "begin_fulfillment",
-        now: "2026-08-24T12:00:00.000Z",
-        paymentVerified: true,
-        eligibilityDecision: allowedCheckoutDecision,
-        release: issuedRelease,
-      } as never,
-      { type: "clearance_revoked", beforeCarrierHandoff: true },
-      {
-        type: "carrier_handoff",
-        carrierHandoffAt: "2026-08-24T12:00:00.000Z",
-        recordedAt: "2026-08-24T12:00:00.000Z",
-        consumedRelease,
-      },
-      { type: "cancel" },
-    ];
-    const allowedEvents: Readonly<Record<OrderState, readonly string[]>> = {
-      draft: ["start_eligibility", "cancel"],
-      eligibility_review: [
-        "place_compliance_hold",
-        "eligibility_passed",
-        "cancel",
-      ],
-      compliance_hold: ["resume_eligibility", "cancel"],
-      ready_for_checkout: ["begin_checkout"],
-      checkout_pending: ["checkout_closed", "payment_verified"],
-      payment_failed: ["cancel"],
-      paid_pending_clearance: [
-        "post_payment_hold",
-        "release_for_fulfillment",
-        "payment_disputed",
-      ],
-      paid_on_hold: ["release_for_fulfillment", "payment_disputed"],
-      ready_for_fulfillment: [
-        "begin_fulfillment",
-        "clearance_revoked",
-        "payment_disputed",
-      ],
-      fulfillment_in_progress: [
-        "clearance_revoked",
-        "carrier_handoff",
-        "payment_disputed",
-      ],
-      fulfilled: [],
-      cancelled: [],
-    };
-
-    for (const state of states) {
-      for (const event of events) {
-        if (allowedEvents[state].includes(event.type)) continue;
-
-        expect(transitionOrder(snapshotFor(state), event)).toEqual({
-          ok: false,
-          error: { code: "invalid_transition", state, event: event.type },
-        });
-      }
-    }
-  });
-});
-
-describe("transitionFulfillmentRelease", () => {
-  it("issues a release only with verified payment and an authoritative permitted decision", () => {
-    const absent: FulfillmentReleaseSnapshot = {
+  const absentRelease = (): FulfillmentReleaseSnapshot =>
+    ({
       state: "absent",
       version: null,
       lastVersion: 0,
       paymentEvidenceId: null,
-      clearanceEvidenceId: null,
-      clearanceEvidenceHistory: [],
+      reviewRequestId: null,
       expiresAt: null,
-    };
+    }) as unknown as FulfillmentReleaseSnapshot;
 
-    const result = transitionFulfillmentRelease(absent, {
-      type: "issue",
-      now: "2026-08-24T12:00:00.000Z",
-      paymentVerified: true,
-      eligibilityDecision: allowedCheckoutDecision,
-      version: 1,
-      paymentEvidenceId: "synthetic-payment-journal-1",
-      clearanceEvidenceId: "synthetic-clearance-1",
-      expiresAt: "2026-08-25T12:00:00.000Z",
+  it("returns a deeply frozen snapshot-plus-incident result for ordinary transitions", () => {
+    const result = transitionOrder(leanDraft, { type: "start_eligibility" });
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        snapshot: { ...leanDraft, state: "eligibility_review" },
+        requiredIncidents: [],
+      },
     });
+    if (!result.ok) return;
+    const value = result.value as unknown as {
+      snapshot: OrderSnapshot;
+      requiredIncidents: readonly string[];
+    };
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(value)).toBe(true);
+    expect(Object.isFrozen(value.snapshot)).toBe(true);
+    expect(Object.isFrozen(value.requiredIncidents)).toBe(true);
+  });
 
+  it("moves an actively reserved verified payment to paid-pending-fulfillment", () => {
+    const result = transitionOrder(checkoutPending(), {
+      type: "payment_verified",
+      source: "verified_provider_event",
+      paymentEvidenceId,
+      reservationDisposition: "active",
+    } as never);
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        snapshot: {
+          state: "paid_pending_fulfillment",
+          paymentEvidenceId,
+        },
+        requiredIncidents: [],
+      },
+    });
+  });
+
+  it.each(["checkout_pending", "payment_failed"] as const)(
+    "routes a late paid %s order to hold with exactly one inventory incident",
+    (state) => {
+      const snapshot = {
+        ...leanDraft,
+        state,
+      } as OrderSnapshot;
+      const result = transitionOrder(snapshot, {
+        type: "payment_verified",
+        source: "verified_provider_event",
+        paymentEvidenceId,
+        reservationDisposition: "authoritatively_released",
+      } as never);
+      expect(result).toEqual({
+        ok: true,
+        value: {
+          snapshot: {
+            ...leanDraft,
+            state: "paid_on_hold",
+            paymentEvidenceId,
+          },
+          requiredIncidents: ["inventory_conflict"],
+        },
+      });
+    },
+  );
+
+  it("accepts cancelled late payment only after authoritative release", () => {
+    const failed = expectOrderSuccess(checkoutPending(), {
+      type: "checkout_closed",
+      source: "verified_provider_event",
+      reason: "checkout_expired",
+      providerEvidenceId: "synthetic-session-expired-1",
+    });
+    const cancelled = expectOrderSuccess(failed, { type: "cancel" });
+    const latePaid = transitionOrder(cancelled, {
+      type: "payment_verified",
+      source: "verified_provider_event",
+      paymentEvidenceId,
+      reservationDisposition: "authoritatively_released",
+    } as never);
+    expect(latePaid).toMatchObject({
+      ok: true,
+      value: {
+        snapshot: { state: "paid_on_hold", paymentEvidenceId },
+        requiredIncidents: ["inventory_conflict"],
+      },
+    });
+    expect(
+      transitionOrder(cancelled, {
+        type: "payment_verified",
+        source: "verified_provider_event",
+        paymentEvidenceId,
+        reservationDisposition: "active",
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "invalid_transition" } });
+  });
+
+  it("places any paid pre-handoff state on a restrictive denied-decision hold", () => {
+    const denied = deniedFulfillment({ refundPending: true });
+    const held = expectOrderSuccess(paidPending(), {
+      type: "post_payment_hold",
+      decision: denied,
+    });
+    expect(held).toMatchObject({
+      state: "paid_on_hold",
+      fulfillmentReleaseVersion: null,
+      reviewRequestId: null,
+    });
+    const repeated = expectOrderSuccess(held, {
+      type: "post_payment_hold",
+      decision: denied,
+    });
+    expect(repeated).toEqual(held);
+    expect(
+      transitionOrder(paidPending(), {
+        type: "post_payment_hold",
+        decision: { ...denied },
+      } as never),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_fulfillment_decision" },
+    });
+  });
+
+  it("clears a hold only with a matching permitted decision and creates no release", () => {
+    const held = {
+      ...leanDraft,
+      state: "paid_on_hold",
+      paymentEvidenceId,
+    } as OrderSnapshot;
+    const result = transitionOrder(held, {
+      type: "clear_fulfillment_hold",
+      decision: permittedFulfillment(),
+    } as never);
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        snapshot: {
+          ...leanDraft,
+          state: "paid_pending_fulfillment",
+          paymentEvidenceId,
+        },
+        requiredIncidents: [],
+      },
+    });
+    expect(
+      transitionOrder(held, {
+        type: "clear_fulfillment_hold",
+        decision: permittedFulfillment({
+          verifiedPaymentEventId: "synthetic-other-payment",
+        }),
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "payment_mismatch" } });
+  });
+
+  it("releases only a matching permitted decision at a newer monotonic version", () => {
+    const released = transitionOrder(paidPending(), {
+      type: "release_for_fulfillment",
+      decision: permittedFulfillment(),
+      paymentEvidenceId,
+      fulfillmentReleaseVersion: 1,
+    } as never);
+    expect(released).toMatchObject({
+      ok: true,
+      value: {
+        snapshot: {
+          state: "ready_for_fulfillment",
+          paymentEvidenceId,
+          reviewRequestId: null,
+          fulfillmentReleaseVersion: 1,
+          lastFulfillmentReleaseVersion: 1,
+        },
+      },
+    });
+    expect(
+      transitionOrder(
+        {
+          ...leanDraft,
+          state: "paid_pending_fulfillment",
+          paymentEvidenceId,
+          lastFulfillmentReleaseVersion: 1,
+        } as OrderSnapshot,
+        {
+          type: "release_for_fulfillment",
+          decision: permittedFulfillment(),
+          paymentEvidenceId,
+          fulfillmentReleaseVersion: 1,
+        } as never,
+      ),
+    ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
+  });
+
+  it("issues a release from the decision and never accepts a caller-substituted review", () => {
+    const reviewed = permittedFulfillment({
+      buyerStatus: "review",
+      buyerReviewCovered: true,
+      reviewRequestId: "synthetic-review-1",
+    });
+    const result = transitionFulfillmentRelease(absentRelease(), {
+      type: "issue",
+      now,
+      decision: reviewed,
+      version: 1,
+      paymentEvidenceId,
+      expiresAt,
+    } as never);
     expect(result).toEqual({
       ok: true,
       value: {
         state: "issued",
         version: 1,
         lastVersion: 1,
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId: "synthetic-clearance-1",
-        clearanceEvidenceHistory: ["synthetic-clearance-1"],
-        expiresAt: "2026-08-25T12:00:00.000Z",
+        paymentEvidenceId,
+        reviewRequestId: "synthetic-review-1",
+        expiresAt,
       },
     });
     expect(
-      result.ok && Object.isFrozen(result.value.clearanceEvidenceHistory),
-    ).toBe(true);
-  });
-
-  it("allows fulfillment only for verified payment, an authoritative permitted decision, and a current release", () => {
-    const release: FulfillmentReleaseSnapshot = {
-      state: "issued",
-      version: 1,
-      lastVersion: 1,
-      paymentEvidenceId: "synthetic-payment-journal-1",
-      clearanceEvidenceId: "synthetic-clearance-1",
-      clearanceEvidenceHistory: ["synthetic-clearance-1"],
-      expiresAt: "2026-08-25T12:00:00.000Z",
-    };
-
-    expect(
-      canFulfill({
-        paymentVerified: true,
-        eligibilityDecision: allowedCheckoutDecision,
-        release,
-        now: "2026-08-24T12:00:00.000Z",
-      }),
-    ).toEqual({ ok: true, value: true });
-  });
-
-  it.each([
-    ["plain lookalike", { ...allowedCheckoutDecision }],
-    ["nonpermitted", blockedCheckoutDecision],
-    ["review-required", reviewCheckoutDecision],
-  ] as const)("denies a %s decision when issuing a fulfillment release", (_name, decision) => {
-    const absent: FulfillmentReleaseSnapshot = {
-      state: "absent",
-      version: null,
-      lastVersion: 0,
-      paymentEvidenceId: null,
-      clearanceEvidenceId: null,
-      clearanceEvidenceHistory: [],
-      expiresAt: null,
-    };
-
-    expect(
-      transitionFulfillmentRelease(absent, {
+      transitionFulfillmentRelease(absentRelease(), {
         type: "issue",
-        now: "2026-08-24T12:00:00.000Z",
-        paymentVerified: true,
-        eligibilityDecision: decision,
+        now,
+        decision: { ...reviewed, reviewRequestId: "synthetic-other-review" },
         version: 1,
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId: "synthetic-clearance-1",
-        expiresAt: "2026-08-25T12:00:00.000Z",
-      }),
+        paymentEvidenceId,
+        expiresAt,
+      } as never),
     ).toMatchObject({
       ok: false,
-      error: { code: "missing_clearance_evidence" },
+      error: { code: "invalid_fulfillment_decision" },
     });
   });
 
-  it.each([
-    ["plain lookalike", { ...allowedCheckoutDecision }],
-    ["nonpermitted", blockedCheckoutDecision],
-    ["review-required", reviewCheckoutDecision],
-  ] as const)("denies a %s decision at the fulfillment recheck", (_name, decision) => {
-    expect(
-      canFulfill({
-        paymentVerified: true,
-        eligibilityDecision: decision,
-        release: issuedRelease,
-        now: "2026-08-24T12:00:00.000Z",
-      }),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "eligibility_not_passed" },
-    });
-  });
-
-  it.each([
-    ["plain lookalike", { ...allowedCheckoutDecision }],
-    ["nonpermitted", blockedCheckoutDecision],
-    ["review-required", reviewCheckoutDecision],
-  ] as const)("denies a %s decision at atomic release consumption", (_name, decision) => {
-    expect(
-      transitionFulfillmentRelease(issuedRelease, {
-        type: "consume",
-        now: "2026-08-24T12:00:00.000Z",
-        atomicEligibilityRecheck: decision,
-      }),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "eligibility_not_passed" },
-    });
-  });
-
-  it("revokes or expires a release and permits only a newer evidence-backed reissue", () => {
-    const absent: FulfillmentReleaseSnapshot = {
-      state: "absent",
-      version: null,
-      lastVersion: 0,
-      paymentEvidenceId: null,
-      clearanceEvidenceId: null,
-      clearanceEvidenceHistory: [],
-      expiresAt: null,
-    };
-    const issue = (snapshot: FulfillmentReleaseSnapshot, version: number) =>
-      transitionFulfillmentRelease(snapshot, {
-        type: "issue",
-        now: "2026-08-24T12:00:00.000Z",
-        paymentVerified: true,
-        eligibilityDecision: allowedCheckoutDecision,
-        version,
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId: `synthetic-clearance-${version}`,
-        expiresAt: "2026-08-25T12:00:00.000Z",
-      });
-
-    const first = issue(absent, 1);
-    if (!first.ok) throw new Error("synthetic test setup failed");
-    const revoked = transitionFulfillmentRelease(first.value, {
+  it("revokes, expires, and consumes only current releases", () => {
+    const issued = transitionFulfillmentRelease(absentRelease(), {
+      type: "issue",
+      now,
+      decision: permittedFulfillment(),
+      version: 1,
+      paymentEvidenceId,
+      expiresAt,
+    } as never);
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+    const revoked = transitionFulfillmentRelease(issued.value, {
       type: "revoke",
-      reasonCode: "synthetic_policy_changed",
+      reasonCode: "facts_changed",
     });
     expect(revoked).toMatchObject({
       ok: true,
-      value: { state: "revoked", version: null, lastVersion: 1 },
-    });
-    if (!revoked.ok) return;
-
-    expect(issue(revoked.value, 1)).toMatchObject({
-      ok: false,
-      error: { code: "invalid_release" },
-    });
-    const second = issue(revoked.value, 2);
-    expect(second).toMatchObject({
-      ok: true,
-      value: { state: "issued", version: 2, lastVersion: 2 },
-    });
-    if (!second.ok) return;
-
-    const expired = transitionFulfillmentRelease(second.value, {
-      type: "expire",
-      now: "2026-08-25T12:00:00.000Z",
-    });
-    expect(expired).toMatchObject({
-      ok: true,
-      value: { state: "expired", version: null, lastVersion: 2 },
-    });
-    if (!expired.ok) return;
-
-    const third = issue(expired.value, 3);
-    if (!third.ok) throw new Error("synthetic test setup failed");
-    const consumed = transitionFulfillmentRelease(third.value, {
-      type: "consume",
-      now: "2026-08-24T12:00:00.000Z",
-      atomicEligibilityRecheck: allowedCheckoutDecision,
-    });
-    expect(consumed).toMatchObject({
-      ok: true,
-      value: { state: "consumed", version: 3, lastVersion: 3 },
-    });
-    if (!consumed.ok) return;
-
-    expect(
-      transitionFulfillmentRelease(consumed.value, {
-        type: "consume",
-        now: "2026-08-24T12:01:00.000Z",
-        atomicEligibilityRecheck: allowedCheckoutDecision,
-      }),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "release_already_consumed" },
-    });
-  });
-
-  it.each(["revoked", "expired"] as const)(
-    "rejects reuse of stale clearance evidence after a release is %s",
-    (terminalState) => {
-      const issued = transitionFulfillmentRelease(
-        {
-          state: "absent",
-          version: null,
-          lastVersion: 0,
-          paymentEvidenceId: null,
-          clearanceEvidenceId: null,
-          clearanceEvidenceHistory: [],
-          expiresAt: null,
-        },
-        {
-          type: "issue",
-          now: "2026-08-24T12:00:00.000Z",
-          paymentVerified: true,
-          eligibilityDecision: allowedCheckoutDecision,
-          version: 1,
-          paymentEvidenceId: "synthetic-payment-journal-1",
-          clearanceEvidenceId: "synthetic-clearance-1",
-          expiresAt: "2026-08-25T12:00:00.000Z",
-        },
-      );
-      if (!issued.ok) throw new Error("synthetic test setup failed");
-
-      const closed = transitionFulfillmentRelease(
-        issued.value,
-        terminalState === "revoked"
-          ? { type: "revoke", reasonCode: "synthetic_policy_changed" }
-          : { type: "expire", now: "2026-08-25T12:00:00.000Z" },
-      );
-      if (!closed.ok) throw new Error("synthetic test setup failed");
-
-      expect(closed.value.clearanceEvidenceId).toBeNull();
-      expect(closed.value.clearanceEvidenceHistory).toEqual([
-        "synthetic-clearance-1",
-      ]);
-      expect(
-        transitionFulfillmentRelease(closed.value, {
-          type: "issue",
-          now: "2026-08-25T12:01:00.000Z",
-          paymentVerified: true,
-          eligibilityDecision: allowedCheckoutDecision,
-          version: 2,
-          paymentEvidenceId: "synthetic-payment-journal-1",
-          clearanceEvidenceId: "synthetic-clearance-1",
-          expiresAt: "2026-08-26T12:00:00.000Z",
-        }),
-      ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
-    },
-  );
-
-  it("rejects any previously used clearance evidence after an intervening reissue", () => {
-    const issue = (
-      snapshot: FulfillmentReleaseSnapshot,
-      version: number,
-      clearanceEvidenceId: string,
-    ) =>
-      transitionFulfillmentRelease(snapshot, {
-        type: "issue",
-        now: "2026-08-24T12:00:00.000Z",
-        paymentVerified: true,
-        eligibilityDecision: allowedCheckoutDecision,
-        version,
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId,
-        expiresAt: "2026-08-25T12:00:00.000Z",
-      });
-
-    const first = issue(
-      {
-        state: "absent",
-        version: null,
-        lastVersion: 0,
-        paymentEvidenceId: null,
-        clearanceEvidenceId: null,
-        clearanceEvidenceHistory: [],
-        expiresAt: null,
-      },
-      1,
-      "synthetic-clearance-1",
-    );
-    if (!first.ok) throw new Error("synthetic test setup failed");
-    const firstRevocation = transitionFulfillmentRelease(first.value, {
-      type: "revoke",
-      reasonCode: "synthetic_policy_changed",
-    });
-    if (!firstRevocation.ok) throw new Error("synthetic test setup failed");
-
-    const second = issue(
-      firstRevocation.value,
-      2,
-      "synthetic-clearance-2",
-    );
-    if (!second.ok) throw new Error("synthetic test setup failed");
-    const secondRevocation = transitionFulfillmentRelease(second.value, {
-      type: "revoke",
-      reasonCode: "synthetic_policy_changed_again",
-    });
-    if (!secondRevocation.ok) throw new Error("synthetic test setup failed");
-
-    expect(
-      issue(secondRevocation.value, 3, "synthetic-clearance-1"),
-    ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
-  });
-
-  it.each([
-    ["past", "2026-08-24T11:59:59.999Z"],
-    ["equal to now", "2026-08-24T12:00:00.000Z"],
-    ["malformed", "not-a-date"],
-  ] as const)("rejects an expiration that is %s", (_name, expiresAt) => {
-    const absent: FulfillmentReleaseSnapshot = {
-      state: "absent",
-      version: null,
-      lastVersion: 0,
-      paymentEvidenceId: null,
-      clearanceEvidenceId: null,
-      clearanceEvidenceHistory: [],
-      expiresAt: null,
-    };
-
-    expect(
-      transitionFulfillmentRelease(absent, {
-        type: "issue",
-        now: "2026-08-24T12:00:00.000Z",
-        paymentVerified: true,
-        eligibilityDecision: allowedCheckoutDecision,
-        version: 1,
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId: "synthetic-clearance-1",
-        expiresAt,
-      } as never),
-    ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
-  });
-
-  it.each([
-    [false, allowedCheckoutDecision, issuedRelease, "missing_payment_evidence"],
-    [true, blockedCheckoutDecision, issuedRelease, "eligibility_not_passed"],
-    [
-      true,
-      allowedCheckoutDecision,
-      {
+      value: {
         state: "revoked",
         version: null,
         lastVersion: 1,
         paymentEvidenceId: null,
-        clearanceEvidenceId: null,
-        clearanceEvidenceHistory: ["synthetic-clearance-1"],
+        reviewRequestId: null,
         expiresAt: null,
       },
-      "release_not_current",
-    ],
-    [true, allowedCheckoutDecision, { ...issuedRelease, paymentEvidenceId: "   " }, "invalid_snapshot"],
-  ] as const)(
-    "denies fulfillment when payment=%s, eligibility=%s, or release is invalid",
-    (paymentVerified, eligibilityDecision, release, code) => {
-      expect(
-        canFulfill({
-          paymentVerified,
-          eligibilityDecision,
-          release: release as FulfillmentReleaseSnapshot,
-          now: "2026-08-24T12:00:00.000Z",
-        }),
-      ).toMatchObject({ ok: false, error: { code } });
-    },
-  );
-
-  it("returns structured denials for null and scalar release inputs", () => {
-    const absent: FulfillmentReleaseSnapshot = {
-      state: "absent",
-      version: null,
-      lastVersion: 0,
-      paymentEvidenceId: null,
-      clearanceEvidenceId: null,
-      clearanceEvidenceHistory: [],
-      expiresAt: null,
-    };
-
-    expect(transitionFulfillmentRelease(null as never, { type: "consume", now: "2026-08-24T12:00:00.000Z", atomicEligibilityRecheck: allowedCheckoutDecision })).toEqual({
-      ok: false,
-      error: { code: "invalid_snapshot", state: "unknown", event: "consume" },
     });
-    expect(transitionFulfillmentRelease(absent, null as never)).toEqual({
-      ok: false,
-      error: { code: "invalid_transition", state: "absent", event: "unknown" },
-    });
+    const consumed = transitionFulfillmentRelease(issued.value, {
+      type: "consume",
+      now,
+      decision: permittedFulfillment(),
+    } as never);
+    expect(consumed).toMatchObject({ ok: true, value: { state: "consumed" } });
+    if (!consumed.ok) return;
     expect(
-      transitionFulfillmentRelease("malformed-snapshot" as never, {
+      transitionFulfillmentRelease(consumed.value, {
         type: "consume",
-        now: "2026-08-24T12:00:00.000Z",
-        atomicEligibilityRecheck: allowedCheckoutDecision,
+        now,
+        decision: permittedFulfillment(),
+      } as never),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "release_already_consumed" },
+    });
+    expect(
+      transitionFulfillmentRelease(issued.value, {
+        type: "expire",
+        now: expiresAt,
       }),
-    ).toEqual({
-      ok: false,
-      error: { code: "invalid_snapshot", state: "unknown", event: "consume" },
+    ).toMatchObject({ ok: true, value: { state: "expired", lastVersion: 1 } });
+  });
+
+  it("rejects expired, payment-mismatched, and review-mismatched release consumption", () => {
+    const reviewed = permittedFulfillment({
+      destinationStatus: "review",
+      destinationReviewCovered: true,
+      reviewRequestId: "synthetic-review-1",
     });
-    expect(transitionFulfillmentRelease(absent, 17 as never)).toEqual({
-      ok: false,
-      error: { code: "invalid_transition", state: "absent", event: "unknown" },
+    const release = {
+      state: "issued",
+      version: 2,
+      lastVersion: 2,
+      paymentEvidenceId,
+      reviewRequestId: "synthetic-review-1",
+      expiresAt,
+    } as unknown as FulfillmentReleaseSnapshot;
+    expect(
+      transitionFulfillmentRelease(release, {
+        type: "consume",
+        now: expiresAt,
+        decision: reviewed,
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "release_not_current" } });
+    expect(
+      transitionFulfillmentRelease(release, {
+        type: "consume",
+        now,
+        decision: permittedFulfillment({
+          verifiedPaymentEventId: "synthetic-other-payment",
+        }),
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "payment_mismatch" } });
+    expect(
+      transitionFulfillmentRelease(release, {
+        type: "consume",
+        now,
+        decision: permittedFulfillment(),
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
+  });
+
+  it("begins fulfillment and records handoff only with matching release facts", () => {
+    const decision = permittedFulfillment();
+    const issued = transitionFulfillmentRelease(absentRelease(), {
+      type: "issue",
+      now,
+      decision,
+      version: 1,
+      paymentEvidenceId,
+      expiresAt,
+    } as never);
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+    const ready = {
+      ...leanDraft,
+      state: "ready_for_fulfillment",
+      paymentEvidenceId,
+      fulfillmentReleaseVersion: 1,
+      lastFulfillmentReleaseVersion: 1,
+    } as OrderSnapshot;
+    const started = transitionOrder(ready, {
+      type: "begin_fulfillment",
+      now,
+      decision,
+      release: issued.value,
+    } as never);
+    expect(started).toMatchObject({
+      ok: true,
+      value: { snapshot: { state: "fulfillment_in_progress" } },
     });
-    expect(canFulfill(null as never)).toEqual({
-      ok: false,
-      error: { code: "invalid_snapshot", state: "unknown", event: "fulfill" },
-    });
-    expect(canFulfill("malformed-input" as never)).toEqual({
-      ok: false,
-      error: { code: "invalid_snapshot", state: "unknown", event: "fulfill" },
-    });
-    expect(canFulfill({ release: null } as never)).toEqual({
-      ok: false,
-      error: { code: "invalid_snapshot", state: "unknown", event: "fulfill" },
+    if (!started.ok) return;
+    const consumed = transitionFulfillmentRelease(issued.value, {
+      type: "consume",
+      now,
+      decision,
+    } as never);
+    expect(consumed.ok).toBe(true);
+    if (!consumed.ok) return;
+    const startedSnapshot = (started.value as unknown as { snapshot: OrderSnapshot }).snapshot;
+    expect(
+      transitionOrder(startedSnapshot, {
+        type: "carrier_handoff",
+        carrierHandoffAt: "2026-08-24T12:10:00.000Z",
+        recordedAt: "2026-08-24T12:11:00.000Z",
+        consumedRelease: consumed.value,
+      } as never),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        snapshot: {
+          state: "fulfilled",
+          carrierHandoffAt: "2026-08-24T12:10:00.000Z",
+        },
+      },
     });
   });
 
-  it("does not treat truthy non-boolean payment markers as verified", () => {
-    const absent: FulfillmentReleaseSnapshot = {
-      state: "absent",
-      version: null,
-      lastVersion: 0,
-      paymentEvidenceId: null,
-      clearanceEvidenceId: null,
-      clearanceEvidenceHistory: [],
-      expiresAt: null,
-    };
-
+  it("fails malformed snapshots, events, and fulfillment decisions closed", () => {
+    expect(transitionOrder(null as never, { type: "start_eligibility" })).toMatchObject({
+      ok: false,
+      error: { code: "invalid_snapshot" },
+    });
+    expect(transitionOrder(leanDraft, null as never)).toMatchObject({
+      ok: false,
+      error: { code: "invalid_transition" },
+    });
     expect(
-      transitionFulfillmentRelease(absent, {
+      transitionFulfillmentRelease(null as never, {
+        type: "consume",
+        now,
+        decision: permittedFulfillment(),
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "invalid_snapshot" } });
+    expect(
+      transitionFulfillmentRelease(absentRelease(), {
         type: "issue",
-        now: "2026-08-24T12:00:00.000Z",
-        paymentVerified: "false",
-        eligibilityDecision: allowedCheckoutDecision,
+        now,
+        decision: { ...permittedFulfillment() },
         version: 1,
-        paymentEvidenceId: "synthetic-payment-journal-1",
-        clearanceEvidenceId: "synthetic-clearance-1",
-        expiresAt: "2026-08-25T12:00:00.000Z",
+        paymentEvidenceId,
+        expiresAt,
       } as never),
     ).toMatchObject({
       ok: false,
-      error: { code: "missing_payment_evidence" },
-    });
-
-    expect(
-      canFulfill({
-        paymentVerified: "false",
-        eligibilityDecision: allowedCheckoutDecision,
-        release: issuedRelease,
-        now: "2026-08-24T12:00:00.000Z",
-      } as never),
-    ).toMatchObject({
-      ok: false,
-      error: { code: "missing_payment_evidence" },
+      error: { code: "invalid_fulfillment_decision" },
     });
   });
 
+  it("accepts an active reservation after provider failure but rejects invalid payment authority", () => {
+    const failed = {
+      ...leanDraft,
+      state: "payment_failed",
+    } as OrderSnapshot;
+    expect(
+      transitionOrder(failed, {
+        type: "payment_verified",
+        source: "verified_provider_event",
+        paymentEvidenceId,
+        reservationDisposition: "active",
+      } as never),
+    ).toMatchObject({
+      ok: true,
+      value: { snapshot: { state: "paid_pending_fulfillment" } },
+    });
+    expect(
+      transitionOrder(failed, {
+        type: "payment_verified",
+        source: "success_page",
+        paymentEvidenceId,
+        reservationDisposition: "active",
+      } as never),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "missing_payment_evidence" },
+    });
+    expect(
+      transitionOrder(failed, {
+        type: "payment_verified",
+        source: "verified_provider_event",
+        paymentEvidenceId,
+        reservationDisposition: "unknown",
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "invalid_transition" } });
+  });
+
+  it("rejects nonfuture release expiry, payment mismatch, and nonmonotonic issue", () => {
+    expect(
+      transitionFulfillmentRelease(absentRelease(), {
+        type: "issue",
+        now,
+        decision: permittedFulfillment(),
+        version: 1,
+        paymentEvidenceId,
+        expiresAt: now,
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
+    expect(
+      transitionFulfillmentRelease(absentRelease(), {
+        type: "issue",
+        now,
+        decision: permittedFulfillment(),
+        version: 1,
+        paymentEvidenceId: "synthetic-other-payment",
+        expiresAt,
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "payment_mismatch" } });
+    expect(
+      transitionFulfillmentRelease(
+        {
+          ...absentRelease(),
+          state: "revoked",
+          lastVersion: 2,
+        } as FulfillmentReleaseSnapshot,
+        {
+          type: "issue",
+          now,
+          decision: permittedFulfillment(),
+          version: 2,
+          paymentEvidenceId,
+          expiresAt,
+        } as never,
+      ),
+    ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
+  });
+
+  it("rejects mismatched begin facts and malformed or repeated carrier handoff", () => {
+    const decision = permittedFulfillment();
+    const ready = {
+      ...leanDraft,
+      state: "ready_for_fulfillment",
+      paymentEvidenceId,
+      fulfillmentReleaseVersion: 1,
+      lastFulfillmentReleaseVersion: 1,
+    } as OrderSnapshot;
+    const wrongRelease = {
+      state: "issued",
+      version: 2,
+      lastVersion: 2,
+      paymentEvidenceId,
+      reviewRequestId: null,
+      expiresAt,
+    } as FulfillmentReleaseSnapshot;
+    expect(
+      transitionOrder(ready, {
+        type: "begin_fulfillment",
+        now,
+        decision,
+        release: wrongRelease,
+      } as never),
+    ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
+
+    const inProgress = {
+      ...ready,
+      state: "fulfillment_in_progress",
+    } as OrderSnapshot;
+    const consumed = {
+      ...wrongRelease,
+      version: 1,
+      lastVersion: 1,
+      state: "consumed",
+    } as FulfillmentReleaseSnapshot;
+    expect(
+      transitionOrder(inProgress, {
+        type: "carrier_handoff",
+        carrierHandoffAt: "2026-08-24T12:12:00.000Z",
+        recordedAt: "2026-08-24T12:11:00.000Z",
+        consumedRelease: consumed,
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "invalid_carrier_handoff" },
+    });
+    expect(
+      transitionOrder(
+        {
+          ...inProgress,
+          state: "fulfilled",
+          carrierHandoffAt: "2026-08-24T12:10:00.000Z",
+        } as OrderSnapshot,
+        {
+          type: "carrier_handoff",
+          carrierHandoffAt: "2026-08-24T12:10:00.000Z",
+          recordedAt: "2026-08-24T12:11:00.000Z",
+          consumedRelease: consumed,
+        },
+      ),
+    ).toMatchObject({ ok: false, error: { code: "invalid_transition" } });
+  });
+
+  it("contains no clearance evidence in order or release snapshots", () => {
+    const paid = paidPending();
+    expect(paid).not.toHaveProperty("clearanceEvidenceId");
+    const issued = transitionFulfillmentRelease(absentRelease(), {
+      type: "issue",
+      now,
+      decision: permittedFulfillment(),
+      version: 1,
+      paymentEvidenceId,
+      expiresAt,
+    } as never);
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+    expect(issued.value).not.toHaveProperty("clearanceEvidenceId");
+    expect(issued.value).not.toHaveProperty("clearanceEvidenceHistory");
+  });
+
+  it.each([
+    ["draft", { type: "begin_checkout" }],
+    ["checkout_pending", { type: "cancel" }],
+    ["paid_pending_fulfillment", { type: "begin_checkout" }],
+    ["paid_on_hold", { type: "begin_fulfillment" }],
+    ["fulfilled", { type: "cancel" }],
+  ] as const)("rejects %s outside the lean transition matrix", (state, event) => {
+    const snapshot =
+      state === "draft" || state === "checkout_pending"
+        ? ({ ...leanDraft, state } as OrderSnapshot)
+        : state === "fulfilled"
+          ? ({
+              ...leanDraft,
+              state,
+              paymentEvidenceId,
+              fulfillmentReleaseVersion: 1,
+              lastFulfillmentReleaseVersion: 1,
+              carrierHandoffAt: "2026-08-24T12:10:00.000Z",
+            } as OrderSnapshot)
+          : ({ ...leanDraft, state, paymentEvidenceId } as OrderSnapshot);
+    expect(transitionOrder(snapshot, event as never)).toMatchObject({
+      ok: false,
+      error: { code: "invalid_transition" },
+    });
+  });
+
+  it("places verified disputes on hold and keeps repeated disputes restrictive", () => {
+    const held = expectOrderSuccess(paidPending(), {
+      type: "payment_disputed",
+      source: "verified_provider_event",
+      providerEvidenceId: "synthetic-dispute-1",
+    });
+    expect(held.state).toBe("paid_on_hold");
+    expect(
+      expectOrderSuccess(held, {
+        type: "payment_disputed",
+        source: "verified_provider_event",
+        providerEvidenceId: "synthetic-dispute-1",
+      }),
+    ).toEqual(held);
+  });
 });
 
 describe("transitionPayment", () => {

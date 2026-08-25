@@ -2,6 +2,10 @@ import {
   isAuthoritativeCheckoutDecision,
   type CheckoutDecision,
 } from "@/domain/eligibility";
+import {
+  isAuthoritativeFulfillmentDecision,
+  type FulfillmentDecision,
+} from "@/domain/fulfillment";
 import type { Result } from "@/domain/result";
 
 export type OrderState =
@@ -11,7 +15,7 @@ export type OrderState =
   | "ready_for_checkout"
   | "checkout_pending"
   | "payment_failed"
-  | "paid_pending_clearance"
+  | "paid_pending_fulfillment"
   | "paid_on_hold"
   | "ready_for_fulfillment"
   | "fulfillment_in_progress"
@@ -21,7 +25,7 @@ export type OrderState =
 export type OrderSnapshot = Readonly<{
   state: OrderState;
   paymentEvidenceId: string | null;
-  clearanceEvidenceId: string | null;
+  reviewRequestId: string | null;
   fulfillmentReleaseVersion: number | null;
   lastFulfillmentReleaseVersion: number;
   carrierHandoffAt: string | null;
@@ -43,6 +47,7 @@ export type OrderEvent =
       type: "payment_verified";
       source: "verified_provider_event";
       paymentEvidenceId: string;
+      reservationDisposition: "active" | "authoritatively_released";
     }>
   | Readonly<{
       type: "payment_disputed";
@@ -51,25 +56,23 @@ export type OrderEvent =
     }>
   | Readonly<{
       type: "post_payment_hold";
-      decision: CheckoutDecision;
+      decision: FulfillmentDecision;
+    }>
+  | Readonly<{
+      type: "clear_fulfillment_hold";
+      decision: FulfillmentDecision;
     }>
   | Readonly<{
       type: "release_for_fulfillment";
-      decision: CheckoutDecision;
+      decision: FulfillmentDecision;
       paymentEvidenceId: string;
-      clearanceEvidenceId: string;
       fulfillmentReleaseVersion: number;
     }>
   | Readonly<{
       type: "begin_fulfillment";
       now: string;
-      paymentVerified: boolean;
-      eligibilityDecision: CheckoutDecision;
+      decision: FulfillmentDecision;
       release: FulfillmentReleaseSnapshot;
-    }>
-  | Readonly<{
-      type: "clearance_revoked";
-      beforeCarrierHandoff: boolean;
     }>
   | Readonly<{
       type: "carrier_handoff";
@@ -84,7 +87,7 @@ export type TransitionError = Readonly<{
     | "invalid_transition"
     | "invalid_snapshot"
     | "missing_payment_evidence"
-    | "missing_clearance_evidence"
+    | "invalid_fulfillment_decision"
     | "invalid_release"
     | "carrier_handoff_already_occurred"
     | "invalid_carrier_handoff"
@@ -155,8 +158,7 @@ export type FulfillmentReleaseSnapshot = Readonly<{
   version: number | null;
   lastVersion: number;
   paymentEvidenceId: string | null;
-  clearanceEvidenceId: string | null;
-  clearanceEvidenceHistory: readonly string[];
+  reviewRequestId: string | null;
   expiresAt: string | null;
 }>;
 
@@ -164,11 +166,9 @@ export type FulfillmentReleaseEvent =
   | Readonly<{
       type: "issue";
       now: string;
-      paymentVerified: boolean;
-      eligibilityDecision: CheckoutDecision;
+      decision: FulfillmentDecision;
       version: number;
       paymentEvidenceId: string;
-      clearanceEvidenceId: string;
       expiresAt: string;
     }>
   | Readonly<{ type: "revoke"; reasonCode: string }>
@@ -176,8 +176,15 @@ export type FulfillmentReleaseEvent =
   | Readonly<{
       type: "consume";
       now: string;
-      atomicEligibilityRecheck: CheckoutDecision;
+      decision: FulfillmentDecision;
     }>;
+
+export type RequiredOrderIncident = "inventory_conflict";
+
+export type OrderTransition = Readonly<{
+  snapshot: OrderSnapshot;
+  requiredIncidents: readonly RequiredOrderIncident[];
+}>;
 
 const orderStates = new Set<OrderState>([
   "draft",
@@ -186,7 +193,7 @@ const orderStates = new Set<OrderState>([
   "ready_for_checkout",
   "checkout_pending",
   "payment_failed",
-  "paid_pending_clearance",
+  "paid_pending_fulfillment",
   "paid_on_hold",
   "ready_for_fulfillment",
   "fulfillment_in_progress",
@@ -225,23 +232,19 @@ function isPermittedCheckoutDecision(
   );
 }
 
-function isNonBlankString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
+function isPermittedFulfillmentDecision(
+  value: unknown,
+): value is FulfillmentDecision {
+  return (
+    isAuthoritativeFulfillmentDecision(value) &&
+    value.permitted === true &&
+    value.reasons.length === 0 &&
+    isNonBlankString(value.verifiedPaymentEventId)
+  );
 }
 
-function isDenseUniqueNonBlankStringArray(
-  value: unknown,
-): value is readonly string[] {
-  if (!Array.isArray(value)) return false;
-  const seen = new Set<string>();
-  for (let index = 0; index < value.length; index += 1) {
-    if (!Object.hasOwn(value, index) || !isNonBlankString(value[index])) {
-      return false;
-    }
-    if (seen.has(value[index])) return false;
-    seen.add(value[index]);
-  }
-  return true;
+function isNonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function isCanonicalInstant(value: unknown): value is string {
@@ -268,10 +271,7 @@ function isValidOrderSnapshot(value: unknown): value is OrderSnapshot {
       value.paymentEvidenceId === null ||
       isNonBlankString(value.paymentEvidenceId)
     ) ||
-    !(
-      value.clearanceEvidenceId === null ||
-      isNonBlankString(value.clearanceEvidenceId)
-    ) ||
+    !(value.reviewRequestId === null || isNonBlankString(value.reviewRequestId)) ||
     !(
       value.fulfillmentReleaseVersion === null ||
       isPositiveSafeInteger(value.fulfillmentReleaseVersion)
@@ -294,17 +294,17 @@ function isValidOrderSnapshot(value: unknown): value is OrderSnapshot {
   if (isPrePaymentState) {
     return (
       value.paymentEvidenceId === null &&
-      value.clearanceEvidenceId === null &&
+      value.reviewRequestId === null &&
       value.fulfillmentReleaseVersion === null &&
       value.lastFulfillmentReleaseVersion === 0 &&
       value.carrierHandoffAt === null
     );
   }
 
-  if (state === "paid_pending_clearance" || state === "paid_on_hold") {
+  if (state === "paid_pending_fulfillment" || state === "paid_on_hold") {
     return (
       isNonBlankString(value.paymentEvidenceId) &&
-      value.clearanceEvidenceId === null &&
+      value.reviewRequestId === null &&
       value.fulfillmentReleaseVersion === null &&
       value.carrierHandoffAt === null
     );
@@ -312,7 +312,7 @@ function isValidOrderSnapshot(value: unknown): value is OrderSnapshot {
 
   const releaseIsBound =
     isNonBlankString(value.paymentEvidenceId) &&
-    isNonBlankString(value.clearanceEvidenceId) &&
+    (value.reviewRequestId === null || isNonBlankString(value.reviewRequestId)) &&
     isPositiveSafeInteger(value.fulfillmentReleaseVersion) &&
     value.fulfillmentReleaseVersion === value.lastFulfillmentReleaseVersion;
 
@@ -386,11 +386,7 @@ function isValidFulfillmentReleaseSnapshot(
       value.paymentEvidenceId === null ||
       isNonBlankString(value.paymentEvidenceId)
     ) ||
-    !(
-      value.clearanceEvidenceId === null ||
-      isNonBlankString(value.clearanceEvidenceId)
-    ) ||
-    !isDenseUniqueNonBlankStringArray(value.clearanceEvidenceHistory) ||
+    !(value.reviewRequestId === null || isNonBlankString(value.reviewRequestId)) ||
     !(value.expiresAt === null || isCanonicalInstant(value.expiresAt))
   ) {
     return false;
@@ -402,9 +398,6 @@ function isValidFulfillmentReleaseSnapshot(
       isPositiveSafeInteger(value.version) &&
       value.version === value.lastVersion &&
       isNonBlankString(value.paymentEvidenceId) &&
-      isNonBlankString(value.clearanceEvidenceId) &&
-      value.clearanceEvidenceHistory.length > 0 &&
-      value.clearanceEvidenceHistory.at(-1) === value.clearanceEvidenceId &&
       isCanonicalInstant(value.expiresAt)
     );
   }
@@ -413,8 +406,7 @@ function isValidFulfillmentReleaseSnapshot(
     return (
       value.version === null &&
       value.paymentEvidenceId === null &&
-      value.clearanceEvidenceId === null &&
-      value.clearanceEvidenceHistory.length > 0 &&
+      value.reviewRequestId === null &&
       value.expiresAt === null &&
       value.lastVersion > 0
     );
@@ -423,8 +415,7 @@ function isValidFulfillmentReleaseSnapshot(
   return (
     value.version === null &&
     value.paymentEvidenceId === null &&
-    value.clearanceEvidenceId === null &&
-    value.clearanceEvidenceHistory.length === 0 &&
+    value.reviewRequestId === null &&
     value.expiresAt === null &&
     (state !== "absent" || value.lastVersion === 0)
   );
@@ -433,7 +424,7 @@ function isValidFulfillmentReleaseSnapshot(
 export function transitionOrder(
   snapshot: OrderSnapshot,
   event: OrderEvent,
-): Result<OrderSnapshot, TransitionError> {
+): Result<OrderTransition, TransitionError> {
   const snapshotState =
     isRecord(snapshot) && typeof snapshot.state === "string"
       ? snapshot.state
@@ -445,14 +436,18 @@ export function transitionOrder(
   const succeed = (
     state: OrderState,
     changes: Partial<OrderSnapshot> = {},
-  ): Result<OrderSnapshot, TransitionError> =>
+    requiredIncidents: readonly RequiredOrderIncident[] = [],
+  ): Result<OrderTransition, TransitionError> =>
     Object.freeze({
       ok: true,
-      value: Object.freeze({ ...snapshot, ...changes, state }),
+      value: Object.freeze({
+        snapshot: Object.freeze({ ...snapshot, ...changes, state }),
+        requiredIncidents: Object.freeze([...new Set(requiredIncidents)]),
+      }),
     });
   const fail = (
     code: TransitionError["code"] = "invalid_transition",
-  ): Result<OrderSnapshot, TransitionError> =>
+  ): Result<OrderTransition, TransitionError> =>
     Object.freeze({
       ok: false,
       error: Object.freeze({ code, state: snapshotState, event: eventType }),
@@ -511,7 +506,9 @@ export function transitionOrder(
     return succeed("payment_failed");
   }
   if (
-    snapshot.state === "checkout_pending" &&
+    (snapshot.state === "checkout_pending" ||
+      snapshot.state === "payment_failed" ||
+      snapshot.state === "cancelled") &&
     event.type === "payment_verified"
   ) {
     if (
@@ -520,12 +517,31 @@ export function transitionOrder(
     ) {
       return fail("missing_payment_evidence");
     }
-    return succeed("paid_pending_clearance", {
+    if (
+      event.reservationDisposition !== "active" &&
+      event.reservationDisposition !== "authoritatively_released"
+    ) {
+      return fail("invalid_transition");
+    }
+    if (
+      snapshot.state === "cancelled" &&
+      event.reservationDisposition !== "authoritatively_released"
+    ) {
+      return fail("invalid_transition");
+    }
+    if (event.reservationDisposition === "authoritatively_released") {
+      return succeed(
+        "paid_on_hold",
+        { paymentEvidenceId: event.paymentEvidenceId },
+        ["inventory_conflict"],
+      );
+    }
+    return succeed("paid_pending_fulfillment", {
       paymentEvidenceId: event.paymentEvidenceId,
     });
   }
   if (
-    (snapshot.state === "paid_pending_clearance" ||
+    (snapshot.state === "paid_pending_fulfillment" ||
       snapshot.state === "paid_on_hold" ||
       snapshot.state === "ready_for_fulfillment" ||
       snapshot.state === "fulfillment_in_progress") &&
@@ -538,26 +554,62 @@ export function transitionOrder(
       return fail("missing_payment_evidence");
     }
     return succeed("paid_on_hold", {
-      clearanceEvidenceId: null,
+      reviewRequestId: null,
       fulfillmentReleaseVersion: null,
     });
   }
   if (
-    (snapshot.state === "paid_pending_clearance" ||
-      snapshot.state === "paid_on_hold") &&
+    (snapshot.state === "paid_pending_fulfillment" ||
+      snapshot.state === "paid_on_hold" ||
+      snapshot.state === "ready_for_fulfillment" ||
+      snapshot.state === "fulfillment_in_progress") &&
+    event.type === "post_payment_hold"
+  ) {
+    if (
+      !isAuthoritativeFulfillmentDecision(event.decision) ||
+      event.decision.permitted
+    ) {
+      return fail("invalid_fulfillment_decision");
+    }
+    if (
+      event.decision.verifiedPaymentEventId !== null &&
+      event.decision.verifiedPaymentEventId !== snapshot.paymentEvidenceId
+    ) {
+      return fail("payment_mismatch");
+    }
+    return succeed("paid_on_hold", {
+      reviewRequestId: null,
+      fulfillmentReleaseVersion: null,
+    });
+  }
+  if (
+    snapshot.state === "paid_on_hold" &&
+    event.type === "clear_fulfillment_hold"
+  ) {
+    if (!isPermittedFulfillmentDecision(event.decision)) {
+      return fail("invalid_fulfillment_decision");
+    }
+    if (event.decision.verifiedPaymentEventId !== snapshot.paymentEvidenceId) {
+      return fail("payment_mismatch");
+    }
+    return succeed("paid_pending_fulfillment", {
+      reviewRequestId: null,
+      fulfillmentReleaseVersion: null,
+    });
+  }
+  if (
+    snapshot.state === "paid_pending_fulfillment" &&
     event.type === "release_for_fulfillment"
   ) {
-    if (!isPermittedCheckoutDecision(event.decision)) {
-      return fail("eligibility_not_passed");
+    if (!isPermittedFulfillmentDecision(event.decision)) {
+      return fail("invalid_fulfillment_decision");
     }
     if (
       !isNonBlankString(event.paymentEvidenceId) ||
-      event.paymentEvidenceId !== snapshot.paymentEvidenceId
+      event.paymentEvidenceId !== snapshot.paymentEvidenceId ||
+      event.decision.verifiedPaymentEventId !== snapshot.paymentEvidenceId
     ) {
-      return fail("missing_payment_evidence");
-    }
-    if (!isNonBlankString(event.clearanceEvidenceId)) {
-      return fail("missing_clearance_evidence");
+      return fail("payment_mismatch");
     }
     if (
       !Number.isSafeInteger(event.fulfillmentReleaseVersion) ||
@@ -566,41 +618,32 @@ export function transitionOrder(
       return fail("invalid_release");
     }
     return succeed("ready_for_fulfillment", {
-      clearanceEvidenceId: event.clearanceEvidenceId,
+      reviewRequestId: event.decision.reviewRequestId,
       fulfillmentReleaseVersion: event.fulfillmentReleaseVersion,
       lastFulfillmentReleaseVersion: event.fulfillmentReleaseVersion,
-    });
-  }
-
-  if (
-    snapshot.state === "paid_pending_clearance" &&
-    event.type === "post_payment_hold" &&
-    isAuthoritativeCheckoutDecision(event.decision) &&
-    !isPermittedCheckoutDecision(event.decision)
-  ) {
-    return succeed("paid_on_hold", {
-      clearanceEvidenceId: null,
-      fulfillmentReleaseVersion: null,
     });
   }
   if (
     snapshot.state === "ready_for_fulfillment" &&
     event.type === "begin_fulfillment"
   ) {
-    const fulfillmentCheck = canFulfill({
-      paymentVerified: event.paymentVerified,
-      eligibilityDecision: event.eligibilityDecision,
-      release: event.release,
-      now: event.now,
-    });
-    if (!fulfillmentCheck.ok) {
-      return fail(fulfillmentCheck.error.code);
+    if (!isPermittedFulfillmentDecision(event.decision)) {
+      return fail("invalid_fulfillment_decision");
+    }
+    if (!isCanonicalInstant(event.now)) return fail("invalid_release");
+    if (!isValidFulfillmentReleaseSnapshot(event.release)) {
+      return fail("invalid_release");
     }
     if (
+      event.release.state !== "issued" ||
       snapshot.fulfillmentReleaseVersion === null ||
       event.release.version !== snapshot.fulfillmentReleaseVersion ||
       event.release.paymentEvidenceId !== snapshot.paymentEvidenceId ||
-      event.release.clearanceEvidenceId !== snapshot.clearanceEvidenceId
+      event.release.reviewRequestId !== snapshot.reviewRequestId ||
+      event.decision.verifiedPaymentEventId !== snapshot.paymentEvidenceId ||
+      event.decision.reviewRequestId !== snapshot.reviewRequestId ||
+      new Date(event.now).getTime() >=
+        new Date(event.release.expiresAt ?? "").getTime()
     ) {
       return fail("invalid_release");
     }
@@ -621,29 +664,12 @@ export function transitionOrder(
       consumedRelease.state !== "consumed" ||
       consumedRelease.version !== snapshot.fulfillmentReleaseVersion ||
       consumedRelease.paymentEvidenceId !== snapshot.paymentEvidenceId ||
-      consumedRelease.clearanceEvidenceId !== snapshot.clearanceEvidenceId
+      consumedRelease.reviewRequestId !== snapshot.reviewRequestId
     ) {
       return fail("invalid_carrier_handoff");
     }
     return succeed("fulfilled", {
       carrierHandoffAt: event.carrierHandoffAt,
-    });
-  }
-
-  if (
-    (snapshot.state === "ready_for_fulfillment" ||
-      snapshot.state === "fulfillment_in_progress") &&
-    event.type === "clearance_revoked"
-  ) {
-    if (typeof event.beforeCarrierHandoff !== "boolean") {
-      return fail("invalid_transition");
-    }
-    if (!event.beforeCarrierHandoff || snapshot.carrierHandoffAt !== null) {
-      return fail("carrier_handoff_already_occurred");
-    }
-    return succeed("paid_on_hold", {
-      clearanceEvidenceId: null,
-      fulfillmentReleaseVersion: null,
     });
   }
 
@@ -842,22 +868,18 @@ export function transitionFulfillmentRelease(
       snapshot.state === "expired") &&
     event.type === "issue"
   ) {
-    if (
-      event.paymentVerified !== true ||
-      !isNonBlankString(event.paymentEvidenceId)
-    ) {
+    if (!isPermittedFulfillmentDecision(event.decision)) {
+      return fail("invalid_fulfillment_decision");
+    }
+    if (!isNonBlankString(event.paymentEvidenceId)) {
       return fail("missing_payment_evidence");
     }
-    if (
-      !isPermittedCheckoutDecision(event.eligibilityDecision) ||
-      !isNonBlankString(event.clearanceEvidenceId)
-    ) {
-      return fail("missing_clearance_evidence");
+    if (event.decision.verifiedPaymentEventId !== event.paymentEvidenceId) {
+      return fail("payment_mismatch");
     }
     if (
       !Number.isSafeInteger(event.version) ||
-      event.version <= snapshot.lastVersion ||
-      snapshot.clearanceEvidenceHistory.includes(event.clearanceEvidenceId)
+      event.version <= snapshot.lastVersion
     ) {
       return fail("invalid_release");
     }
@@ -879,11 +901,7 @@ export function transitionFulfillmentRelease(
         version: event.version,
         lastVersion: event.version,
         paymentEvidenceId: event.paymentEvidenceId,
-        clearanceEvidenceId: event.clearanceEvidenceId,
-        clearanceEvidenceHistory: Object.freeze([
-          ...snapshot.clearanceEvidenceHistory,
-          event.clearanceEvidenceId,
-        ]),
+        reviewRequestId: event.decision.reviewRequestId,
         expiresAt: event.expiresAt,
       }),
     });
@@ -900,7 +918,7 @@ export function transitionFulfillmentRelease(
         state: "revoked",
         version: null,
         paymentEvidenceId: null,
-        clearanceEvidenceId: null,
+        reviewRequestId: null,
         expiresAt: null,
       }),
     });
@@ -924,7 +942,7 @@ export function transitionFulfillmentRelease(
         state: "expired",
         version: null,
         paymentEvidenceId: null,
-        clearanceEvidenceId: null,
+        reviewRequestId: null,
         expiresAt: null,
       }),
     });
@@ -937,8 +955,8 @@ export function transitionFulfillmentRelease(
     if (snapshot.state !== "issued") {
       return fail("release_not_current");
     }
-    if (!isPermittedCheckoutDecision(event.atomicEligibilityRecheck)) {
-      return fail("eligibility_not_passed");
+    if (!isPermittedFulfillmentDecision(event.decision)) {
+      return fail("invalid_fulfillment_decision");
     }
 
     const now = new Date(event.now);
@@ -949,10 +967,15 @@ export function transitionFulfillmentRelease(
       !Number.isFinite(expiration.getTime()) ||
       now.getTime() >= expiration.getTime() ||
       snapshot.version === null ||
-      snapshot.paymentEvidenceId === null ||
-      snapshot.clearanceEvidenceId === null
+      snapshot.paymentEvidenceId === null
     ) {
       return fail("release_not_current");
+    }
+    if (event.decision.verifiedPaymentEventId !== snapshot.paymentEvidenceId) {
+      return fail("payment_mismatch");
+    }
+    if (event.decision.reviewRequestId !== snapshot.reviewRequestId) {
+      return fail("invalid_release");
     }
     return Object.freeze({
       ok: true,
@@ -961,64 +984,4 @@ export function transitionFulfillmentRelease(
   }
 
   return fail("invalid_transition");
-}
-
-export type FulfillmentCheckInput = Readonly<{
-  paymentVerified: boolean;
-  eligibilityDecision: CheckoutDecision;
-  release: FulfillmentReleaseSnapshot;
-  now: string;
-}>;
-
-export function canFulfill(
-  input: FulfillmentCheckInput,
-): Result<true, TransitionError> {
-  const release = isRecord(input) ? input.release : null;
-  const releaseState =
-    isRecord(release) && typeof release.state === "string"
-      ? release.state
-      : "unknown";
-  const fail = (code: TransitionError["code"]): Result<true, TransitionError> =>
-    Object.freeze({
-      ok: false,
-      error: Object.freeze({
-        code,
-        state: releaseState,
-        event: "fulfill",
-      }),
-    });
-
-  if (!isRecord(input) || !isValidFulfillmentReleaseSnapshot(release)) {
-    return fail("invalid_snapshot");
-  }
-  if (input.release.state !== "issued") {
-    return fail("release_not_current");
-  }
-
-  if (
-    input.paymentVerified !== true ||
-    !isNonBlankString(input.release.paymentEvidenceId)
-  ) {
-    return fail("missing_payment_evidence");
-  }
-  if (
-    !isPermittedCheckoutDecision(input.eligibilityDecision) ||
-    !isNonBlankString(input.release.clearanceEvidenceId)
-  ) {
-    return fail("eligibility_not_passed");
-  }
-
-  const now = new Date(input.now);
-  const expiration = new Date(input.release.expiresAt ?? "");
-  if (
-    input.release.version === null ||
-    !Number.isFinite(now.getTime()) ||
-    now.toISOString() !== input.now ||
-    !Number.isFinite(expiration.getTime()) ||
-    now.getTime() >= expiration.getTime()
-  ) {
-    return fail("release_not_current");
-  }
-
-  return Object.freeze({ ok: true, value: true });
 }

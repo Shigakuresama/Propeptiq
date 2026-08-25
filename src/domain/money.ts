@@ -27,6 +27,18 @@ type MoneyComponent = Readonly<{
   currency: string;
 }>;
 
+export type DiscountAllocation = Readonly<{
+  productId: string;
+  discountMinor: number;
+}>;
+
+export type DiscountComponent = Readonly<
+  MoneyComponent & {
+    authority: "server_calculated_discount";
+    allocations: readonly DiscountAllocation[];
+  }
+>;
+
 export type TaxComponent = Readonly<
   MoneyComponent & { authority: "server_calculated_tax" }
 >;
@@ -36,12 +48,17 @@ export type ShippingComponent = Readonly<
 >;
 
 export type PriceSnapshot = Readonly<
-  Omit<PriceLineInput, "authority"> & { lineTotalMinor: number }
+  Omit<PriceLineInput, "authority"> & {
+    subtotalMinor: number;
+    discountMinor: number;
+    totalMinor: number;
+  }
 >;
 
 export type OrderTotals = Readonly<{
   currency: string;
   subtotalMinor: number;
+  discountMinor: number;
   taxMinor: number;
   shippingMinor: number;
   totalMinor: number;
@@ -59,12 +76,14 @@ export type MoneyError = Readonly<{
     | "invalid_amount"
     | "invalid_quantity"
     | "arithmetic_overflow"
-    | "order_limit_exceeded";
+    | "order_limit_exceeded"
+    | "zero_total_not_supported";
   field: string;
 }>;
 
 export type OrderTotalsInput = Readonly<{
   lines: readonly PriceLineInput[];
+  discount: DiscountComponent;
   tax: TaxComponent;
   shipping: ShippingComponent;
 }>;
@@ -73,7 +92,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isDenseArray(value: readonly unknown[]): boolean {
+function isDenseArray(value: unknown): value is readonly unknown[] {
+  if (!Array.isArray(value)) return false;
   for (let index = 0; index < value.length; index += 1) {
     if (!Object.hasOwn(value, index)) return false;
   }
@@ -99,7 +119,6 @@ export function calculateOrderTotals(
     : [];
   const validPolicy =
     isRecord(policy) &&
-    Array.isArray(policy.allowedCurrencies) &&
     isDenseArray(policy.allowedCurrencies) &&
     policy.allowedCurrencies.length > 0 &&
     policy.allowedCurrencies.every(
@@ -108,13 +127,11 @@ export function calculateOrderTotals(
     ) &&
     new Set(policy.allowedCurrencies).size === policy.allowedCurrencies.length &&
     limits.every((limit) => Number.isSafeInteger(limit) && limit > 0);
-  if (!validPolicy) {
-    return fail("invalid_policy", "policy");
-  }
+  if (!validPolicy) return fail("invalid_policy", "policy");
 
   if (
     !isRecord(input) ||
-    !Array.isArray(input.lines) ||
+    !isDenseArray(input.lines) ||
     input.lines.length === 0 ||
     input.lines.length > policy.maximumLineCount
   ) {
@@ -126,33 +143,36 @@ export function calculateOrderTotals(
     /^[A-Z]{3}$/.test(currency) &&
     policy.allowedCurrencies.includes(currency);
 
-  for (const [index, line] of input.lines.entries()) {
+  const productIds = new Set<string>();
+  for (let index = 0; index < input.lines.length; index += 1) {
+    const line = input.lines[index];
     if (!isRecord(line)) {
       return fail("invalid_identifier", `lines[${index}]`);
     }
     if (line.authority !== "server_resolved_price") {
       return fail("untrusted_input", `lines[${index}].authority`);
     }
-    for (const field of [
-      "productId",
-      "priceBookId",
-      "priceVersion",
-    ] as const) {
+    for (const field of ["productId", "priceBookId", "priceVersion"] as const) {
       if (typeof line[field] !== "string" || line[field].trim().length === 0) {
         return fail("invalid_identifier", `lines[${index}].${field}`);
       }
     }
+    if (productIds.has(line.productId as string)) {
+      return fail("invalid_identifier", `lines[${index}].productId`);
+    }
+    productIds.add(line.productId as string);
     if (!isAllowedCurrency(line.currency)) {
       return fail("invalid_currency", `lines[${index}].currency`);
     }
   }
 
-
-  if (!isRecord(input.tax)) {
-    return fail("invalid_amount", "tax");
+  for (const component of ["discount", "tax", "shipping"] as const) {
+    if (!isRecord(input[component])) {
+      return fail("invalid_amount", component);
+    }
   }
-  if (!isRecord(input.shipping)) {
-    return fail("invalid_amount", "shipping");
+  if (input.discount.authority !== "server_calculated_discount") {
+    return fail("untrusted_input", "discount.authority");
   }
   if (input.tax.authority !== "server_calculated_tax") {
     return fail("untrusted_input", "tax.authority");
@@ -160,30 +180,28 @@ export function calculateOrderTotals(
   if (input.shipping.authority !== "server_resolved_shipping") {
     return fail("untrusted_input", "shipping.authority");
   }
-
-  if (!isAllowedCurrency(input.tax.currency)) {
-    return fail("invalid_currency", "tax.currency");
-  }
-  if (!isAllowedCurrency(input.shipping.currency)) {
-    return fail("invalid_currency", "shipping.currency");
+  for (const component of ["discount", "tax", "shipping"] as const) {
+    if (!isAllowedCurrency(input[component].currency)) {
+      return fail("invalid_currency", `${component}.currency`);
+    }
   }
 
   const currency = input.lines[0]!.currency;
-  for (const [index, line] of input.lines.entries()) {
-    if (line.currency !== currency) {
+  for (let index = 0; index < input.lines.length; index += 1) {
+    if (input.lines[index]!.currency !== currency) {
       return fail("currency_mismatch", `lines[${index}].currency`);
     }
   }
-  if (input.tax.currency !== currency) {
-    return fail("currency_mismatch", "tax.currency");
-  }
-  if (input.shipping.currency !== currency) {
-    return fail("currency_mismatch", "shipping.currency");
+  for (const component of ["discount", "tax", "shipping"] as const) {
+    if (input[component].currency !== currency) {
+      return fail("currency_mismatch", `${component}.currency`);
+    }
   }
 
-  const lines: PriceSnapshot[] = [];
+  const lineSubtotals = new Map<string, number>();
   let subtotalMinor = 0;
-  for (const [index, line] of input.lines.entries()) {
+  for (let index = 0; index < input.lines.length; index += 1) {
+    const line = input.lines[index]!;
     if (
       !Number.isSafeInteger(line.unitAmountMinor) ||
       line.unitAmountMinor < 0
@@ -197,56 +215,136 @@ export function calculateOrderTotals(
     ) {
       return fail("invalid_quantity", `lines[${index}].quantity`);
     }
-
-    const lineTotalMinor = line.unitAmountMinor * line.quantity;
-    if (!Number.isSafeInteger(lineTotalMinor)) {
-      return fail("arithmetic_overflow", `lines[${index}].lineTotalMinor`);
+    const lineSubtotalMinor = line.unitAmountMinor * line.quantity;
+    if (!Number.isSafeInteger(lineSubtotalMinor)) {
+      return fail("arithmetic_overflow", `lines[${index}].subtotalMinor`);
     }
-    const nextSubtotal = subtotalMinor + lineTotalMinor;
+    const nextSubtotal = subtotalMinor + lineSubtotalMinor;
     if (!Number.isSafeInteger(nextSubtotal)) {
       return fail("arithmetic_overflow", "subtotalMinor");
     }
-
-    lines.push(
-      Object.freeze({
-        productId: line.productId,
-        priceBookId: line.priceBookId,
-        priceVersion: line.priceVersion,
-        unitAmountMinor: line.unitAmountMinor,
-        currency: line.currency,
-        quantity: line.quantity,
-        lineTotalMinor,
-      }),
-    );
+    lineSubtotals.set(line.productId, lineSubtotalMinor);
     subtotalMinor = nextSubtotal;
   }
 
-  for (const [component, value] of [
-    ["tax", input.tax.amountMinor],
-    ["shipping", input.shipping.amountMinor],
-  ] as const) {
-    if (!Number.isSafeInteger(value) || value < 0) {
+  if (
+    !Number.isSafeInteger(input.discount.amountMinor) ||
+    input.discount.amountMinor < 0
+  ) {
+    return fail("invalid_amount", "discount.amountMinor");
+  }
+  if (
+    !isDenseArray(input.discount.allocations)
+  ) {
+    return fail("invalid_amount", "discount.allocations");
+  }
+
+  const allocationByProductId = new Map<string, number>();
+  let allocatedDiscountMinor = 0;
+  for (
+    let index = 0;
+    index < input.discount.allocations.length;
+    index += 1
+  ) {
+    const allocation = input.discount.allocations[index];
+    if (!isRecord(allocation)) {
+      return fail("invalid_amount", `discount.allocations[${index}]`);
+    }
+    if (
+      typeof allocation.productId !== "string" ||
+      !lineSubtotals.has(allocation.productId)
+    ) {
+      return fail("invalid_amount", "discount.allocations");
+    }
+    if (allocationByProductId.has(allocation.productId)) {
+      return fail(
+        "invalid_amount",
+        `discount.allocations[${index}].productId`,
+      );
+    }
+    if (
+      !Number.isSafeInteger(allocation.discountMinor) ||
+      (allocation.discountMinor as number) < 0 ||
+      (allocation.discountMinor as number) >
+        lineSubtotals.get(allocation.productId)!
+    ) {
+      return fail(
+        "invalid_amount",
+        `discount.allocations[${index}].discountMinor`,
+      );
+    }
+    const nextAllocated =
+      allocatedDiscountMinor + (allocation.discountMinor as number);
+    if (!Number.isSafeInteger(nextAllocated)) {
+      return fail("arithmetic_overflow", "discount.amountMinor");
+    }
+    allocationByProductId.set(
+      allocation.productId,
+      allocation.discountMinor as number,
+    );
+    allocatedDiscountMinor = nextAllocated;
+  }
+  if (
+    input.discount.allocations.length !== input.lines.length ||
+    allocationByProductId.size !== lineSubtotals.size ||
+    allocatedDiscountMinor !== input.discount.amountMinor
+  ) {
+    return fail(
+      "invalid_amount",
+      input.discount.allocations.length !== input.lines.length ||
+        allocationByProductId.size !== lineSubtotals.size
+        ? "discount.allocations"
+        : "discount.amountMinor",
+    );
+  }
+
+  for (const component of ["tax", "shipping"] as const) {
+    if (
+      !Number.isSafeInteger(input[component].amountMinor) ||
+      input[component].amountMinor < 0
+    ) {
       return fail("invalid_amount", `${component}.amountMinor`);
     }
   }
 
-  const subtotalWithTax = subtotalMinor + input.tax.amountMinor;
-  const totalMinor = subtotalWithTax + input.shipping.amountMinor;
-  if (
-    !Number.isSafeInteger(subtotalWithTax) ||
-    !Number.isSafeInteger(totalMinor)
-  ) {
+  const merchandiseTotalMinor = subtotalMinor - input.discount.amountMinor;
+  if (!Number.isSafeInteger(merchandiseTotalMinor) || merchandiseTotalMinor < 0) {
+    return fail("invalid_amount", "discount.amountMinor");
+  }
+  const totalWithTax = merchandiseTotalMinor + input.tax.amountMinor;
+  const totalMinor = totalWithTax + input.shipping.amountMinor;
+  if (!Number.isSafeInteger(totalWithTax) || !Number.isSafeInteger(totalMinor)) {
     return fail("arithmetic_overflow", "totalMinor");
+  }
+  if (totalMinor === 0) {
+    return fail("zero_total_not_supported", "totalMinor");
   }
   if (totalMinor > policy.maximumOrderAmountMinor) {
     return fail("order_limit_exceeded", "totalMinor");
   }
+
+  const lines: PriceSnapshot[] = input.lines.map((line) => {
+    const lineSubtotalMinor = lineSubtotals.get(line.productId)!;
+    const lineDiscountMinor = allocationByProductId.get(line.productId)!;
+    return Object.freeze({
+      productId: line.productId,
+      priceBookId: line.priceBookId,
+      priceVersion: line.priceVersion,
+      unitAmountMinor: line.unitAmountMinor,
+      currency: line.currency,
+      quantity: line.quantity,
+      subtotalMinor: lineSubtotalMinor,
+      discountMinor: lineDiscountMinor,
+      totalMinor: lineSubtotalMinor - lineDiscountMinor,
+    });
+  });
 
   return Object.freeze({
     ok: true,
     value: Object.freeze({
       currency,
       subtotalMinor,
+      discountMinor: input.discount.amountMinor,
       taxMinor: input.tax.amountMinor,
       shippingMinor: input.shipping.amountMinor,
       totalMinor,
