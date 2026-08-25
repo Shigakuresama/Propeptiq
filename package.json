@@ -12,6 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:check": "drizzle-kit check",
     "test:e2e": "playwright test",
     "verify:workspace-boundary": "node scripts/verify-workspace-boundary.mjs",
     "audit:prod": "npm audit --omit=dev",

@@ -109,11 +109,11 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 3: Implement the Lean Database Model
 
-- [ ] Model `users`, `buyer_profiles`, `attestations`, `staff_roles`, `product_policy_groups`, `products`, `lots`, optional `coa_documents`, `destination_policies`, `promotions`, `orders`, `order_items`, `provider_events`, `payment_events`, `inventory_events`, `review_requests`, `shipments`, and `admin_audit`.
-- [ ] Omit v1 organization tenancy, membership projection, evidence-document applications, publication approval chains, jurisdiction evidence hashes, launch-gate tables, and database-level separation-of-duty triggers.
-- [ ] Resolve destination policy as exact product override → policy group → unavailable.
-- [ ] Retain uniqueness/idempotency constraints for payment events, refunds, inventory consumption, and shipment/release consumption.
-- [ ] Add guarded migrations and integration tests against an isolated test database.
+- [x] Model `users`, `buyer_profiles`, `attestation_versions`, `attestation_acceptances`, `staff_roles`, `product_policy_groups`, `products`, `product_prices`, `lots`, optional `coa_documents`, `destination_policies`, `promotions`, `promotion_targets`, `orders`, `order_items`, `checkout_attempts`, `provider_events`, `payment_events`, `inventory_reservations`, `inventory_events`, `refunds`, `review_requests`, `fulfillment_releases`, `shipments`, and `admin_audit`.
+- [x] Omit v1 organization tenancy, membership projection, evidence-document applications, publication approval chains, jurisdiction evidence hashes, launch-gate tables, and database-level separation-of-duty triggers.
+- [x] Resolve destination policy as exact product override → policy group → unavailable.
+- [x] Retain uniqueness/idempotency constraints for payment events, refunds, inventory consumption, and shipment/release consumption.
+- [x] Add guarded migrations and integration tests against an isolated test database.
 
 **Validation:** `db:generate`, `db:check`, and database integration tests pass without production credentials.
 
