@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { useCart } from "@/cart/cart-provider";
 import { BrandMark } from "@/components/site/brand-mark";
+import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -26,10 +27,7 @@ export function SiteHeader() {
 
   return (
     <header className="persistent-chrome">
-      <div className="restriction-bar border-b border-border bg-ink px-4 py-2 text-center text-canvas sm:px-6">
-        <span>{researchRestrictions[0]}</span>{" "}
-        <span className="text-canvas/70">{researchRestrictions[1]}</span>
-      </div>
+      <ResearchRestrictionBar />
       <div className="border-b border-border bg-canvas">
         <div className="site-container flex min-h-[4.75rem] items-center gap-2 py-2 sm:gap-3">
           <Link
@@ -67,7 +65,7 @@ export function SiteHeader() {
           </Link>
 
           <Link
-            href="/cart?checkout=sign-in"
+            href="/sign-in"
             className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-3"
           >
             <UserRound aria-hidden="true" className="size-4" />
@@ -123,10 +121,10 @@ export function SiteHeader() {
                 </SheetClose>
                 <SheetClose asChild>
                   <Link
-                    href="/cart?checkout=sign-in"
+                    href="/sign-in"
                     className="flex min-h-12 items-center rounded-xl px-3 py-3 font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    Sign in <span className="ml-2 text-xs text-muted-ink">Not connected</span>
+                    Sign in
                   </Link>
                 </SheetClose>
               </nav>

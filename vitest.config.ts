@@ -9,6 +9,9 @@ export default defineConfig({
       "catalog-demo-fixtures": fileURLToPath(
         new URL("./src/catalog/demo-fixtures-entry.ts", import.meta.url),
       ),
+      "local-auth-driver": fileURLToPath(
+        new URL("./src/auth/local-driver.ts", import.meta.url),
+      ),
     },
     tsconfigPaths: true,
   },

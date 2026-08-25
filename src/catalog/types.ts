@@ -42,6 +42,8 @@ export type CatalogLotRecord = {
   availableQuantity: number;
   status: LotStatus;
   analyticalMethod: string | null;
+  manufacturedAt: string | null;
+  expiresAt: string | null;
 };
 
 export type CatalogCoaRecord = {
@@ -68,6 +70,9 @@ export type CatalogPromotionRecord = {
   name: string;
   kind: PromotionKind;
   status: PromotionStatus;
+  amountMinor: number | null;
+  basisPoints: number | null;
+  currency: string | null;
   startsAt: string | null;
   endsAt: string | null;
   configuration: unknown;

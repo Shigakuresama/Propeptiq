@@ -93,6 +93,8 @@ function createRecords(): CatalogRecordSet {
         availableQuantity: 12,
         status: "released",
         analyticalMethod: "Synthetic analytical method record",
+        manufacturedAt: null,
+        expiresAt: "2099-01-01T00:00:00.000Z",
       },
       {
         id: "demo-lot-alpha-quarantined",
@@ -102,6 +104,8 @@ function createRecords(): CatalogRecordSet {
         availableQuantity: 8,
         status: "quarantined",
         analyticalMethod: "Unreleased synthetic method",
+        manufacturedAt: null,
+        expiresAt: "2099-01-01T00:00:00.000Z",
       },
       {
         id: "demo-lot-beta",
@@ -111,6 +115,8 @@ function createRecords(): CatalogRecordSet {
         availableQuantity: 7,
         status: "released",
         analyticalMethod: null,
+        manufacturedAt: null,
+        expiresAt: "2099-01-01T00:00:00.000Z",
       },
       {
         id: "demo-lot-retired",
@@ -120,6 +126,8 @@ function createRecords(): CatalogRecordSet {
         availableQuantity: 3,
         status: "released",
         analyticalMethod: null,
+        manufacturedAt: null,
+        expiresAt: "2099-01-01T00:00:00.000Z",
       },
       {
         id: "demo-lot-no-price",
@@ -129,6 +137,8 @@ function createRecords(): CatalogRecordSet {
         availableQuantity: 2,
         status: "released",
         analyticalMethod: null,
+        manufacturedAt: null,
+        expiresAt: "2099-01-01T00:00:00.000Z",
       },
     ],
     coaDocuments: [
@@ -183,21 +193,25 @@ function createRecords(): CatalogRecordSet {
         name: "Synthetic percentage display — Demo Only",
         kind: "discount",
         status: "active",
+        amountMinor: null,
+        basisPoints: 1000,
+        currency: null,
         startsAt: null,
         endsAt: null,
-        configuration: { basisPoints: 1000 },
+        configuration: {},
       },
       {
         id: "demo-bundle",
         name: "Synthetic bundle display — Demo Only",
         kind: "bundle",
         status: "active",
+        amountMinor: 3600,
+        basisPoints: null,
+        currency: "USD",
         startsAt: null,
         endsAt: null,
         configuration: {
           productIds: ["demo-product-alpha", "demo-product-beta"],
-          bundleAmountMinor: 3600,
-          currency: "USD",
         },
       },
       {
@@ -205,6 +219,9 @@ function createRecords(): CatalogRecordSet {
         name: "Synthetic subscription display — Demo Only",
         kind: "subscription",
         status: "active",
+        amountMinor: null,
+        basisPoints: null,
+        currency: null,
         startsAt: null,
         endsAt: null,
         configuration: { interval: "month", intervalCount: 1 },
@@ -214,6 +231,9 @@ function createRecords(): CatalogRecordSet {
         name: "Synthetic loyalty display — Demo Only",
         kind: "loyalty",
         status: "active",
+        amountMinor: null,
+        basisPoints: null,
+        currency: null,
         startsAt: null,
         endsAt: null,
         configuration: { pointsPerDollar: 2 },
@@ -223,6 +243,9 @@ function createRecords(): CatalogRecordSet {
         name: "Synthetic related-record display — Demo Only",
         kind: "cross_sell",
         status: "active",
+        amountMinor: null,
+        basisPoints: null,
+        currency: null,
         startsAt: null,
         endsAt: null,
         configuration: {
@@ -234,18 +257,24 @@ function createRecords(): CatalogRecordSet {
         name: "Invalid synthetic discount",
         kind: "discount",
         status: "active",
+        amountMinor: null,
+        basisPoints: 20000,
+        currency: null,
         startsAt: null,
         endsAt: null,
-        configuration: { basisPoints: 20000 },
+        configuration: {},
       },
       {
         id: "demo-ended-discount",
         name: "Ended synthetic discount",
         kind: "discount",
         status: "active",
+        amountMinor: null,
+        basisPoints: 500,
+        currency: null,
         startsAt: null,
         endsAt: "2026-08-01T00:00:00.000Z",
-        configuration: { basisPoints: 500 },
+        configuration: {},
       },
     ],
     promotionTargets: [
@@ -274,6 +303,42 @@ function createRecords(): CatalogRecordSet {
 }
 
 describe("public catalog projection", () => {
+  it("uses canonical top-level monetary promotion facts instead of duplicating money in configuration", () => {
+    const base = createRecords();
+    const records = {
+      ...base,
+      promotions: [
+        {
+          ...base.promotions[0]!,
+          amountMinor: null,
+          basisPoints: 1000,
+          currency: null,
+          configuration: {},
+        },
+        {
+          ...base.promotions[1]!,
+          amountMinor: 3600,
+          basisPoints: null,
+          currency: "USD",
+          configuration: {
+            productIds: ["demo-product-alpha", "demo-product-beta"],
+          },
+        },
+      ],
+      promotionTargets: base.promotionTargets.filter((target) =>
+        ["demo-discount", "demo-bundle"].includes(target.promotionId),
+      ),
+    } as unknown as CatalogRecordSet;
+
+    const catalog = buildPublicCatalog(records, { now });
+    expect(catalog.promotions.map((promotion) => promotion.kind)).toEqual([
+      "discount",
+      "bundle",
+    ]);
+    expect(catalog.promotions[0]?.summary).toContain("10%");
+    expect(catalog.promotions[1]?.summary).toContain("$36.00");
+  });
+
   it("filters inactive records and validates all five merchandising kinds", () => {
     const catalog = buildPublicCatalog(createRecords(), { now });
 
@@ -325,5 +390,50 @@ describe("public catalog projection", () => {
       "COA state",
     ]);
     expect(alpha?.proof.every((node) => node.state.length > 0)).toBe(true);
+  });
+
+  it("fails closed when a product has ambiguous simultaneous current prices", () => {
+    const base = createRecords();
+    const records: CatalogRecordSet = {
+      ...base,
+      prices: [
+        ...base.prices,
+        {
+          id: "demo-price-alpha-eur",
+          productId: "demo-product-alpha",
+          version: 3,
+          amountMinor: 2300,
+          currency: "EUR",
+          effectiveAt: "2026-08-01T00:00:00.000Z",
+          supersededAt: null,
+        },
+      ],
+    };
+
+    const catalog = buildPublicCatalog(records, { now });
+    expect(findPublicProduct(catalog, "synthetic-reference-alpha")).toBeNull();
+  });
+
+  it("excludes released stock exactly at expiry and when manufacture is still future", () => {
+    const base = createRecords();
+    const expired: CatalogRecordSet = {
+      ...base,
+      lots: base.lots.map((lot) =>
+        lot.id === "demo-lot-alpha"
+          ? { ...lot, expiresAt: now.toISOString() }
+          : lot,
+      ),
+    };
+    expect(findPublicProduct(buildPublicCatalog(expired, { now }), "synthetic-reference-alpha")).toBeNull();
+
+    const futureManufacture: CatalogRecordSet = {
+      ...base,
+      lots: base.lots.map((lot) =>
+        lot.id === "demo-lot-alpha"
+          ? { ...lot, manufacturedAt: "2026-08-25T12:00:00.001Z" }
+          : lot,
+      ),
+    };
+    expect(findPublicProduct(buildPublicCatalog(futureManufacture, { now }), "synthetic-reference-alpha")).toBeNull();
   });
 });

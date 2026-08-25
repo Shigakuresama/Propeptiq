@@ -107,7 +107,7 @@ describe("anonymous cart persistence", () => {
     const items = [{ productId: "demo-product-alpha", quantity: 2 }];
 
     expect(prepareCheckoutHandoff(storage, items)).toEqual({
-      returnTo: "/cart?checkout=resume",
+      returnTo: "/checkout",
       itemCount: 2,
     });
     expect(restoreCheckoutHandoff(storage)).toEqual(items);

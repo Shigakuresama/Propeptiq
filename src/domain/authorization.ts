@@ -14,7 +14,7 @@ export type Capability =
 export type Principal = Readonly<{
   actorId: string;
   clerkUserId: string;
-  buyerStatus: BuyerStatus;
+  buyerStatus: BuyerStatus | null;
   capabilities: readonly Capability[];
   mfaSatisfied: boolean;
 }>;
@@ -144,7 +144,7 @@ export type AuthorizeOperationInput = Readonly<{
   resource: ResourceScope;
 }>;
 
-const capabilityValues = new Set<Capability>([
+export const CAPABILITIES = Object.freeze([
   "review:decide",
   "catalog:publish",
   "destination:manage",
@@ -154,7 +154,13 @@ const capabilityValues = new Set<Capability>([
   "refund:request",
   "fulfillment:release:consume",
   "staff:manage",
-]);
+] as const satisfies readonly Capability[]);
+
+const capabilityValues = new Set<Capability>(CAPABILITIES);
+
+export function isCapability(value: unknown): value is Capability {
+  return typeof value === "string" && capabilityValues.has(value as Capability);
+}
 
 const buyerStatuses = new Set<BuyerStatus>([
   "active",
@@ -183,7 +189,8 @@ function isValidPrincipal(value: unknown): value is Principal {
     isRecord(value) &&
     isNonBlank(value.actorId) &&
     isNonBlank(value.clerkUserId) &&
-    buyerStatuses.has(value.buyerStatus as BuyerStatus) &&
+    (value.buyerStatus === null ||
+      buyerStatuses.has(value.buyerStatus as BuyerStatus)) &&
     isDenseArray(value.capabilities) &&
     value.capabilities.every(
       (capability) =>
@@ -216,8 +223,18 @@ export function authorizeOperation(
   if (!isRecord(input)) return deny("identity_incomplete");
   if (input.principal === null) return deny("unauthenticated");
   if (!isValidPrincipal(input.principal)) return deny("identity_incomplete");
-  if (input.principal.buyerStatus === "blocked") {
+  if (
+    input.principal.buyerStatus === "blocked" &&
+    operation !== "account.read.self" &&
+    operation !== "order.read.self"
+  ) {
     return deny("principal_blocked");
+  }
+  if (
+    input.principal.buyerStatus === null &&
+    operation === "checkout.request"
+  ) {
+    return deny("identity_incomplete");
   }
   if (operation === "unknown") return deny("operation_policy_missing");
 

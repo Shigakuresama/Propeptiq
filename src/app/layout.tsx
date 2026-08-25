@@ -3,6 +3,7 @@ import { Geist, Newsreader } from "next/font/google";
 import type { ReactNode } from "react";
 
 import { CartProvider } from "@/cart/cart-provider";
+import { RuntimeAuthProvider } from "@/auth/runtime-provider";
 import { cn } from "@/lib/utils";
 
 import "./globals.css";
@@ -48,7 +49,9 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       className={cn(geist.variable, newsreader.variable)}
     >
       <body className="min-h-svh bg-canvas font-sans text-ink antialiased">
-        <CartProvider>{children}</CartProvider>
+        <RuntimeAuthProvider>
+          <CartProvider>{children}</CartProvider>
+        </RuntimeAuthProvider>
       </body>
     </html>
   );

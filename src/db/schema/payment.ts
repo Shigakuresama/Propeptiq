@@ -137,6 +137,7 @@ export const refunds = pgTable(
     requestedByUserId: uuid("requested_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
+    verifiedPaymentEventId: uuid("verified_payment_event_id").notNull(),
     provider: text("provider").notNull(),
     providerEventId: uuid("provider_event_id"),
     providerRefundId: text("provider_refund_id"),
@@ -157,6 +158,11 @@ export const refunds = pgTable(
     uniqueIndex("refunds_provider_refund_unique")
       .on(table.provider, table.providerRefundId)
       .where(sql`${table.providerRefundId} is not null`),
+    foreignKey({
+      columns: [table.verifiedPaymentEventId, table.orderId],
+      foreignColumns: [paymentEvents.id, paymentEvents.orderId],
+      name: "refunds_verified_payment_order_fk",
+    }).onDelete("restrict"),
     foreignKey({
       columns: [table.providerEventId, table.provider],
       foreignColumns: [providerEvents.id, providerEvents.provider],

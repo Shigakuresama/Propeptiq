@@ -2,14 +2,16 @@ import { sql } from "drizzle-orm";
 import {
   check,
   index,
+  integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { nonblank } from "./helpers";
+import { nonblank, sha256 } from "./helpers";
 import { users } from "./identity";
 
 export const adminAudit = pgTable(
@@ -47,5 +49,28 @@ export const adminAudit = pgTable(
       table.resourceId,
       table.occurredAt,
     ),
+  ],
+);
+
+export const rateLimitWindows = pgTable(
+  "rate_limit_windows",
+  {
+    scopeHash: text("scope_hash").notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    count: integer("count").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    primaryKey({
+      name: "rate_limit_windows_scope_start_pk",
+      columns: [table.scopeHash, table.windowStart],
+    }),
+    check("rate_limit_windows_scope_sha256", sha256(table.scopeHash)),
+    check("rate_limit_windows_count_positive", sql`${table.count} > 0`),
+    check(
+      "rate_limit_windows_expiry_after_start",
+      sql`${table.expiresAt} > ${table.windowStart}`,
+    ),
+    index("rate_limit_windows_expiry_idx").on(table.expiresAt),
   ],
 );

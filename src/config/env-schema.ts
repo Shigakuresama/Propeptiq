@@ -3,6 +3,7 @@ import { z } from "zod";
 const capabilityMode = z.enum(["disabled", "test", "live"]);
 const appEnvironment = z.enum(["local", "preview", "production"]);
 const catalogDemoMode = z.enum(["disabled", "enabled"]);
+const localTestDriver = z.enum(["disabled", "enabled"]);
 const vercelEnvironment = z.enum(["development", "preview", "production"]);
 const nonBlank = z.string().trim().min(1);
 const urlValue = nonBlank.pipe(z.url());
@@ -22,6 +23,9 @@ const rawServerEnvSchema = z.object({
   APP_ENV: appEnvironment.default("local"),
   APP_ORIGIN: urlValue.optional(),
   CATALOG_DEMO_MODE: catalogDemoMode.default("disabled"),
+  LOCAL_TEST_DRIVER: localTestDriver.default("disabled"),
+  LOCAL_TEST_SECRET: z.string().min(32).optional(),
+  RATE_LIMIT_SECRET: z.string().min(32).optional(),
   VERCEL_ENV: vercelEnvironment.optional(),
   VERCEL_TARGET_ENV: nonBlank.optional(),
   AUTH_MODE: capabilityMode.default("disabled"),
@@ -45,6 +49,19 @@ const rawServerEnvSchema = z.object({
 });
 
 export type ServerEnv = z.infer<typeof rawServerEnvSchema>;
+
+export function hasProductionIdentity(
+  environment: Pick<
+    ServerEnv,
+    "APP_ENV" | "VERCEL_ENV" | "VERCEL_TARGET_ENV"
+  >,
+): boolean {
+  return (
+    environment.APP_ENV === "production" ||
+    environment.VERCEL_ENV === "production" ||
+    environment.VERCEL_TARGET_ENV?.trim().toLowerCase() === "production"
+  );
+}
 
 const modeKeys = [
   "AUTH_MODE",
@@ -126,16 +143,64 @@ function looksProductionScopedDatabase(value: string): boolean {
 }
 
 const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
-  const productionDeployment =
-    env.APP_ENV === "production" ||
-    env.VERCEL_ENV === "production" ||
-    env.VERCEL_TARGET_ENV?.trim().toLowerCase() === "production";
+  const productionDeployment = hasProductionIdentity(env);
+
+  const deploymentIdentityIsInconsistent =
+    (productionDeployment && env.APP_ENV !== "production") ||
+    (env.APP_ENV === "production" &&
+      ((env.VERCEL_ENV !== undefined && env.VERCEL_ENV !== "production") ||
+        (env.VERCEL_TARGET_ENV !== undefined &&
+          env.VERCEL_TARGET_ENV.trim().toLowerCase() !== "production")));
+  if (deploymentIdentityIsInconsistent) {
+    context.addIssue({
+      code: "custom",
+      path: ["APP_ENV"],
+      message: "Production deployment identity is inconsistent",
+    });
+  }
 
   if (env.CATALOG_DEMO_MODE === "enabled" && productionDeployment) {
     context.addIssue({
       code: "custom",
       path: ["CATALOG_DEMO_MODE"],
       message: "CATALOG_DEMO_MODE cannot be enabled for a production identity",
+    });
+  }
+
+  if (env.LOCAL_TEST_DRIVER === "enabled") {
+    if (
+      env.APP_ENV !== "local" ||
+      productionDeployment ||
+      (env.VERCEL_ENV !== undefined && env.VERCEL_ENV !== "development") ||
+      (env.VERCEL_TARGET_ENV !== undefined &&
+        env.VERCEL_TARGET_ENV.trim().toLowerCase() !== "development")
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["LOCAL_TEST_DRIVER"],
+        message:
+          "LOCAL_TEST_DRIVER is permitted only for an explicit local development identity",
+      });
+    }
+    if (!env.LOCAL_TEST_SECRET) {
+      context.addIssue({
+        code: "custom",
+        path: ["LOCAL_TEST_SECRET"],
+        message:
+          "LOCAL_TEST_SECRET is required when LOCAL_TEST_DRIVER is enabled",
+      });
+    }
+  }
+
+  if (
+    (env.AUTH_MODE !== "disabled" || env.LOCAL_TEST_DRIVER === "enabled") &&
+    !env.RATE_LIMIT_SECRET
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["RATE_LIMIT_SECRET"],
+      message:
+        "RATE_LIMIT_SECRET is required when an identity adapter is enabled",
     });
   }
 
@@ -168,11 +233,11 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
   requireFields(env, context, "STORAGE_MODE", ["BLOB_READ_WRITE_TOKEN"]);
   requireFields(env, context, "EMAIL_MODE", ["RESEND_API_KEY", "RESEND_FROM"]);
 
-  if (env.APP_ENV !== "local" && !env.APP_ORIGIN) {
+  if ((env.APP_ENV !== "local" || productionDeployment) && !env.APP_ORIGIN) {
     addRequiredIssue(context, "APP_ORIGIN", "AUTH_MODE");
   }
 
-  if (env.APP_ENV !== "local" && env.APP_ORIGIN) {
+  if ((env.APP_ENV !== "local" || productionDeployment) && env.APP_ORIGIN) {
     const origin = new URL(env.APP_ORIGIN);
     if (
       origin.protocol !== "https:" ||
@@ -186,7 +251,7 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
     }
   }
 
-  if (env.APP_ENV === "production") {
+  if (productionDeployment) {
     for (const modeKey of modeKeys) {
       if (env[modeKey] === "test") {
         context.addIssue({
@@ -199,7 +264,7 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
   }
 
   for (const modeKey of modeKeys) {
-    if (env[modeKey] === "live" && env.APP_ENV !== "production") {
+    if (env[modeKey] === "live" && !productionDeployment) {
       context.addIssue({
         code: "custom",
         path: [modeKey],

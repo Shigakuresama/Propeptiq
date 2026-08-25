@@ -10,14 +10,10 @@ import type {
   PublicProofNode,
 } from "./types";
 
-const discountConfiguration = z
-  .object({ basisPoints: z.number().int().min(1).max(10_000) })
-  .strict();
+const discountConfiguration = z.object({}).strict();
 const bundleConfiguration = z
   .object({
     productIds: z.array(z.string().min(1)).min(2),
-    bundleAmountMinor: z.number().int().positive(),
-    currency: z.string().regex(/^[A-Z]{3}$/),
   })
   .strict();
 const subscriptionConfiguration = z
@@ -48,31 +44,64 @@ function projectPromotion(
       const configuration = discountConfiguration.safeParse(
         promotion.configuration,
       );
-      if (!configuration.success) return null;
+      const percentageIsValid =
+        promotion.amountMinor === null &&
+        promotion.currency === null &&
+        Number.isInteger(promotion.basisPoints) &&
+        promotion.basisPoints !== null &&
+        promotion.basisPoints >= 1 &&
+        promotion.basisPoints <= 10_000;
+      const amountIsValid =
+        promotion.basisPoints === null &&
+        Number.isSafeInteger(promotion.amountMinor) &&
+        promotion.amountMinor !== null &&
+        promotion.amountMinor > 0 &&
+        typeof promotion.currency === "string" &&
+        /^[A-Z]{3}$/.test(promotion.currency);
+      if (!configuration.success || (!percentageIsValid && !amountIsValid)) {
+        return null;
+      }
       return {
         id: promotion.id,
         kind: promotion.kind,
         name: promotion.name,
-        summary: `${configuration.data.basisPoints / 100}% display offer. Final discount is recalculated at checkout.`,
+        summary: percentageIsValid
+          ? `${promotion.basisPoints! / 100}% display offer. Final discount is recalculated at checkout.`
+          : `${formatMoney(promotion.amountMinor!, promotion.currency!)} display offer. Final discount is recalculated at checkout.`,
       };
     }
     case "bundle": {
       const configuration = bundleConfiguration.safeParse(
         promotion.configuration,
       );
-      if (!configuration.success) return null;
+      if (
+        !configuration.success ||
+        !Number.isSafeInteger(promotion.amountMinor) ||
+        promotion.amountMinor === null ||
+        promotion.amountMinor <= 0 ||
+        promotion.basisPoints !== null ||
+        typeof promotion.currency !== "string" ||
+        !/^[A-Z]{3}$/.test(promotion.currency)
+      ) {
+        return null;
+      }
       return {
         id: promotion.id,
         kind: promotion.kind,
         name: promotion.name,
-        summary: `${configuration.data.productIds.length}-record bundle display at ${formatMoney(configuration.data.bundleAmountMinor, configuration.data.currency)}. Enrollment is not active.`,
+        summary: `${configuration.data.productIds.length}-record bundle display at ${formatMoney(promotion.amountMinor, promotion.currency)}. Enrollment is not active.`,
       };
     }
     case "subscription": {
       const configuration = subscriptionConfiguration.safeParse(
         promotion.configuration,
       );
-      if (!configuration.success) return null;
+      if (
+        !configuration.success ||
+        promotion.amountMinor !== null ||
+        promotion.basisPoints !== null ||
+        promotion.currency !== null
+      ) return null;
       return {
         id: promotion.id,
         kind: promotion.kind,
@@ -84,7 +113,12 @@ function projectPromotion(
       const configuration = loyaltyConfiguration.safeParse(
         promotion.configuration,
       );
-      if (!configuration.success) return null;
+      if (
+        !configuration.success ||
+        promotion.amountMinor !== null ||
+        promotion.basisPoints !== null ||
+        promotion.currency !== null
+      ) return null;
       return {
         id: promotion.id,
         kind: promotion.kind,
@@ -96,7 +130,12 @@ function projectPromotion(
       const configuration = crossSellConfiguration.safeParse(
         promotion.configuration,
       );
-      if (!configuration.success) return null;
+      if (
+        !configuration.success ||
+        promotion.amountMinor !== null ||
+        promotion.basisPoints !== null ||
+        promotion.currency !== null
+      ) return null;
       return {
         id: promotion.id,
         kind: promotion.kind,
@@ -146,10 +185,21 @@ export function buildPublicCatalog(
   );
   const activeProductIds = new Set(activeProducts.map((product) => product.id));
   const releasedLots = records.lots.filter(
-    (lot) =>
-      activeProductIds.has(lot.productId) &&
-      lot.status === "released" &&
-      lot.availableQuantity > 0,
+    (lot) => {
+      const manufacturedAt = lot.manufacturedAt
+        ? new Date(lot.manufacturedAt).getTime()
+        : null;
+      const expiresAt = lot.expiresAt ? new Date(lot.expiresAt).getTime() : null;
+      return (
+        activeProductIds.has(lot.productId) &&
+        lot.status === "released" &&
+        lot.availableQuantity > 0 &&
+        (manufacturedAt === null ||
+          (Number.isFinite(manufacturedAt) && manufacturedAt <= now.getTime())) &&
+        (expiresAt === null ||
+          (Number.isFinite(expiresAt) && expiresAt > now.getTime()))
+      );
+    },
   );
   const releasedLotIds = new Set(releasedLots.map((lot) => lot.id));
   const activeCoas = records.coaDocuments.filter(
@@ -163,12 +213,16 @@ export function buildPublicCatalog(
   const products: PublicProduct[] = [];
   const relatedIdsByProduct = new Map<string, Set<string>>();
   for (const product of activeProducts) {
-    const price = records.prices.find(
+    const currentPrices = records.prices.filter(
       (candidate) =>
         candidate.productId === product.id &&
         candidate.supersededAt === null &&
         new Date(candidate.effectiveAt).getTime() <= now.getTime(),
     );
+    const price =
+      currentPrices.length === 1 && currentPrices[0]?.currency === "USD"
+        ? currentPrices[0]
+        : undefined;
     const productLots = releasedLots.filter(
       (lot) => lot.productId === product.id,
     );

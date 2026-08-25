@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -58,6 +59,7 @@ export const products = pgTable(
     slug: text("slug").notNull(),
     name: text("name").notNull(),
     packageForm: text("package_form").notNull(),
+    materialIdentity: text("material_identity").notNull(),
     policyGroupId: uuid("policy_group_id")
       .notNull()
       .references(() => productPolicyGroups.id, { onDelete: "restrict" }),
@@ -70,6 +72,7 @@ export const products = pgTable(
     check("products_slug_nonblank", nonblank(table.slug)),
     check("products_name_nonblank", nonblank(table.name)),
     check("products_package_form_nonblank", nonblank(table.packageForm)),
+    check("products_material_identity_nonblank", nonblank(table.materialIdentity)),
     index("products_policy_group_status_idx").on(
       table.policyGroupId,
       table.status,
@@ -119,6 +122,7 @@ export const lots = pgTable(
       .references(() => products.id, { onDelete: "restrict" }),
     supplierName: text("supplier_name").notNull(),
     supplierLotCode: text("supplier_lot_code").notNull(),
+    analyticalMethod: text("analytical_method"),
     receivedQuantity: integer("received_quantity").notNull(),
     availableQuantity: integer("available_quantity").notNull(),
     status: lotStatusEnum("status").default("draft").notNull(),
@@ -136,6 +140,10 @@ export const lots = pgTable(
     ),
     check("lots_supplier_nonblank", nonblank(table.supplierName)),
     check("lots_supplier_code_nonblank", nonblank(table.supplierLotCode)),
+    check(
+      "lots_analytical_method_nonblank",
+      sql`${table.analyticalMethod} is null or ${nonblank(table.analyticalMethod)}`,
+    ),
     check(
       "lots_quantity_bounds",
       sql`${table.receivedQuantity} > 0 and ${table.availableQuantity} >= 0 and ${table.availableQuantity} <= ${table.receivedQuantity}`,
@@ -163,10 +171,42 @@ export const coaDocuments = pgTable(
     createdAt: createdAt(),
   },
   (table) => [
+    unique("coa_documents_id_lot_unique").on(table.id, table.lotId),
     unique("coa_documents_lot_hash_unique").on(table.lotId, table.evidenceHash),
     check("coa_documents_hash_sha256", sha256(table.evidenceHash)),
     check("coa_documents_storage_key_nonblank", nonblank(table.storageKey)),
     index("coa_documents_lot_active_idx").on(table.lotId, table.active),
+  ],
+);
+
+export const analyticalClaims = pgTable(
+  "analytical_claims",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    productId: uuid("product_id").notNull(),
+    lotId: uuid("lot_id").notNull(),
+    coaDocumentId: uuid("coa_document_id").notNull(),
+    text: text("text").notNull(),
+    active: boolean("active").default(false).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.lotId, table.productId],
+      foreignColumns: [lots.id, lots.productId],
+      name: "analytical_claims_lot_product_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.coaDocumentId, table.lotId],
+      foreignColumns: [coaDocuments.id, coaDocuments.lotId],
+      name: "analytical_claims_coa_lot_fk",
+    }).onDelete("restrict"),
+    check("analytical_claims_text_nonblank", nonblank(table.text)),
+    index("analytical_claims_product_active_idx").on(
+      table.productId,
+      table.active,
+    ),
   ],
 );
 

@@ -9,6 +9,7 @@ describe("parseServerEnv", () => {
     expect(env).toMatchObject({
       APP_ENV: "local",
       CATALOG_DEMO_MODE: "disabled",
+      LOCAL_TEST_DRIVER: "disabled",
       AUTH_MODE: "disabled",
       DATABASE_MODE: "disabled",
       PAYMENTS_MODE: "disabled",
@@ -151,6 +152,7 @@ describe("parseServerEnv", () => {
       EMAIL_MODE: "live",
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_synthetic",
       CLERK_SECRET_KEY: "sk_live_synthetic",
+      RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
       DATABASE_URL: "postgresql://synthetic.invalid/database?sslmode=require",
       STRIPE_SECRET_KEY: "sk_live_synthetic",
       STRIPE_WEBHOOK_SECRET: "whsec_synthetic",
@@ -172,6 +174,62 @@ describe("parseServerEnv", () => {
         RESEND_FROM: "research@example.test",
       }),
     ).toThrow(/test mode is not permitted in production/);
+  });
+
+  it("permits the deterministic auth driver only for an explicit local test secret", () => {
+    const env = parseServerEnv({
+      APP_ENV: "local",
+      LOCAL_TEST_DRIVER: "enabled",
+      LOCAL_TEST_SECRET: "task5-local-driver-secret-at-least-32-chars",
+      RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
+    });
+    expect(env.LOCAL_TEST_DRIVER).toBe("enabled");
+
+    expect(() =>
+      parseServerEnv({
+        APP_ENV: "local",
+        LOCAL_TEST_DRIVER: "enabled",
+        LOCAL_TEST_SECRET: "short",
+        RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
+      }),
+    ).toThrow(/LOCAL_TEST_SECRET/);
+  });
+
+  it.each([
+    { APP_ENV: "production" },
+    { APP_ENV: "preview" },
+    { APP_ENV: "local", VERCEL_ENV: "production" },
+    { APP_ENV: "local", VERCEL_ENV: "preview" },
+    { APP_ENV: "local", VERCEL_TARGET_ENV: "production" },
+    { APP_ENV: "local", VERCEL_TARGET_ENV: "customer-preview" },
+  ] as const)("rejects the local test driver for non-local or production identity %#", (identity) => {
+    expect(() =>
+      parseServerEnv({
+        ...identity,
+        APP_ORIGIN:
+          identity.APP_ENV === "local" ? undefined : "https://research.example.test",
+        LOCAL_TEST_DRIVER: "enabled",
+        LOCAL_TEST_SECRET: "task5-local-driver-secret-at-least-32-chars",
+        RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
+      }),
+    ).toThrow(/LOCAL_TEST_DRIVER/);
+  });
+
+  it("requires a dedicated rate-limit secret for every enabled identity adapter", () => {
+    expect(() =>
+      parseServerEnv({
+        AUTH_MODE: "test",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic",
+        CLERK_SECRET_KEY: "sk_test_synthetic",
+      }),
+    ).toThrow(/RATE_LIMIT_SECRET/);
+
+    expect(() =>
+      parseServerEnv({
+        LOCAL_TEST_DRIVER: "enabled",
+        LOCAL_TEST_SECRET: "task5-local-driver-secret-at-least-32-chars",
+      }),
+    ).toThrow(/RATE_LIMIT_SECRET/);
   });
 
   it("rejects catalog demo mode for the production application environment", () => {

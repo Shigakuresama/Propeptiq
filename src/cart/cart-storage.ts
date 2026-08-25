@@ -71,11 +71,11 @@ export function loadCart(storage: Storage): CartLine[] {
 export function prepareCheckoutHandoff(
   storage: Storage,
   items: readonly CartLine[],
-): { returnTo: "/cart?checkout=resume"; itemCount: number } {
+): { returnTo: "/checkout"; itemCount: number } {
   const normalized = normalizeCart(items);
   persistCart(storage, normalized);
   return {
-    returnTo: "/cart?checkout=resume",
+    returnTo: "/checkout",
     itemCount: normalized.reduce((total, item) => total + item.quantity, 0),
   };
 }

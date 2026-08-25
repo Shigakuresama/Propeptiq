@@ -56,4 +56,46 @@ describe("catalog source boundary", () => {
     ).rejects.toThrow(/CATALOG_DEMO_MODE.*production/);
     expect(loadDemo).not.toHaveBeenCalled();
   });
+
+  it("rejects demo mode before loading fixtures when a live database is configured", async () => {
+    const loadDemo = vi.fn(async () => syntheticRecords);
+    const loadDatabase = vi.fn(async () => ({
+      ...syntheticRecords,
+      source: "production" as const,
+    }));
+    const unsafeEnvironment = {
+      ...parseServerEnv({ CATALOG_DEMO_MODE: "enabled" }),
+      DATABASE_MODE: "live",
+    } as ServerEnv;
+
+    await expect(
+      (loadCatalogRecordSet as unknown as (
+        environment: ServerEnv,
+        loadDemo: () => Promise<CatalogRecordSet>,
+        loadDatabase: () => Promise<CatalogRecordSet>,
+      ) => Promise<CatalogRecordSet>)(unsafeEnvironment, loadDemo, loadDatabase),
+    ).rejects.toThrow(/demo.*live database/i);
+    expect(loadDemo).not.toHaveBeenCalled();
+    expect(loadDatabase).not.toHaveBeenCalled();
+  });
+
+  it("uses only the configured database when demo mode is disabled", async () => {
+    const loadDemo = vi.fn(async () => syntheticRecords);
+    const databaseRecords = { ...syntheticRecords, source: "production" as const };
+    const loadDatabase = vi.fn(async () => databaseRecords);
+    const environment = {
+      ...parseServerEnv({}),
+      DATABASE_MODE: "test",
+    } as ServerEnv;
+
+    await expect(
+      (loadCatalogRecordSet as unknown as (
+        environment: ServerEnv,
+        loadDemo: () => Promise<CatalogRecordSet>,
+        loadDatabase: () => Promise<CatalogRecordSet>,
+      ) => Promise<CatalogRecordSet>)(environment, loadDemo, loadDatabase),
+    ).resolves.toEqual(databaseRecords);
+    expect(loadDemo).not.toHaveBeenCalled();
+    expect(loadDatabase).toHaveBeenCalledOnce();
+  });
 });

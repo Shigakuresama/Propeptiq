@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   adminAudit,
+  analyticalClaims,
   attestationAcceptances,
   attestationVersions,
   buyerProfiles,
@@ -22,6 +23,7 @@ import {
   products,
   promotionTargets,
   promotions,
+  rateLimitWindows,
   providerEvents,
   refunds,
   reviewRequestDestinationPolicies,
@@ -44,6 +46,7 @@ const expectedLeanTables = [
   [productPrices, "product_prices"],
   [lots, "lots"],
   [coaDocuments, "coa_documents"],
+  [analyticalClaims, "analytical_claims"],
   [destinationPolicies, "destination_policies"],
   [promotions, "promotions"],
   [promotionTargets, "promotion_targets"],
@@ -60,6 +63,7 @@ const expectedLeanTables = [
   [fulfillmentReleases, "fulfillment_releases"],
   [shipments, "shipments"],
   [adminAudit, "admin_audit"],
+  [rateLimitWindows, "rate_limit_windows"],
 ] as const;
 
 const obsoleteTables = [
@@ -165,9 +169,9 @@ async function insertCommerceFixture(client: PGlite): Promise<void> {
     VALUES ('${ids.group}', 'synthetic-group', 'Synthetic test group');
 
     INSERT INTO products
-      (id, slug, name, package_form, policy_group_id, status)
+      (id, slug, name, package_form, material_identity, policy_group_id, status)
     VALUES
-      ('${ids.product}', 'synthetic-product', 'Synthetic product', 'sealed vial', '${ids.group}', 'active');
+      ('${ids.product}', 'synthetic-product', 'Synthetic product', 'sealed vial', 'Synthetic identity', '${ids.group}', 'active');
 
     INSERT INTO product_prices
       (id, product_id, version, amount_minor, currency, effective_at)
@@ -227,10 +231,10 @@ async function insertSecondUserAcceptance(client: PGlite): Promise<void> {
 async function insertSecondCatalogRecord(client: PGlite): Promise<void> {
   await client.exec(`
     INSERT INTO products
-      (id, slug, name, package_form, policy_group_id, status)
+      (id, slug, name, package_form, material_identity, policy_group_id, status)
     VALUES
       ('${ids.product2}', 'synthetic-product-two', 'Synthetic product two',
-       'sealed vial', '${ids.group}', 'active');
+       'sealed vial', 'Synthetic identity two', '${ids.group}', 'active');
 
     INSERT INTO product_prices
       (id, product_id, version, amount_minor, currency, effective_at)
@@ -552,18 +556,18 @@ describe("lean database migration", () => {
 
     await client.exec(`
       INSERT INTO refunds
-        (order_id, requested_by_user_id, provider, idempotency_key,
+        (order_id, requested_by_user_id, verified_payment_event_id, provider, idempotency_key,
          requested_amount_minor, currency, status)
       VALUES
-        ('${ids.order}', '${ids.user}', 'synthetic_provider', 'refund-key-1', 500, 'USD', 'requested');
+        ('${ids.order}', '${ids.user}', '${ids.paymentEvent}', 'synthetic_provider', 'refund-key-1', 500, 'USD', 'requested');
     `);
     await expectRejected(
       client,
-      `INSERT INTO refunds
-         (order_id, requested_by_user_id, provider, idempotency_key,
-          requested_amount_minor, currency, status)
-       VALUES
-         ('${ids.order}', '${ids.user}', 'synthetic_provider', 'refund-key-1', 500, 'USD', 'requested')`,
+       `INSERT INTO refunds
+          (order_id, requested_by_user_id, verified_payment_event_id, provider, idempotency_key,
+           requested_amount_minor, currency, status)
+        VALUES
+          ('${ids.order}', '${ids.user}', '${ids.paymentEvent}', 'synthetic_provider', 'refund-key-1', 500, 'USD', 'requested')`,
     );
   });
 
@@ -807,11 +811,11 @@ describe("lean database migration", () => {
     await insertCommerceFixture(client);
     await client.exec(`
       INSERT INTO refunds
-        (order_id, requested_by_user_id, provider, provider_event_id,
+        (order_id, requested_by_user_id, verified_payment_event_id, provider, provider_event_id,
          provider_refund_id, idempotency_key, requested_amount_minor,
          confirmed_amount_minor, currency, status, confirmed_at)
       VALUES
-        ('${ids.order}', '${ids.user}', 'synthetic_provider', '${ids.providerEvent}',
+        ('${ids.order}', '${ids.user}', '${ids.paymentEvent}', 'synthetic_provider', '${ids.providerEvent}',
          'refund-shared-id', 'refund-provider-key-1', 500, 500, 'USD',
          'succeeded', now());
 
@@ -827,33 +831,33 @@ describe("lean database migration", () => {
 
     await expectRejected(
       client,
-      `INSERT INTO refunds
-         (order_id, requested_by_user_id, provider, provider_event_id,
+       `INSERT INTO refunds
+          (order_id, requested_by_user_id, verified_payment_event_id, provider, provider_event_id,
           provider_refund_id, idempotency_key, requested_amount_minor,
           confirmed_amount_minor, currency, status, confirmed_at)
        VALUES
-         ('${ids.order}', '${ids.user}', 'synthetic_provider', '${ids.providerEvent2}',
+          ('${ids.order}', '${ids.user}', '${ids.paymentEvent}', 'synthetic_provider', '${ids.providerEvent2}',
           'refund-shared-id', 'refund-provider-key-2', 400, 400, 'USD',
           'succeeded', now())`,
     );
     await expectRejected(
       client,
-      `INSERT INTO refunds
-         (order_id, requested_by_user_id, provider, provider_event_id,
+       `INSERT INTO refunds
+          (order_id, requested_by_user_id, verified_payment_event_id, provider, provider_event_id,
           provider_refund_id, idempotency_key, requested_amount_minor,
           confirmed_amount_minor, currency, status, confirmed_at)
        VALUES
-         ('${ids.order}', '${ids.user}', 'synthetic_provider',
+          ('${ids.order}', '${ids.user}', '${ids.paymentEvent}', 'synthetic_provider',
           '00000000-0000-4000-8000-000000000045', '   ',
           'refund-provider-key-blank', 300, 300, 'USD', 'succeeded', now())`,
     );
     await expectRejected(
       client,
-      `INSERT INTO refunds
-         (order_id, requested_by_user_id, provider, provider_event_id,
+       `INSERT INTO refunds
+          (order_id, requested_by_user_id, verified_payment_event_id, provider, provider_event_id,
           idempotency_key, requested_amount_minor, currency, status)
        VALUES
-         ('${ids.order}', '${ids.user}', 'synthetic_provider',
+          ('${ids.order}', '${ids.user}', '${ids.paymentEvent}', 'synthetic_provider',
           '00000000-0000-4000-8000-000000000044',
           'refund-provider-key-mismatch', 200, 'USD', 'requested')`,
     );
@@ -876,6 +880,7 @@ describe("lean database migration", () => {
       { table_name: "checkout_attempts", column_name: "request_hash" },
       { table_name: "coa_documents", column_name: "evidence_hash" },
       { table_name: "provider_events", column_name: "payload_hash" },
+      { table_name: "rate_limit_windows", column_name: "scope_hash" },
       { table_name: "review_requests", column_name: "snapshot_hash" },
     ]);
   });

@@ -100,9 +100,8 @@ export function CartView({
 
   function beginCheckoutHandoff() {
     const handoff = prepareCheckoutHandoff(window.localStorage, items);
-    setHandoffMessage(
-      `Sign-in checkout is not connected yet. ${handoff.itemCount} requested unit${handoff.itemCount === 1 ? "" : "s"} remain saved in this browser for return to the cart.`,
-    );
+    setHandoffMessage(`Saving ${handoff.itemCount} requested unit${handoff.itemCount === 1 ? "" : "s"} for checkout.`);
+    window.location.assign(handoff.returnTo);
   }
 
   if (!hydrated) {
@@ -274,7 +273,7 @@ export function CartView({
 
         {checkoutIntent ? (
           <p className="info-record mt-6">
-            Sign-in is not connected in this storefront slice. Your cart remains saved locally.
+            Your saved request is ready to continue at checkout.
           </p>
         ) : null}
         {handoffMessage ? (
@@ -292,7 +291,7 @@ export function CartView({
           Continue to sign in
         </Button>
         <p className="mt-4 text-xs leading-5 text-muted-ink">
-          Account connection, destination, tax, shipping, final discount, and payment are not part of this step.
+          Account verification continues at checkout. Destination, tax, shipping, final discount, and payment remain unavailable until the next commerce step.
         </p>
         <Link className="record-link mt-6 inline-block" href="/catalog">
           Continue shopping

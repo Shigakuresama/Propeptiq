@@ -65,6 +65,50 @@ describe("authorizeOperation", () => {
     ).toMatchObject({ allowed: true });
   });
 
+  it("allows a profile-less authenticated user to manage self facts but not checkout", () => {
+    const profileless = { ...buyer, buyerStatus: null };
+    expect(
+      authorizeOperation({
+        principal: profileless,
+        operation: "account.read.self",
+        resource: ownerResource(),
+      }),
+    ).toMatchObject({ allowed: true });
+    expect(
+      authorizeOperation({
+        principal: profileless,
+        operation: "account.update.self",
+        resource: ownerResource(),
+      }),
+    ).toMatchObject({ allowed: true });
+    expect(
+      authorizeOperation({
+        principal: profileless,
+        operation: "checkout.request",
+        resource: ownerResource(),
+      }),
+    ).toEqual({
+      allowed: false,
+      operation: "checkout.request",
+      reasonCode: "identity_incomplete",
+    });
+  });
+
+  it("allows a capable MFA staff identity without inventing a buyer profile", () => {
+    expect(
+      authorizeOperation({
+        principal: {
+          ...buyer,
+          buyerStatus: null,
+          capabilities: ["catalog:publish"],
+          mfaSatisfied: true,
+        },
+        operation: "catalog.publish",
+        resource: { relation: "capability_only" },
+      }),
+    ).toMatchObject({ allowed: true });
+  });
+
   it.each(staffCases)(
     "requires the matching capability and MFA for %s",
     (operation, capability) => {
@@ -125,7 +169,53 @@ describe("authorizeOperation", () => {
     });
   });
 
-  it("denies unauthenticated, blocked, malformed, and owner-mismatched requests", () => {
+  it("allows blocked buyers to read their own account and order history", () => {
+    const blocked = { ...buyer, buyerStatus: "blocked" as const };
+
+    for (const operation of ["account.read.self", "order.read.self"] as const) {
+      expect(
+        authorizeOperation({
+          principal: blocked,
+          operation,
+          resource: ownerResource(),
+        }),
+      ).toMatchObject({ allowed: true, operation });
+    }
+  });
+
+  it("denies blocked checkout and staff operations", () => {
+    const blocked = {
+      ...buyer,
+      buyerStatus: "blocked" as const,
+      capabilities: ["catalog:publish" as const],
+      mfaSatisfied: true,
+    };
+
+    expect(
+      authorizeOperation({
+        principal: blocked,
+        operation: "checkout.request",
+        resource: ownerResource(),
+      }),
+    ).toEqual({
+      allowed: false,
+      operation: "checkout.request",
+      reasonCode: "principal_blocked",
+    });
+    expect(
+      authorizeOperation({
+        principal: blocked,
+        operation: "catalog.publish",
+        resource: { relation: "capability_only" },
+      }),
+    ).toEqual({
+      allowed: false,
+      operation: "catalog.publish",
+      reasonCode: "principal_blocked",
+    });
+  });
+
+  it("denies unauthenticated, malformed, and owner-mismatched requests", () => {
     expect(
       authorizeOperation({
         principal: null,
@@ -136,18 +226,6 @@ describe("authorizeOperation", () => {
       allowed: false,
       operation: "order.read.self",
       reasonCode: "unauthenticated",
-    });
-
-    expect(
-      authorizeOperation({
-        principal: { ...buyer, buyerStatus: "blocked" },
-        operation: "account.read.self",
-        resource: ownerResource(),
-      }),
-    ).toEqual({
-      allowed: false,
-      operation: "account.read.self",
-      reasonCode: "principal_blocked",
     });
 
     expect(
