@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregateEligibility,
-  canCreateCheckout,
+  evaluateCheckoutCreation,
   evaluateJurisdiction,
   jurisdictionStateToGateStatus,
   REQUIRED_GATE_KEYS,
@@ -58,16 +58,37 @@ describe("aggregateEligibility", () => {
 
     expect(evaluation.decision).toBe("pass");
     expect(evaluation.gates).toHaveLength(9);
-    expect(canCreateCheckout(evaluation)).toBe(true);
+    expect(evaluateCheckoutCreation(evaluation)).toMatchObject({
+      permitted: true,
+      decision: "pass",
+      reasonCodes: evaluation.reasonCodes,
+      evidenceRefs: evaluation.evidenceRefs,
+    });
   });
 
   it("allows checkout only from the immutable aggregate produced by this policy boundary", () => {
     const evaluation = aggregate(passingGates());
 
-    expect(canCreateCheckout(null)).toBe(false);
-    expect(canCreateCheckout({ decision: "pass" })).toBe(false);
-    expect(canCreateCheckout({ ...evaluation })).toBe(false);
-    expect(canCreateCheckout(evaluation)).toBe(true);
+    for (const untrusted of [null, { decision: "pass" }, { ...evaluation }]) {
+      expect(evaluateCheckoutCreation(untrusted)).toEqual({
+        permitted: false,
+        decision: "unknown",
+        reasonCodes: [
+          {
+            gate: "launch_control",
+            orderLineId: null,
+            code: "eligibility_evaluation_not_authoritative",
+          },
+        ],
+        evidenceRefs: [],
+        requiredActions: [
+          "deny_checkout",
+          "create_compliance_hold",
+          "route_policy_review",
+        ],
+      });
+    }
+    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(true);
   });
 
   it("treats a sparse gate collection as structurally unknown", () => {
@@ -82,7 +103,7 @@ describe("aggregateEligibility", () => {
       orderLineId: null,
       code: "unexpected_gate_result",
     });
-    expect(canCreateCheckout(evaluation)).toBe(false);
+    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
   });
 
   it.each([
@@ -117,7 +138,7 @@ describe("aggregateEligibility", () => {
     const evaluation = aggregate(gates);
 
     expect(evaluation.decision).toBe(expected);
-    expect(canCreateCheckout(evaluation)).toBe(false);
+    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
   });
 
   it("turns missing or duplicate gate results into structured unknown denials", () => {
@@ -156,7 +177,7 @@ describe("aggregateEligibility", () => {
       orderLineId: null,
       code: "duplicate_gate_result",
     });
-    expect(canCreateCheckout(duplicated)).toBe(false);
+    expect(evaluateCheckoutCreation(duplicated).permitted).toBe(false);
   });
 
   it.each([
@@ -216,7 +237,7 @@ describe("aggregateEligibility", () => {
       orderLineId: null,
       code: "invalid_gate_result",
     });
-    expect(canCreateCheckout(evaluation)).toBe(false);
+    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
   });
 
   it("requires exactly one jurisdiction result for every expected order line", () => {
@@ -278,7 +299,7 @@ describe("aggregateEligibility", () => {
       orderLineId: null,
       code: "invalid_order_line_scope",
     });
-    expect(canCreateCheckout(evaluation)).toBe(false);
+    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
   });
 
   it("denies checkout for a sparse expected order-line scope without throwing", () => {
@@ -295,7 +316,7 @@ describe("aggregateEligibility", () => {
       orderLineId: null,
       code: "invalid_order_line_scope",
     });
-    expect(canCreateCheckout(evaluation)).toBe(false);
+    expect(evaluateCheckoutCreation(evaluation).permitted).toBe(false);
   });
 
   it("treats a missing runtime reason code as invalid rather than matching undefined", () => {
@@ -328,6 +349,7 @@ describe("aggregateEligibility", () => {
 
   it("returns a deeply immutable evaluation snapshot", () => {
     const evaluation = aggregate(passingGates());
+    const checkoutDecision = evaluateCheckoutCreation(evaluation);
 
     expect(Object.isFrozen(evaluation)).toBe(true);
     expect(Object.isFrozen(evaluation.gates)).toBe(true);
@@ -336,6 +358,7 @@ describe("aggregateEligibility", () => {
     expect(Object.isFrozen(evaluation.gates[0]!.evidenceRefs[0])).toBe(true);
     expect(Object.isFrozen(evaluation.reasonCodes)).toBe(true);
     expect(Object.isFrozen(evaluation.requiredActions)).toBe(true);
+    expect(Object.isFrozen(checkoutDecision)).toBe(true);
     expect(Object.isFrozen(REQUIRED_GATE_KEYS)).toBe(true);
   });
 });

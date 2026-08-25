@@ -45,6 +45,14 @@ export type EligibilityEvaluation = Readonly<{
   requiredActions: readonly EligibilityAction[];
 }>;
 
+export type CheckoutCreationDecision = Readonly<{
+  permitted: boolean;
+  decision: GateStatus;
+  reasonCodes: EligibilityEvaluation["reasonCodes"];
+  evidenceRefs: readonly EvidenceReference[];
+  requiredActions: readonly EligibilityAction[];
+}>;
+
 export type EligibilityAction =
   | "deny_checkout"
   | "create_compliance_hold"
@@ -579,12 +587,34 @@ export function aggregateEligibility(
   return evaluation;
 }
 
-export function canCreateCheckout(
+export function evaluateCheckoutCreation(
   evaluation: unknown,
-): boolean {
-  return (
-    isRecord(evaluation) &&
-    serverProducedEligibilityEvaluations.has(evaluation) &&
-    evaluation.decision === "pass"
-  );
+): CheckoutCreationDecision {
+  if (
+    !isRecord(evaluation) ||
+    !serverProducedEligibilityEvaluations.has(evaluation)
+  ) {
+    return Object.freeze({
+      permitted: false,
+      decision: "unknown",
+      reasonCodes: Object.freeze([
+        Object.freeze({
+          gate: "launch_control",
+          orderLineId: null,
+          code: "eligibility_evaluation_not_authoritative",
+        }),
+      ]),
+      evidenceRefs: Object.freeze([]),
+      requiredActions: requiredActionsFor("unknown"),
+    });
+  }
+
+  const authoritative = evaluation as EligibilityEvaluation;
+  return Object.freeze({
+    permitted: authoritative.decision === "pass",
+    decision: authoritative.decision,
+    reasonCodes: authoritative.reasonCodes,
+    evidenceRefs: authoritative.evidenceRefs,
+    requiredActions: authoritative.requiredActions,
+  });
 }

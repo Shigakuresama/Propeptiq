@@ -43,7 +43,7 @@ These are implementation observations, not production launch approvals. The draf
 The independent review ran in multiple adversarial passes. The final bounded re-review returned **READY** with no remaining Critical/P1 fail-open defect in the pure scope. Current regressions demonstrate:
 
 1. Unicode control/format characters and punctuation fragmentation cannot hide prohibited injection, human-use, animal-use, guarantee, or related language. Approved disclaimers and structured claim text must remain nonempty after normalization.
-2. `canCreateCheckout()` accepts only the immutable aggregate instance emitted by the policy boundary. Null, partial, cloned, and deserialized caller-shaped `pass` projections deny and must be re-aggregated from current server inputs.
+2. `evaluateCheckoutCreation()` accepts only the immutable aggregate instance emitted by the policy boundary and returns a structured decision with reason codes, evidence references, and required actions. Null, partial, cloned, and deserialized caller-shaped `pass` projections deny and must be re-aggregated from current server inputs.
 3. Missing, duplicate, unexpected, malformed, sparse, or incomplete gate/evidence/order-line arrays resolve to `unknown` or another typed denial without throwing. Sparse capability, currency, publication-policy, and claim-evidence arrays also deny.
 4. Null, scalar, array, and representative malformed-object authorization, order, payment, release, fulfillment, and publication inputs return typed denials rather than throwing.
 5. Runtime jurisdiction values map exactly; every invalid value maps to `unknown`. Payment verification requires the exact boolean `true`, and malformed gate decisions or clearance-revocation booleans cannot transition state.

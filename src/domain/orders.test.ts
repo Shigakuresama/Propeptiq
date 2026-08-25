@@ -28,6 +28,7 @@ const issuedRelease: FulfillmentReleaseSnapshot = {
   lastVersion: 1,
   paymentEvidenceId: "synthetic-payment-journal-1",
   clearanceEvidenceId: "synthetic-clearance-1",
+  clearanceEvidenceHistory: ["synthetic-clearance-1"],
   expiresAt: "2026-08-25T12:00:00.000Z",
 };
 
@@ -237,6 +238,11 @@ describe("transitionOrder", () => {
         version: 3,
         lastVersion: 3,
         clearanceEvidenceId: "synthetic-clearance-3",
+        clearanceEvidenceHistory: [
+          "synthetic-clearance-1",
+          "synthetic-clearance-2",
+          "synthetic-clearance-3",
+        ],
       },
     } as never);
     if (!inProgress.ok) throw new Error("synthetic test setup failed");
@@ -472,6 +478,7 @@ describe("transitionOrder", () => {
         lastVersion: 1,
         paymentEvidenceId: null,
         clearanceEvidenceId: null,
+        clearanceEvidenceHistory: ["synthetic-clearance-1"],
         expiresAt: null,
       },
       "release_not_current",
@@ -805,6 +812,7 @@ describe("transitionFulfillmentRelease", () => {
       lastVersion: 0,
       paymentEvidenceId: null,
       clearanceEvidenceId: null,
+      clearanceEvidenceHistory: [],
       expiresAt: null,
     };
 
@@ -827,9 +835,13 @@ describe("transitionFulfillmentRelease", () => {
         lastVersion: 1,
         paymentEvidenceId: "synthetic-payment-journal-1",
         clearanceEvidenceId: "synthetic-clearance-1",
+        clearanceEvidenceHistory: ["synthetic-clearance-1"],
         expiresAt: "2026-08-25T12:00:00.000Z",
       },
     });
+    expect(
+      result.ok && Object.isFrozen(result.value.clearanceEvidenceHistory),
+    ).toBe(true);
   });
 
   it("allows fulfillment only for verified payment, all-pass recheck, and a current issued release", () => {
@@ -839,6 +851,7 @@ describe("transitionFulfillmentRelease", () => {
       lastVersion: 1,
       paymentEvidenceId: "synthetic-payment-journal-1",
       clearanceEvidenceId: "synthetic-clearance-1",
+      clearanceEvidenceHistory: ["synthetic-clearance-1"],
       expiresAt: "2026-08-25T12:00:00.000Z",
     };
 
@@ -859,6 +872,7 @@ describe("transitionFulfillmentRelease", () => {
       lastVersion: 0,
       paymentEvidenceId: null,
       clearanceEvidenceId: null,
+      clearanceEvidenceHistory: [],
       expiresAt: null,
     };
     const issue = (snapshot: FulfillmentReleaseSnapshot, version: number) =>
@@ -931,6 +945,113 @@ describe("transitionFulfillmentRelease", () => {
     });
   });
 
+  it.each(["revoked", "expired"] as const)(
+    "rejects reuse of stale clearance evidence after a release is %s",
+    (terminalState) => {
+      const issued = transitionFulfillmentRelease(
+        {
+          state: "absent",
+          version: null,
+          lastVersion: 0,
+          paymentEvidenceId: null,
+          clearanceEvidenceId: null,
+          clearanceEvidenceHistory: [],
+          expiresAt: null,
+        },
+        {
+          type: "issue",
+          now: "2026-08-24T12:00:00.000Z",
+          paymentVerified: true,
+          eligibilityDecision: "pass",
+          version: 1,
+          paymentEvidenceId: "synthetic-payment-journal-1",
+          clearanceEvidenceId: "synthetic-clearance-1",
+          expiresAt: "2026-08-25T12:00:00.000Z",
+        },
+      );
+      if (!issued.ok) throw new Error("synthetic test setup failed");
+
+      const closed = transitionFulfillmentRelease(
+        issued.value,
+        terminalState === "revoked"
+          ? { type: "revoke", reasonCode: "synthetic_policy_changed" }
+          : { type: "expire", now: "2026-08-25T12:00:00.000Z" },
+      );
+      if (!closed.ok) throw new Error("synthetic test setup failed");
+
+      expect(closed.value.clearanceEvidenceId).toBeNull();
+      expect(closed.value.clearanceEvidenceHistory).toEqual([
+        "synthetic-clearance-1",
+      ]);
+      expect(
+        transitionFulfillmentRelease(closed.value, {
+          type: "issue",
+          now: "2026-08-25T12:01:00.000Z",
+          paymentVerified: true,
+          eligibilityDecision: "pass",
+          version: 2,
+          paymentEvidenceId: "synthetic-payment-journal-1",
+          clearanceEvidenceId: "synthetic-clearance-1",
+          expiresAt: "2026-08-26T12:00:00.000Z",
+        }),
+      ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
+    },
+  );
+
+  it("rejects any previously used clearance evidence after an intervening reissue", () => {
+    const issue = (
+      snapshot: FulfillmentReleaseSnapshot,
+      version: number,
+      clearanceEvidenceId: string,
+    ) =>
+      transitionFulfillmentRelease(snapshot, {
+        type: "issue",
+        now: "2026-08-24T12:00:00.000Z",
+        paymentVerified: true,
+        eligibilityDecision: "pass",
+        version,
+        paymentEvidenceId: "synthetic-payment-journal-1",
+        clearanceEvidenceId,
+        expiresAt: "2026-08-25T12:00:00.000Z",
+      });
+
+    const first = issue(
+      {
+        state: "absent",
+        version: null,
+        lastVersion: 0,
+        paymentEvidenceId: null,
+        clearanceEvidenceId: null,
+        clearanceEvidenceHistory: [],
+        expiresAt: null,
+      },
+      1,
+      "synthetic-clearance-1",
+    );
+    if (!first.ok) throw new Error("synthetic test setup failed");
+    const firstRevocation = transitionFulfillmentRelease(first.value, {
+      type: "revoke",
+      reasonCode: "synthetic_policy_changed",
+    });
+    if (!firstRevocation.ok) throw new Error("synthetic test setup failed");
+
+    const second = issue(
+      firstRevocation.value,
+      2,
+      "synthetic-clearance-2",
+    );
+    if (!second.ok) throw new Error("synthetic test setup failed");
+    const secondRevocation = transitionFulfillmentRelease(second.value, {
+      type: "revoke",
+      reasonCode: "synthetic_policy_changed_again",
+    });
+    if (!secondRevocation.ok) throw new Error("synthetic test setup failed");
+
+    expect(
+      issue(secondRevocation.value, 3, "synthetic-clearance-1"),
+    ).toMatchObject({ ok: false, error: { code: "invalid_release" } });
+  });
+
   it.each([
     ["past", "2026-08-24T11:59:59.999Z"],
     ["equal to now", "2026-08-24T12:00:00.000Z"],
@@ -942,6 +1063,7 @@ describe("transitionFulfillmentRelease", () => {
       lastVersion: 0,
       paymentEvidenceId: null,
       clearanceEvidenceId: null,
+      clearanceEvidenceHistory: [],
       expiresAt: null,
     };
 
@@ -971,6 +1093,7 @@ describe("transitionFulfillmentRelease", () => {
         lastVersion: 1,
         paymentEvidenceId: null,
         clearanceEvidenceId: null,
+        clearanceEvidenceHistory: ["synthetic-clearance-1"],
         expiresAt: null,
       },
       "release_not_current",
@@ -997,6 +1120,7 @@ describe("transitionFulfillmentRelease", () => {
       lastVersion: 0,
       paymentEvidenceId: null,
       clearanceEvidenceId: null,
+      clearanceEvidenceHistory: [],
       expiresAt: null,
     };
 
@@ -1043,6 +1167,7 @@ describe("transitionFulfillmentRelease", () => {
       lastVersion: 0,
       paymentEvidenceId: null,
       clearanceEvidenceId: null,
+      clearanceEvidenceHistory: [],
       expiresAt: null,
     };
 

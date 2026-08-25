@@ -153,6 +153,7 @@ export type FulfillmentReleaseSnapshot = Readonly<{
   lastVersion: number;
   paymentEvidenceId: string | null;
   clearanceEvidenceId: string | null;
+  clearanceEvidenceHistory: readonly string[];
   expiresAt: string | null;
 }>;
 
@@ -213,6 +214,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonBlankString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isDenseUniqueNonBlankStringArray(
+  value: unknown,
+): value is readonly string[] {
+  if (!Array.isArray(value)) return false;
+  const seen = new Set<string>();
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index) || !isNonBlankString(value[index])) {
+      return false;
+    }
+    if (seen.has(value[index])) return false;
+    seen.add(value[index]);
+  }
+  return true;
 }
 
 function isCanonicalInstant(value: unknown): value is string {
@@ -361,6 +377,7 @@ function isValidFulfillmentReleaseSnapshot(
       value.clearanceEvidenceId === null ||
       isNonBlankString(value.clearanceEvidenceId)
     ) ||
+    !isDenseUniqueNonBlankStringArray(value.clearanceEvidenceHistory) ||
     !(value.expiresAt === null || isCanonicalInstant(value.expiresAt))
   ) {
     return false;
@@ -373,7 +390,20 @@ function isValidFulfillmentReleaseSnapshot(
       value.version === value.lastVersion &&
       isNonBlankString(value.paymentEvidenceId) &&
       isNonBlankString(value.clearanceEvidenceId) &&
+      value.clearanceEvidenceHistory.length > 0 &&
+      value.clearanceEvidenceHistory.at(-1) === value.clearanceEvidenceId &&
       isCanonicalInstant(value.expiresAt)
+    );
+  }
+
+  if (state === "revoked" || state === "expired") {
+    return (
+      value.version === null &&
+      value.paymentEvidenceId === null &&
+      value.clearanceEvidenceId === null &&
+      value.clearanceEvidenceHistory.length > 0 &&
+      value.expiresAt === null &&
+      value.lastVersion > 0
     );
   }
 
@@ -381,6 +411,7 @@ function isValidFulfillmentReleaseSnapshot(
     value.version === null &&
     value.paymentEvidenceId === null &&
     value.clearanceEvidenceId === null &&
+    value.clearanceEvidenceHistory.length === 0 &&
     value.expiresAt === null &&
     (state !== "absent" || value.lastVersion === 0)
   );
@@ -811,7 +842,8 @@ export function transitionFulfillmentRelease(
     }
     if (
       !Number.isSafeInteger(event.version) ||
-      event.version <= snapshot.lastVersion
+      event.version <= snapshot.lastVersion ||
+      snapshot.clearanceEvidenceHistory.includes(event.clearanceEvidenceId)
     ) {
       return fail("invalid_release");
     }
@@ -834,6 +866,10 @@ export function transitionFulfillmentRelease(
         lastVersion: event.version,
         paymentEvidenceId: event.paymentEvidenceId,
         clearanceEvidenceId: event.clearanceEvidenceId,
+        clearanceEvidenceHistory: Object.freeze([
+          ...snapshot.clearanceEvidenceHistory,
+          event.clearanceEvidenceId,
+        ]),
         expiresAt: event.expiresAt,
       }),
     });
