@@ -34,6 +34,7 @@ const ids = {
   release: "30000000-0000-4000-8000-000000000020",
   shipment: "30000000-0000-4000-8000-000000000021",
   audit: "30000000-0000-4000-8000-000000000022",
+  matrixReader: "30000000-0000-4000-8000-000000000023",
 } as const;
 
 const resources: readonly AdminReadResource[] = [
@@ -55,6 +56,28 @@ const resources: readonly AdminReadResource[] = [
   "audit",
 ];
 
+const exactCapabilityDenialMatrix = [
+  { resource: "products", capability: "catalog:publish" },
+  { resource: "prices", capability: "catalog:publish" },
+  { resource: "policy-groups", capability: "catalog:publish" },
+  { resource: "lots", capability: "catalog:publish" },
+  { resource: "coas", capability: "catalog:publish" },
+  { resource: "analytical-claims", capability: "catalog:publish" },
+  { resource: "attestations", capability: "catalog:publish" },
+  { resource: "destination-rules", capability: "destination:manage" },
+  { resource: "promotions", capability: "promotion:manage" },
+  { resource: "buyers", capability: "review:decide" },
+  { resource: "review-requests", capability: "review:decide" },
+  { resource: "orders", capability: "order:read:any" },
+  { resource: "refunds", capability: "refund:request" },
+  { resource: "shipments", capability: "fulfillment:release:consume" },
+  { resource: "staff", capability: "staff:manage" },
+  { resource: "audit", capability: "staff:manage" },
+] as const satisfies readonly Readonly<{
+  resource: AdminReadResource;
+  capability: string;
+}>[];
+
 describe("Task 5 production admin read model", () => {
   let database: PGlite;
   let statements: string[];
@@ -69,7 +92,8 @@ describe("Task 5 production admin read model", () => {
       VALUES
         ('${ids.admin}', 'clerk-admin-read', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', '2026-08-25T00:00:00.000Z'),
         ('${ids.limited}', 'clerk-limited-read', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', '2026-08-25T00:00:00.000Z'),
-        ('${ids.buyer}', 'clerk-buyer-read', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', '2026-08-25T00:00:00.000Z');
+        ('${ids.buyer}', 'clerk-buyer-read', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', '2026-08-25T00:00:00.000Z'),
+        ('${ids.matrixReader}', 'clerk-matrix-read', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z', '2026-08-25T00:00:00.000Z');
 
       INSERT INTO staff_roles
         (user_id, capability, granted_by_user_id, grant_correlation_id, granted_at)
@@ -82,7 +106,8 @@ describe("Task 5 production admin read model", () => {
         ('${ids.admin}', 'refund:request', '${ids.admin}', 'grant-refund', '2026-08-01T00:00:00.000Z'),
         ('${ids.admin}', 'fulfillment:release:consume', '${ids.admin}', 'grant-shipment', '2026-08-01T00:00:00.000Z'),
         ('${ids.admin}', 'staff:manage', '${ids.admin}', 'grant-staff', '2026-08-01T00:00:00.000Z'),
-        ('${ids.limited}', 'promotion:manage', '${ids.admin}', 'grant-limited', '2026-08-01T00:00:00.000Z');
+        ('${ids.limited}', 'promotion:manage', '${ids.admin}', 'grant-limited', '2026-08-01T00:00:00.000Z'),
+        ('${ids.matrixReader}', 'payment:reconcile', '${ids.admin}', 'grant-matrix-unrelated', '2026-08-01T00:00:00.000Z');
 
       INSERT INTO buyer_profiles
         (user_id, status, age_confirmed_at, research_purpose, organization_name, created_at, updated_at)
@@ -320,6 +345,51 @@ describe("Task 5 production admin read model", () => {
       readWithIdentity({ ...actor.identity, secondFactorCompleted: false }),
     ).rejects.toThrow(/verified staff identity and MFA/i);
     expect(statements.filter((sql) => /FROM products/.test(sql))).toHaveLength(0);
+  });
+
+  it("denies every resource before its query when the persisted principal lacks that exact capability", async () => {
+    const identity: VerifiedIdentity = {
+      ...actorIdentity,
+      clerkUserId: "clerk-matrix-read",
+      primaryEmail: "matrix-read@example.test",
+    };
+    const observations: Array<{
+      resource: AdminReadResource;
+      denial: string;
+      statementKinds: string[];
+    }> = [];
+
+    for (const { resource } of exactCapabilityDenialMatrix) {
+      statements = [];
+      let denial = "request resolved unexpectedly";
+      try {
+        await repository().readSnapshot({
+          userId: ids.matrixReader,
+          identity,
+          now: actor.now,
+          resource,
+        });
+      } catch (error) {
+        denial = error instanceof Error ? error.message : "non-Error rejection";
+      }
+      observations.push({
+        resource,
+        denial,
+        statementKinds: statements.map((sql) => {
+          if (/SET TRANSACTION READ ONLY/.test(sql)) return "read-only";
+          if (/FROM users u/.test(sql) && /JOIN staff_roles/.test(sql)) return "authority";
+          return "resource-query";
+        }),
+      });
+    }
+
+    expect(observations).toEqual(
+      exactCapabilityDenialMatrix.map(({ resource, capability }) => ({
+        resource,
+        denial: `Persisted ${capability} capability is required`,
+        statementKinds: ["read-only", "authority"],
+      })),
+    );
   });
 
   it("supports every Task 5 resource without returning unrelated snapshot sections", async () => {
