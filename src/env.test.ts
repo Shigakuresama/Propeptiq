@@ -25,6 +25,34 @@ describe("parseServerEnv", () => {
     ).toThrow(/STRIPE_WEBHOOK_SECRET/);
   });
 
+  it("requires an explicitly isolated database URL in test mode", () => {
+    expect(() =>
+      parseServerEnv({
+        DATABASE_MODE: "test",
+        DATABASE_URL: "postgresql://production.example.invalid/database",
+      }),
+    ).toThrow(/TEST_DATABASE_URL/);
+
+    expect(() =>
+      parseServerEnv({
+        DATABASE_MODE: "test",
+        TEST_DATABASE_URL:
+          "postgresql://test-user@example.invalid/propeptiq_test",
+      }),
+    ).toThrow(/TEST_DATABASE_CONFIRMATION/);
+  });
+
+  it("rejects an apparently production-scoped database in test mode", () => {
+    expect(() =>
+      parseServerEnv({
+        DATABASE_MODE: "test",
+        TEST_DATABASE_URL:
+          "postgresql://app@production-db.example.invalid/propeptiq_live",
+        TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+      }),
+    ).toThrow(/appears production-scoped/);
+  });
+
   it("rejects live payments outside the production environment", () => {
     expect(() =>
       parseServerEnv({
@@ -44,6 +72,72 @@ describe("parseServerEnv", () => {
       }),
     ).toThrow(/secure non-local APP_ORIGIN/);
   });
+
+  it.each([
+    "https://localhost.",
+    "https://0.0.0.0",
+    "https://127.99.1.1",
+    "https://10.0.0.8",
+    "https://172.20.1.2",
+    "https://192.168.1.2",
+    "https://[::1]",
+    "https://[::]",
+    "https://[fd00::1]",
+    "https://[0:0:0:0:0:0:0:1]",
+    "https://[::ffff:7f00:1]",
+  ])("rejects non-public production origin %s", (origin) => {
+    expect(() =>
+      parseServerEnv({ APP_ENV: "production", APP_ORIGIN: origin }),
+    ).toThrow(/secure non-local APP_ORIGIN/);
+  });
+
+  it("rejects malformed provider values", () => {
+    expect(() =>
+      parseServerEnv({
+        APP_ENV: "production",
+        APP_ORIGIN: "https://research.example.test",
+        DATABASE_MODE: "live",
+        DATABASE_URL: "not-a-postgres-url",
+      }),
+    ).toThrow(/DATABASE_URL/);
+
+    expect(() =>
+      parseServerEnv({
+        APP_ENV: "preview",
+        APP_ORIGIN: "https://preview.example.test",
+        STORAGE_MODE: "test",
+        BLOB_READ_WRITE_TOKEN: "   ",
+      }),
+    ).toThrow(/BLOB_READ_WRITE_TOKEN/);
+
+    expect(() =>
+      parseServerEnv({
+        APP_ENV: "preview",
+        APP_ORIGIN: "https://preview.example.test",
+        PAYMENTS_MODE: "test",
+        STRIPE_SECRET_KEY: "sk_test_synthetic",
+        STRIPE_WEBHOOK_SECRET: "not-a-webhook-secret",
+      }),
+    ).toThrow(/STRIPE_WEBHOOK_SECRET/);
+  });
+
+  it.each([
+    ["AUTH_MODE", "live", "CLERK_SECRET_KEY"],
+    ["DATABASE_MODE", "live", "DATABASE_URL"],
+    ["STORAGE_MODE", "live", "BLOB_READ_WRITE_TOKEN"],
+    ["EMAIL_MODE", "live", "RESEND_API_KEY"],
+  ] as const)(
+    "rejects incomplete live capability %s",
+    (modeKey, mode, missingField) => {
+      expect(() =>
+        parseServerEnv({
+          APP_ENV: "production",
+          APP_ORIGIN: "https://research.example.test",
+          [modeKey]: mode,
+        }),
+      ).toThrow(new RegExp(missingField));
+    },
+  );
 
   it("accepts an explicitly complete live capability set", () => {
     const env = parseServerEnv({

@@ -2,27 +2,41 @@ import { z } from "zod";
 
 const capabilityMode = z.enum(["disabled", "test", "live"]);
 const appEnvironment = z.enum(["local", "preview", "production"]);
+const nonBlank = z.string().trim().min(1);
+const urlValue = nonBlank.pipe(z.url());
+const postgresUrl = urlValue.refine(
+  (value) => {
+    if (!URL.canParse(value)) {
+      return false;
+    }
+
+    const protocol = new URL(value).protocol;
+    return protocol === "postgres:" || protocol === "postgresql:";
+  },
+  { message: "Expected a postgres:// or postgresql:// URL" },
+);
 
 const rawServerEnvSchema = z.object({
   APP_ENV: appEnvironment.default("local"),
-  APP_ORIGIN: z.url().optional(),
+  APP_ORIGIN: urlValue.optional(),
   AUTH_MODE: capabilityMode.default("disabled"),
   DATABASE_MODE: capabilityMode.default("disabled"),
   PAYMENTS_MODE: capabilityMode.default("disabled"),
   STORAGE_MODE: capabilityMode.default("disabled"),
   EMAIL_MODE: capabilityMode.default("disabled"),
-  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().min(1).optional(),
-  CLERK_SECRET_KEY: z.string().min(1).optional(),
-  CLERK_WEBHOOK_SIGNING_SECRET: z.string().min(1).optional(),
-  DATABASE_URL: z.string().min(1).optional(),
-  DATABASE_MIGRATION_URL: z.string().min(1).optional(),
-  TEST_DATABASE_URL: z.string().min(1).optional(),
-  STRIPE_SECRET_KEY: z.string().min(1).optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
-  BLOB_READ_WRITE_TOKEN: z.string().min(1).optional(),
-  RESEND_API_KEY: z.string().min(1).optional(),
-  RESEND_FROM: z.email().optional(),
-  OTEL_SERVICE_NAME: z.string().min(1).default("propeptiq-labs"),
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: nonBlank.optional(),
+  CLERK_SECRET_KEY: nonBlank.optional(),
+  CLERK_WEBHOOK_SIGNING_SECRET: nonBlank.optional(),
+  DATABASE_URL: postgresUrl.optional(),
+  DATABASE_MIGRATION_URL: postgresUrl.optional(),
+  TEST_DATABASE_URL: postgresUrl.optional(),
+  TEST_DATABASE_CONFIRMATION: z.literal("isolated-test-database").optional(),
+  STRIPE_SECRET_KEY: nonBlank.optional(),
+  STRIPE_WEBHOOK_SECRET: nonBlank.optional(),
+  BLOB_READ_WRITE_TOKEN: nonBlank.optional(),
+  RESEND_API_KEY: nonBlank.optional(),
+  RESEND_FROM: nonBlank.pipe(z.email()).optional(),
+  OTEL_SERVICE_NAME: nonBlank.default("propeptiq-labs"),
 });
 
 export type ServerEnv = z.infer<typeof rawServerEnvSchema>;
@@ -64,12 +78,71 @@ function requireFields(
   }
 }
 
+function normalizeHostname(hostname: string): string {
+  let normalized = hostname.toLowerCase().replace(/\.+$/, "");
+  if (normalized.startsWith("[") && normalized.endsWith("]")) {
+    normalized = normalized.slice(1, -1);
+  }
+  return normalized;
+}
+
+function isIpv4Literal(hostname: string): boolean {
+  const parts = hostname.split(".");
+  if (parts.length !== 4 || parts.some((part) => !/^\d+$/.test(part))) {
+    return false;
+  }
+
+  const octets = parts.map(Number);
+  return octets.every((octet) => octet >= 0 && octet <= 255);
+}
+
+function isUnsafeDeploymentHost(hostname: string): boolean {
+  const normalized = normalizeHostname(hostname);
+  if (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized.endsWith(".local") ||
+    normalized.endsWith(".internal") ||
+    normalized.includes(":") ||
+    isIpv4Literal(normalized)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function looksProductionScopedDatabase(value: string): boolean {
+  const url = new URL(value);
+  const scope = [url.username, url.hostname, url.pathname, url.search]
+    .join("|")
+    .toLowerCase();
+  return /(^|[^a-z])(prod|production|live)([^a-z]|$)/.test(scope);
+}
+
 const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
   requireFields(env, context, "AUTH_MODE", [
     "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
     "CLERK_SECRET_KEY",
   ]);
-  requireFields(env, context, "DATABASE_MODE", ["DATABASE_URL"]);
+  if (env.DATABASE_MODE === "test") {
+    requireFields(env, context, "DATABASE_MODE", [
+      "TEST_DATABASE_URL",
+      "TEST_DATABASE_CONFIRMATION",
+    ]);
+    if (
+      env.TEST_DATABASE_URL &&
+      looksProductionScopedDatabase(env.TEST_DATABASE_URL)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["TEST_DATABASE_URL"],
+        message: "TEST_DATABASE_URL appears production-scoped",
+      });
+    }
+  } else if (env.DATABASE_MODE === "live") {
+    requireFields(env, context, "DATABASE_MODE", ["DATABASE_URL"]);
+  }
   requireFields(env, context, "PAYMENTS_MODE", [
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
@@ -85,8 +158,7 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
     const origin = new URL(env.APP_ORIGIN);
     if (
       origin.protocol !== "https:" ||
-      origin.hostname === "localhost" ||
-      origin.hostname === "127.0.0.1"
+      isUnsafeDeploymentHost(origin.hostname)
     ) {
       context.addIssue({
         code: "custom",
@@ -171,6 +243,17 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
       code: "custom",
       path: ["STRIPE_SECRET_KEY"],
       message: "PAYMENTS_MODE=live requires a Stripe live secret key",
+    });
+  }
+
+  if (
+    env.PAYMENTS_MODE !== "disabled" &&
+    !env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_")
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["STRIPE_WEBHOOK_SECRET"],
+      message: "Enabled payments require a Stripe whsec_ webhook secret",
     });
   }
 

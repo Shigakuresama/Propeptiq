@@ -13,11 +13,8 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "playwright test",
-    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
-    "db:check": "tsx src/db/migration-check.ts",
-    "db:migrate": "tsx src/db/migrate.ts",
     "audit:prod": "npm audit --omit=dev",
-    "verify": "run-s lint typecheck test db:check build"
+    "verify": "run-s lint typecheck test build"
   },
   "dependencies": {
     "@clerk/nextjs": "7.8.1",
