@@ -147,6 +147,104 @@ describe("scanPublicCopy", () => {
     ).toMatchObject({ publishable: true, status: "pass" });
   });
 
+  it("blocks a second purity statement that lacks its own evidence-backed claim", () => {
+    const result = scanPublicCopy(
+      candidate({
+        text: "Lot A is 99% pure. Lot B is 50% pure.",
+        claims: [
+          {
+            id: "lot-a-purity",
+            text: "Lot A is 99% pure.",
+            kind: "analytical",
+            lotEvidenceIds: ["lot-evidence-1"],
+          },
+        ],
+      }),
+      policy,
+    );
+
+    expect(result).toMatchObject({ publishable: false, status: "blocked" });
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        code: "unsupported_claim",
+        claimId: null,
+      }),
+    );
+  });
+
+  it("allows two purity statements when each has contained evidence-backed coverage", () => {
+    expect(
+      scanPublicCopy(
+        candidate({
+          text: "Lot A is 99% pure. Lot B is 50% pure.",
+          claims: [
+            {
+              id: "lot-a-purity",
+              text: "Lot A is 99% pure.",
+              kind: "analytical",
+              lotEvidenceIds: ["lot-evidence-1"],
+            },
+            {
+              id: "lot-b-purity",
+              text: "Lot B is 50% pure.",
+              kind: "analytical",
+              lotEvidenceIds: ["lot-evidence-1"],
+            },
+          ],
+        }),
+        policy,
+      ),
+    ).toMatchObject({ publishable: true, status: "pass" });
+  });
+
+  it("blocks a second HPLC statement that lacks its own evidence-backed claim", () => {
+    const result = scanPublicCopy(
+      candidate({
+        text: "Lot A was tested by HPLC. Lot B was tested by HPLC.",
+        claims: [
+          {
+            id: "lot-a-hplc",
+            text: "Lot A was tested by HPLC.",
+            kind: "ordinary",
+            lotEvidenceIds: ["lot-evidence-1"],
+          },
+        ],
+      }),
+      policy,
+    );
+
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        code: "unsupported_claim",
+        claimId: null,
+      }),
+    );
+  });
+
+  it("fails closed when one structured claim ambiguously matches repeated identical prose", () => {
+    const result = scanPublicCopy(
+      candidate({
+        text: "The lot is pure. The lot is pure.",
+        claims: [
+          {
+            id: "ambiguous-purity",
+            text: "The lot is pure.",
+            kind: "analytical",
+            lotEvidenceIds: ["lot-evidence-1"],
+          },
+        ],
+      }),
+      policy,
+    );
+
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({
+        code: "unsupported_claim",
+        claimId: null,
+      }),
+    );
+  });
+
   it("does not treat neutral laboratory-research wording as an analytical claim", () => {
     expect(
       scanPublicCopy(

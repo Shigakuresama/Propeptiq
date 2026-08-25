@@ -210,15 +210,53 @@ const analyticalMarkerPatterns: readonly Readonly<{
 type AnalyticalMarkerMatch = Readonly<{
   key: string;
   match: string;
+  start: number;
+  end: number;
 }>;
 
 function analyticalMarkerMatches(
   normalizedText: string,
 ): readonly AnalyticalMarkerMatch[] {
-  return analyticalMarkerPatterns.flatMap(({ key, pattern }) => {
-    const match = normalizedText.match(pattern)?.[0];
-    return match === undefined ? [] : [{ key, match }];
-  });
+  const matches: AnalyticalMarkerMatch[] = [];
+  for (const { key, pattern } of analyticalMarkerPatterns) {
+    const globalPattern = new RegExp(
+      pattern.source,
+      pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`,
+    );
+    for (const match of normalizedText.matchAll(globalPattern)) {
+      if (match.index !== undefined && match[0].length > 0) {
+        matches.push({
+          key,
+          match: match[0],
+          start: match.index,
+          end: match.index + match[0].length,
+        });
+      }
+    }
+  }
+  return matches.sort(
+    (left, right) =>
+      left.start - right.start ||
+      left.end - right.end ||
+      left.key.localeCompare(right.key),
+  );
+}
+
+type TextRange = Readonly<{ start: number; end: number }>;
+
+function containedTextRanges(
+  text: string,
+  containedText: string,
+): readonly TextRange[] {
+  const ranges: TextRange[] = [];
+  let searchFrom = 0;
+  while (searchFrom <= text.length - containedText.length) {
+    const start = text.indexOf(containedText, searchFrom);
+    if (start < 0) break;
+    ranges.push({ start, end: start + containedText.length });
+    searchFrom = start + 1;
+  }
+  return ranges;
 }
 
 function violation(
@@ -298,7 +336,8 @@ export function scanPublicCopy(
   const violations: ContentViolation[] = [];
   const normalizedCopy = normalizeText(candidate.text);
   const topLevelAnalyticalMarkers = analyticalMarkerMatches(normalizedCopy);
-  const coveredAnalyticalMarkerKeys = new Set<string>();
+  const coveredAnalyticalRanges: TextRange[] = [];
+  const allocatedContainedRanges = new Set<string>();
   appendProhibitedViolations(normalizedCopy, null, violations);
 
   const activeLotEvidenceIds = new Set(policy.activeLotEvidenceIds);
@@ -343,10 +382,19 @@ export function scanPublicCopy(
       kindIsValid &&
       evidenceProjectionIsValid &&
       analyticalEvidenceIsValid &&
-      normalizedCopy.includes(normalizedClaimText)
+      claimAnalyticalMarkers.length > 0
     ) {
-      for (const marker of claimAnalyticalMarkers) {
-        coveredAnalyticalMarkerKeys.add(marker.key);
+      const containedRange = containedTextRanges(
+        normalizedCopy,
+        normalizedClaimText,
+      ).find(
+        ({ start, end }) => !allocatedContainedRanges.has(`${start}:${end}`),
+      );
+      if (containedRange !== undefined) {
+        allocatedContainedRanges.add(
+          `${containedRange.start}:${containedRange.end}`,
+        );
+        coveredAnalyticalRanges.push(containedRange);
       }
     }
     if (typeof claim.text === "string") {
@@ -359,7 +407,10 @@ export function scanPublicCopy(
   }
 
   for (const marker of topLevelAnalyticalMarkers) {
-    if (!coveredAnalyticalMarkerKeys.has(marker.key)) {
+    const isCovered = coveredAnalyticalRanges.some(
+      ({ start, end }) => start <= marker.start && end >= marker.end,
+    );
+    if (!isCovered) {
       violations.push(
         violation("unsupported_claim", marker.match, null),
       );
