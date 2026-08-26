@@ -177,6 +177,32 @@ describe("durable provider-session repository on PGlite", () => {
     await expect(repo.recordOpen({ ...durable } as never, "cs_local_synthetic_primary")).resolves.toEqual({ status: "conflict" });
   });
 
+  it.each(["recordOpen", "recordUnknown"] as const)(
+    "rejects %s when the durable global request hash is stale",
+    async (operation) => {
+      const repo = repository();
+      const durable = await repo.load({ buyerUserId: ids.buyer, idempotencyKey: ids.key });
+      if (durable === null) throw new Error("missing fixture");
+      await client.exec(`
+        UPDATE checkout_attempts SET request_hash = '${"d".repeat(64)}'
+        WHERE id = '${ids.attempt}'
+      `);
+
+      const result = operation === "recordOpen"
+        ? repo.recordOpen(durable, "cs_local_synthetic_stale_open")
+        : repo.recordUnknown(durable, {
+            knownProviderSessionId: "cs_local_synthetic_stale_unknown",
+            integrityFailure: true,
+          });
+      await expect(result).resolves.toEqual({ status: "conflict" });
+      const attempt = await client.query(`
+        SELECT status, provider_session_id FROM checkout_attempts
+        WHERE id = '${ids.attempt}'
+      `);
+      expect(attempt.rows).toEqual([{ status: "created", provider_session_id: null }]);
+    },
+  );
+
   it("retains reservations for unknown outcomes, preserves known IDs, and never regresses terminal state", async () => {
     const repo = repository();
     const durable = await repo.load({ buyerUserId: ids.buyer, idempotencyKey: ids.key });

@@ -433,6 +433,7 @@ type LockedAttemptRow = {
   orderId: string;
   buyerUserId: string;
   idempotencyKey: string;
+  requestHash: string;
   status: CheckoutAttemptStatus;
   provider: ProviderKind;
   providerIdempotencyKey: string;
@@ -455,6 +456,7 @@ function exactLockedIdentity(
     row.orderId === durable.orderId &&
     row.buyerUserId === durable.buyerUserId &&
     row.idempotencyKey === durable.idempotencyKey &&
+    row.requestHash === durable.requestHash &&
     row.provider === durable.provider &&
     row.providerIdempotencyKey === durable.providerIdempotencyKey &&
     row.providerRequestHash === durable.providerRequestHash &&
@@ -479,7 +481,8 @@ async function lockCasRows(
   const attempts = await client.query<LockedAttemptRow>(
     `SELECT id::text AS "attemptId", order_id::text AS "orderId",
             buyer_user_id::text AS "buyerUserId", idempotency_key AS "idempotencyKey",
-            status, provider, provider_request_id AS "providerIdempotencyKey",
+            request_hash AS "requestHash", status, provider,
+            provider_request_id AS "providerIdempotencyKey",
             provider_session_id AS "providerSessionId",
             provider_request_hash AS "providerRequestHash", expires_at AS "providerExpiresAt",
             provider_customer_email AS "providerCustomerEmail",
