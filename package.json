@@ -18,6 +18,7 @@
     "test:e2e": "playwright test",
     "verify:workspace-boundary": "node scripts/verify-workspace-boundary.mjs",
     "verify:production-artifacts": "node scripts/verify-production-artifacts.mjs",
+    "test:artifact-scanner": "node --test scripts/verify-production-artifacts.test.mjs",
     "audit:prod": "npm audit --omit=dev",
     "verify": "run-s verify:workspace-boundary lint typecheck test build"
   },

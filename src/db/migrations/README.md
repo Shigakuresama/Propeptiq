@@ -31,3 +31,11 @@ refuses populated `orders` or `provider_events` because structured addresses,
 buyer-scoped attempts, exact quote/expiry facts, and normalized provider events
 cannot be reconstructed honestly. A populated commerce chain requires a
 separately authorized reconciliation migration.
+
+Migration `0004` is also source-only and is not authorized for external
+application by Slice 6D. Its first statement refuses any `0003` checkout
+attempt that already carries provider authority, because the verified account
+email, trusted origin, request schema version, expected livemode, and provider
+account scope cannot be backfilled without invention. Provider-free review
+attempts migrate with null replay fields. Future provider-bearing rows must
+carry all five replay facts coherently.

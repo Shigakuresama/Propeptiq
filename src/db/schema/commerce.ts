@@ -159,6 +159,11 @@ export const checkoutAttempts = pgTable(
     providerRequestId: text("provider_request_id"),
     providerSessionId: text("provider_session_id"),
     providerRequestHash: text("provider_request_hash"),
+    providerCustomerEmail: text("provider_customer_email"),
+    providerOrigin: text("provider_origin"),
+    providerRequestSchemaVersion: integer("provider_request_schema_version"),
+    providerLivemode: boolean("provider_livemode"),
+    providerScope: text("provider_scope"),
     taxQuoteReference: text("tax_quote_reference"),
     shippingQuoteReference: text("shipping_quote_reference"),
     shippingService: text("shipping_service"),
@@ -193,9 +198,20 @@ export const checkoutAttempts = pgTable(
     check(
       "checkout_attempts_provider_coherent",
       sql`(${table.provider} is null and ${table.providerRequestId} is null
-            and ${table.providerSessionId} is null and ${table.providerRequestHash} is null)
+            and ${table.providerSessionId} is null and ${table.providerRequestHash} is null
+            and ${table.providerExpiresAt} is null
+            and ${table.providerCustomerEmail} is null and ${table.providerOrigin} is null
+            and ${table.providerRequestSchemaVersion} is null
+            and ${table.providerLivemode} is null and ${table.providerScope} is null)
           or (${table.provider} is not null and ${nonblank(table.provider)}
             and ${table.providerRequestId} is not null and ${nonblank(table.providerRequestId)}
+            and ${table.providerRequestHash} is not null
+            and ${table.providerExpiresAt} is not null
+            and ${table.providerCustomerEmail} is not null and ${nonblank(table.providerCustomerEmail)}
+            and ${table.providerOrigin} is not null and ${nonblank(table.providerOrigin)}
+            and ${table.providerRequestSchemaVersion} = 1
+            and ${table.providerLivemode} is not null
+            and ${table.providerScope} is not null and ${nonblank(table.providerScope)}
             and (${table.providerSessionId} is null or ${nonblank(table.providerSessionId)}))`,
     ),
     check(

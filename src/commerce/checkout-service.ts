@@ -433,6 +433,14 @@ function makePlan(data: AuthoritativeCheckoutPlanData): AuthoritativeCheckoutPla
   return plan;
 }
 
+export function projectAuthoritativeCheckoutPlan(
+  value: unknown,
+): AuthoritativeCheckoutPlanData | null {
+  return typeof value === "object" && value !== null && plans.has(value)
+    ? (value as AuthoritativeCheckoutPlanData)
+    : null;
+}
+
 function resultWithOpaquePlan<
   Base extends Readonly<Record<string, unknown>>,
 >(base: Base, plan: AuthoritativeCheckoutPlan): Base & {

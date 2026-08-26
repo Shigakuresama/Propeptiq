@@ -1,0 +1,469 @@
+import { createHash } from "node:crypto";
+
+import { describe, expect, it, vi } from "vitest";
+
+import { createCheckoutService, type AuthoritativeCheckoutFacts, type BrowserCheckoutQuote, type CheckoutRepository } from "@/commerce/checkout-service";
+import type { CheckoutProviderResult, NormalizedCheckoutSessionV1, PaymentProvider, RefundProviderResult } from "@/commerce/payment-provider";
+import { createProviderExecutionContextV1 } from "@/commerce/provider-context";
+import {
+  createProviderCheckoutOrchestrator,
+  type ProviderCheckoutSessionRepository,
+} from "@/commerce/provider-checkout-orchestration";
+import { parseServerEnv } from "@/config/env-schema";
+import type { DurableCheckoutRequestDataV1 } from "@/db/repositories/provider-session-repository";
+
+const ids = {
+  buyer: "76000000-0000-4000-8000-000000000001",
+  key: "76000000-0000-4000-8000-000000000002",
+  product: "76000000-0000-4000-8000-000000000003",
+  group: "76000000-0000-4000-8000-000000000004",
+  price: "76000000-0000-4000-8000-000000000005",
+  lot: "76000000-0000-4000-8000-000000000006",
+  policy: "76000000-0000-4000-8000-000000000007",
+  attestation: "76000000-0000-4000-8000-000000000008",
+  acceptance: "76000000-0000-4000-8000-000000000009",
+} as const;
+const now = new Date("2026-08-25T12:00:00.123Z");
+const sha256 = async (value: string) => createHash("sha256").update(value).digest("hex");
+
+function keyedUuid(label: string): string {
+  const hex = createHash("sha256").update(`orchestration:${label}`).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+const request = {
+  items: [{ productId: ids.product, quantity: 2 }],
+  destination: {
+    recipientName: "Synthetic Buyer",
+    line1: "100 Test Way",
+    line2: null,
+    city: "Los Angeles",
+    stateCode: "CA",
+    postalCode: "90001",
+    countryCode: "US" as const,
+  },
+  promotionIds: [],
+};
+
+const facts: AuthoritativeCheckoutFacts = {
+  buyer: {
+    userId: ids.buyer,
+    emailVerified: true,
+    status: "active",
+    currentAttestationVersionId: ids.attestation,
+    currentAttestationVersion: 1,
+    attestationAcceptanceId: ids.acceptance,
+    acceptedAttestationVersionId: ids.attestation,
+  },
+  items: [{
+    productId: ids.product,
+    productName: "Synthetic Product",
+    packageForm: "sealed vial",
+    policyGroupId: ids.group,
+    productActive: true,
+    policyGroupActive: true,
+    price: {
+      id: ids.price,
+      version: 1,
+      amountMinor: 5_000,
+      currency: "USD",
+      effectiveAt: "2026-08-01T00:00:00.000Z",
+      supersededAt: null,
+    },
+    destination: {
+      status: "allowed",
+      normalizedStateCode: "CA",
+      ruleId: ids.policy,
+      ruleVersion: "1",
+      scope: "product",
+    },
+    eligibleLots: [{
+      id: ids.lot,
+      status: "released",
+      receivedQuantity: 10,
+      availableQuantity: 10,
+      expiresAt: null,
+    }],
+  }],
+  promotion: null,
+};
+
+function normalizedSession(
+  exactRequest: Parameters<PaymentProvider["createCheckoutSession"]>[0],
+  providerSessionId = "cs_local_synthetic_orchestration",
+  state: "open" | "complete" | "expired" = "open",
+): NormalizedCheckoutSessionV1 {
+  return Object.freeze({
+    provider: "local_test",
+    providerSessionId,
+    hostedUrl: state === "open" ? `http://127.0.0.1:3000/__synthetic_local_checkout/${providerSessionId}` : null,
+    clientReferenceId: exactRequest.client_reference_id,
+    metadata: exactRequest.metadata,
+    paymentIntentId: state === "complete" ? "pi_local_synthetic_orchestration" : null,
+    amountTotal: exactRequest.line_items.reduce((sum, line) => sum + line.price_data.unit_amount, 0),
+    currency: "usd",
+    mode: "payment",
+    uiMode: "hosted_page",
+    status: state,
+    paymentStatus: state === "complete" ? "paid" : "unpaid",
+    livemode: false,
+    customerEmail: exactRequest.customer_email,
+    expiresAt: exactRequest.expires_at,
+  });
+}
+
+function providerWith(
+  createResult: (request: Parameters<PaymentProvider["createCheckoutSession"]>[0]) => CheckoutProviderResult,
+  retrieveResult?: (request: Parameters<PaymentProvider["retrieveCheckoutSession"]>[0]) => CheckoutProviderResult,
+): PaymentProvider {
+  return Object.freeze({
+    context: Object.freeze({
+      provider: "local_test" as const,
+      livemode: false,
+      scope: "local_test:synthetic-propeptiq-v1",
+    }),
+    createCheckoutSession: vi.fn(async (
+      exactRequest: Parameters<PaymentProvider["createCheckoutSession"]>[0],
+    ): Promise<CheckoutProviderResult> => createResult(exactRequest)),
+    retrieveCheckoutSession: vi.fn(async (input): Promise<CheckoutProviderResult> =>
+      retrieveResult?.(input) ?? Object.freeze({
+        status: "provider_unknown" as const,
+        knownProviderSessionId: input.knownProviderSessionId,
+        evidenceCode: "provider_sdk_unknown" as const,
+      })),
+    createRefund: vi.fn(async (): Promise<RefundProviderResult> => ({
+      status: "provider_unknown" as const,
+      knownProviderRefundId: null,
+      evidenceCode: "provider_sdk_unknown" as const,
+    })),
+    retrieveRefund: vi.fn(async (input): Promise<RefundProviderResult> => ({
+      status: "provider_unknown" as const,
+      knownProviderRefundId: input.knownProviderRefundId,
+      evidenceCode: "provider_sdk_unknown" as const,
+    })),
+  });
+}
+
+async function localContext(
+  provider: PaymentProvider,
+  withOrigin = true,
+  overrides: Readonly<{ email?: string; origin?: string }> = {},
+) {
+  const result = await createProviderExecutionContextV1({
+    environment: parseServerEnv({
+      APP_ENV: "local",
+      ...(withOrigin
+        ? { APP_ORIGIN: overrides.origin ?? "http://127.0.0.1:3000" }
+        : {}),
+      LOCAL_TEST_DRIVER: "enabled",
+      LOCAL_TEST_SECRET: "orchestration-local-secret-at-least-32-chars",
+      RATE_LIMIT_SECRET: "orchestration-rate-limit-at-least-32-chars",
+    }),
+    identity: {
+      clerkUserId: "user_synthetic_orchestration",
+      primaryEmail: overrides.email ?? "Synthetic.Buyer@Example.Test",
+      emailVerifiedAt: "2026-08-25T11:00:00.000Z",
+      mfaConfigured: false,
+      secondFactorCompleted: false,
+    },
+    now,
+    resolveDatabaseUsersByClerkId: async () => [ids.buyer],
+    adapters: { stripe: null, localTest: provider },
+  });
+  if (!result.ok) throw new Error("invalid synthetic context");
+  return result.context;
+}
+
+function setup(reviewRequired = false) {
+  const trace: string[] = [];
+  let durable: DurableCheckoutRequestDataV1 | null = null;
+  let quoteSnapshot: BrowserCheckoutQuote | null = null;
+  let failNextCas = false;
+  const releaseDefiniteFailure = vi.fn(async (input) => {
+    if (durable !== null) {
+      durable = { ...durable, attemptStatus: input.targetAttemptStatus };
+    }
+    return { status: "released" as const };
+  });
+  const checkoutRepository: CheckoutRepository = {
+    findAttempt: vi.fn(async () => durable === null ? null : ({
+      orderId: durable.orderId,
+      attemptId: durable.attemptId,
+      requestHash: durable.requestHash,
+      status: durable.attemptStatus,
+      orderState: durable.orderState,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot,
+    })),
+    loadFacts: vi.fn(async () => ({
+      ok: true as const,
+      value: reviewRequired
+        ? { ...facts, buyer: { ...facts.buyer, status: "review" as const } }
+        : facts,
+    })),
+    findExactReview: vi.fn(async () => null),
+    prepare: vi.fn(async (plan, preparation) => {
+      trace.push("prepare:begin");
+      quoteSnapshot = plan.browserQuote;
+      if (preparation === null) {
+        trace.push("prepare:end");
+        return {
+          status: "review_required" as const,
+          orderId: plan.identity.orderId,
+          attemptId: plan.identity.attemptId,
+          reviewRequestId: keyedUuid("orchestration:review"),
+          quote: plan.browserQuote,
+        };
+      }
+      durable = {
+        buyerUserId: plan.buyerUserId,
+        idempotencyKey: plan.idempotencyKey,
+        orderId: plan.identity.orderId,
+        attemptId: plan.identity.attemptId,
+        requestHash: plan.requestHash,
+        attemptStatus: "created",
+        orderState: "checkout_pending",
+        provider: preparation.provider,
+        providerIdempotencyKey: preparation.providerIdempotencyKey,
+        providerSessionId: null,
+        providerRequestHash: preparation.providerRequestHash,
+        providerExpiresAt: preparation.providerExpiresAt,
+        providerCustomerEmail: preparation.providerCustomerEmail,
+        providerOrigin: preparation.providerOrigin,
+        providerRequestSchemaVersion: preparation.providerRequestSchemaVersion,
+        providerLivemode: preparation.providerLivemode,
+        providerScope: preparation.providerScope,
+        currency: "USD",
+        destination: plan.request.destination,
+        lines: plan.browserQuote.lines.map((line: BrowserCheckoutQuote["lines"][number]) => ({
+          productId: line.productId,
+          productName: line.productName,
+          packageForm: line.packageForm,
+          purchasedQuantity: line.quantity,
+          postDiscountTotalMinor: line.totalMinor,
+        })),
+        shippingMinor: plan.browserQuote.shippingMinor,
+        taxMinor: plan.browserQuote.taxMinor,
+        totalMinor: plan.browserQuote.totalMinor,
+      };
+      trace.push("prepare:end");
+      return {
+        status: "prepared" as const,
+        orderId: plan.identity.orderId,
+        attemptId: plan.identity.attemptId,
+        reviewRequestId: null,
+        quote: plan.browserQuote,
+      };
+    }),
+    releaseDefiniteFailure,
+  };
+  const checkoutService = createCheckoutService({
+    repository: checkoutRepository,
+    shippingQuotePort: { quoteShipping: async (input) => ({
+      status: "ready", bindingHash: input.bindingHash, reference: "ship_synthetic",
+      service: "Synthetic Ground", amountMinor: 700, currency: "USD",
+    }) },
+    taxQuotePort: { quoteTax: async (input) => ({
+      status: "ready", bindingHash: input.bindingHash, reference: "tax_synthetic",
+      amountMinor: 325, currency: "USD",
+    }) },
+    sha256,
+    clock: () => new Date(now),
+    keyedUuid,
+    moneyPolicy: {
+      allowedCurrencies: ["USD"], maximumLineCount: 50,
+      maximumQuantityPerLine: 25, maximumOrderAmountMinor: 1_000_000,
+    },
+  });
+  const sessions: ProviderCheckoutSessionRepository = {
+    load: vi.fn(async () => durable as never),
+    recordOpen: vi.fn(async (_loaded, providerSessionId) => {
+      trace.push("cas:begin");
+      if (failNextCas) {
+        failNextCas = false;
+        trace.push("cas:failed");
+        throw new Error("synthetic database failure");
+      }
+      durable = { ...durable!, attemptStatus: "open", providerSessionId };
+      trace.push("cas:end");
+      return { status: "applied" as const };
+    }),
+    recordUnknown: vi.fn(async (_loaded, input) => {
+      trace.push("cas:begin");
+      durable = {
+        ...durable!,
+        attemptStatus: "provider_unknown",
+        providerSessionId: durable!.providerSessionId ?? input.knownProviderSessionId,
+      };
+      trace.push("cas:end");
+      return { status: "applied" as const };
+    }),
+  };
+  const orchestrator = createProviderCheckoutOrchestrator({
+    checkoutService,
+    providerSessionRepository: sessions,
+    releaseDefiniteFailure,
+    sha256,
+  });
+  return {
+    orchestrator,
+    checkoutRepository,
+    sessions,
+    releaseDefiniteFailure,
+    trace,
+    failNextCas: () => { failNextCas = true; },
+    getDurable: () => durable,
+    setDurable: (value: DurableCheckoutRequestDataV1) => { durable = value; },
+  };
+}
+
+describe("provider Checkout orchestration", () => {
+  it("prepares once, calls the provider outside transactions, and exactly recovers a DB failure", async () => {
+    let trace: string[] = [];
+    const provider = providerWith((exactRequest) => {
+      trace.push("provider:create");
+      return { status: "open", session: normalizedSession(exactRequest) };
+    });
+    const fixture = setup();
+    trace = fixture.trace;
+    fixture.failNextCas();
+    const context = await localContext(provider);
+    await expect(fixture.orchestrator.start({ context, idempotencyKey: ids.key, request })).resolves.toEqual({
+      status: "provider_unknown",
+    });
+    const changedContext = await localContext(provider, true, {
+      email: "Changed.Identity@Example.Test",
+      origin: "http://127.0.0.1:4000",
+    });
+    await expect(fixture.orchestrator.start({ context: changedContext, idempotencyKey: ids.key, request })).resolves.toMatchObject({
+      status: "open",
+      orderId: expect.any(String),
+      url: expect.stringContaining("/__synthetic_local_checkout/"),
+      expiresAt: "2026-08-25T13:00:00.000Z",
+    });
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(provider.createCheckoutSession).mock.calls[0]).toEqual(
+      vi.mocked(provider.createCheckoutSession).mock.calls[1],
+    );
+    expect(checkoutRepositoryPrepareCalls(fixture.checkoutRepository)).toBe(1);
+    expect(trace).toEqual([
+      "prepare:begin", "prepare:end", "provider:create", "cas:begin", "cas:failed",
+      "provider:create", "cas:begin", "cas:end",
+    ]);
+  });
+
+  it("uses complete expected request/context for known-ID retrieval and releases only retrieved expiry", async () => {
+    let exactCreatedRequest: Parameters<PaymentProvider["createCheckoutSession"]>[0] | null = null;
+    let retrieves = 0;
+    const provider = providerWith(
+      (exactRequest) => {
+        exactCreatedRequest = exactRequest;
+        return {
+          status: "provider_unknown",
+          knownProviderSessionId: "cs_local_synthetic_known",
+          evidenceCode: "create_requires_retrieve",
+        };
+      },
+      (input) => {
+        retrieves += 1;
+        expect(input.expectedRequest).toEqual(exactCreatedRequest);
+        expect(input.expectedProviderContext).toEqual(provider.context);
+        const state = retrieves === 1 ? "complete" : "expired";
+        return state === "complete"
+          ? { status: "provider_pending", session: normalizedSession(input.expectedRequest, input.knownProviderSessionId, state) }
+          : { status: "verified_expired", session: normalizedSession(input.expectedRequest, input.knownProviderSessionId, state) };
+      },
+    );
+    const fixture = setup();
+    const context = await localContext(provider);
+    await expect(fixture.orchestrator.start({ context, idempotencyKey: ids.key, request })).resolves.toEqual({ status: "provider_unknown" });
+    const recoveryWithoutOrigin = await localContext(provider, false);
+    await expect(fixture.orchestrator.start({ context: recoveryWithoutOrigin, idempotencyKey: ids.key, request })).resolves.toEqual({
+      status: "provider_pending",
+      orderId: expect.any(String),
+    });
+    await expect(fixture.orchestrator.start({ context: recoveryWithoutOrigin, idempotencyKey: ids.key, request })).resolves.toEqual({
+      status: "expired",
+      orderId: expect.any(String),
+    });
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).toHaveBeenCalledTimes(2);
+    expect(fixture.releaseDefiniteFailure).toHaveBeenCalledWith(expect.objectContaining({
+      authority: "authoritative_provider_terminal",
+      cause: "verified_expiry",
+      providerEvidenceId: "cs_local_synthetic_known",
+      targetAttemptStatus: "expired",
+    }));
+  });
+
+  it("releases only a definite create rejection and keeps every ambiguous result unknown", async () => {
+    const definite = providerWith(() => ({
+      status: "definite_rejection",
+      evidenceCode: "create_rejected_4xx",
+      providerRequestId: null,
+    }));
+    const definiteFixture = setup();
+    const definiteContext = await localContext(definite);
+    await expect(definiteFixture.orchestrator.start({ context: definiteContext, idempotencyKey: ids.key, request })).resolves.toMatchObject({ status: "failed" });
+    expect(definiteFixture.releaseDefiniteFailure).toHaveBeenCalledWith(expect.objectContaining({ cause: "definite_rejection" }));
+
+    const unknown = providerWith(() => ({
+      status: "provider_unknown",
+      knownProviderSessionId: null,
+      evidenceCode: "provider_transport_unknown",
+    }));
+    const unknownFixture = setup();
+    const unknownContext = await localContext(unknown);
+    await expect(unknownFixture.orchestrator.start({ context: unknownContext, idempotencyKey: ids.key, request })).resolves.toEqual({ status: "provider_unknown" });
+    expect(unknownFixture.releaseDefiniteFailure).not.toHaveBeenCalled();
+    expect(unknownFixture.sessions.recordUnknown).toHaveBeenCalled();
+  });
+
+  it("makes missing trusted origin an ordinary zero-write/provider-call denial", async () => {
+    const provider = providerWith((exactRequest) => ({ status: "open", session: normalizedSession(exactRequest) }));
+    const fixture = setup();
+    const context = await localContext(provider, false);
+    await expect(fixture.orchestrator.start({ context, idempotencyKey: ids.key, request })).resolves.toEqual({ status: "unavailable" });
+    expect(fixture.checkoutRepository.prepare).not.toHaveBeenCalled();
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+    expect(fixture.sessions.load).not.toHaveBeenCalled();
+  });
+
+  it("prepares review-required plans with null provider authority and makes no provider call", async () => {
+    const provider = providerWith((exactRequest) => ({
+      status: "open",
+      session: normalizedSession(exactRequest),
+    }));
+    const fixture = setup(true);
+    const context = await localContext(provider);
+    await expect(
+      fixture.orchestrator.start({ context, idempotencyKey: ids.key, request }),
+    ).resolves.toMatchObject({ status: "review_required", orderId: expect.any(String) });
+    expect(fixture.checkoutRepository.prepare).toHaveBeenCalledWith(
+      expect.any(Object),
+      null,
+    );
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+    expect(fixture.sessions.load).not.toHaveBeenCalled();
+  });
+
+  it("returns terminal loaded outcomes without provider calls and fences mode/scope drift", async () => {
+    const provider = providerWith((exactRequest) => ({ status: "open", session: normalizedSession(exactRequest) }));
+    const fixture = setup();
+    const context = await localContext(provider);
+    await fixture.orchestrator.start({ context, idempotencyKey: ids.key, request });
+    fixture.setDurable({ ...fixture.getDurable()!, attemptStatus: "completed" });
+    await expect(fixture.orchestrator.start({ context, idempotencyKey: ids.key, request })).resolves.toMatchObject({ status: "provider_pending" });
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+
+    fixture.setDurable({ ...fixture.getDurable()!, attemptStatus: "provider_unknown", providerScope: "local_test:changed-scope" });
+    await expect(fixture.orchestrator.start({ context, idempotencyKey: ids.key, request })).resolves.toEqual({ status: "provider_unknown" });
+    expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
+  });
+});
+
+function checkoutRepositoryPrepareCalls(repository: CheckoutRepository): number {
+  return vi.mocked(repository.prepare).mock.calls.length;
+}

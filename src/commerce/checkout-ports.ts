@@ -86,7 +86,15 @@ export type ProviderPreparation = Readonly<{
   providerIdempotencyKey: string;
   providerRequestHash: string;
   providerExpiresAt: string;
+  providerCustomerEmail: string;
+  providerOrigin: string;
+  providerRequestSchemaVersion: 1;
+  providerLivemode: boolean;
+  providerScope: string;
 }>;
+
+export const LOCAL_PAYMENT_PROVIDER_SCOPE =
+  "local_test:synthetic-propeptiq-v1" as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -122,6 +130,75 @@ function nonblank(value: unknown): value is string {
 
 function safeMoney(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function isCanonicalProviderEmail(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= 254 &&
+    value === value.trim() &&
+    value === value.toLowerCase() &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value) &&
+    !/[\u0000-\u001f\u007f]/u.test(value)
+  );
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return (
+    normalized === "localhost" ||
+    normalized === "127.0.0.1" ||
+    normalized === "[::1]"
+  );
+}
+
+function isUnsafeStripeOriginHost(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/\.+$/u, "");
+  return (
+    isLoopbackHost(normalized) ||
+    normalized.endsWith(".localhost") ||
+    normalized.endsWith(".local") ||
+    normalized.endsWith(".internal") ||
+    normalized.includes(":") ||
+    /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(normalized)
+  );
+}
+
+function isCanonicalProviderOrigin(
+  value: unknown,
+  provider: ProviderPreparation["provider"],
+): value is string {
+  if (typeof value !== "string" || !URL.canParse(value)) return false;
+  const url = new URL(value);
+  if (
+    url.username !== "" ||
+    url.password !== "" ||
+    url.pathname !== "/" ||
+    url.search !== "" ||
+    url.hash !== "" ||
+    url.origin !== value
+  ) {
+    return false;
+  }
+  if (provider === "local_test") {
+    return url.protocol === "http:" && isLoopbackHost(url.hostname);
+  }
+  return url.protocol === "https:" && !isUnsafeStripeOriginHost(url.hostname);
+}
+
+function isCoherentProviderScope(
+  provider: ProviderPreparation["provider"],
+  livemode: boolean,
+  value: unknown,
+): value is string {
+  if (provider === "local_test") {
+    return livemode === false && value === LOCAL_PAYMENT_PROVIDER_SCOPE;
+  }
+  return (
+    typeof value === "string" &&
+    value.length <= 80 &&
+    /^stripe:acct_[A-Za-z0-9]{8,64}$/u.test(value)
+  );
 }
 
 function fail(field: string): ContractResult<never> {
@@ -241,13 +318,27 @@ export function parseProviderPreparation(
       "providerIdempotencyKey",
       "providerRequestHash",
       "providerExpiresAt",
+      "providerCustomerEmail",
+      "providerOrigin",
+      "providerRequestSchemaVersion",
+      "providerLivemode",
+      "providerScope",
     ]) ||
     value.authority !== "server_prepared_provider_request" ||
     (value.provider !== "stripe" && value.provider !== "local_test") ||
     value.providerIdempotencyKey !==
       `checkout_attempt:${expected.attemptId}` ||
     !isSha256(value.providerRequestHash) ||
-    typeof value.providerExpiresAt !== "string"
+    typeof value.providerExpiresAt !== "string" ||
+    !isCanonicalProviderEmail(value.providerCustomerEmail) ||
+    !isCanonicalProviderOrigin(value.providerOrigin, value.provider) ||
+    value.providerRequestSchemaVersion !== 1 ||
+    typeof value.providerLivemode !== "boolean" ||
+    !isCoherentProviderScope(
+      value.provider,
+      value.providerLivemode,
+      value.providerScope,
+    )
   ) {
     return fail("providerPreparation");
   }
@@ -258,6 +349,7 @@ export function parseProviderPreparation(
     !Number.isFinite(nowMs) ||
     !Number.isFinite(expiresMs) ||
     expiresAt.toISOString() !== value.providerExpiresAt ||
+    expiresMs % 1000 !== 0 ||
     expiresMs - nowMs < 30 * 60 * 1000 ||
     expiresMs - nowMs > 24 * 60 * 60 * 1000
   ) {
@@ -271,6 +363,11 @@ export function parseProviderPreparation(
       providerIdempotencyKey: value.providerIdempotencyKey,
       providerRequestHash: value.providerRequestHash,
       providerExpiresAt: value.providerExpiresAt,
+      providerCustomerEmail: value.providerCustomerEmail,
+      providerOrigin: value.providerOrigin,
+      providerRequestSchemaVersion: 1,
+      providerLivemode: value.providerLivemode,
+      providerScope: value.providerScope,
     }),
   });
 }

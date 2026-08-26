@@ -5,6 +5,7 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { hashCheckoutRequest } from "@/commerce/checkout-identity";
 import {
   createCheckoutService,
+  projectAuthoritativeCheckoutPlan,
   type AuthoritativeCheckoutFacts,
   type CheckoutAttemptStatus,
   type CheckoutLoadedResult,
@@ -331,6 +332,11 @@ describe("authoritative checkout service", () => {
         providerIdempotencyKey: `checkout_attempt:${ids.attempt}`,
         providerRequestHash: "c".repeat(64),
         providerExpiresAt: "2026-08-25T13:00:00.000Z",
+        providerCustomerEmail: "synthetic.buyer@example.test",
+        providerOrigin: "http://127.0.0.1:3000",
+        providerRequestSchemaVersion: 1,
+        providerLivemode: false,
+        providerScope: "local_test:synthetic-propeptiq-v1",
       }),
     ).resolves.toEqual({ status: "invalid_plan" });
 
@@ -341,6 +347,11 @@ describe("authoritative checkout service", () => {
       request,
     });
     if (quoted.status !== "quoted") throw new Error("expected quote");
+    expect(projectAuthoritativeCheckoutPlan({ ...quoted.plan })).toBeNull();
+    expect(projectAuthoritativeCheckoutPlan(quoted.plan)).toBe(quoted.plan);
+    expect(() => JSON.stringify(quoted.plan)).toThrow(
+      "Authoritative checkout plans must never be serialized",
+    );
     await expect(service.prepare(quoted.plan, null)).resolves.toEqual({
       status: "invalid_provider_preparation",
     });
@@ -351,6 +362,11 @@ describe("authoritative checkout service", () => {
         providerIdempotencyKey: `checkout_attempt:${ids.attempt}`,
         providerRequestHash: "c".repeat(64),
         providerExpiresAt: "2026-08-25T13:00:00.000Z",
+        providerCustomerEmail: "synthetic.buyer@example.test",
+        providerOrigin: "http://127.0.0.1:3000",
+        providerRequestSchemaVersion: 1,
+        providerLivemode: false,
+        providerScope: "local_test:synthetic-propeptiq-v1",
       }),
     ).resolves.toMatchObject({
       status: "prepared",

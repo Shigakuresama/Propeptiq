@@ -26,6 +26,9 @@ const syntheticDemoModule = includeSyntheticDemoFixtures
 const localTestDriverModule = includeLocalTestDriver
   ? "./src/auth/local-driver.ts"
   : "./src/auth/local-driver-disabled.ts";
+const localPaymentProviderModule = includeLocalTestDriver
+  ? "./src/commerce/local-payment-provider.ts"
+  : "./src/commerce/local-payment-provider-disabled.ts";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
@@ -35,6 +38,7 @@ const nextConfig: NextConfig = {
     resolveAlias: {
       "catalog-demo-fixtures": syntheticDemoModule,
       "local-auth-driver": localTestDriverModule,
+      "local-payment-provider": localPaymentProviderModule,
     },
   },
   experimental: {
@@ -48,6 +52,10 @@ const nextConfig: NextConfig = {
     config.resolve.alias["local-auth-driver$"] = resolve(
       process.cwd(),
       localTestDriverModule,
+    );
+    config.resolve.alias["local-payment-provider$"] = resolve(
+      process.cwd(),
+      localPaymentProviderModule,
     );
     return config;
   },

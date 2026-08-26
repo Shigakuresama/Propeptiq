@@ -365,13 +365,16 @@ describe("Task 6 schema boundary", () => {
          inventory_gate, payment_provider_gate, permitted, review_required,
          tax_ready, shipping_ready, provider, provider_request_id,
          provider_request_hash, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at)
+         shipping_service, expires_at, provider_customer_email, provider_origin,
+         provider_request_schema_version, provider_livemode, provider_scope)
       VALUES
         ('67000000-0000-4000-8000-000000000020', '${fixture.order1}',
          '${fixture.user1}', 'task6-shared-key', '${hashB}', 'created',
          'pass', 'pass', 'pass', 'pass', 'pass', 'pass', true, false, true, true,
          'synthetic_provider', 'req_task6_valid', '${hashC}', 'tax_task6_valid',
-         'shipping_task6_valid', 'ground', now() + interval '1 hour');
+         'shipping_task6_valid', 'ground', now() + interval '1 hour',
+         'synthetic.buyer@example.test', 'https://commerce.synthetic.example',
+         1, false, 'synthetic_provider:task6');
 
       INSERT INTO checkout_attempts
         (id, order_id, buyer_user_id, idempotency_key, request_hash, status,
@@ -392,13 +395,16 @@ describe("Task 6 schema boundary", () => {
          inventory_gate, payment_provider_gate, permitted, review_required,
          tax_ready, shipping_ready, provider, provider_request_id,
          provider_request_hash, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at)
+         shipping_service, expires_at, provider_customer_email, provider_origin,
+         provider_request_schema_version, provider_livemode, provider_scope)
       VALUES
         ('67000000-0000-4000-8000-000000000023', '${fixture.order1}',
          '${fixture.user1}', 'task6-provider-unknown', '${hashC}', 'provider_unknown',
          'pass', 'pass', 'pass', 'pass', 'pass', 'pass', true, false, true, true,
          'synthetic_provider', 'req_task6_unknown', '${hashA}', 'tax_task6_unknown',
-         'shipping_task6_unknown', 'ground', now() + interval '1 hour');
+         'shipping_task6_unknown', 'ground', now() + interval '1 hour',
+         'synthetic.buyer@example.test', 'https://commerce.synthetic.example',
+         1, false, 'synthetic_provider:task6');
     `);
 
     await expectRejected(
@@ -442,12 +448,14 @@ describe("Task 6 schema boundary", () => {
          inventory_gate, payment_provider_gate, permitted, review_required,
          tax_ready, shipping_ready, provider, provider_request_id,
          provider_request_hash, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at)
+         shipping_service, expires_at, provider_customer_email, provider_origin,
+         provider_request_schema_version, provider_livemode, provider_scope)
        VALUES ('${fixture.order1}', '${fixture.user1}', 'task6-open-without-session',
          '${hashC}', 'open', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass', true,
          false, true, true, 'synthetic_provider', 'req_task6_missing_session',
          '${hashA}', 'tax_task6_missing_session', 'shipping_task6_missing_session',
-         'ground', now() + interval '1 hour')`,
+         'ground', now() + interval '1 hour', 'synthetic.buyer@example.test',
+         'https://commerce.synthetic.example', 1, false, 'synthetic_provider:task6')`,
     );
     await expectRejected(
       client,
@@ -457,12 +465,14 @@ describe("Task 6 schema boundary", () => {
          inventory_gate, payment_provider_gate, permitted, review_required,
          tax_ready, shipping_ready, provider, provider_request_id,
          provider_request_hash, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at)
+         shipping_service, expires_at, provider_customer_email, provider_origin,
+         provider_request_schema_version, provider_livemode, provider_scope)
        VALUES ('${fixture.order1}', '${fixture.user1}', 'task6-past-provider-expiry',
          '${hashC}', 'created', 'pass', 'pass', 'pass', 'pass', 'pass', 'pass', true,
          false, true, true, 'synthetic_provider', 'req_task6_past_expiry',
          '${hashA}', 'tax_task6_past_expiry', 'shipping_task6_past_expiry',
-         'ground', now() - interval '1 minute')`,
+         'ground', now() - interval '1 minute', 'synthetic.buyer@example.test',
+         'https://commerce.synthetic.example', 1, false, 'synthetic_provider:task6')`,
     );
   });
 

@@ -27,6 +27,7 @@ const paymentsLive = {
   DATABASE_MODE: "live",
   PAYMENTS_MODE: "live",
   DATABASE_URL: databaseUrl,
+  STRIPE_ACCOUNT_ID: "acct_synthetic123",
   STRIPE_SECRET_KEY: "sk_live_synthetic",
   STRIPE_WEBHOOK_SECRET: "whsec_synthetic",
 } as const;

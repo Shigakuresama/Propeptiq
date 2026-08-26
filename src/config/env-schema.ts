@@ -6,6 +6,11 @@ const catalogDemoMode = z.enum(["disabled", "enabled"]);
 const localTestDriver = z.enum(["disabled", "enabled"]);
 const vercelEnvironment = z.enum(["development", "preview", "production"]);
 const nonBlank = z.string().trim().min(1);
+const stripeAccountId = z.string().min(1).refine(
+  (value) =>
+    value === value.trim() && /^acct_[A-Za-z0-9]{8,64}$/u.test(value),
+  { message: "Expected a Stripe acct_ account ID" },
+);
 const urlValue = nonBlank.pipe(z.url());
 const postgresUrl = urlValue.refine(
   (value) => {
@@ -45,6 +50,7 @@ const rawServerEnvSchema = z.object({
   DATABASE_MIGRATION_URL: postgresUrl.optional(),
   TEST_DATABASE_URL: postgresUrl.optional(),
   TEST_DATABASE_CONFIRMATION: z.literal("isolated-test-database").optional(),
+  STRIPE_ACCOUNT_ID: stripeAccountId.optional(),
   STRIPE_SECRET_KEY: nonBlank.optional(),
   STRIPE_WEBHOOK_SECRET: nonBlank.optional(),
   BLOB_READ_WRITE_TOKEN: nonBlank.optional(),
@@ -235,6 +241,7 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
     requireFields(env, context, "DATABASE_MODE", ["DATABASE_URL"]);
   }
   requireFields(env, context, "PAYMENTS_MODE", [
+    "STRIPE_ACCOUNT_ID",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
   ]);

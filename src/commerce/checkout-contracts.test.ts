@@ -247,7 +247,7 @@ describe("strict quote and provider-preparation contracts", () => {
     ).toMatchObject({ ok: false });
   });
 
-  it("validates exact server provider authority, derived key, hash, and 30m-24h expiry", () => {
+  it("validates every exact provider replay fact and rejects noncanonical authority", () => {
     const now = new Date("2026-08-25T12:00:00.000Z");
     const preparation = {
       authority: "server_prepared_provider_request",
@@ -255,6 +255,11 @@ describe("strict quote and provider-preparation contracts", () => {
       providerIdempotencyKey: `checkout_attempt:${ids.attempt}`,
       providerRequestHash: "c".repeat(64),
       providerExpiresAt: "2026-08-25T12:30:00.000Z",
+      providerCustomerEmail: "synthetic.buyer@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
     } as const;
 
     expect(
@@ -281,5 +286,52 @@ describe("strict quote and provider-preparation contracts", () => {
         { attemptId: ids.attempt, now },
       ),
     ).toMatchObject({ ok: false });
+    for (const invalid of [
+      { ...preparation, providerExpiresAt: "2026-08-25T13:00:00.001Z" },
+      { ...preparation, providerCustomerEmail: "Synthetic.Buyer@example.test" },
+      { ...preparation, providerCustomerEmail: "synthetic.buyer@example.test " },
+      { ...preparation, providerOrigin: "http://127.0.0.1:3000/checkout" },
+      { ...preparation, providerOrigin: "http://research.example.test" },
+      {
+        ...preparation,
+        provider: "stripe",
+        providerOrigin: "https://127.0.0.2",
+        providerScope: "stripe:acct_synthetic6d",
+      },
+      {
+        ...preparation,
+        provider: "stripe",
+        providerOrigin: "https://commerce.local",
+        providerScope: "stripe:acct_synthetic6d",
+      },
+      { ...preparation, providerRequestSchemaVersion: 2 },
+      { ...preparation, providerLivemode: true },
+      { ...preparation, providerScope: "stripe:acct_synthetic" },
+      { ...preparation, unexpected: "caller authority" },
+      Object.assign(Object.create({ inherited: "caller authority" }), preparation),
+      {
+        ...preparation,
+        provider: "stripe",
+        providerOrigin: "http://127.0.0.1:3000",
+        providerScope: "stripe:acct_synthetic123",
+      },
+    ] as const) {
+      expect(
+        parseProviderPreparation(invalid, { attemptId: ids.attempt, now }),
+      ).toMatchObject({ ok: false });
+    }
+
+    expect(
+      parseProviderPreparation(
+        {
+          ...preparation,
+          provider: "stripe",
+          providerOrigin: "https://checkout.synthetic.example",
+          providerScope: "stripe:acct_synthetic123",
+          providerLivemode: true,
+        },
+        { attemptId: ids.attempt, now },
+      ),
+    ).toMatchObject({ ok: true });
   });
 });

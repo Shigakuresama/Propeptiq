@@ -8,6 +8,7 @@ import {
   createPostgresCheckoutRepository,
   type CheckoutSqlClient,
 } from "@/db/repositories/checkout-repository";
+import { createProviderSessionRepository } from "@/db/repositories/provider-session-repository";
 import { resolveTestDatabase } from "../integration/helpers/database";
 
 // resolveTestDatabase validates the exact confirmation and target name before
@@ -108,6 +109,40 @@ function repository() {
     retrySleep: async (retry) => {
       await new Promise((resolve) => setTimeout(resolve, retry * 5));
     },
+  });
+}
+
+async function shortTransaction<Value>(
+  work: (client: CheckoutSqlClient) => Promise<Value>,
+): Promise<Value> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await work({
+      query: async (sql, params = []) => {
+        const queried = await client.query(sql, [...params]);
+        return { rows: queried.rows };
+      },
+    });
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function providerSessionRepository() {
+  return createProviderSessionRepository({
+    client: {
+      query: async (sql, params = []) => {
+        const queried = await pool.query(sql, [...params]);
+        return { rows: queried.rows };
+      },
+    },
+    runTransaction: (work) => shortTransaction(work),
   });
 }
 
@@ -338,17 +373,27 @@ function providerPreparation(attemptId: string) {
     providerIdempotencyKey: `checkout_attempt:${attemptId}`,
     providerRequestHash: "c".repeat(64),
     providerExpiresAt: "2026-08-25T13:00:00.000Z",
+    providerCustomerEmail: "synthetic.buyer@example.test",
+    providerOrigin: "http://127.0.0.1:3000",
+    providerRequestSchemaVersion: 1,
+    providerLivemode: false,
+    providerScope: "local_test:synthetic-propeptiq-v1",
   };
 }
 
 beforeAll(async () => {
-  const ready = await pool.query<{ attempts: string | null; reservations: string | null }>(
+  const ready = await pool.query<{ attempts: string | null; reservations: string | null; replayColumn: boolean }>(
     `SELECT to_regclass('public.checkout_attempts')::text AS attempts,
-            to_regclass('public.inventory_reservations')::text AS reservations`,
+            to_regclass('public.inventory_reservations')::text AS reservations,
+            EXISTS (
+              SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'checkout_attempts'
+                AND column_name = 'provider_scope'
+            ) AS "replayColumn"`,
   );
-  if (!ready.rows[0]?.attempts || !ready.rows[0]?.reservations) {
+  if (!ready.rows[0]?.attempts || !ready.rows[0]?.reservations || !ready.rows[0]?.replayColumn) {
     throw new Error(
-      "The isolated PostgreSQL target must be separately prepared through migration 0003",
+      "The isolated PostgreSQL target must be separately prepared through migration 0004",
     );
   }
 });
@@ -424,6 +469,45 @@ describe("guarded PostgreSQL checkout contention", () => {
         request: checkoutRequest(data, 2),
       });
       expect(changed).toEqual({ status: "idempotency_conflict" });
+    } finally {
+      await cleanupFixture(data);
+    }
+  });
+
+  it("allows only one competing provider session CAS for the same attempt", async () => {
+    const data = fixture("provider-session-cas");
+    await seedFixture(data, { quantityPerLot: 3 });
+    try {
+      const key = keyedUuid("provider-session-cas:key");
+      const planned = await quote(data, 0, key, checkoutRequest(data));
+      const prepared = await planned.checkout.prepare(
+        planned.result.plan,
+        providerPreparation(planned.result.plan.identity.attemptId),
+      );
+      expect(prepared.status).toBe("prepared");
+      const sessions = providerSessionRepository();
+      const durable = await sessions.load({
+        buyerUserId: data.buyers[0]!,
+        idempotencyKey: key,
+      });
+      if (durable === null) throw new Error("missing durable provider request");
+      const results = await Promise.all([
+        sessions.recordOpen(durable, "cs_local_synthetic_guarded_primary"),
+        sessions.recordOpen(durable, "cs_local_synthetic_guarded_competing"),
+      ]);
+      expect(results.map((result) => result.status).toSorted()).toEqual([
+        "applied",
+        "conflict",
+      ]);
+      const stored = await pool.query<{ providerSessionId: string }>(
+        `SELECT provider_session_id AS "providerSessionId"
+         FROM checkout_attempts WHERE id = $1::uuid`,
+        [planned.result.plan.identity.attemptId],
+      );
+      expect([
+        "cs_local_synthetic_guarded_primary",
+        "cs_local_synthetic_guarded_competing",
+      ]).toContain(stored.rows[0]?.providerSessionId);
     } finally {
       await cleanupFixture(data);
     }

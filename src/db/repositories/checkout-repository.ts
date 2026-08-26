@@ -1068,6 +1068,11 @@ async function writeCommercialSnapshots(
     providerPreparation?.providerIdempotencyKey ?? null,
     providerPreparation?.providerRequestHash ?? null,
     providerPreparation?.providerExpiresAt ?? null,
+    providerPreparation?.providerCustomerEmail ?? null,
+    providerPreparation?.providerOrigin ?? null,
+    providerPreparation?.providerRequestSchemaVersion ?? null,
+    providerPreparation?.providerLivemode ?? null,
+    providerPreparation?.providerScope ?? null,
     plan.authoritativeAt.toISOString(),
   ] as const;
   if (existing === null) {
@@ -1078,14 +1083,18 @@ async function writeCommercialSnapshots(
          inventory_gate, payment_provider_gate, permitted, review_required,
          reasons, tax_ready, shipping_ready, tax_quote_reference,
          shipping_quote_reference, shipping_service, provider,
-         provider_request_id, provider_request_hash, expires_at, created_at)
+         provider_request_id, provider_request_hash, expires_at,
+         provider_customer_email, provider_origin,
+         provider_request_schema_version, provider_livemode, provider_scope,
+         created_at)
        VALUES
         ($1::uuid, $2::uuid, $3::uuid, $4, $5, 'created',
          $6::checkout_gate_result, $7::checkout_gate_result,
          $8::checkout_gate_result, $9::checkout_gate_result,
          $10::checkout_gate_result, $11::checkout_gate_result,
          $12, $13, $14::text[], true, true, $15, $16, $17,
-         $18, $19, $20, $21::timestamptz, $22::timestamptz)`,
+         $18, $19, $20, $21::timestamptz, $22, $23, $24, $25, $26,
+         $27::timestamptz)`,
       attemptValues,
     );
   } else {
@@ -1102,10 +1111,13 @@ async function writeCommercialSnapshots(
          tax_quote_reference = $15, shipping_quote_reference = $16,
          shipping_service = $17, provider = $18,
          provider_request_id = $19, provider_session_id = NULL,
-         provider_request_hash = $20, expires_at = $21::timestamptz
+         provider_request_hash = $20, expires_at = $21::timestamptz,
+         provider_customer_email = $22, provider_origin = $23,
+         provider_request_schema_version = $24, provider_livemode = $25,
+         provider_scope = $26
        WHERE id = $1::uuid AND order_id = $2::uuid AND buyer_user_id = $3::uuid
          AND idempotency_key = $4 AND request_hash = $5`,
-      attemptValues.slice(0, 21),
+      attemptValues.slice(0, 26),
     );
   }
   return itemIds;

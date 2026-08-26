@@ -215,6 +215,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       providerIdempotencyKey: `checkout_attempt:${quoted.plan.identity.attemptId}`,
       providerRequestHash: "c".repeat(64),
       providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "synthetic.buyer@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
     });
     expect(prepared.status).toBe("prepared");
     return { ...setupResult, quoted, prepared };
@@ -664,6 +669,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       providerIdempotencyKey: `checkout_attempt:${approved.plan.identity.attemptId}`,
       providerRequestHash: "e".repeat(64),
       providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "synthetic.buyer@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
     });
     expect(prepared).toMatchObject({
       status: "prepared",
@@ -823,6 +833,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
           providerIdempotencyKey: `checkout_attempt:${approved.plan.identity.attemptId}`,
           providerRequestHash: "7".repeat(64),
           providerExpiresAt: "2026-08-25T13:00:00.000Z",
+          providerCustomerEmail: "synthetic.buyer@example.test",
+          providerOrigin: "http://127.0.0.1:3000",
+          providerRequestSchemaVersion: 1,
+          providerLivemode: false,
+          providerScope: "local_test:synthetic-propeptiq-v1",
         }),
       ).resolves.toMatchObject({
         status: "loaded",
@@ -951,6 +966,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         providerIdempotencyKey: `checkout_attempt:${covered.plan.identity.attemptId}`,
         providerRequestHash: "8".repeat(64),
         providerExpiresAt: "2026-08-25T13:00:00.000Z",
+        providerCustomerEmail: "synthetic.buyer@example.test",
+        providerOrigin: "http://127.0.0.1:3000",
+        providerRequestSchemaVersion: 1,
+        providerLivemode: false,
+        providerScope: "local_test:synthetic-propeptiq-v1",
       }),
     ).resolves.toMatchObject({
       status: "prepared",
@@ -1051,6 +1071,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         providerIdempotencyKey: `checkout_attempt:${approvedQuote.plan.identity.attemptId}`,
         providerRequestHash: "f".repeat(64),
         providerExpiresAt: "2026-08-25T13:00:00.000Z",
+        providerCustomerEmail: "synthetic.buyer@example.test",
+        providerOrigin: "http://127.0.0.1:3000",
+        providerRequestSchemaVersion: 1,
+        providerLivemode: false,
+        providerScope: "local_test:synthetic-propeptiq-v1",
       }),
     ).resolves.toMatchObject({ status: "prepared" });
 
@@ -1114,6 +1139,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         providerIdempotencyKey: `checkout_attempt:${quote.plan.identity.attemptId}`,
         providerRequestHash: "f".repeat(64),
         providerExpiresAt: "2026-08-25T13:00:00.000Z",
+        providerCustomerEmail: "synthetic.buyer@example.test",
+        providerOrigin: "http://127.0.0.1:3000",
+        providerRequestSchemaVersion: 1,
+        providerLivemode: false,
+        providerScope: "local_test:synthetic-propeptiq-v1",
       }),
     ).resolves.toEqual({ status: "facts_changed_retry" });
     expect(shipping).toHaveBeenCalledTimes(1);
@@ -1173,6 +1203,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         providerIdempotencyKey: `checkout_attempt:${quote.plan.identity.attemptId}`,
         providerRequestHash: "9".repeat(64),
         providerExpiresAt: "2026-08-25T13:00:00.000Z",
+        providerCustomerEmail: "synthetic.buyer@example.test",
+        providerOrigin: "http://127.0.0.1:3000",
+        providerRequestSchemaVersion: 1,
+        providerLivemode: false,
+        providerScope: "local_test:synthetic-propeptiq-v1",
       }),
     ).resolves.toMatchObject({ status: "prepared" });
     expect(transactionAttempts()).toBe(3);
@@ -1203,6 +1238,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         providerIdempotencyKey: `checkout_attempt:${quote.plan.identity.attemptId}`,
         providerRequestHash: "a".repeat(64),
         providerExpiresAt: "2026-08-25T13:00:00.000Z",
+        providerCustomerEmail: "synthetic.buyer@example.test",
+        providerOrigin: "http://127.0.0.1:3000",
+        providerRequestSchemaVersion: 1,
+        providerLivemode: false,
+        providerScope: "local_test:synthetic-propeptiq-v1",
       }),
     ).rejects.toThrow();
     const state = await client.query<{

@@ -8,6 +8,10 @@ const markerGroups = Object.freeze([
     patterns: [/LOCAL_TEST_ONLY_PROPEPTIQ_91C4E7/gu],
   },
   {
+    label: "local payment provider sentinel",
+    patterns: [/LOCAL_PAYMENT_PROVIDER_TEST_ONLY_PROPEPTIQ_6D_C8A13F/gu],
+  },
+  {
     label: "fixed local actor identity",
     patterns: [
       /50000000-0000-4000-8000-00000000000[1-6]/gu,
@@ -23,7 +27,7 @@ const markerGroups = Object.freeze([
   },
 ]);
 
-const localModulePattern = /(?:src[\\/]+auth[\\/]+local-driver\.ts|src_auth_local-driver_ts|src[\\/]+catalog[\\/]+demo-fixtures\.ts|src_catalog_demo-fixtures_ts)/gu;
+const localModulePattern = /(?:src[\\/]+auth[\\/]+local-driver\.ts|src_auth_local-driver_ts|src[\\/]+catalog[\\/]+demo-fixtures\.ts|src_catalog_demo-fixtures_ts|src[\\/]+commerce[\\/]+local-payment-provider\.ts|src_commerce_local-payment-provider_ts)/gu;
 const deployableDirectoryNames = new Set(["server", "standalone", "static"]);
 const deployableRootFilePattern = /\.(?:json|[cm]?js|map)$/iu;
 

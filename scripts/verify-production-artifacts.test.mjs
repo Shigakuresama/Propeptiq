@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,6 +37,7 @@ test("passes a recursively scanned production tree containing only disabled stub
     "server/disabled.js",
     [
       "The local deterministic test driver is unavailable in this build",
+      "The synthetic local payment provider is unavailable in this build",
       "Synthetic demo fixtures are unavailable in this build",
       "local-auth-driver catalog-demo-fixtures",
     ].join("\n"),
@@ -50,6 +51,7 @@ test("passes a recursively scanned production tree containing only disabled stub
         "webpack://app/./src/auth/local-driver-disabled.ts",
         "webpack://app/./src/auth/local-driver-types.ts",
         "webpack://app/./src/catalog/catalog-demo-disabled.ts",
+        "webpack://app/./src/commerce/local-payment-provider-disabled.ts",
       ],
       sourcesContent: [null, null, null],
     }),
@@ -201,4 +203,59 @@ test("detects a local-driver module chunk even when its payload is minified", (t
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /local implementation module: 1 match in 1 file/u);
+});
+
+test("detects the synthetic local payment provider sentinel and module names", (t) => {
+  const workspace = createWorkspace(t);
+  const artifactRoot = join(workspace, "closed-production-output");
+  writeArtifact(
+    artifactRoot,
+    "server/payment.js",
+    "LOCAL_PAYMENT_PROVIDER_TEST_ONLY_PROPEPTIQ_6D_C8A13F",
+  );
+  writeArtifact(
+    artifactRoot,
+    "static/chunks/src_commerce_local-payment-provider_ts_6d.js",
+    "(()=>{})();",
+  );
+  writeArtifact(
+    artifactRoot,
+    "server/payment.js.map",
+    JSON.stringify({
+      version: 3,
+      sources: ["webpack://app/./src/commerce/local-payment-provider.ts"],
+      sourcesContent: [null],
+    }),
+  );
+
+  const result = runScanner({ cwd: workspace, artifactRoot });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /local payment provider sentinel: 1 match in 1 file/u);
+  assert.match(result.stderr, /local implementation module: 2 matches in 2 files/u);
+  assert.equal(
+    `${result.stdout}${result.stderr}`.includes(
+      "LOCAL_PAYMENT_PROVIDER_TEST_ONLY_PROPEPTIQ_6D_C8A13F",
+    ),
+    false,
+  );
+});
+
+test("configures the local payment provider alias for Turbopack and Webpack", () => {
+  const config = readFileSync(
+    fileURLToPath(new URL("../next.config.ts", import.meta.url)),
+    "utf8",
+  );
+  assert.match(
+    config,
+    /"local-payment-provider": localPaymentProviderModule/u,
+  );
+  assert.match(
+    config,
+    /config\.resolve\.alias\["local-payment-provider\$"\][\s\S]*localPaymentProviderModule/u,
+  );
+  assert.match(
+    config,
+    /localPaymentProviderModule = includeLocalTestDriver[\s\S]*local-payment-provider\.ts[\s\S]*local-payment-provider-disabled\.ts/u,
+  );
 });

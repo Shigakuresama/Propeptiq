@@ -32,6 +32,33 @@ describe("parseServerEnv", () => {
     ).toThrow(/STRIPE_WEBHOOK_SECRET/);
   });
 
+  it("requires one valid nonsecret Stripe account namespace whenever payments are enabled", () => {
+    const stripeTest = {
+      APP_ENV: "preview",
+      APP_ORIGIN: "https://preview.synthetic.example",
+      PAYMENTS_MODE: "test",
+      STRIPE_SECRET_KEY: "sk_test_synthetic",
+      STRIPE_WEBHOOK_SECRET: "whsec_synthetic",
+    } as const;
+    expect(() => parseServerEnv(stripeTest)).toThrow(/STRIPE_ACCOUNT_ID/);
+    for (const STRIPE_ACCOUNT_ID of [
+      "acct_",
+      "acct_has-punctuation",
+      "ca_synthetic123",
+      " acct_synthetic123",
+    ]) {
+      expect(() => parseServerEnv({ ...stripeTest, STRIPE_ACCOUNT_ID })).toThrow(
+        /STRIPE_ACCOUNT_ID/,
+      );
+    }
+    expect(
+      parseServerEnv({
+        ...stripeTest,
+        STRIPE_ACCOUNT_ID: "acct_synthetic123",
+      }).STRIPE_ACCOUNT_ID,
+    ).toBe("acct_synthetic123");
+  });
+
   it("requires an explicitly isolated database URL in test mode", () => {
     expect(() =>
       parseServerEnv({
@@ -159,6 +186,7 @@ describe("parseServerEnv", () => {
       CLERK_SECRET_KEY: "sk_live_synthetic",
       RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
       DATABASE_URL: "postgresql://synthetic.invalid/database?sslmode=require",
+      STRIPE_ACCOUNT_ID: "acct_synthetic123",
       STRIPE_SECRET_KEY: "sk_live_synthetic",
       STRIPE_WEBHOOK_SECRET: "whsec_synthetic",
       BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_synthetic",
