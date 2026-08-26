@@ -23,6 +23,7 @@ const ids = {
   policy: "10000000-0000-4000-8000-000000000006",
   attestation: "10000000-0000-4000-8000-000000000007",
   item: "10000000-0000-4000-8000-000000000008",
+  previousAttestation: "10000000-0000-4000-8000-000000000009",
 } as const;
 
 const sha256 = async (value: string) =>
@@ -86,12 +87,13 @@ describe("checkout identity contracts", () => {
     expect(identity.keyedUuid("item:one")).toBe(ids.item);
   });
 
-  it("includes order ownership and the complete destination in review hashes", async () => {
+  it("binds order, destination, accepted attestation, and current attestation in review hashes", async () => {
     const base = {
       orderId: ids.order,
       buyerUserId: ids.buyer,
       buyerStatus: "review" as const,
-      attestationVersionId: ids.attestation,
+      acceptedAttestationVersionId: ids.attestation,
+      currentAttestationVersionId: ids.attestation,
       items: [{ productId: ids.product, quantity: 1 }],
       promotionIds: [] as string[],
       destination: {
@@ -117,10 +119,26 @@ describe("checkout identity contracts", () => {
       { ...base, orderId: "10000000-0000-4000-8000-000000000099" },
       sha256,
     );
+    const changedAcceptedAttestation = await hashReviewSnapshot(
+      {
+        ...base,
+        acceptedAttestationVersionId: ids.previousAttestation,
+      },
+      sha256,
+    );
+    const changedCurrentAttestation = await hashReviewSnapshot(
+      {
+        ...base,
+        currentAttestationVersionId: ids.previousAttestation,
+      },
+      sha256,
+    );
 
     expect(original).toMatch(/^[0-9a-f]{64}$/);
     expect(changedAddress).not.toBe(original);
     expect(changedOrder).not.toBe(original);
+    expect(changedAcceptedAttestation).not.toBe(original);
+    expect(changedCurrentAttestation).not.toBe(original);
   });
 });
 

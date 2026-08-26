@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hashReviewSnapshot } from "@/commerce/checkout-identity";
 import { createCheckoutService } from "@/commerce/checkout-service";
 import {
   createPostgresCheckoutRepository,
@@ -31,6 +32,7 @@ const ids = {
   promotionTarget: "30000000-0000-4000-8000-000000000017",
   providerEvent: "30000000-0000-4000-8000-000000000018",
   paymentEvent: "30000000-0000-4000-8000-000000000019",
+  previousAttestation: "30000000-0000-4000-8000-000000000020",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -313,6 +315,106 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     expect(afterReplay.rows[0]!.count).toBe(3);
   });
 
+  it.each([
+    {
+      label: "future email verification",
+      key: "30000000-0000-4000-8000-000000000121",
+      mutation: `UPDATE users SET email_verified_at = '2026-08-25T12:00:00.001Z'
+                 WHERE id = '${ids.buyer}'`,
+      reason: "account_required",
+    },
+    {
+      label: "future attestation acceptance",
+      key: "30000000-0000-4000-8000-000000000122",
+      mutation: `UPDATE attestation_acceptances
+                 SET accepted_at = '2026-08-25T12:00:00.001Z'
+                 WHERE user_id = '${ids.buyer}'`,
+      reason: "attestation_not_current",
+    },
+  ])("fails closed with zero writes for $label", async ({ key, mutation, reason }) => {
+    await client.exec(mutation);
+    const { service, shipping, tax } = setup();
+
+    await expect(
+      service.quote({
+        buyerUserId: ids.buyer,
+        idempotencyKey: key,
+        paymentProviderAvailable: true,
+        request,
+      }),
+    ).resolves.toEqual({ status: "denied", reasons: [reason] });
+    expect(shipping).not.toHaveBeenCalled();
+    expect(tax).not.toHaveBeenCalled();
+    const counts = await client.query<{
+      orders: number;
+      attempts: number;
+      reviews: number;
+      reservations: number;
+    }>(`SELECT
+      (SELECT count(*)::int FROM orders) AS orders,
+      (SELECT count(*)::int FROM checkout_attempts) AS attempts,
+      (SELECT count(*)::int FROM review_requests) AS reviews,
+      (SELECT count(*)::int FROM inventory_reservations) AS reservations`);
+    expect(counts.rows[0]).toEqual({
+      orders: 0,
+      attempts: 0,
+      reviews: 0,
+      reservations: 0,
+    });
+  });
+
+  it("replays failed and provider-unknown attempts with their persisted status instead of a ready result", async () => {
+    const failedKey = "30000000-0000-4000-8000-000000000123";
+    const failed = await quoteAndPrepare(failedKey);
+    if (failed.prepared.status !== "prepared") throw new Error("expected prepared");
+    await expect(
+      failed.repository.releaseDefiniteFailure({
+        authority: "authoritative_provider_terminal",
+        cause: "definite_rejection",
+        providerEvidenceId: "synthetic-terminal-replay",
+        attemptId: failed.prepared.attemptId,
+        orderId: failed.prepared.orderId,
+        provider: "local_test",
+        providerIdempotencyKey: `checkout_attempt:${failed.prepared.attemptId}`,
+        targetAttemptStatus: "failed",
+      }),
+    ).resolves.toEqual({ status: "released" });
+    const failedReplay = await failed.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: failedKey,
+      paymentProviderAvailable: true,
+      request,
+    });
+    expect(failedReplay).toMatchObject({
+      status: "loaded",
+      attemptStatus: "failed",
+      orderState: "cancelled",
+      quoteSnapshot: { status: "ready" },
+    });
+    expect(failedReplay).not.toHaveProperty("quote");
+
+    const unknownKey = "30000000-0000-4000-8000-000000000124";
+    const unknown = await quoteAndPrepare(unknownKey, ids.buyer2);
+    if (unknown.prepared.status !== "prepared") throw new Error("expected prepared");
+    await client.exec(
+      `UPDATE checkout_attempts SET status = 'provider_unknown'
+       WHERE id = '${unknown.prepared.attemptId}'`,
+    );
+    const unknownReplay = await unknown.service.quote({
+      buyerUserId: ids.buyer2,
+      idempotencyKey: unknownKey,
+      paymentProviderAvailable: true,
+      request,
+    });
+    expect(unknownReplay).toMatchObject({
+      status: "loaded",
+      attemptStatus: "provider_unknown",
+      orderState: "checkout_pending",
+      quoteSnapshot: { status: "ready" },
+    });
+    expect(unknownReplay).not.toHaveProperty("quote");
+  });
+
   it("scopes the same literal idempotency key independently by buyer and conflicts a changed same-buyer request before quotes", async () => {
     const key = "30000000-0000-4000-8000-000000000108";
     const smallerRequest = {
@@ -405,16 +507,41 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     ).toBe(0);
 
     const oldReviewId = "30000000-0000-4000-8000-000000000199";
+    const oldReviewHash = await hashReviewSnapshot(
+      {
+        orderId: created.orderId,
+        buyerUserId: ids.buyer,
+        buyerStatus: "review",
+        acceptedAttestationVersionId: ids.previousAttestation,
+        currentAttestationVersionId: ids.previousAttestation,
+        items: request.items,
+        promotionIds: [],
+        destination: { ...request.destination, countryCode: "US" },
+        reviewPolicies: [],
+      },
+      sha256,
+    );
+    const exactCartSnapshot = JSON.stringify({
+      schemaVersion: 1,
+      items: request.items,
+      promotionIds: [],
+    });
     await client.exec(`
+      INSERT INTO attestation_versions
+        (id, version, content_hash, policy_text, effective_at, superseded_at)
+      VALUES
+        ('${ids.previousAttestation}', 2, '${"e".repeat(64)}',
+         'Synthetic previous research-use policy.', '2026-07-01T00:00:00.000Z',
+         '2026-08-01T00:00:00.000Z');
       INSERT INTO review_requests
         (id, user_id, order_id, snapshot_hash, buyer_status_snapshot,
          attestation_version_id, destination_state_code, cart_snapshot,
          buyer_review_required, destination_review_required, outcome,
          decided_by_user_id, decided_at, covers_buyer_review)
       VALUES
-        ('${oldReviewId}', '${ids.buyer}', '${created.orderId}', '${"d".repeat(64)}',
-         'review', '${ids.attestation}', 'CA',
-         '{"schemaVersion":1,"items":[],"promotionIds":[]}'::jsonb,
+        ('${oldReviewId}', '${ids.buyer}', '${created.orderId}', '${oldReviewHash}',
+         'review', '${ids.previousAttestation}', 'CA',
+         '${exactCartSnapshot}'::jsonb,
          true, false, 'approved', '${ids.buyer2}',
          '2026-08-25T12:10:00.000Z', true);
     `);
@@ -428,6 +555,25 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       status: "quoted",
       quote: { status: "review_required" },
     });
+    await expect(
+      resolveExactReviewRequest(
+        {
+          query: (sql, params = []) => client.query(sql, [...params]),
+        },
+        {
+          orderId: created.orderId,
+          buyerUserId: ids.buyer,
+          buyerStatus: "review",
+          acceptedAttestationVersionId: ids.previousAttestation,
+          currentAttestationVersionId: ids.previousAttestation,
+          items: request.items,
+          promotionIds: [],
+          destination: { ...request.destination, countryCode: "US" },
+          reviewPolicies: [],
+        },
+        sha256,
+      ),
+    ).resolves.toMatchObject({ reviewRequestId: oldReviewId });
 
     await client.exec(`
       UPDATE review_requests
@@ -443,7 +589,8 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         orderId: created.orderId,
         buyerUserId: ids.buyer,
         buyerStatus: "review",
-        attestationVersionId: ids.attestation,
+        acceptedAttestationVersionId: ids.attestation,
+        currentAttestationVersionId: ids.attestation,
         items: request.items,
         promotionIds: [],
         destination: {
@@ -464,12 +611,35 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
           orderId: created.orderId,
           buyerUserId: ids.buyer,
           buyerStatus: "review",
-          attestationVersionId: ids.attestation,
+          acceptedAttestationVersionId: ids.attestation,
+          currentAttestationVersionId: ids.attestation,
           items: request.items,
           promotionIds: [],
           destination: {
             ...request.destination,
             line1: "101 Changed Test Way",
+            countryCode: "US",
+          },
+          reviewPolicies: [],
+        },
+        sha256,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      resolveExactReviewRequest(
+        {
+          query: (sql, params = []) => client.query(sql, [...params]),
+        },
+        {
+          orderId: created.orderId,
+          buyerUserId: ids.buyer,
+          buyerStatus: "review",
+          acceptedAttestationVersionId: ids.previousAttestation,
+          currentAttestationVersionId: ids.attestation,
+          items: request.items,
+          promotionIds: [],
+          destination: {
+            ...request.destination,
             countryCode: "US",
           },
           reviewPolicies: [],
@@ -603,6 +773,115 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       reservations: 0,
     });
   });
+
+  it.each(["compliance_hold", "cancelled"] as const)(
+    "cannot clear an externally authoritative %s order while preparing an approved review",
+    async (authoritativeState) => {
+      await client.exec(
+        `UPDATE buyer_profiles SET status = 'review' WHERE user_id = '${ids.buyer}'`,
+      );
+      const key =
+        authoritativeState === "compliance_hold"
+          ? "30000000-0000-4000-8000-000000000125"
+          : "30000000-0000-4000-8000-000000000126";
+      const initial = setup();
+      const reviewQuote = await initial.service.quote({
+        buyerUserId: ids.buyer,
+        idempotencyKey: key,
+        paymentProviderAvailable: true,
+        request,
+      });
+      if (reviewQuote.status !== "quoted") throw new Error("expected review quote");
+      const review = await initial.service.prepare(reviewQuote.plan, null);
+      if (review.status !== "review_required") throw new Error("expected review");
+      await client.exec(`
+        UPDATE review_requests
+        SET outcome = 'approved', decided_by_user_id = '${ids.buyer2}',
+            decided_at = '2026-08-25T12:15:00.000Z', covers_buyer_review = true
+        WHERE id = '${review.reviewRequestId}';
+        UPDATE product_prices SET amount_minor = 6000 WHERE id = '${ids.priceA}';
+      `);
+      const approved = await initial.service.quote({
+        buyerUserId: ids.buyer,
+        idempotencyKey: key,
+        paymentProviderAvailable: true,
+        request,
+      });
+      expect(approved).toMatchObject({
+        status: "quoted",
+        quote: { status: "ready", totalMinor: 23_025 },
+      });
+      if (approved.status !== "quoted") throw new Error("expected approved quote");
+      await client.exec(
+        `UPDATE orders SET state = '${authoritativeState}' WHERE id = '${review.orderId}'`,
+      );
+
+      await expect(
+        initial.service.prepare(approved.plan, {
+          authority: "server_prepared_provider_request",
+          provider: "local_test",
+          providerIdempotencyKey: `checkout_attempt:${approved.plan.identity.attemptId}`,
+          providerRequestHash: "7".repeat(64),
+          providerExpiresAt: "2026-08-25T13:00:00.000Z",
+        }),
+      ).resolves.toMatchObject({
+        status: "loaded",
+        attemptStatus: "created",
+        orderState: authoritativeState,
+        quoteSnapshot: { status: "review_required", totalMinor: 20_025 },
+      });
+
+      const unchanged = await client.query<{
+        orderState: string;
+        orderTotalMinor: number;
+        attemptStatus: string;
+        permitted: boolean;
+        providerRequestId: string | null;
+        providerRequestHash: string | null;
+        expiresAt: Date | null;
+        productAUnitMinor: number;
+        items: number;
+        addresses: number;
+        reservations: number;
+        reservationEvents: number;
+        lotA1: number;
+        lotA2: number;
+        lotB: number;
+      }>(`SELECT o.state AS "orderState", o.total_minor AS "orderTotalMinor",
+          a.status AS "attemptStatus", a.permitted,
+          a.provider_request_id AS "providerRequestId",
+          a.provider_request_hash AS "providerRequestHash", a.expires_at AS "expiresAt",
+          (SELECT unit_amount_minor FROM order_items
+           WHERE order_id = o.id AND product_id = '${ids.productA}') AS "productAUnitMinor",
+          (SELECT count(*)::int FROM order_items WHERE order_id = o.id) AS items,
+          (SELECT count(*)::int FROM order_shipping_addresses WHERE order_id = o.id) AS addresses,
+          (SELECT count(*)::int FROM inventory_reservations WHERE order_id = o.id) AS reservations,
+          (SELECT count(*)::int FROM inventory_events
+           WHERE order_id = o.id AND event_type = 'reservation') AS "reservationEvents",
+          (SELECT available_quantity FROM lots WHERE id = '${ids.lotA1}') AS "lotA1",
+          (SELECT available_quantity FROM lots WHERE id = '${ids.lotA2}') AS "lotA2",
+          (SELECT available_quantity FROM lots WHERE id = '${ids.lotB}') AS "lotB"
+        FROM orders o JOIN checkout_attempts a ON a.order_id = o.id
+        WHERE o.id = '${review.orderId}'`);
+      expect(unchanged.rows[0]).toEqual({
+        orderState: authoritativeState,
+        orderTotalMinor: 20_025,
+        attemptStatus: "created",
+        permitted: false,
+        providerRequestId: null,
+        providerRequestHash: null,
+        expiresAt: null,
+        productAUnitMinor: 5_000,
+        items: 2,
+        addresses: 1,
+        reservations: 0,
+        reservationEvents: 0,
+        lotA1: 1,
+        lotA2: 5,
+        lotB: 5,
+      });
+    },
+  );
 
   it("requires coverage from the exact destination-review link before reservation", async () => {
     await client.exec(
@@ -793,7 +1072,7 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     );
     const sequence = [
       firstLock(/FROM checkout_attempts a/),
-      firstLock(/^SELECT id FROM orders/),
+      firstLock(/^SELECT id(?:::text AS id)?, state FROM orders/),
       firstLock(/^SELECT id.*FROM review_requests/),
       firstLock(/FROM review_request_destination_policies/),
       firstLock(/^SELECT (?:id|product_id::text).*FROM order_items/),

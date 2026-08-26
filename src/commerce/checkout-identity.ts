@@ -18,7 +18,8 @@ export type ReviewSnapshotHashInput = Readonly<{
   orderId: string;
   buyerUserId: string;
   buyerStatus: BuyerStatus;
-  attestationVersionId: string;
+  acceptedAttestationVersionId: string;
+  currentAttestationVersionId: string;
   items: readonly Readonly<{ productId: string; quantity: number }>[];
   promotionIds: readonly string[];
   destination: CheckoutRequest["destination"];
@@ -179,7 +180,8 @@ export function hashReviewSnapshot(
       orderId: input.orderId,
       buyerUserId: input.buyerUserId,
       buyerStatus: input.buyerStatus,
-      attestationVersionId: input.attestationVersionId,
+      acceptedAttestationVersionId: input.acceptedAttestationVersionId,
+      currentAttestationVersionId: input.currentAttestationVersionId,
       items: input.items.toSorted((left, right) =>
         left.productId.localeCompare(right.productId),
       ),

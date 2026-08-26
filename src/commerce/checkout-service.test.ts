@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
+import { hashCheckoutRequest } from "@/commerce/checkout-identity";
 import {
   createCheckoutService,
   type AuthoritativeCheckoutFacts,
+  type CheckoutAttemptStatus,
+  type CheckoutLoadedResult,
   type CheckoutPrepareResult,
+  type CheckoutQuoteResult,
   type CheckoutRepository,
   type DefiniteFailureReleaseResult,
   type FactLoadResult,
@@ -35,7 +39,7 @@ const request = {
     city: "Testville",
     stateCode: "CA",
     postalCode: "90001",
-    countryCode: "US",
+    countryCode: "US" as const,
   },
   promotionIds: [],
 };
@@ -363,10 +367,11 @@ describe("authoritative checkout service", () => {
       attemptId: ids.attempt,
       requestHash: "f".repeat(64),
       status: "created",
+      orderState: "eligibility_review",
       permitted: false,
       reviewRequired: true,
       hasReservations: false,
-      quote: null,
+      quoteSnapshot: null,
     });
     await expect(
       service.quote({
@@ -379,4 +384,71 @@ describe("authoritative checkout service", () => {
     expect(repository.loadFacts).not.toHaveBeenCalled();
     expect(shippingQuote).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { attemptStatus: "failed", orderState: "cancelled" },
+    { attemptStatus: "provider_unknown", orderState: "checkout_pending" },
+  ] as const)(
+    "projects $attemptStatus replay as an explicit frozen attempt outcome, not a fresh quote",
+    async ({ attemptStatus, orderState }) => {
+      const { service, repository, shippingQuote, taxQuote } = setup();
+      const quoteSnapshot = {
+        status: "ready" as const,
+        reviewRequired: false,
+        reasons: [] as string[],
+        currency: "USD" as const,
+        subtotalMinor: 10_000,
+        discountMinor: 0,
+        shippingMinor: 700,
+        taxMinor: 325,
+        totalMinor: 11_025,
+        lines: [] as const,
+      };
+      vi.mocked(repository.findAttempt).mockResolvedValueOnce({
+        orderId: ids.order,
+        attemptId: ids.attempt,
+        requestHash: await hashCheckoutRequest(request, sha256),
+        status: attemptStatus,
+        orderState,
+        permitted: true,
+        reviewRequired: false,
+        hasReservations: attemptStatus === "provider_unknown",
+        quoteSnapshot,
+      });
+
+      const replay: CheckoutQuoteResult = await service.quote({
+        buyerUserId: ids.buyer,
+        idempotencyKey: ids.key,
+        paymentProviderAvailable: true,
+        request,
+      });
+
+      expect(replay).toEqual({
+        status: "loaded",
+        orderId: ids.order,
+        attemptId: ids.attempt,
+        attemptStatus,
+        orderState,
+        quoteSnapshot,
+      });
+      expect(Reflect.ownKeys(replay).toSorted()).toEqual(
+        [
+          "attemptId",
+          "attemptStatus",
+          "orderId",
+          "orderState",
+          "quoteSnapshot",
+          "status",
+        ].toSorted(),
+      );
+      expect(Object.isFrozen(replay)).toBe(true);
+      expect(replay).not.toHaveProperty("quote");
+      if (replay.status !== "loaded") throw new Error("expected loaded replay");
+      expectTypeOf(replay).toEqualTypeOf<CheckoutLoadedResult>();
+      expectTypeOf(replay.attemptStatus).toEqualTypeOf<CheckoutAttemptStatus>();
+      expect(repository.loadFacts).not.toHaveBeenCalled();
+      expect(shippingQuote).not.toHaveBeenCalled();
+      expect(taxQuote).not.toHaveBeenCalled();
+    },
+  );
 });

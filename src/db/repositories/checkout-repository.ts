@@ -8,18 +8,20 @@ import {
   type ReviewSnapshotHashInput,
   type Sha256Hasher,
 } from "@/commerce/checkout-identity";
-import type {
-  AuthoritativeCheckoutFacts,
-  AuthoritativeCheckoutItemFact,
-  AuthoritativeCheckoutPlanData,
-  BrowserCheckoutQuote,
-  CheckoutPrepareResult,
-  CheckoutRepository,
-  DefiniteFailureReleaseInput,
-  DefiniteFailureReleaseResult,
-  ExactReviewDecision,
-  FactLoadResult,
-  StoredCheckoutAttempt,
+import {
+  projectLoadedCheckoutAttempt,
+  type AuthoritativeCheckoutFacts,
+  type AuthoritativeCheckoutItemFact,
+  type AuthoritativeCheckoutPlanData,
+  type BrowserCheckoutQuote,
+  type CheckoutAttemptStatus,
+  type CheckoutPrepareResult,
+  type CheckoutRepository,
+  type DefiniteFailureReleaseInput,
+  type DefiniteFailureReleaseResult,
+  type ExactReviewDecision,
+  type FactLoadResult,
+  type StoredCheckoutAttempt,
 } from "@/commerce/checkout-service";
 import type { ProviderPreparation } from "@/commerce/checkout-ports";
 import type { CheckoutRequest } from "@/domain/checkout";
@@ -93,6 +95,15 @@ function uniqueStrings(values: readonly string[]): boolean {
   return values.length === new Set(values).size;
 }
 
+function isTimestampAtOrBefore(
+  value: Date | string | null,
+  authoritativeNow: Date,
+): boolean {
+  if (value === null) return false;
+  const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(timestamp) && timestamp <= authoritativeNow.getTime();
+}
+
 async function readBuyerFacts(
   client: CheckoutSqlClient,
   buyerUserId: string,
@@ -132,14 +143,15 @@ async function readBuyerFacts(
             attestation_version_id::text AS "attestationVersionId"
      FROM attestation_acceptances
      WHERE user_id = $1::uuid AND attestation_version_id = $2::uuid
+       AND accepted_at <= $3::timestamptz
      ORDER BY id${lockSuffix(lock)}`,
-    [buyerUserId, attestation.id],
+    [buyerUserId, attestation.id, now.toISOString()],
   );
   if (acceptances.rows.length > 1) return null;
   const acceptance = acceptances.rows[0] ?? null;
   return Object.freeze({
     userId: user.rows[0]!.userId,
-    emailVerified: user.rows[0]!.emailVerifiedAt !== null,
+    emailVerified: isTimestampAtOrBefore(user.rows[0]!.emailVerifiedAt, now),
     status: profile.rows[0]!.status,
     currentAttestationVersionId: attestation.id,
     currentAttestationVersion: safeInteger(attestation.version),
@@ -612,7 +624,8 @@ export async function resolveExactReviewRequest(
   };
   if (
     row.buyerStatusSnapshot !== input.buyerStatus ||
-    row.attestationVersionId !== input.attestationVersionId ||
+    row.attestationVersionId !== input.acceptedAttestationVersionId ||
+    row.attestationVersionId !== input.currentAttestationVersionId ||
     row.destinationStateCode !== input.destination.stateCode ||
     row.buyerReviewRequired !== (input.buyerStatus === "review") ||
     row.destinationReviewRequired !== (expectedPolicyIds.length > 0) ||
@@ -642,7 +655,8 @@ async function storedAttemptFromClient(
     orderId: string;
     attemptId: string;
     requestHash: string;
-    status: StoredCheckoutAttempt["status"];
+    status: CheckoutAttemptStatus;
+    orderState: OrderState;
     permitted: boolean;
     reviewRequired: boolean;
     reasons: string[];
@@ -661,7 +675,7 @@ async function storedAttemptFromClient(
             o.subtotal_minor AS "subtotalMinor",
             o.discount_minor AS "discountMinor", o.tax_minor AS "taxMinor",
             o.shipping_minor AS "shippingMinor", o.total_minor AS "totalMinor",
-            o.currency,
+             o.currency, o.state AS "orderState",
             EXISTS (SELECT 1 FROM inventory_reservations r
                     WHERE r.checkout_attempt_id = a.id) AS "hasReservations"
      FROM checkout_attempts a
@@ -693,7 +707,7 @@ async function storedAttemptFromClient(
      ORDER BY product_id${lockSuffix(lockItems)}`,
     [row.orderId],
   );
-  const quote: BrowserCheckoutQuote | null =
+  const quoteSnapshot: BrowserCheckoutQuote | null =
     row.currency === "USD" && items.rows.length > 0
       ? Object.freeze({
           status: row.reviewRequired ? "review_required" : "ready",
@@ -726,10 +740,11 @@ async function storedAttemptFromClient(
     attemptId: row.attemptId,
     requestHash: row.requestHash,
     status: row.status,
+    orderState: row.orderState,
     permitted: row.permitted,
     reviewRequired: row.reviewRequired,
     hasReservations: row.hasReservations,
-    quote,
+    quoteSnapshot,
   });
 }
 
@@ -867,7 +882,7 @@ async function writeCommercialSnapshots(
   providerPreparation: ProviderPreparation | null,
   state: "eligibility_review" | "checkout_pending",
   existing: StoredCheckoutAttempt | null,
-): Promise<ReadonlyMap<string, string>> {
+): Promise<ReadonlyMap<string, string> | null> {
   if (plan.totals === null || plan.shippingQuote?.status !== "ready" || plan.taxQuote?.status !== "ready") {
     throw new Error("Truthful commercial snapshot is incomplete");
   }
@@ -900,13 +915,14 @@ async function writeCommercialSnapshots(
       ],
     );
   } else {
-    await client.query(
+    const updated = await client.query<{ id: string }>(
       `UPDATE orders SET buyer_status_snapshot = $2::buyer_status,
           attestation_acceptance_id = $3::uuid, destination_state_code = $4,
           currency = 'USD', subtotal_minor = $5, discount_minor = $6,
           tax_minor = $7, shipping_minor = $8, total_minor = $9,
           state = $10::order_state, updated_at = $11::timestamptz
-       WHERE id = $1::uuid`,
+       WHERE id = $1::uuid AND state = 'eligibility_review'
+       RETURNING id::text AS id`,
       [
         plan.identity.orderId,
         plan.facts.buyer.status,
@@ -921,6 +937,7 @@ async function writeCommercialSnapshots(
         plan.authoritativeAt.toISOString(),
       ],
     );
+    if (updated.rows.length !== 1) return null;
     await client.query(
       `DELETE FROM order_promotion_allocations WHERE order_id = $1::uuid`,
       [plan.identity.orderId],
@@ -1255,7 +1272,7 @@ async function prepareInTransaction(
   );
   if (buyer === null) return { status: "facts_changed_retry" };
 
-  const existing = await storedAttemptFromClient(
+  let existing = await storedAttemptFromClient(
     client,
     { buyerUserId: plan.buyerUserId, idempotencyKey: plan.idempotencyKey },
     true,
@@ -1277,16 +1294,22 @@ async function prepareInTransaction(
       existing.reviewRequired &&
       !existing.hasReservations;
     if (!mutableReview) {
-      return {
-        status: "loaded",
-        orderId: existing.orderId,
-        attemptId: existing.attemptId,
-        quote: existing.quote,
-      };
+      return projectLoadedCheckoutAttempt(existing);
     }
-    await client.query(`SELECT id FROM orders WHERE id = $1::uuid FOR UPDATE`, [
-      existing.orderId,
-    ]);
+    type LockedOrderRow = { id: string; state: OrderState };
+    const lockedOrder = await client.query<LockedOrderRow>(
+      `SELECT id::text AS id, state
+       FROM orders WHERE id = $1::uuid FOR UPDATE`,
+      [existing.orderId],
+    );
+    if (lockedOrder.rows.length !== 1) return { status: "facts_changed_retry" };
+    existing = Object.freeze({
+      ...existing,
+      orderState: lockedOrder.rows[0]!.state,
+    });
+    if (existing.orderState !== "eligibility_review") {
+      return projectLoadedCheckoutAttempt(existing);
+    }
   }
 
   if (existing === null) {
@@ -1357,12 +1380,17 @@ async function prepareInTransaction(
   if (factsHash !== plan.factsHash) return { status: "facts_changed_retry" };
 
   if (plan.reviewSnapshotHash !== null) {
+    if (facts.buyer.acceptedAttestationVersionId === null) {
+      return { status: "facts_changed_retry" };
+    }
     const recomputed = await hashReviewSnapshot(
       {
         orderId: plan.identity.orderId,
         buyerUserId: plan.buyerUserId,
         buyerStatus: facts.buyer.status,
-        attestationVersionId: facts.buyer.currentAttestationVersionId,
+        acceptedAttestationVersionId:
+          facts.buyer.acceptedAttestationVersionId,
+        currentAttestationVersionId: facts.buyer.currentAttestationVersionId,
         items: plan.request.items,
         promotionIds: plan.request.promotionIds,
         destination: plan.request.destination,
@@ -1428,13 +1456,14 @@ async function prepareInTransaction(
 
   if (decision.reviewRequired) {
     if (providerPreparation !== null) return { status: "facts_changed_retry" };
-    await writeCommercialSnapshots(
+    const itemIds = await writeCommercialSnapshots(
       client,
       { ...plan, facts, decision },
       null,
       "eligibility_review",
       existing,
     );
+    if (itemIds === null) return { status: "facts_changed_retry" };
     const reviewRequestId = await createOrLoadPendingReview(client, {
       ...plan,
       facts,
@@ -1479,6 +1508,7 @@ async function prepareInTransaction(
     "checkout_pending",
     existing,
   );
+  if (itemIds === null) return { status: "facts_changed_retry" };
   await reserveInventory(client, { ...plan, facts, decision: finalDecision }, providerPreparation, itemIds);
   return {
     status: "prepared",
@@ -1741,12 +1771,7 @@ export function createPostgresCheckoutRepository(dependencies: Readonly<{
         if (winner.requestHash !== plan.requestHash) {
           return { status: "idempotency_conflict" };
         }
-        return {
-          status: "loaded",
-          orderId: winner.orderId,
-          attemptId: winner.attemptId,
-          quote: winner.quote,
-        };
+        return projectLoadedCheckoutAttempt(winner);
       }
     },
     async releaseDefiniteFailure(input) {

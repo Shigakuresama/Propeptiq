@@ -38,6 +38,7 @@ import {
   calculatePromotionDiscount,
   type PromotionRecord,
 } from "@/domain/promotions";
+import type { OrderState } from "@/domain/orders";
 
 export type AuthoritativeLotFact = Readonly<{
   id: string;
@@ -110,21 +111,33 @@ export type ExactReviewDecision = Readonly<{
   destinationPolicyIds: readonly string[];
 }>;
 
+export type CheckoutAttemptStatus =
+  | "created"
+  | "open"
+  | "provider_unknown"
+  | "completed"
+  | "expired"
+  | "failed";
+
 export type StoredCheckoutAttempt = Readonly<{
   orderId: string;
   attemptId: string;
   requestHash: string;
-  status:
-    | "created"
-    | "open"
-    | "provider_unknown"
-    | "completed"
-    | "expired"
-    | "failed";
+  status: CheckoutAttemptStatus;
+  orderState: OrderState;
   permitted: boolean;
   reviewRequired: boolean;
   hasReservations: boolean;
-  quote: BrowserCheckoutQuote | null;
+  quoteSnapshot: BrowserCheckoutQuote | null;
+}>;
+
+export type CheckoutLoadedResult = Readonly<{
+  status: "loaded";
+  orderId: string;
+  attemptId: string;
+  attemptStatus: CheckoutAttemptStatus;
+  orderState: OrderState;
+  quoteSnapshot: BrowserCheckoutQuote | null;
 }>;
 
 export type FactLoadResult =
@@ -142,12 +155,7 @@ export type CheckoutPrepareResult =
   | Readonly<{ status: "review_rejected"; orderId: string; attemptId: string }>
   | Readonly<{ status: "facts_changed_retry" }>
   | Readonly<{ status: "idempotency_conflict" }>
-  | Readonly<{
-      status: "loaded";
-      orderId: string;
-      attemptId: string;
-      quote: BrowserCheckoutQuote | null;
-    }>;
+  | CheckoutLoadedResult;
 
 export type DefiniteFailureReleaseInput = Readonly<{
   authority: "authoritative_provider_terminal";
@@ -232,15 +240,51 @@ export type CheckoutQuoteResult =
       reasons: readonly string[];
       plan: AuthoritativeCheckoutPlan;
     }>
-  | Readonly<{
-      status: "loaded";
-      orderId: string;
-      attemptId: string;
-      quote: BrowserCheckoutQuote | null;
-    }>;
+  | CheckoutLoadedResult;
 
 const plans = new WeakSet<object>();
 const buyerStatuses = new Set<BuyerStatus>(["active", "review", "blocked"]);
+const checkoutAttemptStatuses = new Set<CheckoutAttemptStatus>([
+  "created",
+  "open",
+  "provider_unknown",
+  "completed",
+  "expired",
+  "failed",
+]);
+const checkoutOrderStates = new Set<OrderState>([
+  "draft",
+  "eligibility_review",
+  "compliance_hold",
+  "ready_for_checkout",
+  "checkout_pending",
+  "payment_failed",
+  "paid_pending_fulfillment",
+  "paid_on_hold",
+  "ready_for_fulfillment",
+  "fulfillment_in_progress",
+  "fulfilled",
+  "cancelled",
+]);
+
+export function projectLoadedCheckoutAttempt(
+  attempt: StoredCheckoutAttempt,
+): CheckoutLoadedResult {
+  if (
+    !checkoutAttemptStatuses.has(attempt.status) ||
+    !checkoutOrderStates.has(attempt.orderState)
+  ) {
+    throw new Error("Stored checkout attempt has an invalid persisted state");
+  }
+  return Object.freeze({
+    status: "loaded" as const,
+    orderId: attempt.orderId,
+    attemptId: attempt.attemptId,
+    attemptStatus: attempt.status,
+    orderState: attempt.orderState,
+    quoteSnapshot: attempt.quoteSnapshot,
+  });
+}
 
 function toIso(value: string): string | null {
   const date = new Date(value);
@@ -458,16 +502,12 @@ export function createCheckoutService(dependencies: Readonly<{
         }
         const mutableReview =
           existing.status === "created" &&
+          existing.orderState === "eligibility_review" &&
           !existing.permitted &&
           existing.reviewRequired &&
           !existing.hasReservations;
         if (!mutableReview) {
-          return {
-            status: "loaded",
-            orderId: existing.orderId,
-            attemptId: existing.attemptId,
-            quote: existing.quote,
-          };
+          return projectLoadedCheckoutAttempt(existing);
         }
       }
 
@@ -505,15 +545,21 @@ export function createCheckoutService(dependencies: Readonly<{
       }
 
       const reviewNeeded =
-        facts.buyer.status === "review" ||
-        facts.items.some((item) => item.destination.status === "review");
+        facts.buyer.acceptedAttestationVersionId !== null &&
+        facts.buyer.acceptedAttestationVersionId ===
+          facts.buyer.currentAttestationVersionId &&
+        (facts.buyer.status === "review" ||
+          facts.items.some((item) => item.destination.status === "review"));
       const reviewSnapshotHash = reviewNeeded
         ? await hashReviewSnapshot(
             {
               orderId: identity.orderId,
               buyerUserId: input.buyerUserId,
               buyerStatus: facts.buyer.status,
-              attestationVersionId: facts.buyer.currentAttestationVersionId,
+              acceptedAttestationVersionId:
+                facts.buyer.acceptedAttestationVersionId!,
+              currentAttestationVersionId:
+                facts.buyer.currentAttestationVersionId,
               items: request.items,
               promotionIds: request.promotionIds,
               destination: request.destination,
