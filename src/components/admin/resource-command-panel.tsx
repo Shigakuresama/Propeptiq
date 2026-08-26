@@ -348,7 +348,7 @@ export function ResourceCommandPanel({
           <Field label="Product ID" name="productId" list="known-price-products" />
           <IdDatalist id="known-price-products" values={productIds} />
           <Field label="New USD amount in cents" name="amountMinor" type="number" min={1} max={100000000} />
-          <p className="info-record">Task 5 is US-first: only USD is accepted. Prior prices remain immutable and are atomically superseded.</p>
+          <p className="info-record">Only USD is accepted. Prior prices remain immutable and are atomically superseded.</p>
         </CommandForm>
       );
     }

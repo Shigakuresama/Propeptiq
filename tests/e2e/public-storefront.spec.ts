@@ -237,6 +237,35 @@ test("explicit 200% CSS rendering pass remains operable without horizontal overf
   });
 });
 
+test("homepage current catalog remains reachable at 200% CSS zoom without horizontal overflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = "2";
+  });
+
+  const currentCatalog = page.getByText("Current catalog", { exact: true });
+  await currentCatalog.scrollIntoViewIfNeeded();
+  await expect(currentCatalog).toBeVisible();
+
+  const browseCatalog = page.getByRole("link", { name: "Browse catalog" });
+  await browseCatalog.scrollIntoViewIfNeeded();
+  await browseCatalog.focus();
+  await expect(browseCatalog).toBeFocused();
+
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(
+    layout.scrollWidth - layout.clientWidth,
+    `homepage 200% zoom overflow: scrollWidth=${layout.scrollWidth}, clientWidth=${layout.clientWidth}`,
+  ).toBeLessThanOrEqual(1);
+});
+
 test("reduced motion disables transition and animation durations", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/catalog");

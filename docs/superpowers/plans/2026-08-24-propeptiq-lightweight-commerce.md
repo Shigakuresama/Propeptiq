@@ -142,13 +142,13 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 6: Implement Checkout, Payments, and Fulfillment
 
-- [ ] Accept only product IDs, quantities, destination, and promotion identifiers from the browser.
-- [ ] Reload product, price, discount, inventory, account, attestation, destination, shipping, and provider status on the server.
-- [ ] Create Stripe Checkout only when the actual Stripe account and catalog are approved and enabled.
-- [ ] Verify webhook signatures from the raw body, deduplicate provider events, journal payment changes, and reject payload-hash conflicts.
-- [ ] Keep the return/success page read-only.
-- [ ] Before shipping, confirm verified payment, no active order/buyer hold, sufficient inventory, and that the product/destination remains allowed.
-- [ ] Place an already-paid order on hold only when one of those facts changed; do not rerun the former nine-gate compliance workflow.
+- [x] Accept only product IDs, quantities, destination, and promotion identifiers from the browser.
+- [x] Reload product, price, discount, inventory, account, attestation, destination, shipping, and provider status on the server.
+- [x] Create Stripe Checkout only when the actual Stripe account and catalog are approved and enabled.
+- [x] Verify webhook signatures from the raw body, deduplicate provider events, journal payment changes, and reject payload-hash conflicts.
+- [x] Keep the return/success page read-only.
+- [x] Before shipping, confirm verified payment, no active order/buyer hold, sufficient inventory, and that the product/destination remains allowed.
+- [x] Place an already-paid order on hold only when one of those facts changed; do not rerun the former nine-gate compliance workflow.
 
 **Validation:** Browser price tampering fails, promotion totals remain authoritative, webhook replay is idempotent, and success-page refresh cannot mark an order paid.
 

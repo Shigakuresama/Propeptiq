@@ -31,15 +31,16 @@ export default function ResearchUsePolicyPage() {
           <section aria-labelledby="responsibilities-heading" className="record-card">
             <h2 id="responsibilities-heading" className="font-heading text-3xl text-ink">Purchaser responsibilities</h2>
             <ul className="mt-5 list-disc space-y-3 pl-5 leading-7 text-muted-ink">
-              <li>Provide accurate account and checkout-attestation information when that connection becomes available.</li>
+              <li>Accurate purchaser information, account details, and the current checkout attestation are required.</li>
+              <li>Account sign-in and acceptance of the current checkout attestation are required before a hosted payment session can be created.</li>
               <li>Use catalog records only for a legitimate laboratory or research purpose.</li>
               <li>Review current product, destination, availability, tax, shipping, and provider results before submitting checkout.</li>
-              <li>Do not interpret publication on this site as a universal legal, regulatory, provider, or destination approval.</li>
+              <li>Publication, a successful build, or synthetic local-test success does not establish universal legal, provider, destination, tax, shipping, fulfillment, or launch approval.</li>
             </ul>
           </section>
         </div>
         <p className="info-record mt-8 max-w-[74ch]">
-          Account sign-in and checkout attestation are not connected in this storefront slice. The anonymous cart remains available and preserves only product IDs and quantities.
+          The anonymous cart retains only product IDs and quantities. At checkout, the server re-resolves authoritative account, attestation, catalog, price, promotion, destination, inventory, tax, shipping, and provider facts.
         </p>
         <Link className="record-link mt-8 inline-block" href="/catalog">Continue to catalog</Link>
       </article>

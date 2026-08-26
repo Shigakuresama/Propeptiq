@@ -87,7 +87,7 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
   const empty = snapshot.items.length === 0 ? <EmptyRecords /> : null;
   const truncation = snapshot.truncated ? (
     <p className="warning-record mt-5" role="status">
-      Showing the first {snapshot.limit} records. Narrower filters are not part of this Task 5 surface.
+      Showing the first {snapshot.limit} records. Narrower filters are unavailable for the current view.
     </p>
   ) : null;
 
@@ -204,7 +204,7 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
           ["Refund", item.refundState],
           ["Release", item.currentReleaseState === null ? "None" : `${item.currentReleaseState} · version ${item.releaseVersion}`],
           ["Shipment", item.shipmentState?.replaceAll("_", " ") ?? "None"],
-          ["Provider execution", "Managed only by signed Task 6 authority"],
+          ["Provider execution", "Matching verified signed provider evidence changes payment state. Staff commands cannot mark an order paid."],
         ]} />
       ));
       break;

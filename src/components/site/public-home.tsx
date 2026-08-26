@@ -9,7 +9,7 @@ export function PublicHome({ catalog }: { catalog: PublicCatalog }) {
   return (
     <div>
       <section className="border-b border-border">
-        <div className="site-container grid gap-12 py-16 lg:grid-cols-[7fr_5fr] lg:items-center lg:py-24">
+        <div className="site-container grid gap-12 py-16 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-center lg:py-24">
           <div className="max-w-[52rem]">
             <p className="eyebrow">Research-use catalog</p>
             <h1 className="mt-6 text-balance font-heading text-display leading-[0.98] text-ink">

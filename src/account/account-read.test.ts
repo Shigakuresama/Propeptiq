@@ -37,6 +37,8 @@ describe("owner-scoped order reads", () => {
       releaseState: null,
       shipmentCount: "1",
       shipmentState: "pending",
+      carrier: "STAFF-ONLY-CARRIER-SENTINEL",
+      trackingReference: "STAFF-ONLY-TRACKING-SENTINEL",
       createdAt: "2026-08-26T12:00:00.000Z",
       }] };
     });
@@ -52,8 +54,10 @@ describe("owner-scoped order reads", () => {
       releaseState: "none",
       shipmentState: "pending",
     })]);
+    expect(orders[0]).not.toHaveProperty("carrier");
+    expect(orders[0]).not.toHaveProperty("trackingReference");
     expect(selectedSql).toMatch(/buyer_user_id = \$1::uuid/iu);
-    expect(selectedSql).not.toMatch(/shipping_address|email|provider_session|provider_refund_id/iu);
+    expect(selectedSql).not.toMatch(/shipping_address|email|provider_session|provider_refund_id|carrier|tracking/iu);
   });
 
   it("fails closed instead of choosing among incoherent payment, release, or shipment rows", async () => {

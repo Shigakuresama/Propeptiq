@@ -57,6 +57,8 @@ describe("checkout success page", () => {
       holdState: "none",
       releaseState: "none",
       shipmentState: "none",
+      carrier: "STAFF-ONLY-CARRIER-SENTINEL",
+      trackingReference: "STAFF-ONLY-TRACKING-SENTINEL",
       createdAt: "2026-08-26T12:00:00.000Z",
       updatedAt: "2026-08-26T12:00:00.000Z",
       items: [{
@@ -85,6 +87,9 @@ describe("checkout success page", () => {
     expect(markup).toContain("$51.41");
     expect(markup).toContain("Synthetic local test only — Alpha");
     expect(markup).not.toContain("buyer@example.test");
+    expect(markup).not.toContain("STAFF-ONLY-CARRIER-SENTINEL");
+    expect(markup).not.toContain("STAFF-ONLY-TRACKING-SENTINEL");
+    expect(markup).not.toMatch(/>Carrier<|>Tracking reference</u);
     expect(markup).not.toMatch(/address|provider session|paymentintent/iu);
     expect(loadCheckoutSuccess).toHaveBeenCalledOnce();
     expect(loadCheckoutSuccess).toHaveBeenCalledWith(orderId);
