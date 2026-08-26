@@ -375,6 +375,81 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
     });
   });
 
+  it("admits missing payment evidence only for an authoritative denied hold quarantine", () => {
+    const unbacked = {
+      ...leanDraft,
+      state: "paid_pending_fulfillment",
+      paymentEvidenceId: null,
+    } as OrderSnapshot;
+    const denied = deniedFulfillment({
+      verifiedPaymentEventId: null,
+      refundPending: true,
+    });
+    const result = transitionOrder(unbacked, {
+      type: "post_payment_hold",
+      decision: denied,
+    });
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        snapshot: {
+          ...unbacked,
+          state: "paid_on_hold",
+          reviewRequestId: null,
+          fulfillmentReleaseVersion: null,
+        },
+        requiredIncidents: [],
+      },
+    });
+    if (!result.ok) return;
+    expect(transitionOrder(result.value.snapshot, {
+      type: "post_payment_hold",
+      decision: denied,
+    })).toEqual(result);
+
+    const unrelated = [
+      {
+        type: "clear_fulfillment_hold",
+        decision: permittedFulfillment({ verifiedPaymentEventId: null }),
+      },
+      {
+        type: "release_for_fulfillment",
+        decision: permittedFulfillment(),
+        paymentEvidenceId,
+        fulfillmentReleaseVersion: 1,
+      },
+      {
+        type: "provider_financial_hold",
+        source: "verified_provider_event",
+        providerEvidenceId: "synthetic-provider-event",
+      },
+    ] as const;
+    for (const event of unrelated) {
+      expect(transitionOrder(unbacked, event as never)).toMatchObject({
+        ok: false,
+        error: { code: "invalid_snapshot" },
+      });
+    }
+    expect(transitionOrder(unbacked, {
+      type: "post_payment_hold",
+      decision: { ...denied },
+    } as never)).toMatchObject({
+      ok: false,
+      error: { code: "invalid_snapshot" },
+    });
+    expect(transitionOrder(unbacked, {
+      type: "post_payment_hold",
+      decision: deniedFulfillment({
+        orderId: otherOrderId,
+        verifiedPaymentEventId: null,
+        refundPending: true,
+      }),
+    })).toMatchObject({
+      ok: false,
+      error: { code: "invalid_snapshot" },
+    });
+  });
+
   it("clears a hold only with a matching permitted decision and creates no release", () => {
     const held = {
       ...leanDraft,

@@ -295,6 +295,133 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
     return (payment.rows[0] as { id: string }).id;
   }
 
+  async function seedFulfilledPhysicalTuple(
+    repo = repository(),
+    existingVerifiedPaymentEventId?: string,
+  ) {
+    const verifiedPaymentEventId =
+      existingVerifiedPaymentEventId ?? await seedVerifiedPayment(repo);
+    const releaseId = keyedUuid("slice6f-post-handoff-release");
+    const shipmentId = keyedUuid("slice6f-post-handoff-shipment");
+    const consumeId = keyedUuid("slice6f-post-handoff-consume");
+    const handoffEffectId = keyedUuid("slice6f-post-handoff-effect");
+    await client.query(
+      `INSERT INTO fulfillment_releases
+         (id, order_id, version, idempotency_key, payment_event_id,
+          review_request_id, state, issued_at, expires_at, consumed_at)
+       VALUES
+         ($1::uuid, $2::uuid, 1, $3, $4::uuid, NULL, 'consumed',
+          '2026-08-25T11:55:00.000Z', '2026-08-25T12:05:00.000Z',
+          '2026-08-25T12:00:00.000Z')`,
+      [
+        releaseId,
+        ids.order,
+        `fulfillment_release:${ids.order}:1`,
+        verifiedPaymentEventId,
+      ],
+    );
+    await client.query(
+      `UPDATE inventory_reservations
+       SET state = 'consumed', quantity_remaining = 0,
+           updated_at = '2026-08-25T12:00:00.000Z'
+       WHERE id = $1::uuid`,
+      [ids.reservation],
+    );
+    await client.query(
+      `INSERT INTO inventory_events
+         (id, idempotency_key, event_type, lot_id, order_id, order_item_id,
+          reservation_id, fulfillment_release_id, quantity, balance_after,
+          occurred_at)
+       VALUES
+         ($1::uuid, $2, 'consume', $3::uuid, $4::uuid, $5::uuid,
+          $6::uuid, $7::uuid, 1, 9, '2026-08-25T12:00:00.000Z')`,
+      [
+        consumeId,
+        `inventory:consume:${ids.reservation}`,
+        ids.lot,
+        ids.order,
+        ids.item,
+        ids.reservation,
+        releaseId,
+      ],
+    );
+    await client.query(
+      `INSERT INTO shipments
+         (id, order_id, fulfillment_release_id, carrier, tracking_reference,
+          state, handed_off_at, updated_at)
+       VALUES
+         ($1::uuid, $2::uuid, $3::uuid, 'Synthetic carrier',
+          'SYNTHETIC-TRACKING-6F', 'handed_off',
+          '2026-08-25T12:00:00.000Z', '2026-08-25T12:00:00.000Z')`,
+      [shipmentId, ids.order, releaseId],
+    );
+    await client.query(
+      `INSERT INTO downstream_effects
+         (id, order_id, provider_event_id, effect_type, payload,
+          idempotency_key, status, attempt_count, created_at, updated_at)
+       VALUES
+         ($1::uuid, $2::uuid, NULL, 'fulfillment_handed_off', $3::jsonb,
+          $4, 'pending', 0, '2026-08-25T12:00:00.000Z',
+          '2026-08-25T12:00:00.000Z')`,
+      [
+        handoffEffectId,
+        ids.order,
+        JSON.stringify({
+          schemaVersion: 1,
+          orderId: ids.order,
+          shipmentId,
+          fulfillmentReleaseId: releaseId,
+        }),
+        `fulfillment_release:${releaseId}:handoff`,
+      ],
+    );
+    await client.query(
+      `UPDATE orders SET state = 'fulfilled',
+                         updated_at = '2026-08-25T12:00:00.000Z'
+       WHERE id = $1::uuid`,
+      [ids.order],
+    );
+    return Object.freeze({
+      verifiedPaymentEventId,
+      releaseId,
+      shipmentId,
+      consumeId,
+      handoffEffectId,
+    });
+  }
+
+  async function physicalTupleSnapshot() {
+    const result = await client.query(`SELECT
+      (SELECT state FROM orders WHERE id = '${ids.order}') AS order_state,
+      (SELECT jsonb_build_object(
+         'id', id::text, 'state', state, 'paymentEventId', payment_event_id::text,
+         'reviewRequestId', review_request_id::text, 'version', version,
+         'consumedAt', consumed_at)
+       FROM fulfillment_releases WHERE order_id = '${ids.order}') AS release,
+      (SELECT jsonb_build_object(
+         'id', id::text, 'state', state, 'releaseId', fulfillment_release_id::text,
+         'handedOffAt', handed_off_at, 'deliveredAt', delivered_at)
+       FROM shipments WHERE order_id = '${ids.order}') AS shipment,
+      (SELECT jsonb_agg(jsonb_build_object(
+         'id', id::text, 'state', state, 'remaining', quantity_remaining)
+         ORDER BY id)
+       FROM inventory_reservations WHERE order_id = '${ids.order}') AS reservations,
+      (SELECT jsonb_agg(jsonb_build_object(
+         'id', id::text, 'type', event_type, 'releaseId', fulfillment_release_id::text,
+         'quantity', quantity, 'balanceAfter', balance_after)
+         ORDER BY id)
+       FROM inventory_events WHERE order_id = '${ids.order}') AS inventory,
+      (SELECT jsonb_agg(jsonb_build_object(
+         'id', id::text, 'available', available_quantity, 'status', status)
+         ORDER BY id)
+       FROM lots WHERE id = '${ids.lot}') AS lots,
+      (SELECT jsonb_agg(jsonb_build_object(
+         'id', id::text, 'type', effect_type, 'payload', payload,
+         'key', idempotency_key) ORDER BY id)
+       FROM downstream_effects WHERE effect_type = 'fulfillment_handed_off') AS handoff_effects`);
+    return JSON.stringify(result.rows[0]);
+  }
+
   function expectGlobalIdentityFence(
     expectedKeys: readonly string[],
     firstIdentityRead: RegExp,
@@ -537,6 +664,52 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       },
     ]);
   });
+
+  it.each([
+    ["external provider event ID", "provider_event_id = 'evt_stored_external_drift_6f'"],
+    ["event type", "event_type = 'refund.updated'"],
+    ["schema version", "schema_version = 2"],
+    ["provider-created time", "provider_created_at = '2026-08-25T11:59:59.000Z'"],
+  ] as const)(
+    "conflicts stored %s drift against the normalized common envelope with zero business writes",
+    async (label, setClause) => {
+      const suffix = `stored-common-drift-${label.replaceAll(" ", "-")}`;
+      const repo = repository();
+      const event = await claim(
+        checkoutNormalization(
+          "checkout.session.completed",
+          `evt_synthetic_6e_${suffix}`,
+        ),
+        suffix,
+      );
+      await client.exec(`
+        ALTER TABLE provider_events
+          DROP CONSTRAINT provider_events_normalized_common_coherent;
+        ALTER TABLE provider_events
+          DROP CONSTRAINT provider_events_schema_version;
+        UPDATE provider_events SET ${setClause}
+        WHERE id = '${keyedUuid(`database-event:${suffix}`)}'
+      `);
+
+      await expect(repo.processClaim({
+        claim: event,
+        authority: authority(),
+        now,
+      })).resolves.toEqual({ status: "conflict" });
+      expect((await client.query(`SELECT
+        (SELECT status FROM provider_events
+         WHERE id = '${keyedUuid(`database-event:${suffix}`)}') AS inbox_status,
+        (SELECT state FROM orders WHERE id = '${ids.order}') AS order_state,
+        (SELECT count(*)::int FROM payment_events) AS payments,
+        (SELECT count(*)::int FROM downstream_effects) AS effects`)).rows[0])
+        .toEqual({
+          inbox_status: "conflict",
+          order_state: "checkout_pending",
+          payments: 0,
+          effects: 0,
+        });
+    },
+  );
 
   it("rolls back an injected pre-commit crash, fail-marks separately, and reclaims once", async () => {
     const normalization = checkoutNormalization(
@@ -1097,6 +1270,44 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
     );
   });
 
+  it("conflicts checkout replay when the stored verified-payment source external identity drifts", async () => {
+    const repo = repository();
+    await seedVerifiedPayment(repo);
+    await client.exec(`
+      ALTER TABLE provider_events
+        DROP CONSTRAINT provider_events_normalized_common_coherent;
+      UPDATE provider_events
+      SET provider_event_id = 'evt_drifted_verified_payment_source_6f'
+      WHERE provider_event_id = 'evt_synthetic_6e_seed_payment'
+    `);
+    const replay = await claim(
+      checkoutNormalization(
+        "checkout.session.async_payment_succeeded",
+        "evt_synthetic_6e_payment_source_external_drift_replay",
+      ),
+      "payment-source-external-drift-replay",
+    );
+
+    await expect(repo.processClaim({
+      claim: replay,
+      authority: authority(),
+      now,
+    })).resolves.toEqual({ status: "conflict" });
+    expect((await client.query(`SELECT
+      (SELECT status FROM provider_events
+       WHERE provider_event_id = 'evt_synthetic_6e_payment_source_external_drift_replay') AS inbox_status,
+      (SELECT state FROM orders WHERE id = '${ids.order}') AS order_state,
+      (SELECT count(*)::int FROM payment_events
+       WHERE event_type = 'payment_verified') AS payments,
+      (SELECT count(*)::int FROM downstream_effects) AS effects`)).rows[0])
+      .toEqual({
+        inbox_status: "conflict",
+        order_state: "paid_pending_fulfillment",
+        payments: 1,
+        effects: 2,
+      });
+  });
+
   it("places a late matching payment on hold after authoritative release with one incident", async () => {
     await client.exec(`
       UPDATE checkout_attempts SET status = 'expired', provider_session_id = '${providerSessionId}'
@@ -1248,6 +1459,37 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
     });
   });
 
+  it("does not wake deferred financial work from a payment source with drifted external identity", async () => {
+    const repo = repository();
+    const normalization = refundNormalization(
+      "evt_synthetic_6e_refund_wake_external_drift",
+      "succeeded",
+    );
+    const deferred = await claim(normalization, "refund-wake-external-drift");
+    await expect(repo.processClaim({
+      claim: deferred,
+      authority: authority(),
+      now,
+    })).resolves.toEqual({ status: "deferred" });
+    const verifiedPaymentEventId = await seedVerifiedPayment(repo);
+    await client.exec(`
+      ALTER TABLE provider_events
+        DROP CONSTRAINT provider_events_normalized_common_coherent;
+      UPDATE provider_events
+      SET provider_event_id = 'evt_drifted_wake_payment_source_6f'
+      WHERE provider_event_id = 'evt_synthetic_6e_seed_payment'
+    `);
+
+    await expect(repo.wakeDeferredDependencies({
+      verifiedPaymentEventId,
+      now,
+    })).resolves.toEqual({ status: "missing_dependency", count: 0 });
+    expect((await client.query(`SELECT status FROM provider_events
+      WHERE normalized_payload->>'providerEventId' =
+        'evt_synthetic_6e_refund_wake_external_drift'`)).rows)
+      .toEqual([{ status: "deferred" }]);
+  });
+
   it("rejects a refund when the stored verified-payment source envelope has drifted", async () => {
     const repo = repository();
     await seedVerifiedPayment(repo);
@@ -1279,6 +1521,47 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       effects: 0,
       order_state: "paid_pending_fulfillment",
     });
+  });
+
+  it("rejects a refund when the stored verified-payment source external identity has drifted", async () => {
+    const repo = repository();
+    await seedVerifiedPayment(repo);
+    await client.exec(`
+      ALTER TABLE provider_events
+        DROP CONSTRAINT provider_events_normalized_common_coherent;
+      UPDATE provider_events
+      SET provider_event_id = 'evt_drifted_refund_payment_source_6f'
+      WHERE provider_event_id = 'evt_synthetic_6e_seed_payment'
+    `);
+    const event = await claim(
+      refundNormalization(
+        "evt_synthetic_6e_refund_external_payment_source_drift",
+        "succeeded",
+      ),
+      "refund-external-payment-source-drift",
+    );
+
+    await expect(repo.processClaim({
+      claim: event,
+      authority: authority(),
+      now,
+    })).resolves.toEqual({ status: "conflict" });
+    expect((await client.query(`SELECT
+      (SELECT status FROM provider_events
+       WHERE provider_event_id =
+         'evt_synthetic_6e_refund_external_payment_source_drift') AS inbox_status,
+      (SELECT count(*)::int FROM refunds) AS refunds,
+      (SELECT count(*)::int FROM payment_events
+       WHERE event_type = 'refund_verified') AS refund_journals,
+      (SELECT count(*)::int FROM downstream_effects
+       WHERE provider_event_id =
+         '${keyedUuid("database-event:refund-external-payment-source-drift")}') AS effects`)).rows[0])
+      .toEqual({
+        inbox_status: "conflict",
+        refunds: 0,
+        refund_journals: 0,
+        effects: 0,
+      });
   });
 
   it("binds exact ambiguous-create refund metadata and confirms only that staff request", async () => {
@@ -1675,8 +1958,135 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
         order_state: "paid_on_hold",
         incidents: 1,
       });
+      expect((await client.query(`SELECT count(*)::int AS count
+        FROM admin_audit
+        WHERE metadata->>'reason' = 'post_handoff_financial_event'`)).rows)
+        .toEqual([{ count: 0 }]);
     },
   );
+
+  it("preserves the complete physical tuple for a post-handoff observed succeeded refund", async () => {
+    const repo = repository();
+    await seedFulfilledPhysicalTuple(repo);
+    const before = await physicalTupleSnapshot();
+    const event = await claim(
+      refundNormalization(
+        "evt_synthetic_6f_post_handoff_observed_refund",
+        "succeeded",
+      ),
+      "post-handoff-observed-refund",
+    );
+
+    await expect(repo.processClaim({ claim: event, authority: authority(), now }))
+      .resolves.toEqual({ status: "processed" });
+    expect(await physicalTupleSnapshot()).toBe(before);
+    const state = await client.query(`SELECT
+      (SELECT status FROM refunds WHERE origin = 'provider_observed') AS refund_status,
+      (SELECT count(*)::int FROM payment_events
+       WHERE event_type = 'refund_verified') AS journals,
+      (SELECT count(*)::int FROM downstream_effects
+       WHERE effect_type = 'refund_verified') AS effects,
+      (SELECT count(*)::int FROM admin_audit
+       WHERE metadata->>'reason' = 'provider_observed_refund') AS observed_incidents,
+      (SELECT count(*)::int FROM admin_audit
+       WHERE metadata->>'reason' = 'post_handoff_financial_event') AS post_handoff_incidents`);
+    expect(state.rows[0]).toEqual({
+      refund_status: "succeeded",
+      journals: 1,
+      effects: 1,
+      observed_incidents: 1,
+      post_handoff_incidents: 1,
+    });
+  });
+
+  it("preserves the physical tuple while journaling a post-handoff unreconciled refund", async () => {
+    const repo = repository();
+    await seedFulfilledPhysicalTuple(repo);
+    const before = await physicalTupleSnapshot();
+    const event = await claim(
+      reconciliationNormalization(
+        "evt_synthetic_6f_post_handoff_unreconciled_refund",
+        700,
+      ),
+      "post-handoff-unreconciled-refund",
+    );
+
+    await expect(repo.processClaim({ claim: event, authority: authority(), now }))
+      .resolves.toEqual({ status: "processed" });
+    expect(await physicalTupleSnapshot()).toBe(before);
+    expect((await client.query(`SELECT
+      (SELECT count(*)::int FROM payment_events
+       WHERE event_type = 'unreconciled_refund_observed') AS journals,
+      (SELECT count(*)::int FROM admin_audit
+       WHERE metadata->>'reason' = 'unreconciled_refund_observed') AS observed_incidents,
+      (SELECT count(*)::int FROM admin_audit
+       WHERE metadata->>'reason' = 'post_handoff_financial_event') AS post_handoff_incidents`)).rows[0])
+      .toEqual({ journals: 1, observed_incidents: 1, post_handoff_incidents: 1 });
+  });
+
+  it("preserves the physical tuple for a post-handoff restrictive dispute", async () => {
+    const repo = repository();
+    await seedFulfilledPhysicalTuple(repo);
+    const before = await physicalTupleSnapshot();
+    const event = await claim(
+      disputeNormalization(
+        "evt_synthetic_6f_post_handoff_restrictive_dispute",
+        "needs_response",
+      ),
+      "post-handoff-restrictive-dispute",
+    );
+
+    await expect(repo.processClaim({ claim: event, authority: authority(), now }))
+      .resolves.toEqual({ status: "processed" });
+    expect(await physicalTupleSnapshot()).toBe(before);
+    expect((await client.query(`SELECT
+      (SELECT count(*)::int FROM payment_events
+       WHERE event_type = 'dispute_recorded') AS journals,
+      (SELECT count(*)::int FROM downstream_effects
+       WHERE effect_type = 'dispute_recorded') AS effects,
+      (SELECT count(*)::int FROM admin_audit
+       WHERE metadata->>'reason' = 'post_handoff_financial_event') AS post_handoff_incidents`)).rows[0])
+      .toEqual({ journals: 1, effects: 1, post_handoff_incidents: 1 });
+  });
+
+  it("does not create a post-handoff incident for resolved dispute or exact reconciliation", async () => {
+    const repo = repository();
+    const paymentId = await seedVerifiedPayment(repo);
+    const refund = await claim(
+      refundNormalization(
+        "evt_synthetic_6f_post_handoff_exact_refund_source",
+        "succeeded",
+      ),
+      "post-handoff-exact-refund-source",
+    );
+    await repo.processClaim({ claim: refund, authority: authority(), now });
+    await seedFulfilledPhysicalTuple(repo, paymentId);
+    const before = await physicalTupleSnapshot();
+    const exact = await claim(
+      reconciliationNormalization(
+        "evt_synthetic_6f_post_handoff_exact_reconciliation",
+        500,
+      ),
+      "post-handoff-exact-reconciliation",
+    );
+    const resolved = await claim(
+      disputeNormalization(
+        "evt_synthetic_6f_post_handoff_resolved_dispute",
+        "won",
+      ),
+      "post-handoff-resolved-dispute",
+    );
+
+    await expect(repo.processClaim({ claim: exact, authority: authority(), now }))
+      .resolves.toEqual({ status: "processed" });
+    await expect(repo.processClaim({ claim: resolved, authority: authority(), now }))
+      .resolves.toEqual({ status: "processed" });
+    expect(await physicalTupleSnapshot()).toBe(before);
+    expect((await client.query(`SELECT count(*)::int AS count
+      FROM admin_audit
+      WHERE metadata->>'reason' = 'post_handoff_financial_event'`)).rows)
+      .toEqual([{ count: 0 }]);
+  });
 
   it("keeps a reconciliation conflict free of unreconciled journal writes", async () => {
     const repo = repository();
@@ -1739,6 +2149,49 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       (SELECT status FROM provider_events
        WHERE provider_event_id = 'evt_synthetic_6e_reconciliation_drifted_refund') AS inbox_status`);
     expect(state.rows[0]).toEqual({ unreconciled: 0, inbox_status: "conflict" });
+  });
+
+  it("conflicts reconciliation when a succeeded refund source external identity drifts", async () => {
+    const repo = repository();
+    await seedVerifiedPayment(repo);
+    const sourceProviderEventId =
+      "evt_synthetic_6e_reconciliation_refund_external_source";
+    const source = await claim(
+      refundNormalization(sourceProviderEventId, "succeeded"),
+      "reconciliation-refund-external-source",
+    );
+    await expect(repo.processClaim({
+      claim: source,
+      authority: authority(),
+      now,
+    })).resolves.toEqual({ status: "processed" });
+    await client.exec(`
+      ALTER TABLE provider_events
+        DROP CONSTRAINT provider_events_normalized_common_coherent;
+      UPDATE provider_events
+      SET provider_event_id = 'evt_drifted_refund_source_external_6f'
+      WHERE provider_event_id = '${sourceProviderEventId}'
+    `);
+    const reconciliation = await claim(
+      reconciliationNormalization(
+        "evt_synthetic_6e_reconciliation_refund_external_drift",
+        500,
+      ),
+      "reconciliation-refund-external-drift",
+    );
+
+    await expect(repo.processClaim({
+      claim: reconciliation,
+      authority: authority(),
+      now,
+    })).resolves.toEqual({ status: "conflict" });
+    expect((await client.query(`SELECT
+      (SELECT status FROM provider_events
+       WHERE provider_event_id =
+         'evt_synthetic_6e_reconciliation_refund_external_drift') AS inbox_status,
+      (SELECT count(*)::int FROM payment_events
+       WHERE event_type = 'unreconciled_refund_observed') AS unreconciled`)).rows[0])
+      .toEqual({ inbox_status: "conflict", unreconciled: 0 });
   });
 
   it("conflicts reconciliation when a staff refund source drifts its signed request identity", async () => {
@@ -2122,6 +2575,60 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       order_state: "paid_on_hold",
       inbox_status: "conflict",
     });
+  });
+
+  it("conflicts a dispute status change when the prior journal source external identity drifts", async () => {
+    const repo = repository();
+    await seedVerifiedPayment(repo);
+    const providerDisputeId = "dp_synthetic_6e_external_source_drift";
+    const recordedProviderEventId =
+      "evt_synthetic_6e_external_source_dispute_recorded";
+    const recorded = await claim(
+      disputeNormalization(
+        recordedProviderEventId,
+        "needs_response",
+        { id: providerDisputeId },
+      ),
+      "external-source-dispute-recorded",
+    );
+    await expect(repo.processClaim({
+      claim: recorded,
+      authority: authority(),
+      now,
+    })).resolves.toEqual({ status: "processed" });
+    await client.exec(`
+      ALTER TABLE provider_events
+        DROP CONSTRAINT provider_events_normalized_common_coherent;
+      UPDATE provider_events
+      SET provider_event_id = 'evt_drifted_dispute_source_external_6f'
+      WHERE provider_event_id = '${recordedProviderEventId}'
+    `);
+    const resolved = await claim(
+      disputeNormalization(
+        "evt_synthetic_6e_external_source_dispute_resolved",
+        "won",
+        { id: providerDisputeId },
+      ),
+      "external-source-dispute-resolved",
+    );
+    const resolvedDatabaseEventId = keyedUuid(
+      "database-event:external-source-dispute-resolved",
+    );
+
+    await expect(repo.processClaim({
+      claim: resolved,
+      authority: authority(),
+      now,
+    })).resolves.toEqual({ status: "conflict" });
+    expect((await client.query(`SELECT
+      (SELECT count(*)::int FROM payment_events
+       WHERE provider_payment_id = '${providerDisputeId}'
+         AND event_type IN ('dispute_recorded', 'dispute_resolved')) AS journals,
+      (SELECT count(*)::int FROM downstream_effects
+       WHERE provider_event_id = '${resolvedDatabaseEventId}') AS resolved_effects,
+      (SELECT status FROM provider_events
+       WHERE id = '${resolvedDatabaseEventId}') AS inbox_status`)).rows[0])
+      .toEqual({ journals: 1, resolved_effects: 0, inbox_status: "conflict" });
   });
 
   it("processes dispute record and resolve when exact payment provenance is unchanged", async () => {

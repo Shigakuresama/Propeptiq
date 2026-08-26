@@ -52,6 +52,7 @@ const ids = {
   price2: "10000000-0000-4000-8000-000000000019",
   lot2: "10000000-0000-4000-8000-000000000020",
   destination2: "10000000-0000-4000-8000-000000000021",
+  attempt: "10000000-0000-4000-8000-000000000024",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -134,22 +135,39 @@ describe("Task 5 PostgreSQL admin repository", () => {
       VALUES
         ('${ids.order}', '${ids.buyer}', 'active', '${ids.acceptance}', 'CA', 'USD',
          5000, 0, 0, 0, 5000, 'paid_pending_fulfillment');
+      INSERT INTO checkout_attempts
+        (id, order_id, buyer_user_id, idempotency_key, request_hash, status,
+         account_gate, attestation_gate, product_gate, destination_gate,
+         inventory_gate, payment_provider_gate, permitted, review_required,
+         reasons, tax_ready, shipping_ready, provider, provider_request_id,
+         provider_session_id, provider_request_hash, provider_customer_email,
+         provider_origin, provider_request_schema_version, provider_livemode,
+         provider_scope, tax_quote_reference, shipping_quote_reference,
+         shipping_service, expires_at)
+      VALUES
+        ('${ids.attempt}', '${ids.order}', '${ids.buyer}', 'checkout-admin-fixture',
+         '${"9".repeat(64)}', 'completed', 'pass', 'pass', 'pass', 'pass',
+         'pass', 'pass', true, false, '{}', true, true, 'local_test',
+         'checkout_attempt:${ids.attempt}', 'cs_local_admin_fixture', '${"8".repeat(64)}',
+         'buyer@example.test', 'http://localhost:3000', 1, false,
+         'local_test:synthetic-propeptiq-v1', 'tax_admin_fixture',
+         'ship_admin_fixture', 'synthetic_ground', '2027-08-24T11:00:00.000Z');
       INSERT INTO provider_events
         (id, provider, provider_event_id, payload_hash, status, attempt_count,
          received_at, processed_at, event_type, schema_version,
          normalized_payload, provider_created_at, livemode)
       VALUES
-        ('${ids.providerEvent}', 'synthetic-provider', 'evt_synthetic_paid', '${"c".repeat(64)}',
+        ('${ids.providerEvent}', 'local_test', 'evt_synthetic_paid', '${"c".repeat(64)}',
          'processed', 1, '2026-08-24T10:00:00.000Z', '2026-08-24T10:01:00.000Z',
          'checkout.session.completed', 1,
-         '{"providerEventId":"evt_synthetic_paid","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         '{"schemaVersion":1,"kind":"checkout_session","providerEventId":"evt_synthetic_paid","eventType":"checkout.session.completed","providerCreatedAt":"2026-08-24T10:00:00.000Z","livemode":false,"sessionId":"cs_local_admin_fixture","orderId":"${ids.order}","attemptId":"${ids.attempt}","paymentIntentId":"pay_synthetic","amountMinor":5000,"currency":"usd","paymentStatus":"paid","sessionStatus":"complete"}'::jsonb,
          '2026-08-24T10:00:00.000Z', false);
       INSERT INTO payment_events
         (id, provider_event_id, order_id, event_type, provider_payment_id,
          idempotency_key, amount_minor, currency, occurred_at)
       VALUES
         ('${ids.paymentEvent}', '${ids.providerEvent}', '${ids.order}', 'payment_verified',
-         'pay_synthetic', 'payment-synthetic-1', 5000, 'USD', '2026-08-24T10:00:00.000Z');
+         'pay_synthetic', 'local_test:payment_intent:pay_synthetic', 5000, 'USD', '2026-08-24T10:00:00.000Z');
       INSERT INTO review_requests
         (id, user_id, order_id, snapshot_hash, buyer_status_snapshot,
          attestation_version_id, destination_state_code, cart_snapshot,
@@ -388,7 +406,7 @@ describe("Task 5 PostgreSQL admin repository", () => {
       reasonRedacted: "Synthetic duplicate",
       idempotencyKey: "refund-synthetic-request",
     });
-    expect(first).toMatchObject({ provider: "synthetic-provider", status: "requested" });
+    expect(first).toMatchObject({ provider: "local_test", status: "requested" });
     const retry = await requestRefundIntent(repo, context("repo-refund-retry"), {
       orderId: ids.order,
       requestedAmountMinor: 2000,
@@ -410,11 +428,164 @@ describe("Task 5 PostgreSQL admin repository", () => {
       FROM refunds
     `);
     expect(persisted.rows).toEqual([{
-      provider: "synthetic-provider",
+      provider: "local_test",
       verified_payment_event_id: ids.paymentEvent,
       refunds: 1,
       audits: 1,
     }]);
+  });
+
+  it("fails closed when the order has multiple or mismatched verified payment authorities", async () => {
+    const repo = repository();
+    const secondProviderEvent = "10000000-0000-4000-8000-000000000022";
+    const secondPaymentEvent = "10000000-0000-4000-8000-000000000023";
+    await client.exec(`
+      INSERT INTO provider_events
+        (id, provider, provider_event_id, payload_hash, status, attempt_count,
+         received_at, processed_at, event_type, schema_version,
+         normalized_payload, provider_created_at, livemode)
+      VALUES
+        ('${secondProviderEvent}', 'local_test', 'evt_synthetic_paid_second', '${"e".repeat(64)}',
+         'processed', 1, '2026-08-24T10:02:00.000Z', '2026-08-24T10:03:00.000Z',
+         'checkout.session.completed', 1,
+         '{"providerEventId":"evt_synthetic_paid_second","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         '2026-08-24T10:02:00.000Z', false);
+      INSERT INTO payment_events
+        (id, provider_event_id, order_id, event_type, provider_payment_id,
+         idempotency_key, amount_minor, currency, occurred_at)
+      VALUES
+        ('${secondPaymentEvent}', '${secondProviderEvent}', '${ids.order}', 'payment_verified',
+         'pay_synthetic_second', 'payment-synthetic-2', 1000, 'USD', '2026-08-24T10:02:00.000Z');
+    `);
+
+    await expect(
+      requestRefundIntent(repo, context("repo-refund-multiple-payment"), {
+        orderId: ids.order,
+        requestedAmountMinor: 1000,
+        reasonRedacted: null,
+        idempotencyKey: "refund-multiple-payment",
+      }),
+    ).rejects.toThrow(/one exact verified payment/i);
+    await client.exec(`
+      DELETE FROM payment_events WHERE id = '${secondPaymentEvent}';
+      DELETE FROM provider_events WHERE id = '${secondProviderEvent}';
+      UPDATE payment_events SET amount_minor = 4000 WHERE id = '${ids.paymentEvent}';
+    `);
+    await expect(
+      requestRefundIntent(repo, context("repo-refund-mismatched-payment"), {
+        orderId: ids.order,
+        requestedAmountMinor: 1000,
+        reasonRedacted: null,
+        idempotencyKey: "refund-mismatched-payment",
+      }),
+    ).rejects.toThrow(/one exact verified payment/i);
+
+    const rows = await client.query<{ refunds: number }>(
+      `SELECT count(*)::int AS refunds FROM refunds`,
+    );
+    expect(rows.rows).toEqual([{ refunds: 0 }]);
+  });
+
+  it.each([
+    [
+      "source provider-event identity drift",
+      `ALTER TABLE provider_events
+         DROP CONSTRAINT provider_events_normalized_common_coherent;
+       UPDATE provider_events
+       SET normalized_payload = jsonb_set(
+         normalized_payload, '{providerEventId}', '"evt_mismatched_normalized"'
+       )
+       WHERE id = '${ids.providerEvent}'`,
+    ],
+    [
+      "invalid checkout provider request hash",
+      `ALTER TABLE checkout_attempts
+         DROP CONSTRAINT checkout_attempts_provider_request_hash;
+       ALTER TABLE checkout_attempts
+         DROP CONSTRAINT checkout_attempts_provider_coherent;
+       UPDATE checkout_attempts SET provider_request_hash = 'invalid'
+       WHERE id = '${ids.attempt}'`,
+    ],
+    [
+      "wrong checkout provider request schema version",
+      `ALTER TABLE checkout_attempts
+         DROP CONSTRAINT checkout_attempts_provider_coherent;
+       UPDATE checkout_attempts SET provider_request_schema_version = 2
+       WHERE id = '${ids.attempt}'`,
+    ],
+  ])("rejects refund intent when durable payment provenance has %s", async (_label, mutation) => {
+    await client.exec(mutation);
+    await expect(
+      requestRefundIntent(repository(), context("repo-refund-durable-provenance"), {
+        orderId: ids.order,
+        requestedAmountMinor: 1000,
+        reasonRedacted: null,
+        idempotencyKey: "refund-durable-provenance",
+      }),
+    ).rejects.toThrow(/one exact verified payment/i);
+    const rows = await client.query<{ refunds: number; audits: number }>(`
+      SELECT count(*)::int AS refunds,
+        (SELECT count(*)::int FROM admin_audit
+         WHERE action = 'refund.requested') AS audits
+      FROM refunds
+    `);
+    expect(rows.rows).toEqual([{ refunds: 0, audits: 0 }]);
+  });
+
+  it("rejects a staff refund intent after physical handoff", async () => {
+    const repo = repository();
+    await client.exec(`UPDATE orders SET state = 'fulfilled' WHERE id = '${ids.order}'`);
+    await expect(
+      requestRefundIntent(repo, context("repo-refund-after-handoff"), {
+        orderId: ids.order,
+        requestedAmountMinor: 1000,
+        reasonRedacted: null,
+        idempotencyKey: "refund-after-handoff",
+      }),
+    ).rejects.toThrow(/pre-handoff paid order/i);
+    const rows = await client.query<{ refunds: number; audits: number }>(`
+      SELECT count(*)::int AS refunds,
+        (SELECT count(*)::int FROM admin_audit WHERE action = 'refund.requested') AS audits
+      FROM refunds
+    `);
+    expect(rows.rows).toEqual([{ refunds: 0, audits: 0 }]);
+  });
+
+  it("retries the whole refund-intent transaction at most three times without re-consuming the rate limit", async () => {
+    let attempts = 0;
+    const repo = createPostgresAdminRepository(
+      async (work) => {
+        attempts += 1;
+        if (attempts <= 2) {
+          const error = new Error("synthetic serializable retry") as Error & { code: string };
+          error.code = attempts === 1 ? "40001" : "40P01";
+          throw error;
+        }
+        return client.transaction(work);
+      },
+      createPostgresRateLimitStore(client),
+    );
+
+    await expect(
+      requestRefundIntent(repo, context("repo-refund-retry-policy"), {
+        orderId: ids.order,
+        requestedAmountMinor: 1000,
+        reasonRedacted: null,
+        idempotencyKey: "refund-retry-policy",
+      }),
+    ).resolves.toMatchObject({ status: "requested", changed: true });
+    expect(attempts).toBe(3);
+    const rows = await client.query<{
+      refunds: number;
+      audits: number;
+      rateCount: number;
+    }>(`
+      SELECT count(*)::int AS refunds,
+        (SELECT count(*)::int FROM admin_audit WHERE action = 'refund.requested') AS audits,
+        (SELECT COALESCE(sum(count), 0)::int FROM rate_limit_windows) AS "rateCount"
+      FROM refunds
+    `);
+    expect(rows.rows).toEqual([{ refunds: 1, audits: 1, rateCount: 1 }]);
   });
 
   it("serializes concurrent refund requests on the order and admits only one outstanding intent", async () => {

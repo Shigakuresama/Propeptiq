@@ -47,6 +47,9 @@ function repositories(): RequestRepositories {
       async transaction() {
         throw new Error("Admin transaction is not used by account updates");
       },
+      async retrySerializableTransaction() {
+        throw new Error("Admin transaction is not used by account updates");
+      },
     },
     storageVerifier: { mode: "disabled", verify: async () => ({ exists: false, sha256: null }) },
     loadAccount: async () => null,

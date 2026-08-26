@@ -19,6 +19,7 @@ import {
   parseKnownProviderEventConflictV1,
   parseNormalizedProviderEventV1,
 } from "@/commerce/provider-events";
+import { hasExactProviderEventEnvelopeIdentity } from "@/commerce/payment-authority";
 import {
   projectProviderEventAuthorityV1,
   type ProviderEventAuthorityV1,
@@ -279,6 +280,7 @@ function exactCommonCoherence(
       : null;
   const event = input.normalization.event;
   return (
+    row.providerEventId === event.providerEventId &&
     row.eventType === event.eventType &&
     Number(row.schemaVersion) === event.schemaVersion &&
     row.livemode === event.livemode &&
@@ -288,6 +290,19 @@ function exactCommonCoherence(
     payload.eventType === event.eventType &&
     payload.schemaVersion === event.schemaVersion &&
     payload.livemode === event.livemode
+  );
+}
+
+function storedEventCommonCoherent(
+  row: ProviderEventRow,
+  event: NormalizedProviderEventV1,
+): boolean {
+  return (
+    hasExactProviderEventEnvelopeIdentity(row.providerEventId, event) &&
+    row.eventType === event.eventType &&
+    Number(row.schemaVersion) === event.schemaVersion &&
+    row.livemode === event.livemode &&
+    iso(row.providerCreatedAt) === event.providerCreatedAt
   );
 }
 
@@ -1221,6 +1236,7 @@ async function processCheckoutEvent(
 
 type SourceProviderEventRow = Readonly<{
   id: string;
+  externalProviderEventId: string;
   provider: string;
   status: string;
   livemode: boolean;
@@ -1240,7 +1256,9 @@ async function paymentSourceMatchesLockedContext(
 ): Promise<boolean> {
   if (payment.providerPaymentId === null) return false;
   const sourceRows = rows<SourceProviderEventRow>(await client.query(
-    `SELECT id::text AS id, provider, status, livemode,
+    `SELECT id::text AS id,
+            provider_event_id AS "externalProviderEventId",
+            provider, status, livemode,
             normalized_payload AS "normalizedPayload"
      FROM provider_events WHERE id = $1::uuid`,
     [payment.providerEventId],
@@ -1256,6 +1274,10 @@ async function paymentSourceMatchesLockedContext(
     source.provider === authority.provider &&
     source.livemode === authority.expectedLivemode &&
     envelope !== null &&
+    hasExactProviderEventEnvelopeIdentity(
+      source.externalProviderEventId,
+      envelope,
+    ) &&
     envelope.kind === "checkout_session" &&
     checkoutSemanticsAreCoherent(envelope) &&
     envelope.paymentStatus === "paid" &&
@@ -1329,7 +1351,9 @@ async function loadAndLockFinancialContext(
   if (discoveredPayments.length !== 1) return Object.freeze({ status: "conflict" });
   const discoveredPayment = discoveredPayments[0]!;
   const sourceRows = rows<SourceProviderEventRow>(await client.query(
-    `SELECT id::text AS id, provider, status, livemode,
+    `SELECT id::text AS id,
+            provider_event_id AS "externalProviderEventId",
+            provider, status, livemode,
             normalized_payload AS "normalizedPayload"
      FROM provider_events WHERE id = $1::uuid`,
     [discoveredPayment.providerEventId],
@@ -1345,6 +1369,10 @@ async function loadAndLockFinancialContext(
     sourceRow.provider !== authority.provider ||
     sourceRow.livemode !== authority.expectedLivemode ||
     sourceEvent === null ||
+    !hasExactProviderEventEnvelopeIdentity(
+      sourceRow.externalProviderEventId,
+      sourceEvent,
+    ) ||
     sourceEvent.kind !== "checkout_session" ||
     !checkoutSemanticsAreCoherent(sourceEvent) ||
     sourceEvent.paymentStatus !== "paid" ||
@@ -1583,7 +1611,9 @@ async function succeededRefundsHaveExactAuthority(
       return false;
     }
     const sourceRows = rows<SourceProviderEventRow>(await client.query(
-      `SELECT id::text AS id, provider, status, livemode,
+      `SELECT id::text AS id,
+              provider_event_id AS "externalProviderEventId",
+              provider, status, livemode,
               normalized_payload AS "normalizedPayload"
        FROM provider_events WHERE id = $1::uuid`,
       [refund.providerEventId],
@@ -1599,6 +1629,10 @@ async function succeededRefundsHaveExactAuthority(
       source.provider !== authority.provider ||
       source.livemode !== authority.expectedLivemode ||
       envelope === null ||
+      !hasExactProviderEventEnvelopeIdentity(
+        source.externalProviderEventId,
+        envelope,
+      ) ||
       envelope.kind !== "refund" ||
       envelope.status !== "succeeded" ||
       envelope.livemode !== authority.expectedLivemode ||
@@ -1779,8 +1813,18 @@ async function processRefundEvent(
     }
   }
   if (providerObserved) {
-    if (!(await placeFinancialHold(client, context, row.id, now))) {
+    const held = await placeFinancialHold(client, context, row.id, now);
+    if (!held && context.order.state !== "fulfilled") {
       return finishBusinessConflict(client, row, now, "order_transition_mismatch", keyedUuid);
+    }
+    if (!held) {
+      await insertIncident(client, {
+        providerEventDatabaseId: row.id,
+        orderId: context.order.id,
+        reason: "post_handoff_financial_event",
+        now,
+        keyedUuid,
+      });
     }
     await insertIncident(client, {
       providerEventDatabaseId: row.id,
@@ -1937,8 +1981,18 @@ async function processRefundReconciliationEvent(
     return finishBusinessConflict(client, row, now, "refund_reconciliation_mismatch", keyedUuid);
   }
   if (succeededSum < event.amountRefundedMinor) {
-    if (!(await placeFinancialHold(client, context, row.id, now))) {
+    const held = await placeFinancialHold(client, context, row.id, now);
+    if (!held && context.order.state !== "fulfilled") {
       return finishBusinessConflict(client, row, now, "order_transition_mismatch", keyedUuid);
+    }
+    if (!held) {
+      await insertIncident(client, {
+        providerEventDatabaseId: row.id,
+        orderId: context.order.id,
+        reason: "post_handoff_financial_event",
+        now,
+        keyedUuid,
+      });
     }
     await client.query(
       `INSERT INTO payment_events
@@ -2000,7 +2054,9 @@ async function disputeJournalsHaveExactAuthority(
 ): Promise<boolean> {
   for (const journal of journals) {
     const sourceRows = rows<SourceProviderEventRow>(await client.query(
-      `SELECT id::text AS id, provider, status, livemode,
+      `SELECT id::text AS id,
+              provider_event_id AS "externalProviderEventId",
+              provider, status, livemode,
               normalized_payload AS "normalizedPayload"
        FROM provider_events WHERE id = $1::uuid`,
       [journal.providerEventId],
@@ -2016,6 +2072,10 @@ async function disputeJournalsHaveExactAuthority(
       source.provider !== authority.provider ||
       source.livemode !== authority.expectedLivemode ||
       envelope === null ||
+      !hasExactProviderEventEnvelopeIdentity(
+        source.externalProviderEventId,
+        envelope,
+      ) ||
       envelope.kind !== "dispute" ||
       envelope.livemode !== authority.expectedLivemode ||
       envelope.disputeId !== event.disputeId ||
@@ -2110,8 +2170,20 @@ async function processDisputeEvent(
   ) {
     return finishBusinessConflict(client, row, now, "dispute_journal_mismatch", keyedUuid);
   }
-  if (restrictive && !(await placeDisputeHold(client, context, row.id, now))) {
-    return finishBusinessConflict(client, row, now, "order_transition_mismatch", keyedUuid);
+  if (restrictive) {
+    const held = await placeDisputeHold(client, context, row.id, now);
+    if (!held && context.order.state !== "fulfilled") {
+      return finishBusinessConflict(client, row, now, "order_transition_mismatch", keyedUuid);
+    }
+    if (!held) {
+      await insertIncident(client, {
+        providerEventDatabaseId: row.id,
+        orderId: context.order.id,
+        reason: "post_handoff_financial_event",
+        now,
+        keyedUuid,
+      });
+    }
   }
   let journalId = existing?.id;
   if (existing === undefined) {
@@ -2198,7 +2270,7 @@ async function processClaimInTransaction(
   if (
     event === null ||
     row.provider !== authority.provider ||
-    row.livemode !== event.livemode
+    !storedEventCommonCoherent(row, event)
   ) {
     return finishBusinessConflict(
       client,
@@ -2319,7 +2391,9 @@ async function wakeDeferredDependenciesInTransaction(
     return Object.freeze({ status: "missing_dependency", count: 0 });
   }
   const sources = rows<SourceProviderEventRow>(await client.query(
-    `SELECT id::text AS id, provider, status, livemode,
+    `SELECT id::text AS id,
+            provider_event_id AS "externalProviderEventId",
+            provider, status, livemode,
             normalized_payload AS "normalizedPayload"
      FROM provider_events WHERE id = $1::uuid`,
     [payment.providerEventId],
@@ -2333,6 +2407,10 @@ async function wakeDeferredDependenciesInTransaction(
     sources.length !== 1 ||
     source.status !== "processed" ||
     envelope === null ||
+    !hasExactProviderEventEnvelopeIdentity(
+      source.externalProviderEventId,
+      envelope,
+    ) ||
     envelope.kind !== "checkout_session" ||
     envelope.paymentIntentId !== payment.providerPaymentId ||
     envelope.livemode !== source.livemode

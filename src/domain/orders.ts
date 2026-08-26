@@ -465,6 +465,37 @@ export function transitionOrder(
       error: Object.freeze({ code, state: snapshotState, event: eventType }),
     });
 
+  // A corrupted/missing durable payment projection must be quarantinable, but
+  // it must never become usable as release, clear-hold, or handoff authority.
+  // This event-scoped admission is deliberately narrower than snapshot
+  // validity: only an authoritative denied decision with no claimed payment
+  // evidence may move/retain the pre-handoff order on hold.
+  const unbackedPaidHoldProjection =
+    isRecord(snapshot) &&
+    (snapshot.state === "paid_pending_fulfillment" ||
+      snapshot.state === "paid_on_hold") &&
+    isNonBlankString(snapshot.orderId) &&
+    snapshot.paymentEvidenceId === null &&
+    snapshot.reviewRequestId === null &&
+    snapshot.fulfillmentReleaseVersion === null &&
+    isNonnegativeSafeInteger(snapshot.lastFulfillmentReleaseVersion) &&
+    snapshot.carrierHandoffAt === null;
+  const deniedHoldDecision =
+    isRecord(event) &&
+    event.type === "post_payment_hold" &&
+    isAuthoritativeFulfillmentDecision(event.decision) &&
+    event.decision.permitted === false &&
+    event.decision.orderId === snapshot.orderId &&
+    event.decision.verifiedPaymentEventId === null;
+  if (unbackedPaidHoldProjection && deniedHoldDecision) {
+    return succeed("paid_on_hold", {
+      paymentEvidenceId: null,
+      reviewRequestId: null,
+      fulfillmentReleaseVersion: null,
+      carrierHandoffAt: null,
+    });
+  }
+
   if (!isValidOrderSnapshot(snapshot)) {
     return fail("invalid_snapshot");
   }

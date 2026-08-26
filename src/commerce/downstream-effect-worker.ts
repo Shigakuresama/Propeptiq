@@ -34,6 +34,16 @@ export type AllowlistedDownstreamEffectV1 =
         reason: "refund_verified" | "dispute_recorded" | "dispute_resolved";
       }>;
       idempotencyKey: string;
+    }>
+  | Readonly<{
+      effectType: "fulfillment_handed_off";
+      payload: Readonly<{
+        schemaVersion: 1;
+        orderId: string;
+        shipmentId: string;
+        fulfillmentReleaseId: string;
+      }>;
+      idempotencyKey: string;
     }>;
 
 export type DownstreamEffectSinkV1 = (
@@ -48,6 +58,7 @@ const externalTypes = new Set([
   "refund_verified",
   "dispute_recorded",
   "dispute_resolved",
+  "fulfillment_handed_off",
 ] as const);
 const BOUNDED_KEY = /^[\x20-\x7e]{1,255}$/u;
 const LEASE_MILLISECONDS = 60_000;
@@ -117,6 +128,31 @@ export function parseAllowlistedDownstreamEffectV1(
         orderId: payload.orderId,
         verifiedPaymentEventId: payload.verifiedPaymentEventId,
         reason: "payment_verified",
+      }),
+      idempotencyKey: delivery.idempotencyKey,
+    });
+  }
+  if (delivery.effectType === "fulfillment_handed_off") {
+    if (
+      !exactKeys(payload, [
+        "schemaVersion",
+        "orderId",
+        "shipmentId",
+        "fulfillmentReleaseId",
+      ]) ||
+      !isCanonicalUuid(payload.orderId) ||
+      !isCanonicalUuid(payload.shipmentId) ||
+      !isCanonicalUuid(payload.fulfillmentReleaseId) ||
+      delivery.idempotencyKey !==
+        `fulfillment_release:${payload.fulfillmentReleaseId}:handoff`
+    ) return null;
+    return Object.freeze({
+      effectType: "fulfillment_handed_off",
+      payload: Object.freeze({
+        schemaVersion: 1,
+        orderId: payload.orderId,
+        shipmentId: payload.shipmentId,
+        fulfillmentReleaseId: payload.fulfillmentReleaseId,
       }),
       idempotencyKey: delivery.idempotencyKey,
     });

@@ -252,6 +252,7 @@ export type AdminTransaction = Readonly<{
   }>>;
   getRefundEligibility: (orderId: string, idempotencyKey: string) => Promise<Readonly<{
     orderId: string;
+    orderState: string;
     currency: string;
     verifiedPaidMinor: number;
     refundedMinor: number;
@@ -271,7 +272,7 @@ export type AdminTransaction = Readonly<{
     now: Date;
   }>) => Promise<Readonly<{
     id: string;
-    status: "requested";
+    status: "requested" | "submitted" | "succeeded" | "failed" | "cancelled";
     provider: string;
     changed: boolean;
   }>>;
@@ -305,6 +306,9 @@ export type AdminTransaction = Readonly<{
 export type AdminRepository = Readonly<{
   rateLimitStore: RateLimitStore;
   transaction: <T>(work: (transaction: AdminTransaction) => Promise<T>) => Promise<T>;
+  retrySerializableTransaction: <T>(
+    work: (transaction: AdminTransaction) => Promise<T>,
+  ) => Promise<T>;
 }>;
 
 const mutationLimit = 30;
@@ -341,6 +345,25 @@ function authorizedTransaction<T>(
   });
 }
 
+function authorizedRetryingTransaction<T>(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  principal: Principal,
+  operation: AuthorizationOperation,
+  work: (tx: AdminTransaction) => Promise<T>,
+): Promise<T> {
+  const capability = operationCapability[operation];
+  if (!capability) throw new Error("Admin operation has no persisted authority mapping");
+  return repository.retrySerializableTransaction(async (tx) => {
+    await tx.assertActorAuthority({
+      actorUserId: principal.actorId,
+      clerkUserId: context.identity!.clerkUserId,
+      capability,
+    });
+    return work(tx);
+  });
+}
+
 async function authorizeAndLimit(
   repository: AdminRepository,
   context: AdminCommandContext,
@@ -364,6 +387,25 @@ async function authorizeAndLimit(
   });
   if (!decision.allowed) throw new Error(`Admin mutation rate limit exceeded until ${decision.retryAt}`);
   return principal;
+}
+
+export type StaffCommerceAuthorizationOperationV1 =
+  | "refund.request"
+  | "fulfillment.release.consume";
+
+export async function authorizeStaffCommerceCommandV1(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  operation: StaffCommerceAuthorizationOperationV1,
+): Promise<Readonly<{
+  actorUserId: string;
+  actorClerkUserId: string;
+}>> {
+  const principal = await authorizeAndLimit(repository, context, operation);
+  return Object.freeze({
+    actorUserId: principal.actorId,
+    actorClerkUserId: context.identity!.clerkUserId,
+  });
 }
 
 function audit(
@@ -707,15 +749,22 @@ export async function requestRefundIntent(
   }>,
 ) {
   const principal = await authorizeAndLimit(repository, context, "refund.request");
-  return authorizedTransaction(repository, context, principal, "refund.request", async (tx) => {
+  return authorizedRetryingTransaction(repository, context, principal, "refund.request", async (tx) => {
     const orderId = requireId(input.orderId, "Order ID");
     if (!Number.isSafeInteger(input.requestedAmountMinor) || input.requestedAmountMinor <= 0) {
       throw new Error("Refund amount must be a positive minor-unit integer");
     }
     const idempotencyKey = requireId(input.idempotencyKey, "Refund idempotency key");
     const facts = await tx.getRefundEligibility(orderId, idempotencyKey);
+    if (
+      facts !== null &&
+      facts.orderState !== "paid_pending_fulfillment" &&
+      facts.orderState !== "paid_on_hold"
+    ) {
+      throw new Error("A pre-handoff paid order is required for a refund intent");
+    }
     if (!facts || !facts.provider || !facts.verifiedPaymentEventId) {
-      throw new Error("A verified payment provider event is required");
+      throw new Error("One exact verified payment authority is required");
     }
     if (facts.outstandingRequested) throw new Error("An outstanding refund request already exists");
     const remaining = facts.verifiedPaidMinor - facts.refundedMinor;

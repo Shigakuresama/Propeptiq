@@ -258,6 +258,7 @@ function createRepository(options: {
     async getRefundEligibility() {
       return {
         orderId: "order-a",
+        orderState: "paid_pending_fulfillment",
         currency: "USD",
         verifiedPaidMinor: 5000,
         refundedMinor: 1000,
@@ -308,6 +309,15 @@ function createRepository(options: {
     repository: {
       rateLimitStore: { increment: async () => options.rateCount ?? 1 },
       async transaction(work) {
+        const before = structuredClone(state);
+        try {
+          return await work(transaction);
+        } catch (error) {
+          Object.assign(state, before);
+          throw error;
+        }
+      },
+      async retrySerializableTransaction(work) {
         const before = structuredClone(state);
         try {
           return await work(transaction);

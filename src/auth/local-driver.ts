@@ -820,12 +820,13 @@ function adminTransaction(): AdminTransaction {
       if (orderId !== localOrderId) return null;
       return {
         orderId: "local-order-customer",
+        orderState: "paid_pending_fulfillment",
         currency: "USD",
         verifiedPaidMinor: 2400,
         refundedMinor: 0,
         outstandingRequested:
           state.refund !== null && state.refund.idempotencyKey !== idempotencyKey,
-        provider: "local-test-provider",
+        provider: "local_test",
         verifiedPaymentEventId: "local-verified-payment-event",
       };
     },
@@ -914,6 +915,15 @@ const adminRepository: AdminRepository = {
     },
   },
   async transaction(work) {
+    const before = structuredClone(state);
+    try {
+      return await work(adminTransaction());
+    } catch (error) {
+      state = before;
+      throw error;
+    }
+  },
+  async retrySerializableTransaction(work) {
     const before = structuredClone(state);
     try {
       return await work(adminTransaction());

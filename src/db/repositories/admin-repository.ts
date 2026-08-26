@@ -6,6 +6,12 @@ import type {
 import type { ProductPublicationFacts } from "@/admin/admin-policy";
 import type { BuyerStatus, ResearchPurpose } from "@/domain/eligibility";
 import type { RateLimitStore } from "@/security/rate-limit";
+import { parseNormalizedProviderEventV1 } from "@/commerce/provider-events";
+import {
+  hasExactCheckoutProviderArtifact,
+  hasExactProviderEventEnvelopeIdentity,
+} from "@/commerce/payment-authority";
+import { runSerializableWithRetry } from "@/db/serializable-retry";
 
 export type AdminSqlClient = Readonly<{
   query: <T extends object>(
@@ -1294,60 +1300,259 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
     },
 
     async getRefundEligibility(orderId, idempotencyKey) {
-      const lockedOrder = await client.query<{ id: string }>(
-        `SELECT id::text AS id FROM orders WHERE id = $1::uuid FOR UPDATE`,
+      type RefundOrderRow = {
+        id: string;
+        buyerUserId: string;
+        state: string;
+        currency: string;
+        totalMinor: number | string;
+      };
+      const lockedOrder = await client.query<RefundOrderRow>(
+        `SELECT id::text AS id, buyer_user_id::text AS "buyerUserId", state,
+                currency, total_minor AS "totalMinor"
+         FROM orders WHERE id = $1::uuid FOR UPDATE`,
         [orderId],
       );
       if (lockedOrder.rows.length !== 1) return null;
-      const payments = await client.query<{
+      const order = lockedOrder.rows[0]!;
+      const invalidAuthority = () => ({
+        orderId,
+        orderState: order.state,
+        currency: order.currency,
+        verifiedPaidMinor: 0,
+        refundedMinor: 0,
+        outstandingRequested: false,
+        provider: null,
+        verifiedPaymentEventId: null,
+      });
+      if (
+        order.state !== "paid_pending_fulfillment" &&
+        order.state !== "paid_on_hold"
+      ) {
+        return invalidAuthority();
+      }
+
+      type RefundPaymentRow = {
+        id: string;
+        providerEventDatabaseId: string;
+        providerEventExternalId: string;
+        eventType: string;
+        providerPaymentId: string | null;
+        idempotencyKey: string;
         amountMinor: number | string;
         currency: string;
         provider: string;
-        verifiedPaymentEventId: string;
-      }>(
+        providerEventStatus: string;
+        sourceLivemode: boolean;
+        normalizedPayload: unknown;
+      };
+      const paymentRows = await client.query<RefundPaymentRow>(
         `
-          SELECT pe.amount_minor AS "amountMinor", pe.currency,
-                 pre.provider, pe.id::text AS "verifiedPaymentEventId"
+          SELECT pe.id::text AS id,
+                 pe.provider_event_id::text AS "providerEventDatabaseId",
+                 pre.provider_event_id AS "providerEventExternalId",
+                 pe.event_type AS "eventType",
+                 pe.provider_payment_id AS "providerPaymentId",
+                 pe.idempotency_key AS "idempotencyKey",
+                 pe.amount_minor AS "amountMinor", pe.currency,
+                 pre.provider, pre.status AS "providerEventStatus",
+                 pre.livemode AS "sourceLivemode",
+                 pre.normalized_payload AS "normalizedPayload"
           FROM payment_events pe
           JOIN provider_events pre ON pre.id = pe.provider_event_id
-          WHERE pe.order_id = $1::uuid AND pe.event_type = 'payment_verified'
-            AND pre.status = 'processed'
-          ORDER BY pe.occurred_at, pe.id
+          WHERE pe.order_id = $1::uuid
+          ORDER BY pe.id FOR UPDATE OF pe
         `,
         [orderId],
       );
-      if (payments.rows.length === 0) return null;
-      const providers = new Set(payments.rows.map((row) => row.provider));
-      const currencies = new Set(payments.rows.map((row) => row.currency));
-      if (providers.size !== 1 || currencies.size !== 1) return null;
-      const verifiedPaidMinor = payments.rows.reduce((sum, row) => {
-        const amount = asSafeInteger(row.amountMinor);
-        if (amount === null || amount < 0) throw new Error("Verified payment amount is invalid");
-        return sum + amount;
-      }, 0);
-      const refunds = await client.query<{
-        refundedMinor: number | string;
-        outstandingRequested: boolean;
-      }>(
-        `
-          SELECT
-            COALESCE(sum(confirmed_amount_minor) FILTER (WHERE status = 'succeeded'), 0)
-              AS "refundedMinor",
-            bool_or(status IN ('requested', 'submitted') AND idempotency_key <> $2)
-              AS "outstandingRequested"
-          FROM refunds WHERE order_id = $1::uuid
-        `,
-        [orderId, idempotencyKey],
+      const verifiedPayments = paymentRows.rows.filter(
+        (row) => row.eventType === "payment_verified",
       );
-      const aggregate = refunds.rows[0];
+      if (verifiedPayments.length !== 1) return invalidAuthority();
+      const payment = verifiedPayments[0]!;
+      const verifiedPaidMinor = asSafeInteger(payment.amountMinor);
+      const source = parseNormalizedProviderEventV1(payment.normalizedPayload);
+      if (
+        (payment.provider !== "stripe" && payment.provider !== "local_test") ||
+        payment.providerEventStatus !== "processed" ||
+        payment.providerPaymentId === null ||
+        verifiedPaidMinor === null ||
+        verifiedPaidMinor <= 0 ||
+        verifiedPaidMinor !== asSafeInteger(order.totalMinor) ||
+        payment.currency !== order.currency ||
+        payment.idempotencyKey !==
+          `${payment.provider}:payment_intent:${payment.providerPaymentId}` ||
+        source === null ||
+        source.kind !== "checkout_session" ||
+        !hasExactProviderEventEnvelopeIdentity(
+          payment.providerEventExternalId,
+          source,
+        ) ||
+        source.orderId !== order.id ||
+        source.paymentIntentId !== payment.providerPaymentId ||
+        source.amountMinor !== verifiedPaidMinor ||
+        source.currency !== order.currency.toLowerCase() ||
+        source.paymentStatus !== "paid" ||
+        source.sessionStatus !== "complete" ||
+        source.livemode !== payment.sourceLivemode
+      ) {
+        return invalidAuthority();
+      }
+      type SourceAttemptRow = {
+        id: string;
+        orderId: string;
+        buyerUserId: string;
+        status: string;
+        provider: string | null;
+        providerRequestId: string | null;
+        providerSessionId: string | null;
+        providerLivemode: boolean | null;
+        providerScope: string | null;
+        providerRequestHash: string | null;
+        providerRequestSchemaVersion: number | string | null;
+      };
+      const attempts = await client.query<SourceAttemptRow>(
+        `SELECT id::text AS id, order_id::text AS "orderId",
+                buyer_user_id::text AS "buyerUserId", status, provider,
+                provider_request_id AS "providerRequestId",
+                provider_session_id AS "providerSessionId",
+                provider_livemode AS "providerLivemode",
+                provider_scope AS "providerScope",
+                provider_request_hash AS "providerRequestHash",
+                provider_request_schema_version AS "providerRequestSchemaVersion"
+         FROM checkout_attempts WHERE id = $1::uuid`,
+        [source.attemptId],
+      );
+      const attempt = attempts.rows[0];
+      if (
+        attempts.rows.length !== 1 ||
+        attempt === undefined ||
+        attempt.id !== source.attemptId ||
+        attempt.orderId !== order.id ||
+        attempt.buyerUserId !== order.buyerUserId ||
+        attempt.status !== "completed" ||
+        attempt.provider !== payment.provider ||
+        attempt.providerRequestId !== `checkout_attempt:${source.attemptId}` ||
+        attempt.providerSessionId !== source.sessionId ||
+        attempt.providerLivemode !== source.livemode ||
+        !hasExactCheckoutProviderArtifact({
+          providerRequestHash: attempt.providerRequestHash,
+          providerRequestSchemaVersion: attempt.providerRequestSchemaVersion,
+        }) ||
+        typeof attempt.providerScope !== "string" ||
+        attempt.providerScope.trim() !== attempt.providerScope ||
+        attempt.providerScope.length === 0
+      ) {
+        return invalidAuthority();
+      }
+
+      type RefundEligibilityRow = {
+        id: string;
+        orderId: string;
+        requestedByUserId: string | null;
+        verifiedPaymentEventId: string;
+        provider: string;
+        providerEventId: string | null;
+        providerRefundId: string | null;
+        idempotencyKey: string;
+        requestedAmountMinor: number | string;
+        confirmedAmountMinor: number | string | null;
+        currency: string;
+        status: "requested" | "submitted" | "succeeded" | "failed" | "cancelled";
+        origin: "staff_requested" | "provider_observed";
+        sourceProvider: string | null;
+        sourceProviderEventId: string | null;
+        sourceStatus: string | null;
+        sourceLivemode: boolean | null;
+        normalizedPayload: unknown;
+      };
+      const refunds = await client.query<RefundEligibilityRow>(
+        `
+          SELECT r.id::text AS id, r.order_id::text AS "orderId",
+                 r.requested_by_user_id::text AS "requestedByUserId",
+                 r.verified_payment_event_id::text AS "verifiedPaymentEventId",
+                 r.provider, r.provider_event_id::text AS "providerEventId",
+                 r.provider_refund_id AS "providerRefundId",
+                 r.idempotency_key AS "idempotencyKey",
+                 r.requested_amount_minor AS "requestedAmountMinor",
+                 r.confirmed_amount_minor AS "confirmedAmountMinor",
+                 r.currency, r.status, r.origin,
+                 pre.provider AS "sourceProvider", pre.status AS "sourceStatus",
+                 pre.provider_event_id AS "sourceProviderEventId",
+                 pre.livemode AS "sourceLivemode",
+                 pre.normalized_payload AS "normalizedPayload"
+          FROM refunds r
+          LEFT JOIN provider_events pre ON pre.id = r.provider_event_id
+          WHERE r.order_id = $1::uuid
+          ORDER BY r.id FOR UPDATE OF r
+        `,
+        [orderId],
+      );
+      let refundedMinor = 0;
+      let outstandingRequested = false;
+      for (const refund of refunds.rows) {
+        const requested = asSafeInteger(refund.requestedAmountMinor);
+        if (
+          refund.orderId !== order.id ||
+          refund.verifiedPaymentEventId !== payment.id ||
+          refund.provider !== payment.provider ||
+          refund.currency !== order.currency ||
+          requested === null ||
+          requested <= 0 ||
+          (refund.origin === "staff_requested" && refund.requestedByUserId === null) ||
+          (refund.origin === "provider_observed" && refund.requestedByUserId !== null)
+        ) {
+          return invalidAuthority();
+        }
+        if (
+          (refund.status === "requested" || refund.status === "submitted") &&
+          refund.idempotencyKey !== idempotencyKey
+        ) {
+          outstandingRequested = true;
+        }
+        if (refund.status !== "succeeded") continue;
+        const confirmed = asSafeInteger(refund.confirmedAmountMinor);
+        const event = parseNormalizedProviderEventV1(refund.normalizedPayload);
+        if (
+          confirmed === null ||
+          confirmed !== requested ||
+          refund.providerEventId === null ||
+          refund.providerRefundId === null ||
+          refund.sourceProvider !== payment.provider ||
+          refund.sourceStatus !== "processed" ||
+          refund.sourceLivemode !== source.livemode ||
+          event === null ||
+          event.kind !== "refund" ||
+          !hasExactProviderEventEnvelopeIdentity(
+            refund.sourceProviderEventId,
+            event,
+          ) ||
+          event.status !== "succeeded" ||
+          event.providerRefundId !== refund.providerRefundId ||
+          event.paymentIntentId !== payment.providerPaymentId ||
+          event.amountMinor !== confirmed ||
+          event.currency !== order.currency.toLowerCase() ||
+          event.livemode !== source.livemode ||
+          (refund.origin === "staff_requested"
+            ? event.orderId !== order.id || event.refundRequestId !== refund.id
+            : event.orderId !== null || event.refundRequestId !== null)
+        ) {
+          return invalidAuthority();
+        }
+        refundedMinor += confirmed;
+        if (!Number.isSafeInteger(refundedMinor) || refundedMinor > verifiedPaidMinor) {
+          return invalidAuthority();
+        }
+      }
       return {
         orderId,
-        currency: payments.rows[0]!.currency,
+        orderState: order.state,
+        currency: payment.currency,
         verifiedPaidMinor,
-        refundedMinor: asSafeInteger(aggregate?.refundedMinor ?? 0) ?? 0,
-        outstandingRequested: aggregate?.outstandingRequested === true,
-        provider: payments.rows[0]!.provider,
-        verifiedPaymentEventId: payments.rows[0]!.verifiedPaymentEventId,
+        refundedMinor,
+        outstandingRequested,
+        provider: payment.provider,
+        verifiedPaymentEventId: payment.id,
       };
     },
 
@@ -1361,14 +1566,15 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
         requestedAmountMinor: number | string;
         currency: string;
         reasonRedacted: string | null;
-        status: "requested";
+        status: "requested" | "submitted" | "succeeded" | "failed" | "cancelled";
+        origin: "staff_requested" | "provider_observed";
       }>(
         `
           SELECT id::text AS id, order_id::text AS "orderId",
                  requested_by_user_id::text AS "requestedByUserId",
                  verified_payment_event_id::text AS "verifiedPaymentEventId", provider,
                  requested_amount_minor AS "requestedAmountMinor", currency,
-                 reason_redacted AS "reasonRedacted", status
+                  reason_redacted AS "reasonRedacted", status, origin
           FROM refunds WHERE idempotency_key = $1 FOR UPDATE
         `,
         [input.idempotencyKey],
@@ -1383,7 +1589,7 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
           asSafeInteger(prior.requestedAmountMinor) === input.requestedAmountMinor &&
           prior.currency === input.currency &&
           prior.reasonRedacted === input.reasonRedacted &&
-          prior.status === "requested";
+          prior.origin === "staff_requested";
         if (!same) throw new Error("Refund idempotency key was already used differently");
         return { id: prior.id, status: prior.status, provider: prior.provider, changed: false };
       }
@@ -1603,6 +1809,13 @@ export function createPostgresAdminRepository(
       return runTransaction((client) => work(transactionFor(client)), {
         isolationLevel: "serializable",
       });
+    },
+    retrySerializableTransaction(work) {
+      return runSerializableWithRetry(() =>
+        runTransaction((client) => work(transactionFor(client)), {
+          isolationLevel: "serializable",
+        }),
+      );
     },
   };
 }
