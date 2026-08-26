@@ -29,6 +29,9 @@ const localTestDriverModule = includeLocalTestDriver
 const localPaymentProviderModule = includeLocalTestDriver
   ? "./src/commerce/local-payment-provider.ts"
   : "./src/commerce/local-payment-provider-disabled.ts";
+const localCommerceHarnessRoutesModule = includeLocalTestDriver
+  ? "./src/commerce/local-commerce-harness-routes.ts"
+  : "./src/commerce/local-commerce-harness-routes-disabled.ts";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
@@ -39,6 +42,7 @@ const nextConfig: NextConfig = {
       "catalog-demo-fixtures": syntheticDemoModule,
       "local-auth-driver": localTestDriverModule,
       "local-payment-provider": localPaymentProviderModule,
+      "local-commerce-harness-routes": localCommerceHarnessRoutesModule,
     },
   },
   experimental: {
@@ -56,6 +60,10 @@ const nextConfig: NextConfig = {
     config.resolve.alias["local-payment-provider$"] = resolve(
       process.cwd(),
       localPaymentProviderModule,
+    );
+    config.resolve.alias["local-commerce-harness-routes$"] = resolve(
+      process.cwd(),
+      localCommerceHarnessRoutesModule,
     );
     return config;
   },

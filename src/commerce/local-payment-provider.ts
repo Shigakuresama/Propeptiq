@@ -94,12 +94,13 @@ function normalizedCheckout(record: CheckoutRecord): CheckoutProviderResult {
     return checkoutUnknown(record.sessionId);
   }
   const request = record.request;
+  const trustedOrigin = new URL(request.success_url).origin;
   const session = Object.freeze({
     provider: "local_test" as const,
     providerSessionId: record.sessionId,
     hostedUrl:
       record.state === "open"
-        ? `http://127.0.0.1:3000/__synthetic_local_checkout/${record.sessionId}`
+        ? `${trustedOrigin}/__synthetic_local_checkout/${record.sessionId}`
         : null,
     clientReferenceId: request.client_reference_id,
     metadata: Object.freeze({ ...request.metadata }),
@@ -182,8 +183,13 @@ function scriptedRefundFailure(
 export function createSyntheticLocalPaymentProvider(): Readonly<{
   provider: PaymentProvider;
   control: Readonly<{
+    reset: () => void;
     nextCheckoutOutcome: (outcome: SyntheticCheckoutOutcome) => void;
     nextRefundOutcome: (outcome: SyntheticRefundOutcome) => void;
+    checkoutState: (providerSessionId: string) => Readonly<{
+      state: CheckoutState;
+      expiresAt: string;
+    }> | null;
     setCheckoutState: (providerSessionId: string, state: CheckoutState) => void;
     setRefundState: (providerRefundId: string, state: RefundState) => void;
   }>;
@@ -292,11 +298,28 @@ export function createSyntheticLocalPaymentProvider(): Readonly<{
   return Object.freeze({
     provider,
     control: Object.freeze({
+      reset() {
+        checkoutByKey.clear();
+        checkoutById.clear();
+        refundByKey.clear();
+        refundById.clear();
+        checkoutOutcome = "open";
+        refundOutcome = "open";
+      },
       nextCheckoutOutcome(outcome: SyntheticCheckoutOutcome) {
         checkoutOutcome = outcome;
       },
       nextRefundOutcome(outcome: SyntheticRefundOutcome) {
         refundOutcome = outcome;
+      },
+      checkoutState(providerSessionId: string) {
+        const record = checkoutById.get(providerSessionId);
+        return record === undefined
+          ? null
+          : Object.freeze({
+              state: record.state,
+              expiresAt: new Date(record.request.expires_at * 1_000).toISOString(),
+            });
       },
       setCheckoutState(providerSessionId: string, state: CheckoutState) {
         const record = checkoutById.get(providerSessionId);

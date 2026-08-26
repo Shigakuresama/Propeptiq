@@ -241,6 +241,27 @@ test("detects the synthetic local payment provider sentinel and module names", (
   );
 });
 
+test("detects an active synthetic hosted checkout page and action path", (t) => {
+  const workspace = createWorkspace(t);
+  const artifactRoot = join(workspace, "closed-production-output");
+  writeArtifact(
+    artifactRoot,
+    "server/app/__synthetic_local_checkout/[sessionId]/route.js",
+    [
+      "Hosted payment test double",
+      '<form method="post" action="/__synthetic_local_checkout/session/complete">',
+    ].join("\n"),
+  );
+
+  const result = runScanner({ cwd: workspace, artifactRoot });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1, output);
+  assert.match(result.stderr, /synthetic hosted checkout implementation: [1-9]\d* matches? in 1 file/u);
+  assert.equal(output.includes("Hosted payment test double"), false);
+  assert.equal(output.includes("/__synthetic_local_checkout/session/complete"), false);
+});
+
 test("configures the local payment provider alias for Turbopack and Webpack", () => {
   const config = readFileSync(
     fileURLToPath(new URL("../next.config.ts", import.meta.url)),
@@ -257,5 +278,17 @@ test("configures the local payment provider alias for Turbopack and Webpack", ()
   assert.match(
     config,
     /localPaymentProviderModule = includeLocalTestDriver[\s\S]*local-payment-provider\.ts[\s\S]*local-payment-provider-disabled\.ts/u,
+  );
+  assert.match(
+    config,
+    /"local-commerce-harness-routes": localCommerceHarnessRoutesModule/u,
+  );
+  assert.match(
+    config,
+    /config\.resolve\.alias\["local-commerce-harness-routes\$"\][\s\S]*localCommerceHarnessRoutesModule/u,
+  );
+  assert.match(
+    config,
+    /localCommerceHarnessRoutesModule = includeLocalTestDriver[\s\S]*local-commerce-harness-routes\.ts[\s\S]*local-commerce-harness-routes-disabled\.ts/u,
   );
 });

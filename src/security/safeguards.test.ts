@@ -49,6 +49,20 @@ describe("mutation safeguards", () => {
     ).not.toThrow();
   });
 
+  it("accepts the local Next development URL canonicalization only with the exact trusted Host and Origin", () => {
+    const environment = { APP_ENV: "local" as const, APP_ORIGIN: "http://127.0.0.1:4631" };
+    const canonicalized = new Request("http://localhost:4631/api/checkout/quote", {
+      method: "POST",
+      headers: { origin: "http://127.0.0.1:4631", host: "127.0.0.1:4631" },
+    });
+    expect(() => assertMutationOrigin(canonicalized, environment)).not.toThrow();
+    const wrongHost = new Request("http://localhost:4631/api/checkout/quote", {
+      method: "POST",
+      headers: { origin: "http://127.0.0.1:4631", host: "localhost:4631" },
+    });
+    expect(() => assertMutationOrigin(wrongHost, environment)).toThrow(/origin/i);
+  });
+
   it("hashes actor and operation into isolated fixed-window limiter scopes", async () => {
     const counts = new Map<string, number>();
     const store: RateLimitStore = {

@@ -208,6 +208,77 @@ function mintDurable(
   return durable;
 }
 
+/**
+ * Repository-adapter mint seam. In-memory/local repository adapters must pass
+ * the same complete durable projection that the PostgreSQL loader produces;
+ * callers never receive a structural shortcut around the opaque check.
+ */
+export function createRepositoryDurableCheckoutRequestV1(
+  data: DurableCheckoutRequestDataV1,
+): DurableCheckoutRequestV1 {
+  if (
+    !isCanonicalUuid(data.buyerUserId) ||
+    !isCanonicalUuid(data.idempotencyKey) ||
+    !isCanonicalUuid(data.orderId) ||
+    !isCanonicalUuid(data.attemptId) ||
+    !isSha256(data.requestHash) ||
+    !attemptStatuses.has(data.attemptStatus) ||
+    !orderStates.has(data.orderState) ||
+    (data.provider !== "stripe" && data.provider !== "local_test") ||
+    data.providerIdempotencyKey !== `checkout_attempt:${data.attemptId}` ||
+    (data.providerSessionId !== null && !canonicalSessionId(data.providerSessionId)) ||
+    !isSha256(data.providerRequestHash) ||
+    iso(data.providerExpiresAt) !== data.providerExpiresAt ||
+    !canonicalText(data.providerCustomerEmail, 254) ||
+    !URL.canParse(data.providerOrigin) ||
+    data.providerRequestSchemaVersion !== 1 ||
+    typeof data.providerLivemode !== "boolean" ||
+    !canonicalText(data.providerScope, 200) ||
+    data.currency !== "USD" ||
+    data.destination.countryCode !== "US" ||
+    !canonicalText(data.destination.recipientName, 120) ||
+    !canonicalText(data.destination.line1, 120) ||
+    (data.destination.line2 !== null && !canonicalText(data.destination.line2, 120)) ||
+    !canonicalText(data.destination.city, 100) ||
+    !/^[A-Z]{2}$/u.test(data.destination.stateCode) ||
+    !/^\d{5}(?:-\d{4})?$/u.test(data.destination.postalCode) ||
+    !Array.isArray(data.lines) || data.lines.length < 1 || data.lines.length > 50 ||
+    !Number.isSafeInteger(data.shippingMinor) || data.shippingMinor < 0 ||
+    !Number.isSafeInteger(data.taxMinor) || data.taxMinor < 0 ||
+    !Number.isSafeInteger(data.totalMinor) || data.totalMinor <= 0
+  ) {
+    throw new Error("Durable checkout snapshot is incoherent");
+  }
+  const origin = new URL(data.providerOrigin);
+  const providerNamespaceCoherent = data.provider === "local_test"
+    ? data.providerLivemode === false &&
+      data.providerScope === "local_test:synthetic-propeptiq-v1" &&
+      origin.protocol === "http:" && loopbackHost(origin.hostname)
+    : /^stripe:acct_[A-Za-z0-9]{8,64}$/u.test(data.providerScope) &&
+      origin.protocol === "https:" && !unsafeStripeOriginHost(origin.hostname);
+  const seen = new Set<string>();
+  let merchandiseMinor = 0;
+  for (const line of data.lines) {
+    if (
+      !isCanonicalUuid(line.productId) || seen.has(line.productId) ||
+      !canonicalText(line.productName) || !canonicalText(line.packageForm) ||
+      !Number.isSafeInteger(line.purchasedQuantity) || line.purchasedQuantity < 1 || line.purchasedQuantity > 25 ||
+      !Number.isSafeInteger(line.postDiscountTotalMinor) || line.postDiscountTotalMinor < 0
+    ) throw new Error("Durable checkout snapshot is incoherent");
+    seen.add(line.productId);
+    merchandiseMinor += line.postDiscountTotalMinor;
+    if (!Number.isSafeInteger(merchandiseMinor)) throw new Error("Durable checkout snapshot is incoherent");
+  }
+  if (!providerNamespaceCoherent || merchandiseMinor + data.shippingMinor + data.taxMinor !== data.totalMinor) {
+    throw new Error("Durable checkout snapshot is incoherent");
+  }
+  return mintDurable(Object.freeze({
+    ...data,
+    destination: Object.freeze({ ...data.destination }),
+    lines: Object.freeze(data.lines.map((line) => Object.freeze({ ...line }))),
+  }));
+}
+
 export function projectDurableCheckoutRequestV1(
   value: unknown,
 ): DurableCheckoutRequestDataV1 | null {

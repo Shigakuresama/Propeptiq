@@ -193,7 +193,7 @@ footer a,
 .site-container {
   width: min(100%, 90rem);
   margin-inline: auto;
-  padding-inline: clamp(1rem, 4vw, 2rem);
+  padding-inline: 1rem;
 }
 
 .site-section {
@@ -239,6 +239,10 @@ footer a,
   padding: 1rem 1.25rem;
   background: var(--moss-soft);
   line-height: 1.6;
+}
+
+.record-row .eyebrow {
+  color: var(--ink);
 }
 
 .record-link {
@@ -444,6 +448,20 @@ footer a,
   align-items: start;
 }
 
+.status-pill {
+  display: inline-flex;
+  min-height: 1.75rem;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--moss) 45%, var(--rule));
+  border-radius: 999px;
+  background: var(--moss-soft);
+  color: var(--ink);
+  padding: 0.25rem 0.7rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 .shell-nav-link {
   display: inline-flex;
   min-height: 44px;
@@ -504,6 +522,10 @@ footer a {
 }
 
 @media (min-width: 48rem) {
+  .site-container {
+    padding-inline: 1.5rem;
+  }
+
   .catalog-grid,
   .policy-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -525,6 +547,12 @@ footer a {
 }
 
 @media (min-width: 64rem) {
+  .site-container {
+    padding-inline: 2rem;
+  }
+}
+
+@media (min-width: 80rem) {
   .account-layout {
     grid-template-columns: minmax(0, 7fr) minmax(18rem, 5fr);
     gap: 3rem;

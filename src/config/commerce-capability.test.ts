@@ -152,16 +152,16 @@ describe("commerce capability configuration", () => {
     ).toBe(false);
   });
 
-  it("explicitly closes all five commerce fields in Playwright", () => {
+  it("keeps live capabilities closed while Playwright uses synthetic commerce ports", () => {
     const servers = Array.isArray(playwrightConfig.webServer)
       ? playwrightConfig.webServer
       : [playwrightConfig.webServer];
     expect(servers[0]?.env).toMatchObject({
       COMMERCE_LIVE_CAPABILITY: "disabled",
       PAYMENTS_LIVE_CAPABILITY: "disabled",
-      TAX_MODE: "disabled",
-      SHIPPING_MODE: "disabled",
-      FULFILLMENT_MODE: "disabled",
+      TAX_MODE: "test",
+      SHIPPING_MODE: "test",
+      FULFILLMENT_MODE: "test",
     });
   });
 });

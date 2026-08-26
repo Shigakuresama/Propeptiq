@@ -12,6 +12,13 @@ const markerGroups = Object.freeze([
     patterns: [/LOCAL_PAYMENT_PROVIDER_TEST_ONLY_PROPEPTIQ_6D_C8A13F/gu],
   },
   {
+    label: "synthetic hosted checkout implementation",
+    patterns: [
+      /Hosted payment test double/gu,
+      /action=["']\/__synthetic_local_checkout\/[^"'\s<>/]{1,96}\/(?:return|complete)["']/gu,
+    ],
+  },
+  {
     label: "fixed local actor identity",
     patterns: [
       /50000000-0000-4000-8000-00000000000[1-6]/gu,
@@ -27,7 +34,7 @@ const markerGroups = Object.freeze([
   },
 ]);
 
-const localModulePattern = /(?:src[\\/]+auth[\\/]+local-driver\.ts|src_auth_local-driver_ts|src[\\/]+catalog[\\/]+demo-fixtures\.ts|src_catalog_demo-fixtures_ts|src[\\/]+commerce[\\/]+local-payment-provider\.ts|src_commerce_local-payment-provider_ts)/gu;
+const localModulePattern = /(?:src[\\/]+auth[\\/]+local-driver\.ts|src_auth_local-driver_ts|src[\\/]+catalog[\\/]+demo-fixtures\.ts|src_catalog_demo-fixtures_ts|src[\\/]+commerce[\\/]+local-payment-provider\.ts|src_commerce_local-payment-provider_ts|src[\\/]+commerce[\\/]+local-commerce-harness-routes\.ts|src_commerce_local-commerce-harness-routes_ts)/gu;
 const deployableDirectoryNames = new Set(["server", "standalone", "static"]);
 const deployableRootFilePattern = /\.(?:json|[cm]?js|map)$/iu;
 

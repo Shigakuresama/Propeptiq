@@ -5,9 +5,11 @@ import { redirect } from "next/navigation";
 import { accountAccessReason } from "@/account/access";
 import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
+import { getPublicCatalog } from "@/catalog/server";
 import { AccountFactsForm } from "@/components/account/account-facts-form";
 import { AccountShell } from "@/components/account/account-shell";
 import { CheckoutCartStatus } from "@/components/account/checkout-cart-status";
+import { CheckoutForm } from "@/components/commerce/checkout-form";
 
 export const metadata: Metadata = { title: "Checkout" };
 
@@ -44,17 +46,26 @@ export default async function CheckoutPage() {
           repositories.loadCurrentAttestation(),
         ])
       : [null, null];
+  const checkoutEligible =
+    account !== null &&
+    attestation !== null &&
+    account.acceptedAttestationVersion === attestation.version &&
+    (account.status === "active" || account.status === "review");
+  const catalog = checkoutEligible ? await getPublicCatalog() : null;
+  const promotionOptions = catalog?.promotions
+    .filter((promotion) => promotion.kind === "discount")
+    .map((promotion) => ({ id: promotion.id, name: promotion.name })) ?? [];
   return (
     <AccountShell localDriver={request.localDriver !== null}>
       <div className="mb-10 max-w-3xl">
         <p className="eyebrow">Verified account gate</p>
         <h1 className="mt-4 font-heading text-page leading-[0.92]">Checkout readiness</h1>
         <p className="mt-5 text-base leading-7 text-muted-ink">
-          Account and attestation facts are verified here. Payment and order creation remain unavailable until the next commerce step.
+          Account and attestation facts are verified here before current destination, product, promotion, shipping, tax, and payment-session facts are resolved.
         </p>
       </div>
       <div className="account-layout">
-        <div>
+        <div className="grid gap-6">
           {reason ? <ClosedState reason={reason} /> : null}
           {!reason && (!repositories || !principal) ? <ClosedState reason="account_unavailable" /> : null}
           {!reason && repositories && principal && !attestation ? (
@@ -84,11 +95,12 @@ export default async function CheckoutPage() {
               </div>
               {account?.status === "active" && account.acceptedAttestationVersion === attestation.version ? (
                 <div className="info-record mt-8" role="status">
-                  <strong>Account gate complete.</strong> Payment session creation, destination totals, and order creation are not available in this step.
+                  <strong>Account gate complete.</strong> Authoritative checkout is available below. Every request fact is resolved again before a hosted payment session can open.
                 </div>
               ) : null}
             </section>
           ) : null}
+          {checkoutEligible ? <CheckoutForm promotions={promotionOptions} syntheticLocal={request.localDriver !== null} /> : null}
         </div>
         <CheckoutCartStatus />
       </div>

@@ -18,6 +18,7 @@ import type {
   SafePromotionConfiguration,
 } from "@/admin/admin-read";
 import { signLocalActor, verifyLocalActor, type VerifiedIdentity } from "@/auth/identity";
+import { createLocalCommerceDriverV1 } from "@/auth/local-commerce-driver";
 import { CAPABILITIES, type Capability } from "@/domain/authorization";
 import type { BuyerStatus } from "@/domain/eligibility";
 
@@ -264,7 +265,12 @@ function initialState(): LocalState {
   };
 }
 
-let state = initialState();
+const localDriverProcessStateKey = Symbol.for("propeptiq.local-driver-state.v1");
+const localProcessState = process as NodeJS.Process & {
+  [key: symbol]: LocalState | undefined;
+};
+const state = localProcessState[localDriverProcessStateKey] ?? initialState();
+localProcessState[localDriverProcessStateKey] = state;
 
 function canonicalLocalValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalLocalValue).join(",")}]`;
@@ -383,7 +389,7 @@ const accountRepository: AccountRepository = {
     try {
       return await work(accountTransaction());
     } catch (error) {
-      state = before;
+      Object.assign(state, before);
       throw error;
     }
   },
@@ -919,7 +925,7 @@ const adminRepository: AdminRepository = {
     try {
       return await work(adminTransaction());
     } catch (error) {
-      state = before;
+      Object.assign(state, before);
       throw error;
     }
   },
@@ -928,7 +934,7 @@ const adminRepository: AdminRepository = {
     try {
       return await work(adminTransaction());
     } catch (error) {
-      state = before;
+      Object.assign(state, before);
       throw error;
     }
   },
@@ -940,6 +946,11 @@ const localOrders: readonly OrderDetail[] = Object.freeze([
     state: "paid_pending_fulfillment",
     currency: "USD",
     totalMinor: 2400,
+    paymentState: "paid",
+    refundState: "none",
+    holdState: "none",
+    releaseState: "issued",
+    shipmentState: "pending",
     createdAt: "2026-08-24T12:00:00.000Z",
     destinationStateCode: "CA",
     items: [
@@ -958,6 +969,11 @@ const localOrders: readonly OrderDetail[] = Object.freeze([
     state: "fulfilled",
     currency: "USD",
     totalMinor: 1800,
+    paymentState: "paid",
+    refundState: "none",
+    holdState: "none",
+    releaseState: "consumed",
+    shipmentState: "delivered",
     createdAt: "2026-08-20T12:00:00.000Z",
     destinationStateCode: "NV",
     items: [
@@ -1206,7 +1222,12 @@ function localAdminReadSnapshot(resource: AdminReadResource): AdminReadSnapshot 
           state: order.state,
           itemCount: order.items.length,
           verifiedPaymentEventCount: 1,
+          paymentState: "paid" as const,
+          refundState: "none" as const,
+          holdState: "none" as const,
           currentReleaseState: order.id === localOrderId ? "issued" : "consumed",
+          releaseVersion: 1,
+          shipmentState: order.shipmentState === "none" ? null : order.shipmentState,
           providerExecutionBoundary: "task6_managed" as const,
           createdAt: order.createdAt,
           updatedAt: order.createdAt,
@@ -1294,6 +1315,21 @@ function localAdminReadSnapshot(resource: AdminReadResource): AdminReadSnapshot 
   }
 }
 
+const commerce = createLocalCommerceDriverV1({
+  loadProfile(userId) {
+    return state.profiles.get(userId) ?? null;
+  },
+  hasCurrentAttestation(userId) {
+    return state.acceptances.has(`${userId}:${state.attestationVersion}`);
+  },
+  loadEmail(userId) {
+    return fixedActors.find((actor) => actor.userId === userId)?.identity.primaryEmail ?? null;
+  },
+}, () => {
+  const secret = process.env.LOCAL_TEST_SECRET;
+  return typeof secret === "string" && secret.length >= 32 ? secret : null;
+});
+
 const driver: LocalTestDriver = {
   actorOptions: fixedActors.map(({ key, label, description }) => ({
     key,
@@ -1360,7 +1396,7 @@ const driver: LocalTestDriver = {
   },
   listOrders(userId) {
     const orderId = ownerOrderId(userId);
-    return orderId
+    const historical = orderId
       ? localOrders
           .filter((order) => order.id === orderId)
           .map((order) => ({
@@ -1368,14 +1404,20 @@ const driver: LocalTestDriver = {
             state: order.state,
             currency: order.currency,
             totalMinor: order.totalMinor,
+            paymentState: order.paymentState,
+            refundState: order.refundState,
+            holdState: order.holdState,
+            releaseState: order.releaseState,
+            shipmentState: order.shipmentState,
             createdAt: order.createdAt,
           }))
       : [];
+    return Object.freeze([...commerce.listOrders(userId), ...historical]);
   },
   loadOrder(userId, orderId) {
-    return ownerOrderId(userId) === orderId
+    return commerce.loadOrder(userId, orderId) ?? (ownerOrderId(userId) === orderId
       ? (localOrders.find((order) => order.id === orderId) ?? null)
-      : null;
+      : null);
   },
   loadAdminSnapshot() {
     return {
@@ -1421,8 +1463,16 @@ const driver: LocalTestDriver = {
     };
   },
   readAdminSnapshot<Resource extends AdminReadResource>(resource: Resource) {
+    if (resource === "orders" || resource === "refunds" || resource === "shipments") {
+      const base = localAdminReadSnapshot(resource);
+      return {
+        ...base,
+        items: commerce.adminSnapshotItems(resource),
+      } as AdminReadSnapshotFor<Resource>;
+    }
     return localAdminReadSnapshot(resource) as AdminReadSnapshotFor<Resource>;
   },
+  commerce,
 };
 
 export function getLocalTestDriver(): LocalTestDriver {

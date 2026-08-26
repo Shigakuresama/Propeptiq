@@ -24,7 +24,7 @@ function checkoutRequest() {
     orderId: ids.order,
     attemptId: ids.attempt,
     providerCustomerEmail: "synthetic.buyer@example.test",
-    providerOrigin: "http://127.0.0.1:3000",
+    providerOrigin: "http://127.0.0.1:4631",
     providerExpiresAt: "2026-08-25T20:00:00.000Z",
     currency: "USD",
     destination: {
@@ -94,7 +94,9 @@ describe("synthetic local payment provider", () => {
     expect(replay).toMatchObject({ status: "open" });
     if (replay.status === "open") {
       expect(replay.session.providerSessionId).toMatch(/^cs_local_synthetic_/u);
-      expect(replay.session.hostedUrl).toContain("/__synthetic_local_checkout/");
+      expect(replay.session.hostedUrl).toBe(
+        `http://127.0.0.1:4631/__synthetic_local_checkout/${replay.session.providerSessionId}`,
+      );
     }
     await expect(
       harness.provider.createCheckoutSession(

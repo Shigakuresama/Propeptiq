@@ -13,6 +13,10 @@ import {
 } from "@/admin/admin-read";
 import type { AdminRepository } from "@/admin/admin-service";
 import type { LocalTestDriver } from "@/auth/local-driver-types";
+import {
+  loadCheckoutSuccess,
+  type CheckoutSuccessReadModel,
+} from "@/commerce/checkout-success-read";
 import type { ServerEnv } from "@/config/env-schema";
 import type { Capability, Principal } from "@/domain/authorization";
 import { createPostgresAccountRepository } from "@/db/repositories/account-repository";
@@ -52,6 +56,7 @@ export type RequestRepositories = Readonly<{
   loadCurrentAttestation: () => Promise<Readonly<{ version: number; policyText: string }> | null>;
   listOrders: () => Promise<readonly OrderSummary[]>;
   loadOrder: (orderId: string) => Promise<OrderDetail | null>;
+  loadCheckoutSuccess: (orderId: string) => Promise<CheckoutSuccessReadModel | null>;
   readAdminSnapshot: <Resource extends AdminReadResource>(
     resource: Resource,
   ) => Promise<AdminReadSnapshotFor<Resource>>;
@@ -123,7 +128,7 @@ export async function getRequestIdentity(): Promise<RequestIdentity> {
 
 function databaseQueryPort(client: RuntimeDatabaseClient) {
   return {
-    query<T extends object>(sql: string, params: unknown[] = []) {
+    query<T extends object>(sql: string, params: readonly unknown[] = []) {
       return client.query<T>(sql, params);
     },
   };
@@ -162,6 +167,8 @@ export function getRequestRepositories(
       loadCurrentAttestation: async () => driver.loadCurrentAttestation(),
       listOrders: async () => (ownerId ? driver.listOrders(ownerId) : []),
       loadOrder: async (orderId) => (ownerId ? driver.loadOrder(ownerId, orderId) : null),
+      loadCheckoutSuccess: async (orderId) =>
+        ownerId ? driver.commerce.loadSuccess(ownerId, orderId) : null,
       readAdminSnapshot: async (resource) => {
         requireLocalCapability(requiredAdminReadCapability(resource));
         return driver.readAdminSnapshot(resource);
@@ -225,6 +232,10 @@ export function getRequestRepositories(
     loadOrder: (orderId) =>
       withRuntimeTransaction(request.environment, (client) =>
         loadOwnOrder(databaseQueryPort(client), requireOwner(), orderId),
+      ),
+    loadCheckoutSuccess: (orderId) =>
+      withRuntimeTransaction(request.environment, (client) =>
+        loadCheckoutSuccess(databaseQueryPort(client), requireOwner(), orderId),
       ),
     readAdminSnapshot(resource) {
       if (!request.identity || !request.principal) {

@@ -24,6 +24,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
         <div><dt className="eyebrow">Total</dt><dd className="mt-2 text-xl tabular-nums">{money(order.totalMinor, order.currency)}</dd></div>
         <div><dt className="eyebrow">Destination state</dt><dd className="mt-2 text-xl">{order.destinationStateCode}</dd></div>
         <div><dt className="eyebrow">Created</dt><dd className="mt-2 text-xl">{new Date(order.createdAt).toLocaleDateString("en-US")}</dd></div>
+        <div><dt className="eyebrow">Payment</dt><dd className="mt-2 text-xl capitalize">{order.paymentState.replaceAll("_", " ")}</dd></div>
+        <div><dt className="eyebrow">Refund</dt><dd className="mt-2 text-xl capitalize">{order.refundState}</dd></div>
+        <div><dt className="eyebrow">Fulfillment hold</dt><dd className="mt-2 text-xl capitalize">{order.holdState}</dd></div>
+        <div><dt className="eyebrow">Release</dt><dd className="mt-2 text-xl capitalize">{order.releaseState}</dd></div>
+        <div><dt className="eyebrow">Shipment</dt><dd className="mt-2 text-xl capitalize">{order.shipmentState.replaceAll("_", " ")}</dd></div>
       </dl>
       <h2 className="mt-10 font-heading text-3xl">Order items</h2>
       <ul className="mt-5 grid gap-4 p-0">{order.items.map((item) => <li key={item.id} className="record-card"><p className="font-heading text-2xl">{item.productName}</p><p className="mt-2 text-base text-muted-ink">{item.packageForm}</p><p className="mt-4 tabular-nums">{item.quantity} × {money(item.unitAmountMinor, order.currency)} · {money(item.totalMinor, order.currency)}</p></li>)}</ul>

@@ -24,9 +24,9 @@ export const adminResources: readonly AdminResource[] = Object.freeze([
   { slug: "promotions", label: "Promotions", description: "Canonical kind-specific activation.", capability: "promotion:manage", operation: "promotion.manage" },
   { slug: "buyers", label: "Buyers", description: "Status commands with current identity re-verification.", capability: "review:decide", operation: "review.decide" },
   { slug: "review-requests", label: "Review requests", description: "Pending-only immutable decisions.", capability: "review:decide", operation: "review.decide" },
-  { slug: "orders", label: "Orders", description: "Read-only administration in this step.", capability: "order:read:any", operation: "order.read.any" },
-  { slug: "refunds", label: "Refund intents", description: "Verified-payment-bounded requested intents only.", capability: "refund:request", operation: "refund.request" },
-  { slug: "shipments", label: "Shipments", description: "Pending preparation metadata only; preparation does not authorize handoff.", capability: "fulfillment:release:consume", operation: "fulfillment.release.consume" },
+  { slug: "orders", label: "Orders", description: "Redacted payment, refund, hold, release, and shipment authority with guarded hold clearing.", capability: "order:read:any", operation: "order.read.any" },
+  { slug: "refunds", label: "Refund intents", description: "Verified-payment-bounded intent, submission/recovery, and signed-event readback.", capability: "refund:request", operation: "refund.request" },
+  { slug: "shipments", label: "Shipments", description: "Preparation remains separate from guarded handoff, delivery, and exception transitions.", capability: "fulfillment:release:consume", operation: "fulfillment.release.consume" },
   { slug: "staff", label: "Staff capabilities", description: "Known capability grants and revocations.", capability: "staff:manage", operation: "staff.manage" },
   { slug: "audit", label: "Audit history", description: "Append-only redacted mutation records.", capability: "staff:manage", operation: "staff.manage" },
 ]);

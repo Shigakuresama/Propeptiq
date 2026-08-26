@@ -5,9 +5,13 @@ import {
   activatePromotionAction,
   changeBuyerStatusAction,
   changeStaffCapabilityAction,
+  clearFulfillmentHoldAction,
   decideReviewAction,
+  handoffFulfillmentAction,
+  markShipmentDeliveredAction,
   publishAttestationAction,
   publishCoaAction,
+  recordShipmentExceptionAction,
   requestRefundAction,
   retireProductAction,
   retirePromotionAction,
@@ -22,15 +26,77 @@ import {
   setCoaLifecycleAction,
   setLotLifecycleAction,
   setPolicyGroupLifecycleAction,
+  submitOrRecoverRefundAction,
   supersedeDestinationAction,
   supersedeProductPriceAction,
 } from "@/admin/actions";
 import type { AdminResource } from "@/admin/access";
 import type { AdminReadSnapshot, SafePromotionConfiguration } from "@/admin/admin-read";
+import { CommandResultNotice } from "@/components/admin/command-result-notice";
 import { Button } from "@/components/ui/button";
 import { CAPABILITIES } from "@/domain/authorization";
 
 type Option = Readonly<{ value: string; label: string }>;
+
+export type CommerceCommandOutcome = Readonly<{
+  command: "submit-refund" | "clear-hold" | "handoff" | "deliver" | "exception";
+  target: string;
+  result: string;
+}>;
+
+const commerceResultCopy: Readonly<Record<string, Readonly<{
+  message: string;
+  error: boolean;
+}>>> = Object.freeze({
+  submitted: { message: "Refund submission was recorded and is awaiting a signed provider event.", error: false },
+  awaiting_signed_event: { message: "Provider acknowledgement is awaiting a signed provider event before financial confirmation.", error: false },
+  succeeded: { message: "The authoritative read reports the refund already succeeded through signed event authority.", error: false },
+  cleared: { message: "The fulfillment hold was cleared once. Confirm the reloaded order state below.", error: false },
+  already_clear: { message: "The fulfillment hold was already clear; no new effect was created.", error: false },
+  handed_off: { message: "The prepared shipment was handed off once. Confirm the reloaded shipment state below.", error: false },
+  already_handed_off: { message: "The shipment was already handed off; no new handoff effect was created.", error: false },
+  delivered: { message: "The shipment was marked delivered once.", error: false },
+  already_delivered: { message: "The shipment was already delivered; no new transition was created.", error: false },
+  exception: { message: "The shipment exception was recorded once.", error: false },
+  already_exception: { message: "The shipment exception was already recorded; no new transition was created.", error: false },
+  ineligible: { message: "Current authoritative state is not eligible for this command.", error: true },
+  conflict: { message: "Current authoritative facts conflict with the submitted command. Reload and review the record.", error: true },
+  held: { message: "The order remains held by current authoritative eligibility or financial facts.", error: true },
+  denied: { message: "Current identity, MFA, capability, or policy authority denied this command.", error: true },
+  stale: { message: "The command used stale authoritative facts and created no new effect.", error: true },
+  "rate-limited": { message: "The guarded command rate limit is active. Wait for the fixed window before retrying.", error: true },
+  unavailable: { message: "A required authoritative dependency is unavailable; the command created no new effect.", error: true },
+  failed: { message: "The authoritative refund state is failed; no success is implied.", error: true },
+  cancelled: { message: "The authoritative refund state is cancelled; no success is implied.", error: true },
+});
+
+function matchingOutcome(
+  outcome: CommerceCommandOutcome | undefined,
+  command: CommerceCommandOutcome["command"],
+  target: string,
+) {
+  if (!outcome || outcome.command !== command || outcome.target !== target) return undefined;
+  return commerceResultCopy[outcome.result];
+}
+
+function unmatchedOutcome(
+  outcome: CommerceCommandOutcome | undefined,
+  command: CommerceCommandOutcome["command"],
+  visibleTargets: readonly string[],
+) {
+  if (!outcome || outcome.command !== command || visibleTargets.includes(outcome.target)) return undefined;
+  return commerceResultCopy[outcome.result];
+}
+
+function CommandOutcomeNotice({
+  outcome,
+}: {
+  outcome: Readonly<{ message: string; error: boolean }> | undefined;
+}) {
+  return outcome ? (
+    <CommandResultNotice error={outcome.error} message={outcome.message} />
+  ) : null;
+}
 
 function versionedValue(id: string, expectedUpdatedAt: string): string {
   return JSON.stringify({ id, expectedUpdatedAt });
@@ -150,10 +216,12 @@ function CommandForm({
   action,
   title,
   children,
+  outcome,
 }: {
   action: (formData: FormData) => Promise<never>;
   title: string;
   children: ReactNode;
+  outcome?: Readonly<{ message: string; error: boolean }> | undefined;
 }) {
   return (
     <section className="record-card">
@@ -164,6 +232,13 @@ function CommandForm({
           Submit guarded command
         </Button>
       </form>
+      {outcome ? (
+        <CommandResultNotice
+          error={outcome.error}
+          message={outcome.message}
+          className="mt-5"
+        />
+      ) : null}
     </section>
   );
 }
@@ -210,9 +285,11 @@ function promotionConfigFields(configuration?: SafePromotionConfiguration) {
 export function ResourceCommandPanel({
   resource,
   snapshot,
+  outcome,
 }: {
   resource: AdminResource;
   snapshot: AdminReadSnapshot;
+  outcome?: CommerceCommandOutcome | undefined;
 }) {
   if (resource.slug !== snapshot.resource) {
     return <EmptyCommand>The authoritative resource read-back did not match this route. Commands fail closed.</EmptyCommand>;
@@ -482,37 +559,109 @@ export function ResourceCommandPanel({
         </CommandForm>
       ) : <EmptyCommand>No pending review request is available.</EmptyCommand>;
     }
-    case "orders":
-      return <ReadOnlyBoundary>Order creation, payment authorship, inventory effects, and provider execution remain unavailable until Task 6. This page exposes only the capability-scoped authoritative read model.</ReadOnlyBoundary>;
+    case "orders": {
+      const held = snapshot.items.filter((item) =>
+        item.state === "paid_on_hold" && item.holdState === "active");
+      const completedOutcome = unmatchedOutcome(outcome, "clear-hold", held.map((item) => item.id));
+      return held.length || completedOutcome ? (
+        <div className="grid gap-6">
+          <CommandOutcomeNotice outcome={completedOutcome} />
+          {held.map((item) => (
+            <CommandForm
+              key={item.id}
+              action={clearFulfillmentHoldAction}
+              title={`Clear fulfillment hold · ${item.id}`}
+              outcome={matchingOutcome(outcome, "clear-hold", item.id)}
+            >
+              <Hidden name="orderId" value={item.id} />
+              <p className="info-record">
+                The server rechecks current MFA, capability, signed payment,
+                buyer, destination, review, dispute, and refund authority.
+              </p>
+            </CommandForm>
+          ))}
+        </div>
+      ) : (
+        <ReadOnlyBoundary>No currently projected order is eligible for a hold-clear command.</ReadOnlyBoundary>
+      );
+    }
     case "refunds": {
       const orderIds = [...new Set(snapshot.items.map((item) => item.orderId))];
+      const submittable = snapshot.items.filter((item) => item.status === "requested" || item.status === "submitted");
       return (
-        <CommandForm action={requestRefundAction} title="Record a requested refund intent">
-          <Field label="Order ID" name="orderId" list="known-refund-orders" />
-          <IdDatalist id="known-refund-orders" values={orderIds} />
-          <Field label="Amount in minor units" name="requestedAmountMinor" defaultValue="100" type="number" min={1} max={100000000} />
-          <Field label="Unique idempotency key" name="idempotencyKey" maxLength={120} />
-          <Field label="Redacted operator reason (optional)" name="reasonRedacted" required={false} maxLength={500} />
-          <p className="warning-record">This records a bounded requested intent only. Provider submission and confirmation remain unavailable.</p>
-        </CommandForm>
+        <div className="grid gap-6">
+          <CommandOutcomeNotice outcome={unmatchedOutcome(outcome, "submit-refund", submittable.map((item) => item.id))} />
+          <CommandForm action={requestRefundAction} title="Record a requested refund intent">
+            <Field label="Order ID" name="orderId" list="known-refund-orders" />
+            <IdDatalist id="known-refund-orders" values={orderIds} />
+            <Field label="Amount in minor units" name="requestedAmountMinor" defaultValue="100" type="number" min={1} max={100000000} />
+            <Field label="Unique idempotency key" name="idempotencyKey" maxLength={120} />
+            <Field label="Redacted operator reason (optional)" name="reasonRedacted" required={false} maxLength={500} />
+            <p className="warning-record">This records a bounded requested intent only. Submission remains a separate command.</p>
+          </CommandForm>
+          {submittable.map((item) => (
+              <CommandForm
+                key={item.id}
+                action={submitOrRecoverRefundAction}
+                title={`Submit or recover refund · ${item.id}`}
+                outcome={matchingOutcome(outcome, "submit-refund", item.id)}
+              >
+                <Hidden name="refundId" value={item.id} />
+                <p className="info-record">
+                  A provider acknowledgement remains awaiting a signed provider event;
+                  replay recovers the same refund rather than creating a new intent.
+                </p>
+              </CommandForm>
+            ))}
+        </div>
       );
     }
     case "shipments": {
+      const pending = snapshot.items.filter((item) => item.state === "pending");
+      const deliverable = snapshot.items.filter((item) => item.state === "handed_off" || item.state === "exception");
+      const exceptable = snapshot.items.filter((item) => item.state === "handed_off");
+      const completedOutcome = outcome?.command === "handoff"
+        ? unmatchedOutcome(outcome, "handoff", pending.map((item) => item.orderId))
+        : outcome?.command === "deliver"
+          ? unmatchedOutcome(outcome, "deliver", deliverable.map((item) => item.orderId))
+          : outcome?.command === "exception"
+            ? unmatchedOutcome(outcome, "exception", exceptable.map((item) => item.orderId))
+            : undefined;
       return (
         <div className="grid gap-6">
+          <CommandOutcomeNotice outcome={completedOutcome} />
           <CommandForm action={saveShipmentAction} title="Create pending shipment metadata">
             <Field label="Eligible paid order ID" name="orderId" list="known-shipment-orders" />
             <IdDatalist id="known-shipment-orders" values={snapshot.items.map((item) => item.orderId)} />
             <Field label="Carrier" name="carrier" maxLength={100} />
             <Field label="Tracking reference" name="trackingReference" maxLength={200} />
             <Hidden name="expectedUpdatedAt" value="" />
-            <p className="warning-record">Preparation does not authorize handoff. Release issuance, inventory effects, handoff, and delivery remain unavailable.</p>
+            <p className="warning-record">Preparation does not authorize handoff.</p>
+            <p className="info-record">Release issuance and inventory effects occur only inside the separate guarded handoff command.</p>
           </CommandForm>
-          {snapshot.items.map((item) => (
+          {pending.map((item) => (
             <CommandForm key={item.id} action={saveShipmentAction} title={`Update pending shipment · ${item.orderId}`}>
               <Hidden name="orderId" value={item.orderId} /><Hidden name="expectedUpdatedAt" value={item.updatedAt} />
               <Field label="Carrier" name="carrier" defaultValue={item.carrier} maxLength={100} />
               <Field label="Tracking reference" name="trackingReference" defaultValue={item.trackingReference} maxLength={200} />
+            </CommandForm>
+          ))}
+          {pending.map((item) => (
+            <CommandForm key={`handoff:${item.id}`} action={handoffFulfillmentAction} title={`Handoff shipment · ${item.orderId}`} outcome={matchingOutcome(outcome, "handoff", item.orderId)}>
+              <Hidden name="orderId" value={item.orderId} />
+              <p className="warning-record">This distinct command consumes the authoritative release only after every server-side eligibility check passes.</p>
+            </CommandForm>
+          ))}
+          {deliverable.map((item) => (
+            <CommandForm key={`deliver:${item.id}`} action={markShipmentDeliveredAction} title={`Mark shipment delivered · ${item.orderId}`} outcome={matchingOutcome(outcome, "deliver", item.orderId)}>
+              <Hidden name="orderId" value={item.orderId} />
+              <p className="info-record">Delivery time and lifecycle authority are minted by the server.</p>
+            </CommandForm>
+          ))}
+          {exceptable.map((item) => (
+            <CommandForm key={`exception:${item.id}`} action={recordShipmentExceptionAction} title={`Record shipment exception · ${item.orderId}`} outcome={matchingOutcome(outcome, "exception", item.orderId)}>
+              <Hidden name="orderId" value={item.orderId} />
+              <p className="info-record">No browser-supplied reason, time, release, payment, or fulfillment metadata is accepted.</p>
             </CommandForm>
           ))}
         </div>

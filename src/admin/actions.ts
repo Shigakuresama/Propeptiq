@@ -36,6 +36,8 @@ import {
   getRequestRepositories,
   loadTargetVerifiedIdentity,
 } from "@/auth/server";
+import { isCanonicalUuid } from "@/commerce/checkout-identity";
+import { createStaffCommerceServerRuntime } from "@/commerce/server-runtime";
 import { isCapability } from "@/domain/authorization";
 import type { BuyerStatus } from "@/domain/eligibility";
 
@@ -204,6 +206,63 @@ async function run(resource: string, command: () => Promise<unknown>): Promise<n
     result = resultCode(error);
   }
   redirect(`/admin/${resource}?result=${result}` as never);
+}
+
+type CommerceCommand =
+  | "submit-refund"
+  | "clear-hold"
+  | "handoff"
+  | "deliver"
+  | "exception";
+
+function closedCommerceResult(value: unknown): string {
+  if (!value || typeof value !== "object" || !("status" in value)) return "unavailable";
+  const status = value.status;
+  if (status === "terminal" && "refundStatus" in value) {
+    const refundStatus = value.refundStatus;
+    return refundStatus === "succeeded" || refundStatus === "failed" || refundStatus === "cancelled"
+      ? refundStatus
+      : "unavailable";
+  }
+  return typeof status === "string" && new Set([
+    "unavailable", "ineligible", "conflict", "submitted", "awaiting_signed_event",
+    "failed", "cancelled", "stale", "held", "denied", "cleared", "already_clear",
+    "handed_off", "already_handed_off", "delivered", "already_delivered",
+    "exception", "already_exception",
+  ]).has(status)
+    ? status
+    : "unavailable";
+}
+
+async function runCommerce(
+  resource: "orders" | "refunds" | "shipments",
+  command: CommerceCommand,
+  readTarget: () => string,
+  execute: (
+    runtime: NonNullable<Awaited<ReturnType<typeof createStaffCommerceServerRuntime>>>,
+    target: string,
+  ) => Promise<unknown>,
+): Promise<never> {
+  let result = "unavailable";
+  let canonicalTarget: string | null = null;
+  try {
+    const target = readTarget();
+    canonicalTarget = isCanonicalUuid(target) ? target : null;
+    if (canonicalTarget !== null) {
+      const admin = await trustedAdmin(resource);
+      const runtime = await createStaffCommerceServerRuntime(
+        admin.request,
+        admin.context.correlationId,
+      );
+      if (runtime !== null) {
+        result = closedCommerceResult(await execute(runtime, canonicalTarget));
+      }
+    }
+  } catch (error) {
+    result = resultCode(error);
+  }
+  const targetQuery = canonicalTarget === null ? "" : `&target=${canonicalTarget}`;
+  redirect(`/admin/${resource}?command=${command}${targetQuery}&result=${result}` as never);
 }
 
 export async function activateProductAction(formData: FormData): Promise<never> {
@@ -543,6 +602,16 @@ export async function requestRefundAction(formData: FormData): Promise<never> {
   });
 }
 
+export async function submitOrRecoverRefundAction(formData: FormData): Promise<never> {
+  return runCommerce("refunds", "submit-refund", () => value(formData, "refundId"),
+    (runtime, refundId) => runtime.submitOrRecoverRefund(refundId));
+}
+
+export async function clearFulfillmentHoldAction(formData: FormData): Promise<never> {
+  return runCommerce("orders", "clear-hold", () => value(formData, "orderId"),
+    (runtime, orderId) => runtime.clearFulfillmentHold(orderId));
+}
+
 export async function saveShipmentAction(formData: FormData): Promise<never> {
   return run("shipments", async () => {
     const admin = await trustedAdmin("shipments");
@@ -554,6 +623,21 @@ export async function saveShipmentAction(formData: FormData): Promise<never> {
       expectedUpdatedAt: expected || null,
     });
   });
+}
+
+export async function handoffFulfillmentAction(formData: FormData): Promise<never> {
+  return runCommerce("shipments", "handoff", () => value(formData, "orderId"),
+    (runtime, orderId) => runtime.handoffFulfillment(orderId));
+}
+
+export async function markShipmentDeliveredAction(formData: FormData): Promise<never> {
+  return runCommerce("shipments", "deliver", () => value(formData, "orderId"),
+    (runtime, orderId) => runtime.markShipmentDelivered(orderId));
+}
+
+export async function recordShipmentExceptionAction(formData: FormData): Promise<never> {
+  return runCommerce("shipments", "exception", () => value(formData, "orderId"),
+    (runtime, orderId) => runtime.recordShipmentException(orderId));
 }
 
 export async function changeStaffCapabilityAction(formData: FormData): Promise<never> {

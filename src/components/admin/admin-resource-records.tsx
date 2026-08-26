@@ -200,7 +200,11 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
           ["Buyer user ID", item.buyerUserId], ["Buyer status snapshot", item.buyerStatusSnapshot],
           ["Destination", item.destinationStateCode], ["Total", formatMoney(item.totalMinor, item.currency)],
           ["Items", item.itemCount], ["Verified payment events", item.verifiedPaymentEventCount],
-          ["Release", item.currentReleaseState ?? "None"], ["Provider execution", "Managed only by Task 6"],
+          ["Payment", item.paymentState.replaceAll("_", " ")], ["Current hold", item.holdState],
+          ["Refund", item.refundState],
+          ["Release", item.currentReleaseState === null ? "None" : `${item.currentReleaseState} · version ${item.releaseVersion}`],
+          ["Shipment", item.shipmentState?.replaceAll("_", " ") ?? "None"],
+          ["Provider execution", "Managed only by signed Task 6 authority"],
         ]} />
       ));
       break;
@@ -210,7 +214,7 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
           ["Order ID", item.orderId], ["Provider", item.provider], ["Requested amount", formatMoney(item.requestedAmountMinor, item.currency)],
           ["Confirmed", item.confirmedAmountMinor === null ? "Not confirmed" : formatMoney(item.confirmedAmountMinor, item.currency)],
           ["Reason", item.reasonRedacted ?? "Not supplied"], ["Requested at", formatInstant(item.requestedAt)],
-          ["Provider execution", "Managed only by Task 6"],
+          ["Provider execution", item.status === "succeeded" ? "Confirmed by signed provider event" : "Managed by the guarded refund command"],
         ]} />
       ));
       break;
@@ -220,7 +224,8 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
           ["Order ID", item.orderId], ["Release", item.releaseState === null ? "Not issued — preparation only" : `${item.releaseState} · version ${item.releaseVersion}`],
           ["Release expires", formatInstant(item.releaseExpiresAt)], ["Carrier", item.carrier],
           ["Tracking reference", item.trackingReference], ["Current version", item.updatedAt],
-          ["Handoff confirmation", "Managed only by Task 6"],
+          ["Handoff confirmation", item.handedOffAt === null ? "Not recorded" : formatInstant(item.handedOffAt)],
+          ["Delivery", item.deliveredAt === null ? "Not recorded" : formatInstant(item.deliveredAt)],
         ]} />
       ));
       break;

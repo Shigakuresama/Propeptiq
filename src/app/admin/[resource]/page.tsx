@@ -4,7 +4,9 @@ import { adminGate, resourceBySlug } from "@/admin/access";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
 import { AdminGateState } from "@/components/admin/admin-gate-state";
 import { AdminResourceRecords } from "@/components/admin/admin-resource-records";
-import { ResourceCommandPanel } from "@/components/admin/resource-command-panel";
+import { CommandResultNotice } from "@/components/admin/command-result-notice";
+import { ResourceCommandPanel, type CommerceCommandOutcome } from "@/components/admin/resource-command-panel";
+import { isCanonicalUuid } from "@/commerce/checkout-identity";
 
 const resultCopy = {
   saved: "The submitted command returned without a domain error. This editable URL status is not authoritative; confirm the resource or audit read-back.",
@@ -14,12 +16,27 @@ const resultCopy = {
   unavailable: "A required current record, verified dependency, or lifecycle fact is unavailable.",
 } as const;
 
+const commerceCommandResources = {
+  "submit-refund": "refunds",
+  "clear-hold": "orders",
+  handoff: "shipments",
+  deliver: "shipments",
+  exception: "shipments",
+} as const;
+
+const commerceResults = new Set([
+  "submitted", "awaiting_signed_event", "succeeded", "cleared", "already_clear",
+  "handed_off", "already_handed_off", "delivered", "already_delivered",
+  "exception", "already_exception", "ineligible", "conflict", "held", "denied",
+  "stale", "rate-limited", "unavailable", "failed", "cancelled",
+]);
+
 export default async function AdminResourcePage({
   params,
   searchParams,
 }: {
   params: Promise<{ resource: string }>;
-  searchParams: Promise<{ result?: string }>;
+  searchParams: Promise<{ result?: string; command?: string; target?: string }>;
 }) {
   const { resource: slug } = await params;
   const resource = resourceBySlug(slug);
@@ -37,8 +54,17 @@ export default async function AdminResourcePage({
   }
   const snapshot = await repositories.readAdminSnapshot(resource.slug);
   const query = await searchParams;
+  const command = query.command && Object.hasOwn(commerceCommandResources, query.command)
+    ? query.command as keyof typeof commerceCommandResources
+    : null;
+  const outcome: CommerceCommandOutcome | undefined =
+    command !== null && commerceCommandResources[command] === slug &&
+    query.target !== undefined && isCanonicalUuid(query.target) &&
+    query.result !== undefined && commerceResults.has(query.result)
+      ? { command, target: query.target, result: query.result }
+      : undefined;
   const result =
-    query.result && Object.hasOwn(resultCopy, query.result)
+    outcome === undefined && query.result && Object.hasOwn(resultCopy, query.result)
       ? resultCopy[query.result as keyof typeof resultCopy]
       : null;
   return (
@@ -51,27 +77,21 @@ export default async function AdminResourcePage({
         {resource.description}
       </p>
       {result ? (
-        <div
-          className={query.result === "saved" ? "warning-record mt-7" : "error-record mt-7"}
-          role={query.result === "saved" ? "status" : "alert"}
-        >
-          {result}
-        </div>
+        <CommandResultNotice
+          error={query.result !== "saved"}
+          heading={query.result === "saved" ? "Command response received" : "Command not completed"}
+          message={result}
+          className="mt-7"
+        />
       ) : null}
       <div className="mt-8">
         <ResourceCommandPanel
           resource={resource}
           snapshot={snapshot}
+          {...(outcome === undefined ? {} : { outcome })}
         />
       </div>
       <AdminResourceRecords snapshot={snapshot} />
-      {["orders", "refunds", "shipments"].includes(slug) ? (
-        <div className="warning-record mt-8">
-          <strong>Task 6 boundary:</strong> order creation, payment authorship,
-          provider refund submission, release issuance, inventory consumption,
-          handoff, and delivery effects are unavailable here.
-        </div>
-      ) : null}
     </section>
   );
 }

@@ -205,7 +205,12 @@ type OrderItem = {
   state: string;
   itemCount: number;
   verifiedPaymentEventCount: number;
+  paymentState: "pending_verification" | "paid" | "failed";
+  refundState: "none" | "pending" | "partial" | "full" | "failed";
+  holdState: "none" | "active";
   currentReleaseState: "issued" | "revoked" | "expired" | "consumed" | null;
+  releaseVersion: number | null;
+  shipmentState: "pending" | "handed_off" | "delivered" | "exception" | null;
   providerExecutionBoundary: "task6_managed";
   createdAt: string;
   updatedAt: string;

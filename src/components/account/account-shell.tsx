@@ -45,10 +45,10 @@ export function AccountShell({
           <Link href="/" className="flex min-h-11 items-center gap-3 rounded-full px-1 font-semibold tracking-[0.08em]">
             <BrandMark /> <span>PROPEPTIQ LABS</span>
           </Link>
-          <nav aria-label="Account" className="ml-auto hidden items-center gap-2 md:flex"><NavLinks /></nav>
+          <nav aria-label="Account" className="ml-auto hidden items-center gap-2 xl:flex"><NavLinks /></nav>
           <Sheet>
             <SheetTrigger asChild>
-              <Button type="button" variant="outline" size="icon" className="ml-auto size-11 md:hidden" aria-label="Open account navigation">
+              <Button type="button" variant="outline" size="icon" className="ml-auto size-11 xl:hidden" aria-label="Open account navigation">
                 <Menu aria-hidden="true" />
               </Button>
             </SheetTrigger>

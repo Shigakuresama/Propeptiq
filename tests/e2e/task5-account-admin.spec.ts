@@ -19,12 +19,15 @@ async function signInAs(page: Page, actorLabel: string) {
 
 test("preserves exact cart IDs and quantities through fixed sign-in and checkout", async ({ page }) => {
   await page.goto("/cart");
+  await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
   await page.evaluate(() => {
     window.localStorage.setItem(
       "propeptiq.cart.v1",
       JSON.stringify({ version: 1, items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }] }),
     );
+    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v1" }));
   });
+  await expect(page.getByRole("button", { name: "Continue to sign in" })).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Continue to sign in" }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
@@ -118,14 +121,18 @@ test("one capable administrator can mutate a local resource and read its redacte
   await expect(page.getByRole("list", { name: "Redacted audit history" })).toContainText("catalog.product.activated");
 });
 
-test("labels order, refund, and shipment pages as Task 6 unavailable surfaces", async ({ page }) => {
+test("projects distinct order, refund, and shipment lifecycle commands", async ({ page }) => {
   await signInAs(page, "Fixed capable administrator");
-  for (const resource of ["orders", "refunds", "shipments"]) {
-    await page.goto(`/admin/${resource}`);
-    const task6Boundary = page.locator(".warning-record").filter({ hasText: "Task 6 boundary:" });
-    await expect(task6Boundary).toBeVisible();
-    await expect(task6Boundary).toContainText(/provider refund submission|release issuance|delivery effects remain unavailable/i);
-  }
+  await page.goto("/admin/orders");
+  await expect(page.getByRole("form", { name: /Clear fulfillment hold/ })).toBeVisible();
+  await expect(page.getByText("Payment", { exact: true }).first()).toBeVisible();
+
+  await page.goto("/admin/refunds");
+  await expect(page.getByRole("form", { name: "Record a requested refund intent" })).toBeVisible();
+  await expect(page.getByRole("form", { name: /Submit or recover refund/ })).toBeVisible();
+
+  await page.goto("/admin/shipments");
+  await expect(page.getByRole("form", { name: /Handoff shipment/ })).toBeVisible();
   await expect(
     page.locator(".warning-record").filter({
       hasText: "Preparation does not authorize handoff.",

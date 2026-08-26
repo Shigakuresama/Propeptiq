@@ -7,6 +7,10 @@ import { useEffect, useRef, useState } from "react";
 import { useCart } from "@/cart/cart-provider";
 import { prepareCheckoutHandoff } from "@/cart/cart-storage";
 import {
+  loadPreviewPresentation,
+  savePreviewPresentation,
+} from "@/cart/preview-presentation";
+import {
   type CartPreview,
   type CartPreviewItem,
   canContinueFromPreview,
@@ -38,11 +42,16 @@ export function CartView({
   const [acknowledgedToken, setAcknowledgedToken] = useState<string | null>(null);
   const [handoffMessage, setHandoffMessage] = useState("");
   const previousPreviewToken = useRef<string | null>(null);
+  const presentationLoaded = useRef(false);
 
   useEffect(() => {
     if (!hydrated || items.length === 0) {
       previousPreviewToken.current = null;
       return;
+    }
+    if (!presentationLoaded.current) {
+      presentationLoaded.current = true;
+      previousPreviewToken.current = loadPreviewPresentation(window.sessionStorage)?.previewToken ?? null;
     }
 
     const controller = new AbortController();
@@ -67,6 +76,7 @@ export function CartView({
       })
       .then((nextPreview) => {
         previousPreviewToken.current = nextPreview.previewToken;
+        savePreviewPresentation(window.sessionStorage, nextPreview);
         setAcknowledgedToken((current) =>
           current === nextPreview.previewToken ? current : null,
         );

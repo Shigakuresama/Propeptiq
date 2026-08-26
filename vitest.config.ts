@@ -18,6 +18,9 @@ export default defineConfig({
       "local-payment-provider": fileURLToPath(
         new URL("./src/commerce/local-payment-provider.ts", import.meta.url),
       ),
+      "local-commerce-harness-routes": fileURLToPath(
+        new URL("./src/commerce/local-commerce-harness-routes.ts", import.meta.url),
+      ),
     },
     tsconfigPaths: true,
   },

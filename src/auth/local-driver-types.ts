@@ -6,7 +6,15 @@ import type {
   AdminReadSnapshotFor,
 } from "@/admin/admin-read";
 import type { VerifiedIdentity } from "@/auth/identity";
+import type { CheckoutRepository } from "@/commerce/checkout-service";
+import type { ShippingQuotePort, TaxQuotePort } from "@/commerce/checkout-ports";
+import type { CheckoutSuccessReadModel } from "@/commerce/checkout-success-read";
+import type { FulfillmentCommandRepository } from "@/commerce/fulfillment-service";
+import type { PaymentProvider } from "@/commerce/payment-provider";
+import type { RefundCommandRepository } from "@/commerce/refund-service";
+import type { ProviderSessionRepository } from "@/db/repositories/provider-session-repository";
 import type { Principal } from "@/domain/authorization";
+import type { RateLimitStore } from "@/security/rate-limit";
 import type { StorageVerifier } from "@/security/storage";
 
 export type LocalActorOption = Readonly<{
@@ -36,6 +44,57 @@ export type LocalAdminSnapshot = Readonly<{
   commandDefaults?: Readonly<Record<string, string>>;
 }>;
 
+export type LocalCommerceInspectionV1 = Readonly<{
+  schemaVersion: 1;
+  revision: number;
+  orderCount: number;
+  attemptCount: number;
+  providerSessionCount: number;
+  reviewRequestCount: number;
+  reservationCount: number;
+  paymentTransitionCount: number;
+  refundCount: number;
+  releaseCount: number;
+  shipmentHandoffCount: number;
+  deliveryCount: number;
+  exceptionCount: number;
+  effectCount: number;
+  lastOrderUpdatedAt: string | null;
+}>;
+
+export type LocalCommerceDriverV1 = Readonly<{
+  checkoutRepository: CheckoutRepository;
+  providerSessionRepository: ProviderSessionRepository;
+  paymentProvider: PaymentProvider;
+  shippingQuotePort: ShippingQuotePort;
+  taxQuotePort: TaxQuotePort;
+  rateLimitStore: RateLimitStore;
+  refundRepository: RefundCommandRepository;
+  fulfillmentRepository: FulfillmentCommandRepository;
+  reset: () => LocalCommerceInspectionV1;
+  inspect: () => LocalCommerceInspectionV1;
+  loadSyntheticHostedSession: (input: Readonly<{
+    ownerUserId: string;
+    sessionId: string;
+  }>) => Readonly<{ orderId: string; sessionId: string; totalMinor: number; currency: "USD" }> | null;
+  returnWithoutEvent: (input: Readonly<{
+    ownerUserId: string;
+    sessionId: string;
+  }>) => Readonly<{ status: "pending"; orderId: string }> | null;
+  completeWithInternallySignedEvent: (input: Readonly<{
+    ownerUserId: string;
+    sessionId: string;
+    secret: string;
+  }>) => Readonly<{ status: "paid"; orderId: string }> | null;
+  loadSuccess: (ownerUserId: string, orderId: string) => CheckoutSuccessReadModel | null;
+  listOrders: (ownerUserId: string) => readonly OrderSummary[];
+  loadOrder: (ownerUserId: string, orderId: string) => OrderDetail | null;
+  commandTargets: () => Readonly<{ refundId: string; fulfillmentOrderId: string }>;
+  adminSnapshotItems: (
+    resource: "orders" | "refunds" | "shipments",
+  ) => readonly Readonly<Record<string, unknown>>[];
+}>;
+
 export type LocalTestDriver = Readonly<{
   actorOptions: readonly LocalActorOption[];
   signActor: (actorKey: string, secret: string) => string | null;
@@ -53,4 +112,5 @@ export type LocalTestDriver = Readonly<{
   readAdminSnapshot: <Resource extends AdminReadResource>(
     resource: Resource,
   ) => AdminReadSnapshotFor<Resource>;
+  commerce: LocalCommerceDriverV1;
 }>;

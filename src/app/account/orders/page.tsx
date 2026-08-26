@@ -27,7 +27,13 @@ export default async function OrdersPage() {
         <ul className="mt-8 grid gap-4 p-0">
           {orders.map((order) => (
             <li key={order.id} className="record-card grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
-              <div><p className="font-heading text-2xl">Order {order.id}</p><p className="mt-2 text-base text-muted-ink">{new Date(order.createdAt).toLocaleDateString("en-US")} · {order.state.replaceAll("_", " ")}</p></div>
+              <div>
+                <p className="font-heading text-2xl">Order {order.id}</p>
+                <p className="mt-2 text-base text-muted-ink">{new Date(order.createdAt).toLocaleDateString("en-US")} · {order.state.replaceAll("_", " ")}</p>
+                <p className="mt-2 text-base text-muted-ink">
+                  Payment: {order.paymentState.replaceAll("_", " ")} · Refund: {order.refundState} · Shipment: {order.shipmentState.replaceAll("_", " ")}
+                </p>
+              </div>
               <div className="sm:text-right"><p className="text-xl font-semibold tabular-nums">{money(order.totalMinor, order.currency)}</p><Link href={`/account/orders/${order.id}`} className="record-link mt-2 inline-flex min-h-11 items-center">View order</Link></div>
             </li>
           ))}

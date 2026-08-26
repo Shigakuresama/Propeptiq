@@ -649,7 +649,16 @@ async function loadSnapshot(
         state: string;
         itemCount: number | string;
         verifiedPaymentEventCount: number | string;
+        failedPaymentEventCount: number | string;
+        refundCount: number | string;
+        confirmedRefundMinor: number | string;
+        pendingRefundCount: number | string;
+        failedRefundCount: number | string;
+        releaseCount: number | string;
         currentReleaseState: "issued" | "revoked" | "expired" | "consumed" | null;
+        releaseVersion: number | string | null;
+        shipmentCount: number | string;
+        shipmentState: "pending" | "handed_off" | "delivered" | "exception" | null;
         createdAt: Date | string;
         updatedAt: Date | string;
       }, SnapshotItem<"orders">>(
@@ -667,9 +676,32 @@ async function loadSnapshot(
                  (SELECT count(*) FROM payment_events pe
                    WHERE pe.order_id = o.id AND pe.event_type = 'payment_verified')
                    AS "verifiedPaymentEventCount",
+                 (SELECT count(*) FROM payment_events pe
+                   WHERE pe.order_id = o.id AND pe.event_type = 'payment_failed')
+                   AS "failedPaymentEventCount",
+                 (SELECT count(*) FROM refunds r WHERE r.order_id = o.id)
+                   AS "refundCount",
+                 (SELECT coalesce(sum(r.confirmed_amount_minor), 0) FROM refunds r
+                   WHERE r.order_id = o.id AND r.status = 'succeeded')
+                   AS "confirmedRefundMinor",
+                 (SELECT count(*) FROM refunds r
+                   WHERE r.order_id = o.id AND r.status IN ('requested','submitted'))
+                   AS "pendingRefundCount",
+                 (SELECT count(*) FROM refunds r
+                   WHERE r.order_id = o.id AND r.status IN ('failed','cancelled'))
+                   AS "failedRefundCount",
+                 (SELECT count(*) FROM fulfillment_releases fr WHERE fr.order_id = o.id)
+                   AS "releaseCount",
                  (SELECT fr.state FROM fulfillment_releases fr
                    WHERE fr.order_id = o.id ORDER BY fr.version DESC LIMIT 1)
                    AS "currentReleaseState",
+                 (SELECT fr.version FROM fulfillment_releases fr
+                   WHERE fr.order_id = o.id ORDER BY fr.version DESC LIMIT 1)
+                   AS "releaseVersion",
+                 (SELECT count(*) FROM shipments s WHERE s.order_id = o.id)
+                   AS "shipmentCount",
+                 (SELECT s.state FROM shipments s WHERE s.order_id = o.id)
+                   AS "shipmentState",
                  o.created_at AS "createdAt", o.updated_at AS "updatedAt"
           FROM orders o
           JOIN attestation_acceptances aa ON aa.id = o.attestation_acceptance_id
@@ -677,20 +709,79 @@ async function loadSnapshot(
           ORDER BY o.updated_at DESC, o.id DESC
           LIMIT $1
         `,
-        (row) => ({
-          ...row,
-          attestationVersion: safeInteger(row.attestationVersion),
-          subtotalMinor: safeInteger(row.subtotalMinor),
-          discountMinor: safeInteger(row.discountMinor),
-          taxMinor: safeInteger(row.taxMinor),
-          shippingMinor: safeInteger(row.shippingMinor),
-          totalMinor: safeInteger(row.totalMinor),
-          itemCount: safeInteger(row.itemCount),
-          verifiedPaymentEventCount: safeInteger(row.verifiedPaymentEventCount),
-          providerExecutionBoundary: "task6_managed" as const,
-          createdAt: toIso(row.createdAt),
-          updatedAt: toIso(row.updatedAt),
-        }),
+        (row) => {
+          const subtotalMinor = safeInteger(row.subtotalMinor);
+          const discountMinor = safeInteger(row.discountMinor);
+          const taxMinor = safeInteger(row.taxMinor);
+          const shippingMinor = safeInteger(row.shippingMinor);
+          const totalMinor = safeInteger(row.totalMinor);
+          const verifiedPaymentEventCount = safeInteger(row.verifiedPaymentEventCount);
+          const failedPaymentEventCount = safeInteger(row.failedPaymentEventCount);
+          const refundCount = safeInteger(row.refundCount);
+          const confirmedRefundMinor = safeInteger(row.confirmedRefundMinor);
+          const pendingRefundCount = safeInteger(row.pendingRefundCount);
+          const failedRefundCount = safeInteger(row.failedRefundCount);
+          const releaseCount = safeInteger(row.releaseCount);
+          const releaseVersion = nullableSafeInteger(row.releaseVersion);
+          const shipmentCount = safeInteger(row.shipmentCount);
+          if (
+            [subtotalMinor, discountMinor, taxMinor, shippingMinor, totalMinor,
+              verifiedPaymentEventCount, failedPaymentEventCount, refundCount,
+              confirmedRefundMinor, pendingRefundCount, failedRefundCount,
+              releaseCount, shipmentCount].some((value) => value < 0) ||
+            verifiedPaymentEventCount > 1 || discountMinor > subtotalMinor ||
+            totalMinor !== subtotalMinor - discountMinor + shippingMinor + taxMinor ||
+            confirmedRefundMinor > totalMinor || pendingRefundCount > refundCount ||
+            failedRefundCount > refundCount || pendingRefundCount + failedRefundCount > refundCount ||
+            (releaseCount === 0) !== (row.currentReleaseState === null) ||
+            (releaseCount === 0) !== (releaseVersion === null) ||
+            (releaseVersion !== null && (releaseVersion < 1 || releaseVersion > releaseCount)) ||
+            shipmentCount > 1 || (shipmentCount === 0) !== (row.shipmentState === null)
+          ) {
+            throw new Error("Incoherent commerce lifecycle in admin read model");
+          }
+          const succeededRefundCount = refundCount - pendingRefundCount - failedRefundCount;
+          if ((confirmedRefundMinor > 0) !== (succeededRefundCount > 0)) {
+            throw new Error("Incoherent commerce lifecycle in admin read model");
+          }
+          const refundState = pendingRefundCount > 0
+            ? "pending" as const
+            : confirmedRefundMinor === totalMinor && totalMinor > 0
+              ? "full" as const
+              : confirmedRefundMinor > 0
+                ? "partial" as const
+                : refundCount > 0 && failedRefundCount === refundCount
+                  ? "failed" as const
+                  : "none" as const;
+          return {
+            id: row.id,
+            buyerUserId: row.buyerUserId,
+            buyerStatusSnapshot: row.buyerStatusSnapshot,
+            attestationAcceptanceId: row.attestationAcceptanceId,
+            attestationVersion: safeInteger(row.attestationVersion),
+            destinationStateCode: row.destinationStateCode,
+            currency: row.currency,
+            subtotalMinor,
+            discountMinor,
+            taxMinor,
+            shippingMinor,
+            totalMinor,
+            state: row.state,
+            itemCount: safeInteger(row.itemCount),
+            verifiedPaymentEventCount,
+            paymentState: verifiedPaymentEventCount === 1
+              ? "paid" as const
+              : failedPaymentEventCount > 0 ? "failed" as const : "pending_verification" as const,
+            refundState,
+            holdState: row.state === "paid_on_hold" ? "active" as const : "none" as const,
+            currentReleaseState: row.currentReleaseState,
+            releaseVersion,
+            shipmentState: row.shipmentState,
+            providerExecutionBoundary: "task6_managed" as const,
+            createdAt: toIso(row.createdAt),
+            updatedAt: toIso(row.updatedAt),
+          };
+        },
       );
       return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "orders" }>;
     }

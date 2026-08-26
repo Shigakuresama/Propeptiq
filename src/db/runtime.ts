@@ -11,6 +11,10 @@ export type RuntimeDatabaseClient = Readonly<{
   ) => Promise<Readonly<{ rows: T[] }>>;
 }>;
 
+export type RuntimeDatabaseSession = RuntimeDatabaseClient & Readonly<{
+  release: (destroy?: boolean) => void;
+}>;
+
 let poolPromise: Promise<import("pg").Pool> | null = null;
 let poolUrl: string | null = null;
 
@@ -55,6 +59,20 @@ function asQueryPort(client: PoolClient): RuntimeDatabaseClient {
       return { rows: result.rows };
     },
   };
+}
+
+export async function connectRuntimeDatabaseSession(
+  environment: ServerEnv,
+): Promise<RuntimeDatabaseSession> {
+  const pool = await getPool(environment);
+  const client = await pool.connect();
+  const queryPort = asQueryPort(client);
+  return Object.freeze({
+    query: queryPort.query,
+    release(destroy = false) {
+      client.release(destroy);
+    },
+  });
 }
 
 export async function withRuntimeTransaction<T>(

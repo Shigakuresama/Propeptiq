@@ -1,6 +1,7 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { listOwnOrders, type AccountReadQueryPort } from "@/account/account-read";
 import type { AdminReadResource } from "@/admin/admin-read";
 import type { VerifiedIdentity } from "@/auth/identity";
 import {
@@ -438,7 +439,12 @@ describe("Task 5 production admin read model", () => {
         totalMinor: 7000,
         itemCount: 1,
         verifiedPaymentEventCount: 1,
+        paymentState: "paid",
+        refundState: "pending",
+        holdState: "none",
         currentReleaseState: "issued",
+        releaseVersion: 1,
+        shipmentState: "pending",
         providerExecutionBoundary: "task6_managed",
       }],
     });
@@ -470,6 +476,48 @@ describe("Task 5 production admin read model", () => {
         correlationId: "read-fixture-correlation",
       }],
     });
+  });
+
+  it("fails the order projection closed when signed payment authority is ambiguous", async () => {
+    await database.exec(`
+      INSERT INTO provider_events
+        (id, provider, provider_event_id, payload_hash, status, attempt_count,
+         received_at, processed_at, event_type, schema_version,
+         normalized_payload, provider_created_at, livemode)
+      VALUES
+        ('30000000-0000-4000-8000-000000000024', 'synthetic-provider',
+         'ambiguous-provider-event', '${"e".repeat(64)}', 'processed', 1,
+         '2026-08-25T11:00:00.000Z', '2026-08-25T11:00:01.000Z',
+         'checkout.session.completed', 1,
+         '{"providerEventId":"ambiguous-provider-event","eventType":"checkout.session.completed","schemaVersion":1,"livemode":false}'::jsonb,
+         '2026-08-25T11:00:00.000Z', false);
+      INSERT INTO payment_events
+        (id, provider_event_id, order_id, event_type, provider_payment_id,
+         idempotency_key, amount_minor, currency, occurred_at, created_at)
+      VALUES
+        ('30000000-0000-4000-8000-000000000025',
+         '30000000-0000-4000-8000-000000000024', '${ids.order}',
+         'payment_verified', 'ambiguous-payment', 'ambiguous-payment-key',
+         7000, 'USD', '2026-08-25T11:00:00.000Z', '2026-08-25T11:00:00.000Z');
+    `);
+    await expect(repository().readSnapshot({ ...actor, resource: "orders" }))
+      .rejects.toThrow(/coherent commerce lifecycle/iu);
+  });
+
+  it("projects the same bounded lifecycle states into the owner account list", async () => {
+    const orders = await listOwnOrders(
+      { query: database.query.bind(database) as AccountReadQueryPort["query"] },
+      ids.buyer,
+    );
+    expect(orders).toEqual([expect.objectContaining({
+      id: ids.order,
+      paymentState: "paid",
+      refundState: "pending",
+      holdState: "none",
+      releaseState: "issued",
+      shipmentState: "pending",
+    })]);
+    expect(JSON.stringify(orders)).not.toMatch(/NEVER-EXPOSE|carrier|tracking|provider/iu);
   });
 
   it("uses stable newest-first ordering and reports truncation after 100 rows", async () => {

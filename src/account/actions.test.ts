@@ -56,6 +56,7 @@ function repositories(): RequestRepositories {
     loadCurrentAttestation: async () => ({ version: 1, policyText: "Research only." }),
     listOrders: async () => [],
     loadOrder: async () => null,
+    loadCheckoutSuccess: async () => null,
     readAdminSnapshot: async (resource) => ({
       resource,
       limit: 100,

@@ -25,9 +25,17 @@ export function assertMutationOrigin(
     ? new URL(environment.APP_ORIGIN).origin
     : requestOrigin;
   const normalizedSuppliedOrigin = new URL(suppliedOrigin).origin;
+  const requestUrl = new URL(requestOrigin);
+  const expectedUrl = new URL(expectedOrigin);
+  const localFrameworkCanonicalization =
+    environment.APP_ENV === "local" &&
+    isLocalHostname(requestUrl.hostname) &&
+    isLocalHostname(expectedUrl.hostname) &&
+    requestUrl.protocol === expectedUrl.protocol &&
+    request.headers.get("host")?.toLowerCase() === expectedUrl.host.toLowerCase();
   if (
     normalizedSuppliedOrigin !== expectedOrigin ||
-    requestOrigin !== expectedOrigin
+    (requestOrigin !== expectedOrigin && !localFrameworkCanonicalization)
   ) {
     throw new Error("Mutation origin does not match APP_ORIGIN");
   }
