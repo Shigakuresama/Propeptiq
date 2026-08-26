@@ -157,16 +157,31 @@ export type CheckoutPrepareResult =
   | Readonly<{ status: "idempotency_conflict" }>
   | CheckoutLoadedResult;
 
-export type DefiniteFailureReleaseInput = Readonly<{
+type DefiniteFailureReleaseCommon = Readonly<{
   authority: "authoritative_provider_terminal";
-  cause: "definite_rejection" | "verified_expiry";
   providerEvidenceId: string;
   attemptId: string;
   orderId: string;
   provider: "stripe" | "local_test";
   providerIdempotencyKey: string;
-  targetAttemptStatus: "failed" | "expired";
 }>;
+
+export type DefiniteFailureReleaseInput =
+  | (DefiniteFailureReleaseCommon &
+      Readonly<{
+        cause: "definite_rejection";
+        targetAttemptStatus: "failed";
+      }>)
+  | (DefiniteFailureReleaseCommon &
+      Readonly<{
+        cause: "verified_expiry";
+        providerSessionId: string;
+        providerLivemode: boolean;
+        providerScope: string;
+        amountMinor: number;
+        currency: "USD";
+        targetAttemptStatus: "expired";
+      }>);
 
 export type DefiniteFailureReleaseResult = Readonly<{
   status: "released" | "already_released" | "payment_verified" | "conflict";

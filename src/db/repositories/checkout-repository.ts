@@ -1546,6 +1546,15 @@ function isDefiniteFailureInput(value: unknown): value is DefiniteFailureRelease
     "provider",
     "providerIdempotencyKey",
     "targetAttemptStatus",
+    ...(candidate.cause === "verified_expiry"
+      ? [
+          "providerSessionId",
+          "providerLivemode",
+          "providerScope",
+          "amountMinor",
+          "currency",
+        ]
+      : []),
   ].toSorted();
   return (
     keys.length === expected.length &&
@@ -1554,6 +1563,13 @@ function isDefiniteFailureInput(value: unknown): value is DefiniteFailureRelease
     ((candidate.cause === "definite_rejection" && candidate.targetAttemptStatus === "failed") ||
       (candidate.cause === "verified_expiry" && candidate.targetAttemptStatus === "expired")) &&
     nonblank(candidate.providerEvidenceId) &&
+    (candidate.cause !== "verified_expiry" ||
+      (nonblank(candidate.providerSessionId) &&
+        typeof candidate.providerLivemode === "boolean" &&
+        nonblank(candidate.providerScope) &&
+        Number.isSafeInteger(candidate.amountMinor) &&
+        candidate.amountMinor > 0 &&
+        candidate.currency === "USD")) &&
     isCanonicalUuid(candidate.attemptId) &&
     isCanonicalUuid(candidate.orderId) &&
     (candidate.provider === "stripe" || candidate.provider === "local_test") &&
@@ -1590,12 +1606,16 @@ export async function releaseCheckoutReservationsForDefiniteFailureInTransaction
     provider: string | null;
     providerRequestId: string | null;
     providerSessionId: string | null;
+    providerLivemode: boolean | null;
+    providerScope: string | null;
   };
   const attempt = await client.query<AttemptRow>(
     `SELECT status, order_id::text AS "orderId",
             buyer_user_id::text AS "buyerUserId", provider,
             provider_request_id AS "providerRequestId",
-            provider_session_id AS "providerSessionId"
+             provider_session_id AS "providerSessionId",
+             provider_livemode AS "providerLivemode",
+             provider_scope AS "providerScope"
      FROM checkout_attempts WHERE id = $1::uuid FOR UPDATE`,
     [input.attemptId],
   );
@@ -1606,16 +1626,32 @@ export async function releaseCheckoutReservationsForDefiniteFailureInTransaction
     attemptRow.buyerUserId !== buyerUserId ||
     attemptRow.provider !== input.provider ||
     attemptRow.providerRequestId !== input.providerIdempotencyKey ||
-    (input.targetAttemptStatus === "expired" && attemptRow.providerSessionId === null)
+    (input.cause === "verified_expiry" &&
+      (attemptRow.providerSessionId !== null &&
+        attemptRow.providerSessionId !== input.providerSessionId ||
+        attemptRow.providerLivemode !== input.providerLivemode ||
+        attemptRow.providerScope !== input.providerScope))
   ) {
     return { status: "conflict" };
   }
-  type OrderRow = { state: string };
+  type OrderRow = {
+    state: string;
+    totalMinor: number | string;
+    currency: string;
+  };
   const order = await client.query<OrderRow>(
-    `SELECT state FROM orders WHERE id = $1::uuid FOR UPDATE`,
+    `SELECT state, total_minor AS "totalMinor", currency
+     FROM orders WHERE id = $1::uuid FOR UPDATE`,
     [input.orderId],
   );
   if (order.rows.length !== 1) return { status: "conflict" };
+  if (
+    input.cause === "verified_expiry" &&
+    (safeInteger(order.rows[0]!.totalMinor) !== input.amountMinor ||
+      order.rows[0]!.currency !== input.currency)
+  ) {
+    return { status: "conflict" };
+  }
 
   type PaymentRow = { eventType: string };
   const payments = await client.query<PaymentRow>(
@@ -1656,7 +1692,10 @@ export async function releaseCheckoutReservationsForDefiniteFailureInTransaction
   }
   if (
     !orderStatesBeforePayment.has(order.rows[0]!.state) ||
-    !["created", "open", "provider_unknown"].includes(attemptRow.status) ||
+    !(
+      ["created", "open", "provider_unknown"].includes(attemptRow.status) ||
+      (input.cause === "verified_expiry" && attemptRow.status === "completed")
+    ) ||
     reservations.rows.some(
       (reservation) =>
         reservation.state !== "active" ||
@@ -1716,9 +1755,16 @@ export async function releaseCheckoutReservationsForDefiniteFailureInTransaction
     );
   }
   await client.query(
-    `UPDATE checkout_attempts SET status = $2::checkout_attempt_status
+    `UPDATE checkout_attempts
+     SET status = $2::checkout_attempt_status,
+         provider_session_id = CASE WHEN $2 = 'expired'
+           THEN COALESCE(provider_session_id, $3) ELSE provider_session_id END
      WHERE id = $1::uuid`,
-    [input.attemptId, input.targetAttemptStatus],
+    [
+      input.attemptId,
+      input.targetAttemptStatus,
+      input.cause === "verified_expiry" ? input.providerSessionId : null,
+    ],
   );
   await client.query(
     `UPDATE orders SET state = $2::order_state, updated_at = now()

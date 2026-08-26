@@ -1380,4 +1380,56 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
        WHERE order_id = '${prepared.prepared.orderId}' AND event_type = 'release') AS "releaseEvents"`);
     expect(retained.rows[0]).toEqual({ active: 3, releaseEvents: 0 });
   });
+
+  it("releases a completed unpaid attempt once only with exact signed event and session evidence", async () => {
+    const key = "30000000-0000-4000-8000-000000000111";
+    const prepared = await quoteAndPrepare(key);
+    if (prepared.prepared.status !== "prepared") throw new Error("expected prepared");
+    const providerSessionId = "cs_local_synthetic_completed_unpaid";
+    await client.query(
+      `UPDATE checkout_attempts
+       SET status = 'completed', provider_session_id = $2
+       WHERE id = $1::uuid`,
+      [prepared.prepared.attemptId, providerSessionId],
+    );
+    const input = {
+      authority: "authoritative_provider_terminal" as const,
+      cause: "verified_expiry" as const,
+      providerEvidenceId: "evt_synthetic_signed_expiry",
+      providerSessionId,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+      amountMinor: 20_025,
+      currency: "USD" as const,
+      attemptId: prepared.prepared.attemptId,
+      orderId: prepared.prepared.orderId,
+      provider: "local_test" as const,
+      providerIdempotencyKey: `checkout_attempt:${prepared.prepared.attemptId}`,
+      targetAttemptStatus: "expired" as const,
+    };
+    await expect(prepared.repository.releaseDefiniteFailure(input)).resolves.toEqual({
+      status: "released",
+    });
+    await expect(prepared.repository.releaseDefiniteFailure(input)).resolves.toEqual({
+      status: "already_released",
+    });
+    await expect(prepared.repository.releaseDefiniteFailure({
+      ...input,
+      providerSessionId: "cs_local_synthetic_wrong_session",
+    })).resolves.toEqual({ status: "conflict" });
+
+    const state = await client.query(`SELECT
+      (SELECT status FROM checkout_attempts WHERE id = '${prepared.prepared.attemptId}') AS attempt_status,
+      (SELECT state FROM orders WHERE id = '${prepared.prepared.orderId}') AS order_state,
+      (SELECT count(*)::int FROM inventory_reservations
+       WHERE order_id = '${prepared.prepared.orderId}' AND state = 'expired') AS expired,
+      (SELECT count(*)::int FROM inventory_events
+       WHERE order_id = '${prepared.prepared.orderId}' AND event_type = 'release') AS release_events`);
+    expect(state.rows[0]).toEqual({
+      attempt_status: "expired",
+      order_state: "cancelled",
+      expired: 3,
+      release_events: 3,
+    });
+  });
 });

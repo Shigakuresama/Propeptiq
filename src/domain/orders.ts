@@ -56,6 +56,11 @@ export type OrderEvent =
       providerEvidenceId: string;
     }>
   | Readonly<{
+      type: "provider_financial_hold";
+      source: "verified_provider_event";
+      providerEvidenceId: string;
+    }>
+  | Readonly<{
       type: "post_payment_hold";
       decision: FulfillmentDecision;
     }>
@@ -570,6 +575,24 @@ export function transitionOrder(
       snapshot.state === "paid_on_hold" ||
       snapshot.state === "ready_for_fulfillment" ||
       snapshot.state === "fulfillment_in_progress") &&
+    event.type === "provider_financial_hold"
+  ) {
+    if (
+      event.source !== "verified_provider_event" ||
+      !isNonBlankString(event.providerEvidenceId)
+    ) {
+      return fail("missing_payment_evidence");
+    }
+    return succeed("paid_on_hold", {
+      reviewRequestId: null,
+      fulfillmentReleaseVersion: null,
+    });
+  }
+  if (
+    (snapshot.state === "paid_pending_fulfillment" ||
+      snapshot.state === "paid_on_hold" ||
+      snapshot.state === "ready_for_fulfillment" ||
+      snapshot.state === "fulfillment_in_progress") &&
     event.type === "post_payment_hold"
   ) {
     if (
@@ -734,7 +757,7 @@ export function transitionPayment(
   }
 
   if (
-    snapshot.state === "unpaid" &&
+    (snapshot.state === "unpaid" || snapshot.state === "paid") &&
     event.type === "verified_payment"
   ) {
     if (
@@ -751,6 +774,9 @@ export function transitionPayment(
       event.amountMinor !== snapshot.orderAmountMinor
     ) {
       return fail("payment_mismatch");
+    }
+    if (snapshot.state === "paid") {
+      return Object.freeze({ ok: true, value: snapshot });
     }
     return Object.freeze({
       ok: true,

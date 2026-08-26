@@ -390,10 +390,17 @@ describe("provider Checkout orchestration", () => {
     });
     expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
     expect(provider.retrieveCheckoutSession).toHaveBeenCalledTimes(2);
+    const durable = fixture.getDurable();
+    if (durable === null) throw new Error("expected durable checkout request");
     expect(fixture.releaseDefiniteFailure).toHaveBeenCalledWith(expect.objectContaining({
       authority: "authoritative_provider_terminal",
       cause: "verified_expiry",
       providerEvidenceId: "cs_local_synthetic_known",
+      providerSessionId: "cs_local_synthetic_known",
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+      amountMinor: durable.totalMinor,
+      currency: "USD",
       targetAttemptStatus: "expired",
     }));
   });

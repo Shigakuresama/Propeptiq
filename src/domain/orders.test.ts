@@ -899,6 +899,26 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
       }),
     ).toEqual(held);
   });
+
+  it("places verified provider refund anomalies on financial hold without calling them disputes", () => {
+    const held = expectOrderSuccess(paidPending(), {
+      type: "provider_financial_hold",
+      source: "verified_provider_event",
+      providerEvidenceId: "synthetic-refund-anomaly-1",
+    } as never);
+    expect(held).toMatchObject({
+      state: "paid_on_hold",
+      reviewRequestId: null,
+      fulfillmentReleaseVersion: null,
+    });
+    expect(
+      expectOrderSuccess(held, {
+        type: "provider_financial_hold",
+        source: "verified_provider_event",
+        providerEvidenceId: "synthetic-refund-anomaly-1",
+      } as never),
+    ).toEqual(held);
+  });
 });
 
 describe("transitionPayment", () => {
@@ -925,6 +945,35 @@ describe("transitionPayment", () => {
       value: { ...unpaid, state: "paid", paidAmountMinor: 2_850 },
     });
     expect(unpaid.state).toBe("unpaid");
+  });
+
+  it("validates an exact verified-payment replay without regressing paid state", () => {
+    const paid: PaymentSnapshot = {
+      state: "paid",
+      currency: "USD",
+      orderAmountMinor: 2_850,
+      paidAmountMinor: 2_850,
+      refundedAmountMinor: 0,
+      pendingRefundAmountMinor: 0,
+    };
+
+    expect(transitionPayment(paid, {
+      type: "verified_payment",
+      source: "verified_provider_event",
+      amountMinor: 2_850,
+      currency: "USD",
+      providerEvidenceId: "synthetic-provider-event-replay",
+    })).toEqual({ ok: true, value: paid });
+    expect(transitionPayment(paid, {
+      type: "verified_payment",
+      source: "verified_provider_event",
+      amountMinor: 2_849,
+      currency: "USD",
+      providerEvidenceId: "synthetic-provider-event-replay",
+    })).toMatchObject({
+      ok: false,
+      error: { code: "payment_mismatch" },
+    });
   });
 
   it.each([
