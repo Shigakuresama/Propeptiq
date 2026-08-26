@@ -197,6 +197,24 @@ describe("NormalizedProviderEventV1", () => {
       },
       {
         id: "re_synthetic_6e",
+        metadata: "not-an-object",
+        payment_intent: null,
+        charge: null,
+        amount: 500,
+        currency: "usd",
+        status: "pending",
+      },
+      {
+        id: "re_synthetic_6e",
+        metadata: { orderId: "not-a-uuid", refundId: refundRequestId },
+        payment_intent: null,
+        charge: null,
+        amount: 500,
+        currency: "usd",
+        status: "pending",
+      },
+      {
+        id: "re_synthetic_6e",
         metadata: {},
         payment_intent: null,
         charge: null,
@@ -313,20 +331,27 @@ describe("NormalizedProviderEventV1", () => {
     ).toMatchObject({ status: "conflict", reason: "malformed_known_event" });
   });
 
-  it("treats null refund metadata as an uncorrelated provider observation", () => {
-    expect(
-      normalizeStripeProviderEventV1(
-        stripeEvent("refund.updated", {
-          id: "re_synthetic_6e_null_metadata",
-          metadata: null,
-          payment_intent: "pi_synthetic_6e",
-          charge: "ch_synthetic_6e",
-          amount: 500,
-          currency: "usd",
-          status: "pending",
-        }),
-      ),
-    ).toMatchObject({
+  it.each([
+    ["absent", {}],
+    ["undefined", { metadata: undefined }],
+    ["null", { metadata: null }],
+    ["empty", { metadata: {} }],
+  ])("treats %s refund metadata as an uncorrelated provider observation", (
+    _label,
+    metadata,
+  ) => {
+    const normalized = normalizeStripeProviderEventV1(
+      stripeEvent("refund.updated", {
+        id: "re_synthetic_6e_observed_without_correlation",
+        ...metadata,
+        payment_intent: "pi_synthetic_6e",
+        charge: "ch_synthetic_6e",
+        amount: 500,
+        currency: "usd",
+        status: "pending",
+      }),
+    );
+    expect(normalized).toMatchObject({
       status: "normalized",
       event: {
         kind: "refund",
@@ -334,6 +359,7 @@ describe("NormalizedProviderEventV1", () => {
         refundRequestId: null,
       },
     });
+    expect(JSON.stringify(normalized)).not.toContain("metadata");
   });
 
   it("retains only common identity for an unsupported signed event", () => {

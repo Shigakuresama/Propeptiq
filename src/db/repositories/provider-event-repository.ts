@@ -450,11 +450,11 @@ async function registerInTransaction(
   if (!exactCommonCoherence(row, input)) {
     return markConflict(client, input, row, "immutable_common_mismatch");
   }
+  if (row.status === "processed") return Object.freeze({ status: "processed" });
+  if (row.status === "conflict") return Object.freeze({ status: "conflict" });
   if (terminalConflict) {
     return markConflict(client, input, row, "malformed_known_event");
   }
-  if (row.status === "processed") return Object.freeze({ status: "processed" });
-  if (row.status === "conflict") return Object.freeze({ status: "conflict" });
 
   const leaseExpired =
     row.status === "processing" &&
@@ -2020,6 +2020,7 @@ async function disputeJournalsHaveExactAuthority(
       envelope.livemode !== authority.expectedLivemode ||
       envelope.disputeId !== event.disputeId ||
       envelope.paymentIntentId !== context.payment.providerPaymentId ||
+      envelope.chargeId !== event.chargeId ||
       envelope.amountMinor !== safeNonnegativeInteger(journal.amountMinor) ||
       envelope.currency !== journal.currency.toLowerCase() ||
       disputeJournalEventType(envelope) !== journal.eventType

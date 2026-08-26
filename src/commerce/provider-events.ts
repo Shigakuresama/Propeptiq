@@ -333,7 +333,9 @@ function normalizedCheckout(
 function refundCorrelation(
   value: unknown,
 ): Readonly<{ orderId: string | null; refundRequestId: string | null }> | null {
-  if (value === null) return { orderId: null, refundRequestId: null };
+  if (value === undefined || value === null) {
+    return { orderId: null, refundRequestId: null };
+  }
   const metadata = record(value);
   if (metadata === null) return null;
   const hasOrder = Object.hasOwn(metadata, "orderId");

@@ -2072,6 +2072,58 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
     });
   });
 
+  it("conflicts a dispute status change that switches the normalized charge authority", async () => {
+    const repo = repository();
+    await seedVerifiedPayment(repo);
+    const providerDisputeId = "dp_synthetic_6e_charge_switch";
+    const recorded = await claim(
+      disputeNormalization(
+        "evt_synthetic_6e_charge_switch_recorded",
+        "needs_response",
+        { id: providerDisputeId, charge: "ch_synthetic_6e_charge_original" },
+      ),
+      "charge-switch-dispute-recorded",
+    );
+    await expect(repo.processClaim({
+      claim: recorded,
+      authority: authority(),
+      now,
+    })).resolves.toEqual({ status: "processed" });
+
+    const resolved = await claim(
+      disputeNormalization(
+        "evt_synthetic_6e_charge_switch_resolved",
+        "won",
+        { id: providerDisputeId, charge: "ch_synthetic_6e_charge_changed" },
+      ),
+      "charge-switch-dispute-resolved",
+    );
+    await expect(repo.processClaim({
+      claim: resolved,
+      authority: authority(),
+      now,
+    })).resolves.toEqual({ status: "conflict" });
+
+    const resolvedDatabaseEventId = keyedUuid(
+      "database-event:charge-switch-dispute-resolved",
+    );
+    const state = await client.query(`SELECT
+      (SELECT count(*)::int FROM payment_events
+       WHERE provider_payment_id = '${providerDisputeId}'
+         AND event_type IN ('dispute_recorded', 'dispute_resolved')) AS journals,
+      (SELECT count(*)::int FROM downstream_effects
+       WHERE provider_event_id = '${resolvedDatabaseEventId}') AS resolved_effects,
+      (SELECT state FROM orders WHERE id = '${ids.order}') AS order_state,
+      (SELECT status FROM provider_events
+       WHERE id = '${resolvedDatabaseEventId}') AS inbox_status`);
+    expect(state.rows[0]).toEqual({
+      journals: 1,
+      resolved_effects: 0,
+      order_state: "paid_on_hold",
+      inbox_status: "conflict",
+    });
+  });
+
   it("processes dispute record and resolve when exact payment provenance is unchanged", async () => {
     const repo = repository();
     await seedVerifiedPayment(repo);

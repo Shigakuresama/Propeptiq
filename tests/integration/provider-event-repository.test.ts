@@ -58,6 +58,20 @@ function paidCheckoutNormalization() {
   return result;
 }
 
+function malformedPaidCheckoutNormalization() {
+  const result = normalizeStripeProviderEventV1({
+    id: "evt_synthetic_6e_fenced_checkout",
+    type: "checkout.session.completed",
+    created: 1_787_659_200,
+    livemode: false,
+    data: { object: {} },
+  });
+  if (result.status !== "conflict") {
+    throw new Error("malformed checkout fixture did not conflict");
+  }
+  return result;
+}
+
 function advisoryFenceKey(identity: string): string {
   return createHash("sha256")
     .update(identity, "utf8")
@@ -214,6 +228,61 @@ describe("provider event Transaction A on PGlite", () => {
     await expect(repo.registerAndClaim(registration())).resolves.toEqual({
       status: "conflict",
     });
+  });
+
+  it("preserves a processed terminal replay before a caller normalization conflict", async () => {
+    const repo = repository();
+    await repo.registerAndClaim(registration({
+      normalization: paidCheckoutNormalization(),
+    }));
+    await client.exec(`
+      UPDATE provider_events
+      SET status = 'processed', lease_token = NULL, lease_expires_at = NULL,
+          processed_at = '2026-08-25T12:00:30.000Z'
+      WHERE id = '${ids.event}'
+    `);
+
+    await expect(repo.registerAndClaim(registration({
+      normalization: malformedPaidCheckoutNormalization(),
+      leaseToken: "lease_synthetic_6e_conflicting_replay",
+    }))).resolves.toEqual({ status: "processed" });
+    const stored = await client.query(`SELECT
+      status, attempt_count, lease_token, last_error_redacted, processed_at,
+      (SELECT count(*)::int FROM admin_audit) AS audits
+      FROM provider_events WHERE id = '${ids.event}'`);
+    expect(stored.rows).toMatchObject([{
+      status: "processed",
+      attempt_count: 1,
+      lease_token: null,
+      last_error_redacted: null,
+      processed_at: new Date("2026-08-25T12:00:30.000Z"),
+      audits: 0,
+    }]);
+  });
+
+  it("preserves a conflict terminal replay without a second conflict audit", async () => {
+    const repo = repository();
+    const malformed = registration({
+      normalization: malformedPaidCheckoutNormalization(),
+    });
+    await expect(repo.registerAndClaim(malformed)).resolves.toEqual({
+      status: "conflict",
+    });
+
+    await expect(repo.registerAndClaim(malformed)).resolves.toEqual({
+      status: "conflict",
+    });
+    const stored = await client.query(`SELECT
+      status, attempt_count, lease_token, last_error_redacted,
+      (SELECT count(*)::int FROM admin_audit) AS audits
+      FROM provider_events WHERE id = '${ids.event}'`);
+    expect(stored.rows).toEqual([{
+      status: "conflict",
+      attempt_count: 1,
+      lease_token: null,
+      last_error_redacted: "malformed_known_event",
+      audits: 1,
+    }]);
   });
 
   it("makes same-ID different-hash delivery terminal conflict with one redacted audit", async () => {
