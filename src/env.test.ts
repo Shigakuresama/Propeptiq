@@ -2,6 +2,43 @@ import { describe, expect, it } from "vitest";
 
 import { parseServerEnv } from "@/config/env-schema";
 
+const exactPreviewInput = {
+  APP_ENV: "preview",
+  VERCEL_ENV: "preview",
+  APP_ORIGIN: "https://preview.propeptiq.example.invalid",
+  CATALOG_DEMO_MODE: "enabled",
+  LOCAL_TEST_DRIVER: "disabled",
+  LOCAL_TEST_SECRET: "",
+  AUTH_MODE: "test",
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
+  CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
+  CLERK_WEBHOOK_SIGNING_SECRET: "",
+  RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
+  DATABASE_MODE: "test",
+  TEST_DATABASE_URL:
+    "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
+  TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+  DATABASE_URL: "",
+  DATABASE_MIGRATION_URL: "",
+  PAYMENTS_MODE: "test",
+  STRIPE_ACCOUNT_ID: "acct_SyntheticTask7Preview",
+  STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
+  STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
+  STORAGE_MODE: "disabled",
+  EMAIL_MODE: "disabled",
+  TAX_MODE: "disabled",
+  SHIPPING_MODE: "disabled",
+  FULFILLMENT_MODE: "disabled",
+  COMMERCE_LIVE_CAPABILITY: "disabled",
+  PAYMENTS_LIVE_CAPABILITY: "disabled",
+} as const;
+
+const productionIdentity = {
+  APP_ENV: "production",
+  VERCEL_ENV: "production",
+  APP_ORIGIN: "https://production.propeptiq.example.invalid",
+} as const;
+
 describe("parseServerEnv", () => {
   it("defaults every external capability to disabled", () => {
     const env = parseServerEnv({});
@@ -31,6 +68,108 @@ describe("parseServerEnv", () => {
       }),
     ).toThrow(/STRIPE_WEBHOOK_SECRET/);
   });
+
+  it("accepts the complete placeholder-equivalent browse-only Preview matrix", () => {
+    const env = parseServerEnv(exactPreviewInput);
+
+    expect(env).toMatchObject({
+      APP_ENV: "preview",
+      VERCEL_ENV: "preview",
+      APP_ORIGIN: "https://preview.propeptiq.example.invalid",
+      CATALOG_DEMO_MODE: "enabled",
+      LOCAL_TEST_DRIVER: "disabled",
+      AUTH_MODE: "test",
+      DATABASE_MODE: "test",
+      PAYMENTS_MODE: "test",
+      STORAGE_MODE: "disabled",
+      EMAIL_MODE: "disabled",
+      TAX_MODE: "disabled",
+      SHIPPING_MODE: "disabled",
+      FULFILLMENT_MODE: "disabled",
+      COMMERCE_LIVE_CAPABILITY: "disabled",
+      PAYMENTS_LIVE_CAPABILITY: "disabled",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
+      CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
+      RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
+      TEST_DATABASE_URL:
+        "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
+      TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+      STRIPE_ACCOUNT_ID: "acct_SyntheticTask7Preview",
+      STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
+      STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
+    });
+    expect(env.LOCAL_TEST_SECRET).toBeUndefined();
+    expect(env.CLERK_WEBHOOK_SIGNING_SECRET).toBeUndefined();
+    expect(env.DATABASE_URL).toBeUndefined();
+    expect(env.DATABASE_MIGRATION_URL).toBeUndefined();
+  });
+
+  it("rejects the complete Preview matrix when its origin is insecure", () => {
+    expect(() =>
+      parseServerEnv({
+        ...exactPreviewInput,
+        APP_ORIGIN: "http://preview.propeptiq.example.invalid",
+      }),
+    ).toThrow(
+      /APP_ORIGIN: Preview and production require a secure non-local APP_ORIGIN/,
+    );
+  });
+
+  it.each([
+    [
+      "AUTH_MODE",
+      {
+        AUTH_MODE: "test",
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_production_denial",
+        CLERK_SECRET_KEY: "sk_test_synthetic_task7_production_denial",
+        RATE_LIMIT_SECRET: "synthetic-task7-production-rate-limit-secret-0001",
+      },
+    ],
+    [
+      "DATABASE_MODE",
+      {
+        DATABASE_MODE: "test",
+        TEST_DATABASE_URL:
+          "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
+        TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+      },
+    ],
+    [
+      "PAYMENTS_MODE",
+      {
+        PAYMENTS_MODE: "test",
+        STRIPE_ACCOUNT_ID: "acct_SyntheticTask7Denied",
+        STRIPE_SECRET_KEY: "sk_test_synthetic_task7_production_denial",
+        STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_production_denial",
+      },
+    ],
+    ["STORAGE_MODE", { STORAGE_MODE: "test", BLOB_READ_WRITE_TOKEN: "synthetic_task7_blob_token" }],
+    [
+      "EMAIL_MODE",
+      {
+        EMAIL_MODE: "test",
+        RESEND_API_KEY: "re_synthetic_task7_production_denial",
+        RESEND_FROM: "synthetic-task7@example.invalid",
+      },
+    ],
+    ["TAX_MODE", { TAX_MODE: "test" }],
+    ["SHIPPING_MODE", { SHIPPING_MODE: "test" }],
+    ["FULFILLMENT_MODE", { FULFILLMENT_MODE: "test" }],
+  ] as const)(
+    "rejects a prerequisite-complete Production %s=test matrix with its exact mode error",
+    (modeKey, prerequisites) => {
+      let message = "configuration unexpectedly accepted";
+      try {
+        parseServerEnv({ ...productionIdentity, ...prerequisites });
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+
+      expect(message).toBe(
+        `Invalid server configuration: ${modeKey}: ${modeKey} test mode is not permitted in production`,
+      );
+    },
+  );
 
   it("requires one valid nonsecret Stripe account namespace whenever payments are enabled", () => {
     const stripeTest = {

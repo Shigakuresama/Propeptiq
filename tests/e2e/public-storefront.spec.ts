@@ -43,6 +43,23 @@ test("every public route renders the shared restriction and passes axe", async (
   }
 });
 
+test("synthetic catalog pages identify every displayed record as fictional demo data", async ({
+  page,
+}) => {
+  await page.goto("/catalog");
+
+  const notice = page.getByRole("note");
+  await expect(
+    notice.getByText("Synthetic demo catalog", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    notice.getByText(
+      "Every product, price, lot, promotion, and quality record shown in this mode is fictional test data—not a real offer or production record.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+});
+
 test("anonymous catalog to cart flow survives reload and preserves only IDs and quantities", async ({
   page,
 }) => {
@@ -198,9 +215,21 @@ test("mobile explanatory copy meets the 16px body minimum", async ({ page }) => 
   }
 });
 
-test("mobile footer navigation targets are at least 44px", async ({ page }) => {
+test("mobile header brand and footer navigation targets are at least 44px", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
+
+  const brandTarget = await page
+    .getByRole("banner")
+    .getByRole("link", { name: "PROPEPTIQ LABS home" })
+    .evaluate((link) => {
+      const bounds = link.getBoundingClientRect();
+      return { height: bounds.height, width: bounds.width };
+    });
+
+  console.info(`Header brand target size at 375px: ${JSON.stringify(brandTarget)}`);
+  expect(brandTarget.height).toBeGreaterThanOrEqual(44);
+  expect(brandTarget.width).toBeGreaterThanOrEqual(44);
 
   const targetSizes = await page
     .getByRole("navigation", { name: "Footer" })

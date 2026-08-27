@@ -4,8 +4,9 @@ import { getLocalTestDriver } from "local-auth-driver";
 import {
   createCheckoutServerRuntime,
   createStaffCommerceServerRuntime,
+  isBuyerCheckoutRuntimeReady,
 } from "@/commerce/server-runtime";
-import type { ServerEnv } from "@/config/env-schema";
+import { parseServerEnv, type ServerEnv } from "@/config/env-schema";
 
 const origin = "http://127.0.0.1:4631";
 const localEnvironment = {
@@ -29,6 +30,37 @@ const localEnvironment = {
   FULFILLMENT_MODE: "test",
   OTEL_SERVICE_NAME: "propeptiq-labs",
 } satisfies ServerEnv;
+
+const previewEnvironment = parseServerEnv({
+  APP_ENV: "preview",
+  VERCEL_ENV: "preview",
+  APP_ORIGIN: "https://preview.propeptiq.example.invalid",
+  CATALOG_DEMO_MODE: "enabled",
+  LOCAL_TEST_DRIVER: "disabled",
+  LOCAL_TEST_SECRET: "",
+  AUTH_MODE: "test",
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
+  CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
+  CLERK_WEBHOOK_SIGNING_SECRET: "",
+  RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
+  DATABASE_MODE: "test",
+  TEST_DATABASE_URL:
+    "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
+  TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+  DATABASE_URL: "",
+  DATABASE_MIGRATION_URL: "",
+  PAYMENTS_MODE: "test",
+  STRIPE_ACCOUNT_ID: "acct_SyntheticTask7Preview",
+  STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
+  STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
+  STORAGE_MODE: "disabled",
+  EMAIL_MODE: "disabled",
+  TAX_MODE: "disabled",
+  SHIPPING_MODE: "disabled",
+  FULFILLMENT_MODE: "disabled",
+  COMMERCE_LIVE_CAPABILITY: "disabled",
+  PAYMENTS_LIVE_CAPABILITY: "disabled",
+});
 
 function requestForActor(actorKey: "non_admin" | "admin") {
   const driver = getLocalTestDriver();
@@ -55,6 +87,19 @@ const idempotencyKey = "6b000000-0000-4000-8000-000000000001";
 
 describe("commerce server composition", () => {
   beforeEach(() => getLocalTestDriver().commerce.reset());
+
+  it("reports buyer checkout ready only for the guarded local request and not the exact Preview matrix", async () => {
+    const localRequest = requestForActor("non_admin");
+    expect(isBuyerCheckoutRuntimeReady(localRequest)).toBe(true);
+
+    const previewRequest = {
+      ...localRequest,
+      environment: previewEnvironment,
+      localDriver: null,
+    };
+    expect(isBuyerCheckoutRuntimeReady(previewRequest)).toBe(false);
+    await expect(createCheckoutServerRuntime(previewRequest)).resolves.toBeNull();
+  });
 
   it("composes the existing checkout service/orchestrator over one local adapter", async () => {
     const request = requestForActor("non_admin");
@@ -129,6 +174,7 @@ describe("commerce server composition", () => {
         ...request,
         environment: { ...localEnvironment, ...mismatch } as ServerEnv,
       };
+      expect(isBuyerCheckoutRuntimeReady(incoherent), label).toBe(false);
       await expect(createCheckoutServerRuntime(incoherent), label).resolves.toBeNull();
       await expect(
         createStaffCommerceServerRuntime(incoherent, `matrix-${label}`),

@@ -43,6 +43,50 @@ describe("catalog source boundary", () => {
     expect(loadDemo).toHaveBeenCalledOnce();
   });
 
+  it("uses only the synthetic loader for the exact browse-only Preview matrix", async () => {
+    const loadDemo = vi.fn(async () => syntheticRecords);
+    const loadDatabase = vi.fn(async () => ({
+      ...syntheticRecords,
+      source: "production" as const,
+    }));
+    const environment = parseServerEnv({
+      APP_ENV: "preview",
+      VERCEL_ENV: "preview",
+      APP_ORIGIN: "https://preview.propeptiq.example.invalid",
+      CATALOG_DEMO_MODE: "enabled",
+      LOCAL_TEST_DRIVER: "disabled",
+      LOCAL_TEST_SECRET: "",
+      AUTH_MODE: "test",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
+      CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
+      CLERK_WEBHOOK_SIGNING_SECRET: "",
+      RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
+      DATABASE_MODE: "test",
+      TEST_DATABASE_URL:
+        "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
+      TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+      DATABASE_URL: "",
+      DATABASE_MIGRATION_URL: "",
+      PAYMENTS_MODE: "test",
+      STRIPE_ACCOUNT_ID: "acct_SyntheticTask7Preview",
+      STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
+      STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
+      STORAGE_MODE: "disabled",
+      EMAIL_MODE: "disabled",
+      TAX_MODE: "disabled",
+      SHIPPING_MODE: "disabled",
+      FULFILLMENT_MODE: "disabled",
+      COMMERCE_LIVE_CAPABILITY: "disabled",
+      PAYMENTS_LIVE_CAPABILITY: "disabled",
+    });
+
+    await expect(
+      loadCatalogRecordSet(environment, loadDemo, loadDatabase),
+    ).resolves.toEqual(syntheticRecords);
+    expect(loadDemo).toHaveBeenCalledOnce();
+    expect(loadDatabase).not.toHaveBeenCalled();
+  });
+
   it("checks production identity before invoking the fixture loader", async () => {
     const loadDemo = vi.fn(async () => syntheticRecords);
     const unsafeEnvironment = {

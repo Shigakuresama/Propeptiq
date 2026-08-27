@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { parseServerEnv } from "@/config/env-schema";
+
 const { getRequestIdentity, createCheckoutServerRuntime, startSession, readServerEnv } = vi.hoisted(() => ({
   getRequestIdentity: vi.fn(),
   createCheckoutServerRuntime: vi.fn(),
@@ -17,6 +19,36 @@ import { POST, dynamic } from "./route";
 const buyerUserId = "50000000-0000-4000-8000-000000000004";
 const idempotencyKey = "6e000000-0000-4000-8000-000000000001";
 const origin = "http://127.0.0.1:4631";
+const previewEnvironment = parseServerEnv({
+  APP_ENV: "preview",
+  VERCEL_ENV: "preview",
+  APP_ORIGIN: "https://preview.propeptiq.example.invalid",
+  CATALOG_DEMO_MODE: "enabled",
+  LOCAL_TEST_DRIVER: "disabled",
+  LOCAL_TEST_SECRET: "",
+  AUTH_MODE: "test",
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
+  CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
+  CLERK_WEBHOOK_SIGNING_SECRET: "",
+  RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
+  DATABASE_MODE: "test",
+  TEST_DATABASE_URL:
+    "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
+  TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+  DATABASE_URL: "",
+  DATABASE_MIGRATION_URL: "",
+  PAYMENTS_MODE: "test",
+  STRIPE_ACCOUNT_ID: "acct_SyntheticTask7Preview",
+  STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
+  STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
+  STORAGE_MODE: "disabled",
+  EMAIL_MODE: "disabled",
+  TAX_MODE: "disabled",
+  SHIPPING_MODE: "disabled",
+  FULFILLMENT_MODE: "disabled",
+  COMMERCE_LIVE_CAPABILITY: "disabled",
+  PAYMENTS_LIVE_CAPABILITY: "disabled",
+});
 const body = {
   items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }],
   destination: {
@@ -31,10 +63,10 @@ const body = {
   promotionIds: ["66000000-0000-4000-8000-000000000001"],
 };
 
-function request() {
-  return new Request(`${origin}/api/checkout/sessions`, {
+function request(requestOrigin = origin) {
+  return new Request(`${requestOrigin}/api/checkout/sessions`, {
     method: "POST",
-    headers: { "content-type": "application/json", "idempotency-key": idempotencyKey, origin },
+    headers: { "content-type": "application/json", "idempotency-key": idempotencyKey, origin: requestOrigin },
     body: JSON.stringify(body),
   });
 }
@@ -80,5 +112,32 @@ describe("POST /api/checkout/sessions", () => {
       expiresAt: "2026-08-26T21:30:00.000Z",
     });
     expect(startSession).toHaveBeenCalledWith({ buyerUserId, idempotencyKey, request: body });
+  });
+
+  it("returns the closed no-store envelope without a session operation for the exact Preview matrix", async () => {
+    readServerEnv.mockReturnValue(previewEnvironment);
+    getRequestIdentity.mockResolvedValue({
+      environment: previewEnvironment,
+      identity: {
+        clerkUserId: "synthetic-preview-buyer",
+        primaryEmail: "synthetic-preview-buyer@example.invalid",
+        emailVerifiedAt: "2026-08-26T00:00:00.000Z",
+        mfaConfigured: false,
+        secondFactorCompleted: false,
+      },
+      principal: {
+        actorId: buyerUserId,
+        clerkUserId: "synthetic-preview-buyer",
+      },
+      localDriver: null,
+    });
+    createCheckoutServerRuntime.mockResolvedValue(null);
+
+    const response = await POST(request(previewEnvironment.APP_ORIGIN));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ status: "unavailable" });
+    expect(startSession).not.toHaveBeenCalled();
   });
 });

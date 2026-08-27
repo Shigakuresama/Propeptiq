@@ -1,6 +1,14 @@
 import { z } from "zod";
 
+import {
+  scanPublicCopy,
+  type PublicationPolicy,
+} from "@/domain/content-policy";
+
 import type {
+  CatalogCoaRecord,
+  CatalogLotRecord,
+  CatalogPriceRecord,
   CatalogProductRecord,
   CatalogPromotionRecord,
   CatalogRecordSet,
@@ -29,6 +37,41 @@ const crossSellConfiguration = z
   .object({ productIds: z.array(z.string().min(1)).min(1) })
   .strict();
 
+const ordinaryPublicationPolicy: PublicationPolicy = {
+  version: "public-catalog-read-v1",
+  activeLotEvidenceIds: [],
+};
+
+function passesOrdinaryPublicCopy(text: string): boolean {
+  return scanPublicCopy(
+    { text, claims: [] },
+    ordinaryPublicationPolicy,
+  ).publishable;
+}
+
+function passesExactEvidenceAnalyticalCopy(
+  text: string,
+  claimId: string,
+  evidenceId: string,
+  policy: PublicationPolicy,
+  overallText: string = text,
+): boolean {
+  return scanPublicCopy(
+    {
+      text: overallText,
+      claims: [
+        {
+          id: claimId,
+          text,
+          kind: "analytical",
+          lotEvidenceIds: [evidenceId],
+        },
+      ],
+    },
+    policy,
+  ).publishable;
+}
+
 function formatMoney(amountMinor: number, currency: string): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -38,6 +81,7 @@ function formatMoney(amountMinor: number, currency: string): string {
 
 function projectPromotion(
   promotion: CatalogPromotionRecord,
+  validatedBundleProductCount?: number,
 ): PublicMerchandising | null {
   switch (promotion.kind) {
     case "discount": {
@@ -81,7 +125,10 @@ function projectPromotion(
         promotion.amountMinor <= 0 ||
         promotion.basisPoints !== null ||
         typeof promotion.currency !== "string" ||
-        !/^[A-Z]{3}$/.test(promotion.currency)
+        !/^[A-Z]{3}$/.test(promotion.currency) ||
+        !Number.isSafeInteger(validatedBundleProductCount) ||
+        validatedBundleProductCount === undefined ||
+        validatedBundleProductCount < 2
       ) {
         return null;
       }
@@ -89,7 +136,7 @@ function projectPromotion(
         id: promotion.id,
         kind: promotion.kind,
         name: promotion.name,
-        summary: `${configuration.data.productIds.length}-record bundle display at ${formatMoney(promotion.amountMinor, promotion.currency)}. Enrollment is not active.`,
+        summary: `${validatedBundleProductCount}-record bundle display at ${formatMoney(promotion.amountMinor, promotion.currency)}. Enrollment is not active.`,
       };
     }
     case "subscription": {
@@ -181,7 +228,19 @@ export function buildPublicCatalog(
 ): PublicCatalog {
   const now = options.now ?? new Date();
   const activeProducts = records.products.filter(
-    (product) => product.status === "active",
+    (product) => {
+      const corePublicCopy = [
+        product.slug,
+        product.name,
+        product.packageForm,
+        product.materialIdentity,
+      ];
+      return (
+        product.status === "active" &&
+        corePublicCopy.every(passesOrdinaryPublicCopy) &&
+        passesOrdinaryPublicCopy(corePublicCopy.join(" "))
+      );
+    },
   );
   const activeProductIds = new Set(activeProducts.map((product) => product.id));
   const releasedLots = records.lots.filter(
@@ -194,6 +253,7 @@ export function buildPublicCatalog(
         activeProductIds.has(lot.productId) &&
         lot.status === "released" &&
         lot.availableQuantity > 0 &&
+        passesOrdinaryPublicCopy(lot.supplierLotCode) &&
         (manufacturedAt === null ||
           (Number.isFinite(manufacturedAt) && manufacturedAt <= now.getTime())) &&
         (expiresAt === null ||
@@ -205,13 +265,53 @@ export function buildPublicCatalog(
   const activeCoas = records.coaDocuments.filter(
     (coa) => coa.active && coa.public && releasedLotIds.has(coa.lotId),
   );
-  const activeCoaIds = new Set(activeCoas.map((coa) => coa.id));
+  const publicationPolicy: PublicationPolicy = {
+    version: "public-catalog-read-v1",
+    activeLotEvidenceIds: [...new Set(activeCoas.map((coa) => coa.id))],
+  };
+  const activeCoaById = new Map(
+    activeCoas.map((coa) => [coa.id, coa] as const),
+  );
+  const activeCoaByLotId = new Map<string, CatalogCoaRecord>();
+  for (const coa of activeCoas) {
+    if (!activeCoaByLotId.has(coa.lotId)) {
+      activeCoaByLotId.set(coa.lotId, coa);
+    }
+  }
+  const releasedLotById = new Map(
+    releasedLots.map((lot) => [lot.id, lot] as const),
+  );
+  const analyticalMethodByLotId = new Map<string, string | null>();
+  for (const lot of releasedLots) {
+    const evidence = activeCoaByLotId.get(lot.id);
+    const analyticalMethod = lot.analyticalMethod;
+    analyticalMethodByLotId.set(
+      lot.id,
+      analyticalMethod !== null &&
+        evidence !== undefined &&
+        passesExactEvidenceAnalyticalCopy(
+          analyticalMethod,
+          `lot-method:${lot.id}`,
+          evidence.id,
+          publicationPolicy,
+          `${lot.supplierLotCode} ${analyticalMethod}`,
+        )
+        ? analyticalMethod
+        : null,
+    );
+  }
   const currentPromotions = records.promotions.filter((promotion) =>
     isPromotionCurrent(promotion, now),
   );
 
-  const products: PublicProduct[] = [];
-  const relatedIdsByProduct = new Map<string, Set<string>>();
+  const productFacts = new Map<
+    string,
+    {
+      price: CatalogPriceRecord;
+      lots: CatalogLotRecord[];
+      primaryLot: CatalogLotRecord;
+    }
+  >();
   for (const product of activeProducts) {
     const currentPrices = records.prices.filter(
       (candidate) =>
@@ -223,35 +323,76 @@ export function buildPublicCatalog(
       currentPrices.length === 1 && currentPrices[0]?.currency === "USD"
         ? currentPrices[0]
         : undefined;
-    const productLots = releasedLots.filter(
-      (lot) => lot.productId === product.id,
-    );
-    if (!price || productLots.length === 0) continue;
+    const lots = releasedLots.filter((lot) => lot.productId === product.id);
+    const primaryLot = lots[0];
+    if (!price || !primaryLot) continue;
+    productFacts.set(product.id, { price, lots, primaryLot });
+  }
+  const publicCandidateProductIds = new Set(productFacts.keys());
 
-    const primaryLot = productLots[0];
-    if (!primaryLot) continue;
-    const primaryCoa = activeCoas.find((coa) => coa.lotId === primaryLot.id);
-    const merchandising = currentPromotions.flatMap((promotion) => {
-      if (!targetApplies(records, promotion.id, product)) return [];
-      const projected = projectPromotion(promotion);
-      return projected ? [projected] : [];
-    });
+  const products: PublicProduct[] = [];
+  const relatedIdsByProduct = new Map<string, Set<string>>();
+  for (const product of activeProducts) {
+    const facts = productFacts.get(product.id);
+    if (!facts) continue;
+    const { price, lots: productLots, primaryLot } = facts;
+    const primaryCoa = activeCoaByLotId.get(primaryLot.id);
 
+    const merchandising: PublicMerchandising[] = [];
     const relatedProductIds = new Set<string>();
     for (const promotion of currentPromotions) {
-      if (
-        promotion.kind !== "cross_sell" ||
-        !targetApplies(records, promotion.id, product)
-      ) {
-        continue;
+      if (!targetApplies(records, promotion.id, product)) continue;
+      let validatedBundleProductCount: number | undefined;
+      if (promotion.kind === "bundle") {
+        const configuration = bundleConfiguration.safeParse(
+          promotion.configuration,
+        );
+        if (!configuration.success) continue;
+        const uniqueProductIds = new Set(configuration.data.productIds);
+        if (
+          uniqueProductIds.size !== configuration.data.productIds.length ||
+          configuration.data.productIds.some(
+            (productId) => !publicCandidateProductIds.has(productId),
+          )
+        ) continue;
+        validatedBundleProductCount = uniqueProductIds.size;
       }
-      const configuration = crossSellConfiguration.safeParse(
-        promotion.configuration,
+      const projected = projectPromotion(
+        promotion,
+        validatedBundleProductCount,
       );
-      if (configuration.success) {
-        for (const productId of configuration.data.productIds) {
-          relatedProductIds.add(productId);
+      if (!projected) continue;
+
+      const candidateRelatedIds = new Set<string>();
+      let finalProjection = projected;
+      if (promotion.kind === "cross_sell") {
+        const configuration = crossSellConfiguration.safeParse(
+          promotion.configuration,
+        );
+        if (!configuration.success) continue;
+        for (const relatedId of configuration.data.productIds) {
+          if (publicCandidateProductIds.has(relatedId)) {
+            candidateRelatedIds.add(relatedId);
+          }
         }
+        const relatedCount = candidateRelatedIds.size;
+        finalProjection = {
+          ...projected,
+          summary: `${relatedCount} related public catalog record${relatedCount === 1 ? "" : "s"}.`,
+        };
+      }
+
+      if (
+        !passesOrdinaryPublicCopy(finalProjection.name) ||
+        !passesOrdinaryPublicCopy(finalProjection.summary) ||
+        !passesOrdinaryPublicCopy(
+          `${finalProjection.name} ${finalProjection.summary}`,
+        )
+      ) continue;
+
+      merchandising.push(finalProjection);
+      for (const relatedId of candidateRelatedIds) {
+        relatedProductIds.add(relatedId);
       }
     }
     relatedIdsByProduct.set(product.id, relatedProductIds);
@@ -260,7 +401,9 @@ export function buildPublicCatalog(
       { label: "Material identity", state: product.materialIdentity },
       {
         label: "Analytical method",
-        state: primaryLot.analyticalMethod ?? "No approved public record",
+        state:
+          analyticalMethodByLotId.get(primaryLot.id) ??
+          "No approved public record",
       },
       { label: "Lot/batch", state: primaryLot.supplierLotCode },
       primaryCoa
@@ -289,15 +432,21 @@ export function buildPublicCatalog(
       ),
       claims: records.claims
         .filter(
-          (claim) =>
-            claim.active &&
-            claim.productId === product.id &&
-            releasedLotIds.has(claim.lotId) &&
-            activeCoaIds.has(claim.coaDocumentId) &&
-            activeCoas.some(
-              (coa) =>
-                coa.id === claim.coaDocumentId && coa.lotId === claim.lotId,
-            ),
+          (claim) => {
+            if (!claim.active || claim.productId !== product.id) return false;
+            const lot = releasedLotById.get(claim.lotId);
+            const evidence = activeCoaById.get(claim.coaDocumentId);
+            return (
+              lot?.productId === product.id &&
+              evidence?.lotId === lot.id &&
+              passesExactEvidenceAnalyticalCopy(
+                claim.text,
+                claim.id,
+                evidence.id,
+                publicationPolicy,
+              )
+            );
+          },
         )
         .map((claim) => ({ id: claim.id, text: claim.text })),
       merchandising,
@@ -318,23 +467,14 @@ export function buildPublicCatalog(
           : [];
       },
     );
-    const relatedCount = relatedProducts.length;
     return {
       ...product,
-      merchandising: product.merchandising.map((entry) =>
-        entry.kind === "cross_sell"
-          ? {
-              ...entry,
-              summary: `${relatedCount} related public catalog record${relatedCount === 1 ? "" : "s"}.`,
-            }
-          : entry,
-      ),
       relatedProducts,
     };
   });
   const publicProductIds = new Set(projectedProducts.map((product) => product.id));
   const qualityRecords = activeCoas.flatMap((coa) => {
-    const lot = releasedLots.find((candidate) => candidate.id === coa.lotId);
+    const lot = releasedLotById.get(coa.lotId);
     const product = activeProducts.find(
       (candidate) => candidate.id === lot?.productId,
     );
@@ -345,7 +485,7 @@ export function buildPublicCatalog(
         productId: product.id,
         productName: product.name,
         lotCode: lot.supplierLotCode,
-        analyticalMethod: lot.analyticalMethod,
+        analyticalMethod: analyticalMethodByLotId.get(lot.id) ?? null,
         issuedAt: coa.issuedAt,
         href: `/quality-records#record-${coa.id}`,
       },

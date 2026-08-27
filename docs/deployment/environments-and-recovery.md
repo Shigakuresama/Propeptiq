@@ -1,12 +1,15 @@
 # Environments, Deployment, and Recovery
 
-## Environment separation
+## Target environment separation
 
-| Environment | Data and providers | Allowed use |
+This table is the required target topology, not a statement that Preview or
+Production accounts, resources, secrets, or deployments currently exist.
+
+| Environment | Target data and providers | Current allowed use |
 |---|---|---|
 | Local/test | isolated database and clearly labeled test fixtures; provider fakes/test modes | automated and manual development only |
-| Preview | isolated Clerk/Neon/Blob/email/Stripe test resources and synthetic identities/catalog | controlled review; no live payment, customer message, or shipment |
-| Production | separately scoped production resources and real imported records | enabled only where verified external inputs and application controls pass |
+| Preview | separately provisioned test-only identity/database/provider resources and pre-created synthetic identities; synthetic demo catalog only | **not published or provisioned**; browse-only preparation, with buyer checkout unavailable |
+| Production | separately scoped production resources and real imported records | buyer checkout is inert at this checkpoint, regardless of environment flags; later activation requires separate authorization and every external/application prerequisite |
 
 Never share production credentials or customer data with Local/Preview. Production demo/test catalog mode must hard-fail.
 
@@ -24,11 +27,11 @@ These are deployment inputs and owner evidence, not database approval workflows.
 
 ## Promotion and migration
 
-Use reviewed commits, protected production deployment, environment-specific secrets, guarded ordered migrations, and a pre-deploy backup/restore plan. Run the documented release commands against the exact commit. Never infer a passed integration, external decision, or live behavior from local lint/tests.
+Use reviewed commits, protected production deployment, environment-specific secrets, guarded ordered migrations, and a pre-deploy backup/restore plan. This repository currently exposes `db:generate` and `db:check` for source consistency only; it does **not** provide or authorize a Preview or Production migration-apply command. A future migration apply requires a separately reviewed command, exact target proof, backup/recovery evidence, and post-apply reconciliation. Never infer a passed integration, applied migration, external decision, or live behavior from local lint/tests.
 
 ## Safe modes
 
-- Provider mode defaults disabled; test uses test resources; live requires verified provider acceptance/configuration.
+- Provider mode defaults disabled. Preview preparation remains browse-only even with syntactically valid test placeholders, and Production buyer checkout remains unavailable at this checkpoint. External acceptance/configuration is necessary but not sufficient for any later activation.
 - Catalog projection defaults empty when real records are absent.
 - Destination defaults unavailable when no active rule resolves.
 - Tax/shipping absence denies hosted checkout.

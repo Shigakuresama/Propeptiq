@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import playwrightConfig from "../../playwright.config";
-import { isLiveCheckoutEnvironmentConfigured } from "./commerce-capability";
+import {
+  isLiveCheckoutEnvironmentConfigured,
+  isSyntheticLocalCommerceEnvironmentConfigured,
+} from "./commerce-capability";
 import { parseServerEnv, type ServerEnv } from "./env-schema";
 
 const origin = "https://research.example.test";
@@ -150,6 +153,42 @@ describe("commerce capability configuration", () => {
         CATALOG_DEMO_MODE: "enabled",
       }),
     ).toBe(false);
+  });
+
+  it("keeps the exact browse-only Preview matrix outside live and local checkout capability", () => {
+    const preview = parseServerEnv({
+      APP_ENV: "preview",
+      VERCEL_ENV: "preview",
+      APP_ORIGIN: "https://preview.propeptiq.example.invalid",
+      CATALOG_DEMO_MODE: "enabled",
+      LOCAL_TEST_DRIVER: "disabled",
+      LOCAL_TEST_SECRET: "",
+      AUTH_MODE: "test",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
+      CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
+      CLERK_WEBHOOK_SIGNING_SECRET: "",
+      RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
+      DATABASE_MODE: "test",
+      TEST_DATABASE_URL:
+        "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
+      TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+      DATABASE_URL: "",
+      DATABASE_MIGRATION_URL: "",
+      PAYMENTS_MODE: "test",
+      STRIPE_ACCOUNT_ID: "acct_SyntheticTask7Preview",
+      STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
+      STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
+      STORAGE_MODE: "disabled",
+      EMAIL_MODE: "disabled",
+      TAX_MODE: "disabled",
+      SHIPPING_MODE: "disabled",
+      FULFILLMENT_MODE: "disabled",
+      COMMERCE_LIVE_CAPABILITY: "disabled",
+      PAYMENTS_LIVE_CAPABILITY: "disabled",
+    });
+
+    expect(isSyntheticLocalCommerceEnvironmentConfigured(preview)).toBe(false);
+    expect(isLiveCheckoutEnvironmentConfigured(preview)).toBe(false);
   });
 
   it("keeps live capabilities closed while Playwright uses synthetic commerce ports", () => {

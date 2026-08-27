@@ -1,6 +1,6 @@
 # System Architecture
 
-## Boundaries
+## Boundaries and target topology
 
 ```text
 Browser
@@ -10,6 +10,11 @@ Browser
         -> server-only repositories and adapters
           -> Clerk | Neon/Drizzle | Stripe-hosted Checkout | Blob | Resend
 ```
+
+The final adapter line is the target topology, not a claim that those vendor
+accounts, resources, or production integrations have been provisioned. At this
+checkpoint Preview is prepared only as an unpublished, unprovisioned,
+browse-only environment, and Production buyer checkout remains inert.
 
 The browser may hold anonymous cart product IDs and quantities. It is never authoritative for identity, capability, buyer status, attestation version, price, discount, product state, destination, inventory, tax, shipping, payment, or fulfillment.
 
@@ -28,7 +33,7 @@ Review exists only for a buyer status or destination result explicitly equal to 
 
 ## Payment and fulfillment flow
 
-Signed raw-body provider webhooks are the payment write boundary. Unique provider events append payment journal entries and drive idempotent inventory/email effects. The success route reads order state only. Fulfillment consumes once after rechecking payment, holds, inventory, buyer, product, and destination.
+Signed raw-body provider webhooks are the payment write boundary. Unique provider events append payment journal entries and create durable, idempotent downstream-effect records. The implemented library includes the effect repository and a lease-aware worker factory exercised with an injected test sink; there is no runtime scheduler/wake-up, production sink or Resend delivery, bounded backoff/dead-letter operation, alerting, or production telemetry pipeline. The success route reads order state only. Fulfillment consumes once after rechecking payment, holds, inventory, buyer, product, and destination.
 
 ## Administration
 
@@ -40,4 +45,4 @@ Unavailable database, identity verification, current attestation, manifest data,
 
 ## Deployment shape
 
-Local, Preview, and Production use separate configuration and provider resources. Production starts with catalog/payment/fulfillment unavailable until the named external inputs are verified. Server-only modules own secrets and provider SDKs; logs use correlation IDs and redact secrets, payment payloads, addresses, attestation text, and unnecessary PII.
+Local, Preview, and Production are designed to use separate configuration and provider resources. That separation is a deployment requirement, not evidence that Preview or Production resources exist. Preview is currently prepared but not published or provisioned and is browse-only; Production buyer checkout and fulfillment remain unavailable. Server-only modules own secrets and provider SDKs. Correlation/redaction requirements remain binding, while a production structured telemetry pipeline is not yet implemented.

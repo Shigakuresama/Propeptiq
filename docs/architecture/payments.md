@@ -20,10 +20,10 @@ Any missing or changed fact denies creation. Browser totals, provider redirect p
 ## Webhooks and journal
 
 - Verify the provider signature against the raw request body before parsing business fields.
-- Store each provider event ID once with its payload hash, durable status (`pending`, `processing`, `processed`, or `failed`), attempt count, lease token, and lease expiry. The first handler persists `pending`, then atomically claims it by transitioning to `processing` with a lease token and expiry. A crash before the claim leaves a reclaimable `pending` event.
-- A same-ID/same-hash replay returns idempotent success only when status is `processed`. A replay in `pending` or `failed`, or with an expired `processing` lease, safely resumes or reclaims processing. A concurrent replay under an unexpired lease must not receive terminal success unless the original worker completes. The same ID with a different hash is a conflict and incident.
+- Store each provider event ID once with its payload hash, attempt count, lease data, and one of six durable statuses: `pending`, `processing`, `processed`, `failed`, `deferred`, or `conflict`. `pending` awaits a claim; `processing` owns an expiring lease; `processed` is the only terminal idempotent-success state; `failed` is retryable; `deferred` awaits a prerequisite and can be explicitly woken/reclaimed; and `conflict` is a terminal incident, never success.
+- A same-ID/same-hash replay returns idempotent success only when status is `processed`. `pending`, `failed`, and `deferred` are reclaimable, as is `processing` after lease expiry. An unexpired `processing` replay remains busy and must not receive terminal success. A changed hash for the same provider event ID becomes `conflict`.
 - In one transaction, append payment state changes to `payment_events`, apply required internal state transitions, durably enqueue downstream effects, and mark the provider event `processed`. A failure leaves or marks the event retryable; never mutate payment state from the success page.
-- Perform inventory, email, refund, and fulfillment effects with their own idempotency keys. Retried or reclaimed processing may not duplicate any effect.
+- Downstream effects use their own idempotency keys. This checkpoint implements durable effect records and a lease-aware worker factory with injected-sink tests. It does not implement a runtime scheduler/wake-up, a production sink or Resend delivery, bounded backoff/dead-letter operations, alerts, a structured telemetry pipeline, external firewall configuration, or webhook rate limiting. Those absent operational controls are launch blockers, not implied by the repository or worker tests.
 - Preserve unknown event types safely for reconciliation without treating them as payment success.
 
 ## Refunds
@@ -32,7 +32,7 @@ An authorized MFA-authenticated staff user may request a full or partial refund 
 
 ## Success and reconciliation
 
-The return page reads internal order state and may say pending until a verified webhook arrives. Scheduled reconciliation compares internal totals/states with provider events and settlements using redacted identifiers. It never invents a paid state to match a redirect or dashboard appearance.
+The return page reads internal order state and may say pending until a verified webhook arrives. Signed refund-reconciliation provider events can reconcile matching internal payment/refund state idempotently. There is no scheduled settlement fetch, authenticated reconciliation command, or period-closure system at this checkpoint. It never invents a paid state to match a redirect or dashboard appearance.
 
 ## Fulfillment separation
 

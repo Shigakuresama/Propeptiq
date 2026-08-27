@@ -17,13 +17,13 @@ The browser, Clerk, Stripe, email, object storage, databases, staff devices, and
 | Catalog fabrication or test-data leak | Real-manifest production import, production demo-mode hard failure, public active-record projection |
 | Destination fail-open | Exact product/state → policy-group/state → unavailable; territories unavailable; denial tests |
 | Broken object authorization | Principal-bound repositories, own-order checks, opaque identifiers as defense-in-depth, negative tests |
-| Staff account takeover | Current MFA for staff routes/refunds/fulfillment, least capability, session revoke, rate limits, alerts |
+| Staff account takeover | Current MFA and least capability for staff routes/refunds/fulfillment; session-response procedures; database-backed limits on implemented mutation paths; operational alerts remain unimplemented |
 | Price/promotion tampering | Server reload and integer-money calculation, order version references, hosted collection |
-| Webhook forgery/replay | Raw-body signature verification, unique provider event/hash, idempotent downstream effects |
+| Webhook forgery/replay | Raw-body signature verification, unique provider event/hash, idempotent downstream effects; webhook rate limiting and external firewall configuration remain unimplemented launch controls |
 | Success-page spoofing | Read-only return page; payment writes from verified provider evidence only |
 | Inventory/refund/shipment race | Transactions, uniqueness, remaining-balance/quantity checks, consume-once records |
 | COA/object misuse | Minimal allowed types/size, private storage by default, lot linkage, safe response headers, no executable rendering |
-| Secret/PII leakage | Server-only modules, scoped environment variables, redacted correlated logs, minimal collection/retention |
+| Secret/PII leakage | Server-only modules, scoped environment variables, redaction requirements, minimal collection/retention; a production structured telemetry pipeline is not yet implemented |
 | Dependency/build compromise | Lockfile, official packages, reviews, audit, isolated environments, protected deployments |
 
 ## Authorization model
@@ -32,7 +32,7 @@ V1 users are individual Clerk principals. Optional organization name is never an
 
 ## Review and denial
 
-Review work exists only for buyer status `review` or destination result `review`. A decision is immutable and bound to the exact buyer/cart/destination snapshot. Missing, blocked, malformed, or unavailable facts deny without creating work. Rate limiting and alerting apply to repeated account, checkout, webhook, refund, and staff mutation failures.
+Review work exists only for buyer status `review` or destination result `review`. A decision is immutable and bound to the exact buyer/cart/destination snapshot. Missing, blocked, malformed, or unavailable facts deny without creating work. Database-backed rate limiting exists on selected account, checkout, refund, and staff mutation paths. It is not a claim of webhook rate limiting, external firewall configuration, alerting, or structured production telemetry; those controls remain unimplemented launch blockers where applicable.
 
 ## External limitations
 

@@ -16,5 +16,6 @@ These runbooks operate the lightweight commerce model:
 - Redact secrets, addresses, attestation text, provider payloads, and unnecessary PII from tickets/logs.
 - One capable administrator may perform catalog/destination/promotion publication. No additional actor is an operational prerequisite.
 - Escalate legal SKU/destination questions, catalog truth, tax/shipping setup, warehouse operation, and provider acceptance to their external owners; do not create substitute application state.
+- Carrier, tracking, preparation, handoff, delivery, and exception commands create manual internal records only. No carrier adapter, carrier webhook, or carrier-confirmed synchronization is implemented. Fulfillment remains disabled; any future use requires an accountable operator to own physical/carrier evidence and read back the internal record without treating it as carrier confirmation.
 
 Every closure record states the affected IDs, facts inspected, mutation/idempotency key, read-back result, unresolved risk, owner, and timestamp.

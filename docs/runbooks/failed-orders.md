@@ -13,7 +13,7 @@
 2. Inspect authoritative order, gate reasons, tax/shipping prerequisite result, provider event/hash, payment journal, and inventory events.
 3. For an unknown provider-create outcome, query by the existing idempotency/reference before retrying. Never create a second session speculatively.
 4. For invalid signatures, preserve redacted delivery metadata and do not apply business effects.
-5. For a duplicate event with the same hash, acknowledge without reapplying effects. A changed hash for the same provider event ID is an incident.
+5. Interpret all six durable provider-event states before responding: `processed` is the only terminal same-hash replay success; `pending`, `failed`, and `deferred` are reclaimable; an expired `processing` lease is reclaimable; unexpired `processing` is still busy and is not terminal success; and `conflict` is a terminal incident. A changed hash for the same provider event ID becomes `conflict`. Never reapply an already processed effect.
 6. Release a stale inventory reservation once with its idempotency key when no payable session/order needs it.
 7. If payment is verified but current fulfillment checks fail, place the order on the narrow paid-order hold and follow `compliance-holds.md`.
 8. Read back order, payment, inventory, refund, and hold state before communicating the outcome.

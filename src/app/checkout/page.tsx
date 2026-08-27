@@ -6,6 +6,7 @@ import { accountAccessReason } from "@/account/access";
 import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
 import { getPublicCatalog } from "@/catalog/server";
+import { isBuyerCheckoutRuntimeReady } from "@/commerce/server-runtime";
 import { AccountFactsForm } from "@/components/account/account-facts-form";
 import { AccountShell } from "@/components/account/account-shell";
 import { CheckoutCartStatus } from "@/components/account/checkout-cart-status";
@@ -51,7 +52,10 @@ export default async function CheckoutPage() {
     attestation !== null &&
     account.acceptedAttestationVersion === attestation.version &&
     (account.status === "active" || account.status === "review");
-  const catalog = checkoutEligible ? await getPublicCatalog() : null;
+  const buyerCheckoutReady =
+    checkoutEligible && isBuyerCheckoutRuntimeReady(request);
+  const browseOnlyPreview = request.environment.APP_ENV === "preview";
+  const catalog = buyerCheckoutReady ? await getPublicCatalog() : null;
   const promotionOptions = catalog?.promotions
     .filter((promotion) => promotion.kind === "discount")
     .map((promotion) => ({ id: promotion.id, name: promotion.name })) ?? [];
@@ -66,6 +70,11 @@ export default async function CheckoutPage() {
       </div>
       <div className="account-layout">
         <div className="grid gap-6">
+          {browseOnlyPreview ? (
+            <div className="info-record" role="status">
+              <strong>Browse-only Preview.</strong> Shipping, tax, and payment-session creation are unavailable in this Preview. Browse the synthetic catalog without submitting checkout requests.
+            </div>
+          ) : null}
           {reason ? <ClosedState reason={reason} /> : null}
           {!reason && (!repositories || !principal) ? <ClosedState reason="account_unavailable" /> : null}
           {!reason && repositories && principal && !attestation ? (
@@ -93,14 +102,22 @@ export default async function CheckoutPage() {
               <div className="mt-8">
                 <AccountFactsForm email={request.identity!.primaryEmail!} account={account} attestation={attestation} compact />
               </div>
-              {account?.status === "active" && account.acceptedAttestationVersion === attestation.version ? (
+              {account?.status === "active" && account.acceptedAttestationVersion === attestation.version && !browseOnlyPreview ? (
                 <div className="info-record mt-8" role="status">
-                  <strong>Account gate complete.</strong> Authoritative checkout is available below. Every request fact is resolved again before a hosted payment session can open.
+                  {buyerCheckoutReady ? (
+                    <>
+                      <strong>Account gate complete.</strong> Authoritative checkout is available below. Every request fact is resolved again before a hosted payment session can open.
+                    </>
+                  ) : (
+                    <>
+                      <strong>Checkout remains unavailable.</strong> Account facts are current, but buyer shipping, tax, and payment-session capabilities are not enabled in this environment.
+                    </>
+                  )}
                 </div>
               ) : null}
             </section>
           ) : null}
-          {checkoutEligible ? <CheckoutForm promotions={promotionOptions} syntheticLocal={request.localDriver !== null} /> : null}
+          {buyerCheckoutReady ? <CheckoutForm promotions={promotionOptions} syntheticLocal={request.localDriver !== null} /> : null}
         </div>
         <CheckoutCartStatus />
       </div>

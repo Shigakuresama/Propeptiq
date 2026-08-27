@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { parseServerEnv } from "@/config/env-schema";
+
 const { getRequestIdentity, createCheckoutServerRuntime, quoteCheckout, readServerEnv } = vi.hoisted(() => ({
   getRequestIdentity: vi.fn(),
   createCheckoutServerRuntime: vi.fn(),
@@ -21,6 +23,36 @@ const environment = {
   APP_ORIGIN: "http://127.0.0.1:4631",
   RATE_LIMIT_SECRET: "route-test-rate-limit-secret-at-least-32-characters",
 };
+const previewEnvironment = parseServerEnv({
+  APP_ENV: "preview",
+  VERCEL_ENV: "preview",
+  APP_ORIGIN: "https://preview.propeptiq.example.invalid",
+  CATALOG_DEMO_MODE: "enabled",
+  LOCAL_TEST_DRIVER: "disabled",
+  LOCAL_TEST_SECRET: "",
+  AUTH_MODE: "test",
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
+  CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
+  CLERK_WEBHOOK_SIGNING_SECRET: "",
+  RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
+  DATABASE_MODE: "test",
+  TEST_DATABASE_URL:
+    "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
+  TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+  DATABASE_URL: "",
+  DATABASE_MIGRATION_URL: "",
+  PAYMENTS_MODE: "test",
+  STRIPE_ACCOUNT_ID: "acct_SyntheticTask7Preview",
+  STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
+  STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
+  STORAGE_MODE: "disabled",
+  EMAIL_MODE: "disabled",
+  TAX_MODE: "disabled",
+  SHIPPING_MODE: "disabled",
+  FULFILLMENT_MODE: "disabled",
+  COMMERCE_LIVE_CAPABILITY: "disabled",
+  PAYMENTS_LIVE_CAPABILITY: "disabled",
+});
 const body = {
   items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }],
   destination: {
@@ -35,13 +67,16 @@ const body = {
   promotionIds: ["66000000-0000-4000-8000-000000000001"],
 };
 
-function request(payload: unknown = body) {
-  return new Request(`${environment.APP_ORIGIN}/api/checkout/quote`, {
+function request(
+  payload: unknown = body,
+  requestOrigin = environment.APP_ORIGIN,
+) {
+  return new Request(`${requestOrigin}/api/checkout/quote`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "idempotency-key": idempotencyKey,
-      origin: environment.APP_ORIGIN,
+      origin: requestOrigin,
     },
     body: JSON.stringify(payload),
   });
@@ -112,6 +147,39 @@ describe("POST /api/checkout/quote", () => {
     createCheckoutServerRuntime.mockResolvedValue(null);
     const response = await POST(request());
     expect(response.status).toBe(503);
+    expect(quoteCheckout).not.toHaveBeenCalled();
+  });
+
+  it("returns the closed no-store envelope without a quote operation for the exact Preview matrix", async () => {
+    const previewIdentity = {
+      environment: previewEnvironment,
+      identity: {
+        clerkUserId: "synthetic-preview-buyer",
+        primaryEmail: "synthetic-preview-buyer@example.invalid",
+        emailVerifiedAt: "2026-08-26T00:00:00.000Z",
+        mfaConfigured: false,
+        secondFactorCompleted: false,
+      },
+      principal: {
+        actorId: buyerUserId,
+        clerkUserId: "synthetic-preview-buyer",
+      },
+      localDriver: null,
+    };
+    readServerEnv.mockReturnValue(previewEnvironment);
+    getRequestIdentity.mockResolvedValue(previewIdentity);
+    createCheckoutServerRuntime.mockResolvedValue(null);
+
+    const response = await POST(
+      request(body, previewEnvironment.APP_ORIGIN),
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({
+      status: "quote_unavailable",
+      component: "commerce",
+    });
     expect(quoteCheckout).not.toHaveBeenCalled();
   });
 

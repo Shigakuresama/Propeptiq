@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildPublicCatalog, findPublicProduct } from "./public-catalog";
-import type { CatalogRecordSet } from "./types";
+import type { CatalogProductRecord, CatalogRecordSet } from "./types";
 
 const now = new Date("2026-08-25T12:00:00.000Z");
 
@@ -383,7 +383,366 @@ describe("public catalog projection", () => {
     expect(
       alpha?.merchandising.find((entry) => entry.kind === "cross_sell")?.summary,
     ).toBe("1 related public catalog record.");
+    expect(
+      alpha?.merchandising.find((entry) => entry.kind === "bundle")?.summary,
+    ).toBe(
+      "2-record bundle display at $36.00. Enrollment is not active.",
+    );
     expect(catalog.promotions).toHaveLength(5);
+  });
+
+  it.each([
+    {
+      boundary: "a missing product",
+      productIds: ["demo-product-alpha", "missing-product"],
+    },
+    {
+      boundary: "a duplicated product",
+      productIds: ["demo-product-alpha", "demo-product-alpha"],
+    },
+    {
+      boundary: "an unsafe product",
+      productIds: ["demo-product-alpha", "demo-product-beta"],
+    },
+    {
+      boundary: "a nonpublic product",
+      productIds: ["demo-product-alpha", "demo-product-retired"],
+    },
+    {
+      boundary: "a product without a current price",
+      productIds: ["demo-product-alpha", "demo-product-no-price"],
+    },
+  ])(
+    "omits a direct active bundle configured with $boundary",
+    ({ boundary, productIds }) => {
+      const base = createRecords();
+      const products =
+        boundary === "an unsafe product"
+          ? base.products.map((product) =>
+              product.id === "demo-product-beta"
+                ? { ...product, name: "For human use record" }
+                : product,
+            )
+          : base.products;
+      const records: CatalogRecordSet = {
+        ...base,
+        products,
+        promotions: base.promotions.map((promotion) =>
+          promotion.id === "demo-bundle"
+            ? { ...promotion, configuration: { productIds } }
+            : promotion,
+        ),
+      };
+
+      const catalog = buildPublicCatalog(records, { now });
+      const alpha = findPublicProduct(catalog, "synthetic-reference-alpha");
+
+      expect(alpha).not.toBeNull();
+      expect(alpha?.merchandising.map((entry) => entry.id)).not.toContain(
+        "demo-bundle",
+      );
+      expect(catalog.promotions.map((promotion) => promotion.id)).not.toContain(
+        "demo-bundle",
+      );
+    },
+  );
+
+  it.each([
+    ["slug", "for-human-use"],
+    ["name", "For human use reference"],
+    ["packageForm", "Research dose administration unit"],
+    ["materialIdentity", "Clinically proven material identity"],
+  ] as const)(
+    "excludes a product and its dependent public output when direct-active %s copy violates policy",
+    (field, unsafeValue) => {
+      const base = createRecords();
+      const records: CatalogRecordSet = {
+        ...base,
+        products: base.products.map((product): CatalogProductRecord =>
+          product.id === "demo-product-alpha"
+            ? { ...product, [field]: unsafeValue }
+            : product,
+        ),
+      };
+
+      const catalog = buildPublicCatalog(records, { now });
+
+      expect(catalog.products.map((product) => product.id)).not.toContain(
+        "demo-product-alpha",
+      );
+      expect(catalog.promotions.map((promotion) => promotion.id)).not.toContain(
+        "demo-bundle",
+      );
+      expect(catalog.qualityRecords.map((record) => record.productId)).not.toContain(
+        "demo-product-alpha",
+      );
+    },
+  );
+
+  it("excludes a product when individually safe core fields join into prohibited public copy", () => {
+    const base = createRecords();
+    const records: CatalogRecordSet = {
+      ...base,
+      products: base.products.map((product) =>
+        product.id === "demo-product-alpha"
+          ? { ...product, name: "Human", packageForm: "use reference" }
+          : product,
+      ),
+    };
+
+    const catalog = buildPublicCatalog(records, { now });
+
+    expect(catalog.products.map((product) => product.id)).not.toContain(
+      "demo-product-alpha",
+    );
+    expect(catalog.promotions.map((promotion) => promotion.id)).not.toContain(
+      "demo-bundle",
+    );
+    expect(catalog.qualityRecords.map((record) => record.productId)).not.toContain(
+      "demo-product-alpha",
+    );
+  });
+
+  it.each(["missing", "private", "inactive", "sibling"] as const)(
+    "keeps safe product copy but hides its analytical method when exact same-lot COA evidence is %s",
+    (evidenceState) => {
+      const base = createRecords();
+      const coaDocuments =
+        evidenceState === "missing"
+          ? base.coaDocuments.filter((coa) => coa.id !== "demo-coa-alpha")
+          : base.coaDocuments.map((coa) => {
+              if (coa.id !== "demo-coa-alpha") return coa;
+              if (evidenceState === "private") return { ...coa, public: false };
+              if (evidenceState === "inactive") return { ...coa, active: false };
+              return { ...coa, lotId: "demo-lot-beta" };
+            });
+      const catalog = buildPublicCatalog({ ...base, coaDocuments }, { now });
+      const alpha = findPublicProduct(catalog, "synthetic-reference-alpha");
+
+      expect(alpha?.proof.find((node) => node.label === "Analytical method")?.state).toBe(
+        "No approved public record",
+      );
+      expect(
+        catalog.qualityRecords.filter(
+          (record) => record.productId === "demo-product-alpha",
+        ),
+      ).toEqual([]);
+    },
+  );
+
+  it("sanitizes an unsupported analytical method even with exact public same-lot evidence", () => {
+    const base = createRecords();
+    const records: CatalogRecordSet = {
+      ...base,
+      lots: base.lots.map((lot) =>
+        lot.id === "demo-lot-alpha"
+          ? { ...lot, analyticalMethod: "Clinically proven HPLC purity" }
+          : lot,
+      ),
+    };
+
+    const catalog = buildPublicCatalog(records, { now });
+    const alpha = findPublicProduct(catalog, "synthetic-reference-alpha");
+
+    expect(alpha).not.toBeNull();
+    expect(alpha?.proof.find((node) => node.label === "Analytical method")?.state).toBe(
+      "No approved public record",
+    );
+    expect(
+      catalog.qualityRecords.find((record) => record.id === "demo-coa-alpha")
+        ?.analyticalMethod,
+    ).toBeNull();
+  });
+
+  it("keeps an individually safe lot but redacts its method when their joined public impression is prohibited", () => {
+    const base = createRecords();
+    const records: CatalogRecordSet = {
+      ...base,
+      lots: base.lots.map((lot) =>
+        lot.id === "demo-lot-alpha"
+          ? {
+              ...lot,
+              supplierLotCode: "HUMAN",
+              analyticalMethod: "use reference",
+            }
+          : lot,
+      ),
+    };
+
+    const catalog = buildPublicCatalog(records, { now });
+    const alpha = findPublicProduct(catalog, "synthetic-reference-alpha");
+    const qualityRecord = catalog.qualityRecords.find(
+      (record) => record.id === "demo-coa-alpha",
+    );
+
+    expect(alpha?.availableQuantity).toBe(12);
+    expect(alpha?.proof.find((node) => node.label === "Lot/batch")?.state).toBe(
+      "HUMAN",
+    );
+    expect(alpha?.proof.find((node) => node.label === "Analytical method")?.state).toBe(
+      "No approved public record",
+    );
+    expect(alpha?.proof.find((node) => node.label === "COA state")?.href).toBe(
+      "/quality-records#record-demo-coa-alpha",
+    );
+    expect(qualityRecord).toMatchObject({
+      lotCode: "HUMAN",
+      analyticalMethod: null,
+    });
+  });
+
+  it("excludes an unsafe released lot and keeps only a second safe lot's quantity and quality output", () => {
+    const base = createRecords();
+    const alphaLot = base.lots.find((lot) => lot.id === "demo-lot-alpha")!;
+    const alphaCoa = base.coaDocuments.find((coa) => coa.id === "demo-coa-alpha")!;
+    const records: CatalogRecordSet = {
+      ...base,
+      lots: [
+        ...base.lots.map((lot) =>
+          lot.id === "demo-lot-alpha"
+            ? { ...lot, supplierLotCode: "FOR-HUMAN-USE" }
+            : lot,
+        ),
+        {
+          ...alphaLot,
+          id: "demo-lot-alpha-safe",
+          supplierLotCode: "DEMO-LOT-ALPHA-SAFE",
+          availableQuantity: 5,
+          analyticalMethod: null,
+        },
+      ],
+      coaDocuments: [
+        ...base.coaDocuments,
+        {
+          ...alphaCoa,
+          id: "demo-coa-alpha-safe",
+          lotId: "demo-lot-alpha-safe",
+          storageKey: "synthetic-demo/alpha-safe-record.pdf",
+        },
+      ],
+    };
+
+    const catalog = buildPublicCatalog(records, { now });
+    const alpha = findPublicProduct(catalog, "synthetic-reference-alpha");
+
+    expect(alpha?.availableQuantity).toBe(5);
+    expect(alpha?.proof.find((node) => node.label === "Lot/batch")?.state).toBe(
+      "DEMO-LOT-ALPHA-SAFE",
+    );
+    expect(alpha?.proof.find((node) => node.label === "COA state")?.href).toBe(
+      "/quality-records#record-demo-coa-alpha-safe",
+    );
+    expect(
+      catalog.qualityRecords
+        .filter((record) => record.productId === "demo-product-alpha")
+        .map((record) => record.id),
+    ).toEqual(["demo-coa-alpha-safe"]);
+  });
+
+  it("omits only an unsafe evidence-linked analytical claim", () => {
+    const base = createRecords();
+    const supportedClaim = base.claims.find(
+      (claim) => claim.id === "demo-claim-supported",
+    )!;
+    const records: CatalogRecordSet = {
+      ...base,
+      claims: [
+        ...base.claims,
+        {
+          ...supportedClaim,
+          id: "demo-claim-unsafe",
+          text: "HPLC is clinically proven for humans.",
+        },
+      ],
+    };
+
+    const alpha = findPublicProduct(
+      buildPublicCatalog(records, { now }),
+      "synthetic-reference-alpha",
+    );
+
+    expect(alpha?.claims).toEqual([
+      {
+        id: "demo-claim-supported",
+        text: "A synthetic analytical record is linked to this demo lot.",
+      },
+    ]);
+  });
+
+  it("omits an unsafe discount without removing other valid merchandising", () => {
+    const base = createRecords();
+    const records: CatalogRecordSet = {
+      ...base,
+      promotions: base.promotions.map((promotion) =>
+        promotion.id === "demo-discount"
+          ? { ...promotion, name: "Clinically proven discount" }
+          : promotion,
+      ),
+    };
+
+    const alpha = findPublicProduct(
+      buildPublicCatalog(records, { now }),
+      "synthetic-reference-alpha",
+    );
+
+    expect(alpha?.merchandising.map((entry) => entry.kind)).toEqual([
+      "bundle",
+      "subscription",
+      "loyalty",
+      "cross_sell",
+    ]);
+  });
+
+  it("omits a promotion when its individually safe final name and summary join into prohibited copy", () => {
+    const base = createRecords();
+    const records: CatalogRecordSet = {
+      ...base,
+      promotions: base.promotions.map((promotion) =>
+        promotion.id === "demo-discount"
+          ? {
+              ...promotion,
+              name: "Human",
+              amountMinor: 1_000,
+              basisPoints: null,
+              currency: "USE",
+            }
+          : promotion,
+      ),
+    };
+
+    const alpha = findPublicProduct(
+      buildPublicCatalog(records, { now }),
+      "synthetic-reference-alpha",
+    );
+
+    expect(alpha?.merchandising.map((entry) => entry.kind)).toEqual([
+      "bundle",
+      "subscription",
+      "loyalty",
+      "cross_sell",
+    ]);
+  });
+
+  it("omits an unsafe cross-sell from merchandising and related products", () => {
+    const base = createRecords();
+    const records: CatalogRecordSet = {
+      ...base,
+      promotions: base.promotions.map((promotion) =>
+        promotion.id === "demo-cross-sell"
+          ? { ...promotion, name: "For human use related records" }
+          : promotion,
+      ),
+    };
+
+    const alpha = findPublicProduct(
+      buildPublicCatalog(records, { now }),
+      "synthetic-reference-alpha",
+    );
+
+    expect(alpha?.merchandising.map((entry) => entry.kind)).not.toContain(
+      "cross_sell",
+    );
+    expect(alpha?.relatedProducts).toEqual([]);
   });
 
   it("fails closed for unknown slugs and evidence-gates analytical claims and quality records", () => {
@@ -404,6 +763,9 @@ describe("public catalog projection", () => {
       "COA state",
     ]);
     expect(alpha?.proof.every((node) => node.state.length > 0)).toBe(true);
+    expect(alpha?.proof.find((node) => node.label === "Analytical method")?.state).toBe(
+      "Synthetic analytical method record",
+    );
   });
 
   it("fails closed when a product has ambiguous simultaneous current prices", () => {

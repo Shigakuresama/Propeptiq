@@ -34,7 +34,7 @@ export function SiteHeader() {
           <Link
             href="/"
             aria-label={`${siteName} home`}
-            className="group flex min-w-0 items-center gap-2.5 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-canvas"
+            className="group flex min-h-11 min-w-11 items-center gap-2.5 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-canvas"
           >
             <BrandMark className="transition-transform duration-200 ease-out group-hover:rotate-12 motion-reduce:transform-none" />
             <span className="truncate text-[0.7rem] font-semibold tracking-[0.11em] text-ink sm:text-[0.78rem]">

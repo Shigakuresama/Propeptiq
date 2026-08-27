@@ -6,9 +6,11 @@ schema, foreign-key, uniqueness, enum, and row-check behavior without database
 credentials.
 
 PGlite is not evidence for real PostgreSQL concurrency, locking, transaction
-isolation, or deployment behavior. A separate checkout-contention lane is
-available as `npm run test:postgres:checkout`; it is excluded from both normal
-unit and PGlite integration suites.
+isolation, or deployment behavior. The guarded PostgreSQL lane contains three
+files and twenty tests: five checkout-contention tests, five provider-event
+contention tests, and ten refund/fulfillment contention tests. It is available
+as `npm run test:postgres:checkout` and is excluded from both normal unit and
+PGlite integration suites.
 
 The contention lane requires a separately prepared, fully migrated, disposable
 PostgreSQL database plus both a narrowly test-scoped `TEST_DATABASE_URL` and

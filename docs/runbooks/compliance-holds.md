@@ -27,6 +27,13 @@ To clear the hold:
 3. Re-run the current fulfillment checks to confirm the hold's reason is resolved.
 4. Clear only the hold and append an audit event. Do not create or consume a fulfillment release while clearing the hold.
 
-At the actual fulfillment/shipment action, re-run all current release checks and atomically create/consume the fulfillment release with the shipment transaction and idempotency key. Clearing a hold never reserves or exhausts that consume-once authority.
+The current carrier/tracking/preparation/handoff/delivery/exception commands
+create manual internal records only. They are not a carrier adapter, carrier
+webhook, carrier-confirmed synchronization, or proof that a physical handoff
+or delivery occurred. Fulfillment remains disabled. Any future authorized
+operation must require an accountable operator to own the physical/carrier
+evidence, re-run every release check, use the consume-once transaction and
+idempotency key, and read back the internal record. Clearing a hold never
+reserves or exhausts that consume-once authority.
 
 If legality, catalog, tax/shipping, warehouse, or provider facts are unresolved, keep the order held and escalate to the accountable external owner. Software does not decide those inputs.

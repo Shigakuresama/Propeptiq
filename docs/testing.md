@@ -4,7 +4,7 @@
 
 - **Domain unit tests:** automatic buyer activation, exact gate decisions/reason codes, destination precedence, explicit review snapshots, content/publication policy, price/promotion calculations, order/payment/inventory/refund/fulfillment transitions.
 - **Repository integration tests:** Drizzle queries and constraints against an isolated database, guarded migrations, provider event/hash uniqueness, concurrent inventory/refund/shipment behavior.
-- **Adapter contract tests:** Clerk verification projection, Stripe raw-body signature verification and idempotency, Blob authorization, email outbox behavior.
+- **Adapter contract tests:** Clerk verification projection, Stripe raw-body signature verification and idempotency, Blob authorization, and the durable downstream-effect repository/lease-worker factory with visibly injected test sinks.
 - **Component/browser tests:** public catalog/prices/promotions/cart, preserved cart through sign-in, account attestation, own-order authorization, staff MFA/capability denial, read-only success route, safe empty/error states.
 - **Responsive/accessibility tests:** 375px, 768px, 1024px, and 1440px; keyboard-only; visible focus; reduced motion; 200% zoom; no horizontal overflow; accessible navigation sheet and Proof Rail.
 
@@ -62,5 +62,12 @@ This historical list is not sufficient for later checkpoints.
 If `.next` must move for clean type/build proof, first record its file count, byte count, and manifest SHA-256 outside the worktree; move it only to a unique explicit temporary path; preserve each fresh evidence tree outside the worktree; restore the inherited path; and verify the identical manifest. Never recursively delete an inherited generated tree.
 
 Record exact commands, exit codes, counts, viewports/routes, production-disabled values, evidence locations, and unresolved external checks. Local unit/PGlite/synthetic-browser/build evidence never establishes legal, provider, destination, tax, shipping, fulfillment, warehouse, or launch approval.
+
+The downstream-effect tests establish repository leases, idempotency, and the
+worker factory with an injected sink only. They do not establish a runtime
+scheduler/wake-up, production email/Resend delivery, bounded backoff or
+dead-letter operations, alerts, structured telemetry, external firewall
+configuration, or webhook rate limiting. Those claims require separate
+implementation and operational evidence.
 
 Dependency audit, network package metadata, preview/release preparation, publication, deployment, and production activation remain Task 7 work and are excluded from the Task 6 checkpoint.

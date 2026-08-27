@@ -58,7 +58,7 @@ function runtimeNow(): Date {
   return new Date(Math.floor(Date.now() / 1_000) * 1_000);
 }
 
-function coherentLocalRequest(request: RequestIdentity): boolean {
+export function isBuyerCheckoutRuntimeReady(request: RequestIdentity): boolean {
   const environment = request.environment;
   return request.localDriver !== null &&
     request.identity !== null &&
@@ -85,7 +85,7 @@ async function localProviderContext(request: RequestIdentity, now: Date) {
 export async function createCheckoutServerRuntime(
   request: RequestIdentity,
 ): Promise<CheckoutServerRuntimeV1 | null> {
-  if (!coherentLocalRequest(request)) {
+  if (!isBuyerCheckoutRuntimeReady(request)) {
     // PostgreSQL/live composition remains fail closed until every configured
     // shipping and tax adapter is present. Credentials alone never enable it.
     return null;
@@ -143,7 +143,7 @@ export async function createStaffCommerceServerRuntime(
   correlationId: string,
 ): Promise<StaffCommerceCommandRuntimeV1 | null> {
   if (request.principal === null || request.identity === null) return null;
-  if (coherentLocalRequest(request)) {
+  if (isBuyerCheckoutRuntimeReady(request)) {
     const driver = request.localDriver!;
     return createStaffCommerceCommandRuntimeV1({
       environment: request.environment,

@@ -9,9 +9,18 @@ Card handling should remain outside the application. Stripe’s official current
 
 ## Decision
 
-Define a server-only `PaymentProvider` interface. Implement a production-safe disabled provider and a Stripe Checkout adapter. Use Stripe-hosted Checkout, server-derived line prices, explicit idempotency keys, raw-body signature verification, unique webhook inbox, append-only payment journal, and reconciliation.
+Define a server-only `PaymentProvider` interface. Implement a production-safe disabled provider and a Stripe Checkout adapter. Use Stripe-hosted Checkout, server-derived line prices, explicit idempotency keys, raw-body signature verification, unique webhook inbox, append-only payment journal, and signed refund-reconciliation provider-event handling.
 
-Payment mode defaults to disabled. Live mode additionally requires evidence-backed launch gates for entity/catalog/provider approval, jurisdictions, tax, shipping, fulfillment, monitoring, and recovery. Success/return pages are read-only status surfaces.
+Payment mode defaults to disabled. Production buyer checkout remains inert at
+this checkpoint regardless of environment flags. External entity/catalog/
+provider acceptance, jurisdictions, tax, shipping, fulfillment, monitoring,
+and recovery evidence are necessary but not sufficient for a later separately
+authorized activation. Success/return pages are read-only status surfaces.
+
+There is no scheduled settlement reconciliation, provider settlement fetch,
+authenticated operator reconciliation command, period-close evidence system,
+or period-close authorization. Those are future operational capabilities, not
+implied by signed refund-event handling.
 
 ## Consequences
 

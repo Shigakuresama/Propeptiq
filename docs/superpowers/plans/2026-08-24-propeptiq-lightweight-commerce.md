@@ -154,12 +154,12 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 7: Final Verification and Controlled Handoff
 
-- [ ] Run lint, strict TypeScript, all unit/integration/browser tests, production build, dependency audit, and `git diff --check`.
-- [ ] Test 375px, 768px, 1024px, 1440px, keyboard navigation, reduced motion, and 200% zoom.
-- [ ] Perform an adversarial content review for implied human-use positioning, misleading quality claims, and promotion accuracy.
-- [ ] Prepare a preview for synthetic accounts, Stripe test mode, and a clearly marked demo catalog. Preview publication is a separate external side effect and requires explicit approval at action time.
-- [ ] Keep production commerce disabled only until real SKU manifest, destination allowlist, tax/shipping configuration, fulfillment process, and provider approval are supplied and verified.
-- [ ] After verification, complete branch review and prepare the normal release handoff. Merge and production activation remain separate explicit actions.
+- [x] Run lint, strict TypeScript, all unit/integration/browser tests, production build, dependency audit, and `git diff --check`.
+- [x] Test 375px, 768px, 1024px, 1440px, keyboard navigation, reduced motion, and 200% zoom.
+- [x] Perform an adversarial content review for implied human-use positioning, misleading quality claims, and promotion accuracy.
+- [x] Prepare a preview for synthetic accounts, Stripe test mode, and a clearly marked demo catalog. Preview publication is a separate external side effect and requires explicit approval at action time.
+- [x] Keep production commerce disabled only until real SKU manifest, destination allowlist, tax/shipping configuration, fulfillment process, and provider approval are supplied and verified.
+- [x] After verification, complete branch review and prepare the normal release handoff. Merge and production activation remain separate explicit actions.
 
 ## Acceptance Scenarios
 
