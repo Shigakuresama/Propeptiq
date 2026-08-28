@@ -399,3 +399,109 @@ returned `idempotent` and left the conversion qualified.
 92d2c2a6790af548812b317f690700f8f2db3321
 fix(growth): make referral reversals replay safe
 ```
+
+## 5C checkpoint — Neutral shared research sets (Task 5 complete)
+
+### Outcome
+
+Implemented private owner-managed research sets and a deliberately narrow
+public projection. Owners can create, update, list/read, and deactivate sets;
+public readers can resolve only an active opaque code; and cart transfer uses
+only normalized current product IDs and quantities through the existing cart
+contract. The set page has no checkout action.
+
+Mutation boundaries are fail closed: verified active buyer/owner scope, exact
+same-origin/CSRF, database-backed fixed-window rate limiting, expected-version
+CAS, durable idempotency receipts, and a serializable transaction wrap the
+existing repository mutations. The label and item payload are strictly parsed
+before storage: labels are bounded and screened by the existing prohibited-use
+and unsupported-claim policy; items contain exactly 2–8 unique current active
+production product IDs with integer quantities from 1–25. Unknown keys and all
+client-supplied product, commerce, identity, PII, claim, protocol, dose/use,
+destination, supplier, lot, COA, price, discount/rate, inventory, and
+eligibility authority are rejected.
+
+Public resolution never exposes owner identity and derives current product
+facts server-side from the production public catalog. Missing or inactive
+products are omitted with a truthful non-claiming explanation. Owner list/read
+is private and bounded; deactivation prevents public resolution; exact receipt
+replay and stale-version conflicts are deterministic, including replay after
+catalog drift.
+
+### Changed implementation files
+
+- `src/growth/shared-set-service.ts` and focused tests.
+- `src/growth/shared-set-server.ts` and focused tests.
+- `src/growth/actions.ts` and focused action tests, extended only for shared-set
+  create/update/deactivate.
+- `src/components/growth/add-set-to-cart-button.tsx` and focused tests.
+- `src/components/growth/shared-set-builder.tsx` and focused tests.
+- `src/app/(public)/sets/[code]/page.tsx` and focused tests.
+- `src/app/research-sets/page.tsx` and focused tests.
+
+No schema, migration, affiliate cash workflow, admin growth control, or Task 7
+visual-polish file changed.
+
+### RED evidence
+
+- Initial service test: exit 1, 1 failed suite, 0 tests because
+  `./shared-set-service` did not exist.
+- Mutation-adapter slice: exit 1, 3 failed and 47 passed because
+  `deriveSharedSetCreateIdentity` and `createPostgresSharedSetMutationPort` did
+  not exist.
+- Read-adapter slice: exit 1, 2 failed and 50 passed because
+  `createPostgresSharedSetReadPort` did not exist.
+- Action slice: exit 1, 18 failed and 8 passed because
+  `createSharedSetMutationAction` did not exist.
+- Page/component slice: exit 1, 4 failed suites and 0 tests because all four
+  target implementation files did not exist.
+- Public server-composition regression: exit 1, 1 failed because public
+  resolution incorrectly loaded identity instead of server environment.
+- Later-clock replay regression: exit 1, 1 failed and 52 passed because exact
+  create replay did not resolve the durable mutation.
+- Catalog-drift replay regression: exit 1, 2 failed and 52 passed because exact
+  create/update replays were incorrectly rejected as `product_unavailable`.
+
+All RED runs used fixed clocks/IDs and local test doubles only. No external
+service, production secret, or production data was used.
+
+### GREEN and acceptance evidence
+
+- Focused shared-set/action/page/component lane: exit 0, 7 files, 88/88 tests.
+- Full unit suite: exit 0, 83 files, 927/927 tests.
+- Required affected PGlite transaction lane: exit 0, 2 files, 45/45 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- Working and staged `git diff --check`: exit 0.
+- Privacy/content scenarios: active owner authorization, exact origin/CSRF,
+  fixed-window limits, strict own-key payload parsing, neutral policy-screened
+  labels, private bounded owner reads, and owner-free public results passed.
+- CAS/idempotency scenarios: exact create/update/deactivate replay, changed
+  idempotency payload, stale expected version, owner mismatch, transaction
+  rollback, and catalog drift after a durable receipt passed.
+- Public/cart scenarios: opaque bounded codes, active-code-only lookup,
+  deactivation, omitted stale products with truthful notice, server-derived
+  public facts, normalized ID/quantity-only cart transfer, and absence of
+  checkout/price/discount/inventory authority passed.
+- Database generation/check: not run because 5C made no schema or migration
+  change and reused the completed Task 3 shared-set contracts.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no real
+  PostgreSQL concurrency claim is made.
+- External services, production credentials, production data, and non-fixed
+  test clocks/IDs: not used.
+
+### Implementation commit
+
+```text
+b4b594c5c08847e4fc2b749e316f80d3aec1f52d
+feat(growth): add private referrals and shareable research sets
+```
+
+### Task 5 acceptance checkpoint
+
+Task 5 is complete across reviewed slices 5A–5C. The required focused,
+integration, unit, type, lint, and diff gates are green. The guarded real
+PostgreSQL lane remains explicitly unavailable under its exact environment
+guards, so no real-PostgreSQL concurrency claim is made. Task 6 affiliate cash
+workflow and Task 7 visual polish remain unstarted.
