@@ -138,6 +138,144 @@ Task 5B enrollment/binding/discount/lifecycle and Task 5C shared sets/actions/UI
 remain unstarted. Task 5A does not activate production economics, disclose a
 referral owner, bind a buyer/order, calculate a benefit, or create rewards.
 
+## 5B checkpoint — Private customer referral lifecycle
+
+### Outcome
+
+Implemented Task 5B only. An authenticated active buyer with the existing
+verified-primary-email contract can accept exactly one current
+`customer_rewards_referrals` terms version/hash and idempotently receive one
+stable opaque `ref_` code. The production action boundary enforces exact form
+fields, same-origin/CSRF checks, the existing authorization policy, and a
+database-backed fixed-window limit. It returns only the buyer's own code and no
+owner identity or application-style disclosure fields.
+
+Checkout now reads the 5A cookie only from the HTTP cookie header, verifies its
+HMAC server-side, reloads the active code/current referral policy, rejects
+self-referral and referral/affiliate/first-order conflicts, and carries the
+eligible candidate only inside the opaque authoritative plan. Promotion and
+referral acquisition benefits compete by greatest eligible discount and only
+the winner is snapshotted; points redemption remains after that winner under
+the existing cap/order. Browser input has no code, owner, rate, cap, policy, or
+discount authority, and browser results never disclose the referrer.
+
+Checkout preparation revalidates and binds one referral attribution, exact
+policy ID/version, one order-growth attribution, and one pending conversion in
+the existing serializable order/reward/inventory transaction. Verified payment
+adds pending referral points and qualifies the conversion exactly once;
+verified delivery moves the unreversed pending amount to available exactly
+once; verified cumulative refund/chargeback journals append proportional
+incremental reversals and fully reverse the conversion at complete loss. The
+approved signed available balance permits a negative referrer balance. No
+consumed-redemption restoration rule was added.
+
+No shared-set/page work (5C), cash affiliate commission/payout workflow (Task
+6), visual UI (Task 7), schema/migration, external service, production secret,
+or production policy activation was added.
+
+### Changed implementation files
+
+- `src/growth/referral-service.ts`
+- `src/growth/referral-service.test.ts`
+- `src/growth/actions.ts`
+- `src/growth/actions.test.ts`
+- `src/growth/policies.ts`
+- `src/growth/rewards-service.ts`
+- `src/commerce/checkout-service.ts`
+- `src/commerce/checkout-service.test.ts`
+- `src/db/repositories/checkout-repository.ts`
+- `src/commerce/checkout-http.ts`
+- `src/commerce/checkout-http.test.ts`
+- `src/commerce/provider-checkout-orchestration.ts`
+- `src/commerce/server-runtime.ts`
+- `src/app/api/checkout/quote/route.test.ts`
+- `src/app/api/checkout/sessions/route.test.ts`
+- `tests/integration/referral-enrollment.test.ts`
+- `tests/integration/growth-commerce-transactions.test.ts`
+
+### RED evidence
+
+- Enrollment unit RED: `npm test -- --run src/growth/referral-service.test.ts`
+  exited 1 with one failed suite, zero tests, because
+  `src/growth/referral-service.ts` did not exist.
+- Enrollment PGlite RED: the corrected seven-case fixture failed 7/7 because
+  `createPostgresReferralEnrollmentTransaction` did not exist. Candidate lookup
+  then failed 5/5 because `createPostgresReferralCandidateLookup` did not exist.
+- Discount RED: checkout focused tests had 1 expected failure and 19 passes;
+  the referral service received zero calls and referral did not compete with
+  promotion.
+- Binding RED: the PGlite growth-commerce lane had 1 expected failure and 9
+  passes; order preparation succeeded but referral attribution/conversion rows
+  were absent.
+- Payment, delivery, and reversal REDs each failed the new focused lifecycle
+  assertion in turn: no referrer account/pending entry, no available transfer,
+  and no proportional referral reversal were present before each implementation.
+- HTTP-cookie RED: the controller passed no attribution cookie to checkout.
+  No-points projection RED: the monetary discount applied but separate referral
+  acquisition fields were absent.
+- Real-cookie RED: the PGlite test failed because
+  `createPostgresReferralCheckoutService` did not yet exist; the implementation
+  then bound the existing 5A verifier to authoritative candidate lookup.
+
+### Transaction, idempotency, and security evidence
+
+- Exact terms commit and replay return one stable active code; stale version,
+  hash mismatch, overlapping current terms, review/blocked buyer, future or
+  missing verified email, and code collision roll back acceptance/code writes.
+- Real 5A HMAC cookie succeeds; tampering, stale/expired cookie, revoked code,
+  overlapping policy, self-referral, duplicate referred buyer/first qualified
+  order, and customer-versus-affiliate conflict fail closed.
+- Post-quote code revocation and overlapping-policy races return
+  `facts_changed_retry` and roll back order, checkout attempt, inventory,
+  redemption, attribution, and conversion writes together.
+- Exact replay leaves one attribution, one order attribution, one conversion,
+  one pending referral entry, and one available referral entry.
+- The synthetic 10,000-minor order snapshots a 1,000 referral acquisition
+  discount instead of the smaller promotion, then 750 points redemption; the
+  referrer reward is 412 points from authoritative 8,250 post-discount
+  merchandise.
+- Cumulative 4,125-minor refund then 8,250-minor chargeback creates only two
+  incremental referral reversals totaling 412 points. Replay and a later
+  post-full-loss event are no-ops; simulated post-delivery spending permits the
+  approved `-312` available balance.
+- Action tests reject cross-origin/missing-origin requests, missing acceptance,
+  stale/invalid terms fields, extra browser owner authority, and the fixed-window
+  excess before enrollment. Results are frozen and privacy-minimal.
+- The provider-event lifecycle is required by its production composition; the
+  fulfillment seam returns conflict if its required lifecycle dependency is
+  absent. Referral writes are part of those existing durable transactions, not
+  an optional or swallowed side channel.
+
+### Validation gates
+
+- Focused service/action/checkout/controller/provider/fulfillment/runtime lane:
+  exit 0, 10 files, 94/94 tests.
+- Required affected PGlite transaction lane: exit 0, 2 files, 26/26 tests.
+- Full unit suite: exit 0, 77 files, 847/847 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- Working and staged `git diff --check`: exit 0; only expected Windows LF/CRLF
+  working-copy notices appeared.
+- Database generation/check: not run because 5B made no schema or migration
+  change and reused the completed Task 2–4 contracts.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no real
+  PostgreSQL concurrency claim is made.
+- External services and production credentials: not used.
+
+### Implementation commit
+
+```text
+31c4181d6cbc779009c90283274fa6e45121dc06
+feat(growth): add private referral lifecycle
+```
+
+### Remaining Task 5 boundary
+
+Task 5C shared research sets/actions/pages remains unstarted. Task 5B does not
+create shared-set routes, affiliate cash economics, admin growth controls, or
+visual account/public UI.
+
 ## 5A review fix round 1/5 — Trusted redirect origin
 
 ### Outcome
