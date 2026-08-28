@@ -19,8 +19,10 @@ import {
 } from "@/db/repositories/provider-event-repository";
 import { createPostgresRateLimitStore } from "@/db/repositories/rate-limit-store";
 import { createRefundFulfillmentRepository } from "@/db/repositories/refund-fulfillment-repository";
+import type { GrowthTransactionRunner } from "@/db/repositories/growth-repository";
 import { connectRuntimeDatabaseSession, withRuntimeTransaction } from "@/db/runtime";
 import { readServerEnv } from "@/env";
+import { createPostgresRewardsLifecycleService } from "@/growth/rewards-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 
 export type CheckoutServerRuntimeV1 = Readonly<{
@@ -56,6 +58,28 @@ function deterministicUuid(value: string): string {
 
 function runtimeNow(): Date {
   return new Date(Math.floor(Date.now() / 1_000) * 1_000);
+}
+
+const rewardsDisabledLifecycle = Object.freeze({
+  async reconcileProcessedProviderEvent() {
+    return Object.freeze({ status: "idempotent" as const });
+  },
+  async reconcileDeliveredOrder() {
+    return Object.freeze({ status: "idempotent" as const });
+  },
+});
+
+function createRuntimeRewardsLifecycle(environment: ReturnType<typeof readServerEnv>) {
+  const runSerializableTransaction: GrowthTransactionRunner = (work, options) =>
+    withRuntimeTransaction(environment, work, options);
+  return createPostgresRewardsLifecycleService({
+    client: {
+      query: (sql, params = []) =>
+        withRuntimeTransaction(environment, (client) => client.query(sql, params)),
+    },
+    runSerializableTransaction,
+    keyedUuid: deterministicUuid,
+  });
 }
 
 export function isBuyerCheckoutRuntimeReady(request: RequestIdentity): boolean {
@@ -154,6 +178,7 @@ export async function createStaffCommerceServerRuntime(
       adminRepository: driver.adminRepository,
       refundRepository: driver.commerce.refundRepository,
       fulfillmentRepository: driver.commerce.fulfillmentRepository,
+      rewardsLifecycle: rewardsDisabledLifecycle,
       async resolveDatabaseUsersByClerkId(clerkUserId) {
         const principal = driver.loadPrincipal(clerkUserId);
         return principal === null ? [] : [principal.actorId];
@@ -194,6 +219,7 @@ export async function createStaffCommerceServerRuntime(
     sha256,
     keyedUuid: deterministicUuid,
   });
+  const rewardsLifecycle = createRuntimeRewardsLifecycle(environment);
   let stripe = null;
   if (
     (environment.PAYMENTS_MODE === "test" || environment.PAYMENTS_MODE === "live") &&
@@ -219,6 +245,7 @@ export async function createStaffCommerceServerRuntime(
     adminRepository,
     refundRepository,
     fulfillmentRepository,
+    rewardsLifecycle,
     async resolveDatabaseUsersByClerkId(clerkUserId) {
       return withRuntimeTransaction(environment, async (client) => {
         const result = await client.query<{ id: string }>(
@@ -250,6 +277,7 @@ export async function createStripeWebhookServerRuntime(): Promise<StripeWebhookS
     ),
     keyedUuid: deterministicUuid,
   });
+  const rewardsLifecycle = createRuntimeRewardsLifecycle(environment);
   const service = createProviderEventServiceV1({
     authority,
     repository,
@@ -259,6 +287,7 @@ export async function createStripeWebhookServerRuntime(): Promise<StripeWebhookS
     clock: () => new Date(),
     uuid: () => randomUUID(),
     leaseToken: () => `provider_event_${randomBytes(24).toString("hex")}`,
+    rewardsLifecycle,
   });
   return Object.freeze({ handleDelivery: service.handleDelivery });
 }

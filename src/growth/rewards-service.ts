@@ -189,8 +189,9 @@ async function loadCheckoutRewardsFromClient(
      WHERE user_id = $1::uuid
        AND program = 'customer_rewards_referrals'
        AND terms_version_id = $2::uuid
-       AND content_hash = $3${input.lockAccount ? " FOR UPDATE" : ""}`,
-    [input.buyerUserId, terms.id, terms.contentHash],
+       AND content_hash = $3
+       AND accepted_at <= $4::timestamptz${input.lockAccount ? " FOR UPDATE" : ""}`,
+    [input.buyerUserId, terms.id, terms.contentHash, input.now.toISOString()],
   );
   if (acceptance.rows.length !== 1) {
     return Object.freeze({ status: "unavailable", reason: "acceptance_unavailable" });
@@ -519,8 +520,9 @@ async function reconcileVerifiedPaymentInTransaction(
          WHERE user_id = $1::uuid
            AND program = 'customer_rewards_referrals'
            AND terms_version_id = $2::uuid AND content_hash = $3
+           AND accepted_at <= $4::timestamptz
          FOR UPDATE`,
-        [buyerUserId, terms.id, terms.contentHash],
+        [buyerUserId, terms.id, terms.contentHash, input.now.toISOString()],
       );
       if (acceptance.rows.length !== 1) return Object.freeze({ status: "idempotent" });
       const account = await client.query<RewardAccountRow>(

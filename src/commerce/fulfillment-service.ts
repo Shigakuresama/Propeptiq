@@ -46,6 +46,13 @@ export type FulfillmentCommandRepository = Readonly<{
   ) => Promise<FulfillmentCommandResultV1>;
 }>;
 
+export type FulfillmentRewardsLifecycleV1 = Readonly<{
+  reconcileDeliveredOrder: (input: Readonly<{
+    orderId: string;
+    now: Date;
+  }>) => Promise<Readonly<{ status: "applied" | "idempotent" }>>;
+}>;
+
 type CommandInput = Readonly<{
   executionContext: unknown;
   repository: FulfillmentCommandRepository;
@@ -54,12 +61,7 @@ type CommandInput = Readonly<{
   now: Date;
   correlationId: string;
   authorize: () => Promise<FulfillmentCommandActorV1>;
-  rewardsLifecycle?: Readonly<{
-    reconcileDeliveredOrder: (input: Readonly<{
-      orderId: string;
-      now: Date;
-    }>) => Promise<Readonly<{ status: "applied" | "idempotent" }>>;
-  }>;
+  rewardsLifecycle?: FulfillmentRewardsLifecycleV1;
 }>;
 
 function boundedText(value: unknown): value is string {
@@ -110,9 +112,11 @@ async function execute(
   });
   if (
     action === "deliver" &&
-    (result.status === "delivered" || result.status === "already_delivered") &&
-    input.rewardsLifecycle !== undefined
+    (result.status === "delivered" || result.status === "already_delivered")
   ) {
+    if (input.rewardsLifecycle === undefined) {
+      return Object.freeze({ status: "conflict" as const });
+    }
     try {
       await input.rewardsLifecycle.reconcileDeliveredOrder({
         orderId: input.orderId,

@@ -119,6 +119,9 @@ describe("fulfillment command orchestration", () => {
       executionContext: authority(true),
       repository: repo,
       authorize: authorize(),
+      rewardsLifecycle: {
+        reconcileDeliveredOrder: vi.fn(async () => ({ status: "idempotent" as const })),
+      },
     };
     await expect(clearFulfillmentHold(base)).resolves.toEqual({ status: "cleared" });
     await expect(markShipmentDelivered(base)).resolves.toEqual({ status: "delivered" });
@@ -158,4 +161,15 @@ describe("fulfillment command orchestration", () => {
       expect(reconcile).toHaveBeenCalledWith({ orderId, now });
     },
   );
+
+  it("does not report delivery success when reward reconciliation is omitted", async () => {
+    const repo = repository();
+    await expect(markShipmentDelivered({
+      ...common(),
+      executionContext: authority(true),
+      repository: repo,
+      authorize: authorize(),
+    })).resolves.toEqual({ status: "conflict" });
+    expect(repo.transitionShipment).toHaveBeenCalledTimes(1);
+  });
 });

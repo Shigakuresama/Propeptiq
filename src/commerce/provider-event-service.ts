@@ -23,6 +23,14 @@ export type ProviderEventIngressV1 = Readonly<{
   }>) => Promise<ProviderEventIngressResultV1>;
 }>;
 
+export type ProviderRewardsLifecycleV1 = Readonly<{
+  reconcileProcessedProviderEvent: (input: Readonly<{
+    provider: "stripe";
+    providerEventId: string;
+    now: Date;
+  }>) => Promise<Readonly<{ status: "applied" | "idempotent" }>>;
+}>;
+
 type ProviderEventIngressDependenciesV1 = Readonly<{
   authority: ProviderEventAuthorityV1 | null;
   repository: Pick<ProviderEventRepository, "registerAndClaim">;
@@ -128,13 +136,7 @@ export function createProviderEventServiceV1(
         ProviderEventRepository,
         "registerAndClaim" | "processClaim" | "markClaimFailed"
       >;
-      rewardsLifecycle?: Readonly<{
-        reconcileProcessedProviderEvent: (input: Readonly<{
-          provider: "stripe";
-          providerEventId: string;
-          now: Date;
-        }>) => Promise<Readonly<{ status: "applied" | "idempotent" }>>;
-      }>;
+      rewardsLifecycle: ProviderRewardsLifecycleV1;
     }>,
 ): Readonly<{
   handleDelivery: (input: Readonly<{
@@ -158,7 +160,6 @@ export function createProviderEventServiceV1(
       const registered = registration.result;
       const reconcile = async () => {
         if (
-          dependencies.rewardsLifecycle === undefined ||
           registration.provider === null ||
           registration.providerEventId === null
         ) {

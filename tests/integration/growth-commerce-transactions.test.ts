@@ -352,6 +352,85 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     });
   });
 
+  it("treats a future-dated current terms acceptance as unavailable at the supplied quote instant", async () => {
+    await client.query(
+      `UPDATE growth_terms_acceptances
+       SET accepted_at = $2::timestamptz
+       WHERE id = $1::uuid`,
+      [ids.termsAcceptance, "2026-08-28T12:00:00.001Z"],
+    );
+
+    const result = await setup().service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.keyA,
+      paymentProviderAvailable: true,
+      request,
+    });
+
+    expect(result.status).toBe("quoted");
+    if (result.status !== "quoted") throw new Error("expected fallback quote");
+    expect(result.quote).toMatchObject({
+      rewardRedemptionPoints: 0,
+      rewardRedemptionMinor: 0,
+      pendingBaseEarnPoints: 0,
+      rewardsBenefitAvailable: false,
+      rewardsUnavailableReason: "acceptance_unavailable",
+    });
+    const growthWrites = await client.query<{ redemptions: number; ledger: number }>(
+      `SELECT (SELECT count(*)::int FROM reward_redemptions) AS redemptions,
+              (SELECT count(*)::int FROM reward_ledger_entries) AS ledger`,
+    );
+    expect(growthWrites.rows[0]).toEqual({ redemptions: 0, ledger: 0 });
+  });
+
+  it("does not append base earn for a future-dated acceptance on the negative-balance catch-up path", async () => {
+    const { service } = setup();
+    const ordinaryRequest = {
+      items: request.items,
+      destination: request.destination,
+      promotionIds: request.promotionIds,
+    };
+    const ordinary = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.keyA,
+      paymentProviderAvailable: true,
+      request: ordinaryRequest,
+    });
+    expect(ordinary.status).toBe("quoted");
+    if (ordinary.status !== "quoted") throw new Error("expected ordinary quote");
+    const prepared = await service.prepare(
+      ordinary.plan,
+      providerPreparation(ordinary.plan.identity.attemptId),
+    );
+    if (prepared.status !== "prepared") throw new Error("expected prepared order");
+    await client.query(
+      `UPDATE reward_accounts SET available_points = -25
+       WHERE buyer_user_id = $1::uuid`,
+      [ids.buyer],
+    );
+    await client.query(
+      `UPDATE growth_terms_acceptances
+       SET accepted_at = $2::timestamptz
+       WHERE id = $1::uuid`,
+      [ids.termsAcceptance, "2026-08-28T12:00:00.001Z"],
+    );
+    await seedProcessedPayment(prepared.orderId, "evt_task4_future_acceptance");
+
+    await expect(lifecycleService().reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task4_future_acceptance",
+      now,
+    })).resolves.toEqual({ status: "idempotent" });
+    const state = await client.query<{ pending: number; available: number; earns: number }>(
+      `SELECT pending_points AS pending, available_points AS available,
+              (SELECT count(*)::int FROM reward_ledger_entries
+               WHERE kind = 'order_earned_pending') AS earns
+       FROM reward_accounts WHERE buyer_user_id = $1::uuid`,
+      [ids.buyer],
+    );
+    expect(state.rows[0]).toEqual({ pending: 0, available: -25, earns: 0 });
+  });
+
   it("allows only one of two prequoted attempts to reserve the same available balance", async () => {
     const first = await quote(ids.keyA);
     const second = await quote(ids.keyB);
