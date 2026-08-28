@@ -10,7 +10,7 @@ Add a coherent growth layer to PROPEPTIQ without replacing the approved `desktop
 
 ## Evidence and inspiration
 
-The current PROPEPTIQ public site is calm, legible, and evidence-oriented, but its homepage is sparse, its 53-family / 103-variant browse catalog needs stronger discovery tools, and account navigation does not expose rewards or referrals. The live 375px layout also needs a release check that the full logo lockup remains uncropped after deployment.
+The current PROPEPTIQ public site is calm, legible, and evidence-oriented, but its homepage is sparse, its 56-exact-name / 103-variant browse catalog needs stronger discovery tools, and account navigation does not expose rewards or referrals. The live 375px layout also needs a release check that the full logo lockup remains uncropped after deployment.
 
 AminoClub currently exposes several useful growth patterns: a visible partner program, 30-day referral attribution, a tracked partner dashboard, points, membership tiers, shareable research bundles, subscription boxes, bulk ordering, and evidence links. See its [homepage](https://www.aminoclub.com/), [partner program](https://www.aminoclub.com/us/affiliate), [research bundles](https://www.aminoclub.com/us/bundles), [points page](https://www.aminoclub.com/us/buy-points), and [membership page](https://www.aminoclub.com/us/membership).
 
@@ -72,7 +72,7 @@ When commerce or growth policies are inactive, omit their modules rather than sh
 ### Catalog and product records
 
 - Add a persistent labeled search field and compact filters for exact source name, source code, and package unit. Do not invent therapeutic categories.
-- Keep 53 exact-name cards and all 103 owner-supplied variants available in browse-only publication mode. Prices and growth actions remain absent in that mode.
+- Keep 56 exact-name cards and all 103 owner-supplied variants available in browse-only publication mode. Prices and growth actions remain absent in that mode.
 - For production database products, show active server price, available package form, active promotion summary, and evidence state.
 - Product details may show `Earn N points` only after the server has projected a real price and active loyalty policy.
 - Related records come only from active cross-sell records. Shared-set suggestions must not imply a scientific protocol or outcome.
