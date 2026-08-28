@@ -223,3 +223,144 @@ fix(growth): preserve reviewed affiliate application replay
 Task 6B attribution/commission lifecycle and Task 6C payout batching/externally
 paid recording remain unstarted. Task 7 UI and all production/external
 operations remain unstarted. No affiliate policy was activated.
+
+## 6B checkpoint — Affiliate attribution and commission lifecycle
+
+### Outcome
+
+Implemented Task 6B only from clean base
+`6608623f15ed8feff6201cbba4a32ed1c3ec9ede`. An active affiliate code with
+exactly one active current affiliate policy may issue the existing signed,
+environment-bound V1 attribution cookie for 30 days through `/a/[code]`. The
+landing always redirects to the trusted configured application origin plus
+`/catalog`; request host and query input cannot alter the destination. Invalid,
+inactive, suspended, rejected, missing-policy, and overlapping-policy requests
+set no cookie and remain non-enumerating.
+
+Checkout verifies the signed cookie and reloads the active partner, current
+policy, customer identity, and qualified-order history server-side. It binds one
+private affiliate order snapshot inside the existing serializable checkout
+transaction only when customer-referral attribution is absent. Self-attribution,
+duplicate/incoherent attribution, and referral-versus-affiliate conflicts fail
+closed. Browser quote totals contain no partner identity or commission facts.
+
+Verified payment appends one pending USD commission using authoritative
+post-promotion, post-referral, post-points merchandise only. The first qualified
+order earns 10%; qualifying reorders earn 5% through day 180 inclusive and zero
+afterward. Tax and shipping are validated but excluded. Verified delivery sets
+approval eligibility to no earlier than delivery plus 30 days without approving,
+paying, batching, or sending anything. Verified refunds and chargebacks append
+cumulative proportional reversals; a full cumulative merchandise loss leaves
+one coherent fully reversed commission. Existing provider-event, inventory,
+Task 4 rewards, and Task 5 referral effects remain composed through the same
+required durable lifecycle boundary.
+
+No payout creation, approval consumption, mark-paid operation, payout provider
+or reference, cash transmission, Task 7 UI, external call, production operation,
+or policy activation was added. No click row is persisted because the existing
+schema has no privacy-minimal affiliate-visit table; no IP, device fingerprint,
+PII, or raw cookie is stored.
+
+### Changed implementation files
+
+- `src/app/a/[code]/route.ts`
+- `src/app/a/[code]/route.test.ts`
+- `src/growth/affiliate-landing-runtime.ts`
+- `src/growth/affiliate-landing-runtime.test.ts`
+- `src/growth/affiliate-service.ts`
+- `src/growth/affiliate-service.test.ts`
+- `src/growth/policies.ts`
+- `src/commerce/checkout-service.ts`
+- `src/commerce/checkout-service.test.ts`
+- `src/db/repositories/checkout-repository.ts`
+- `src/growth/rewards-service.ts`
+- `tests/integration/growth-commerce-transactions.test.ts`
+- `src/db/schema/growth.ts`
+- `src/db/migrations/0015_rich_toro.sql`
+- `src/db/migrations/meta/0015_snapshot.json`
+- `src/db/migrations/meta/_journal.json`
+
+### Schema and transaction boundary
+
+Generated migration `0015_rich_toro.sql` adds only nullable
+`affiliate_commissions.approval_eligible_at` plus a check requiring it to be
+later than commission creation when present. A second `npm run db:generate`
+reported `No schema changes, nothing to migrate`; `npm run db:check` passed.
+
+Affiliate attribution and the exclusive order-growth snapshot are written in the
+same serializable checkout transaction as the order and reward/referral facts.
+Commission creation, delivery eligibility, and cumulative reversals execute in
+the existing required rewards lifecycle transaction used by verified provider
+events and fulfillment. Replays do not add rows or regress state; conflicting
+facts fail closed instead of silently skipping accounting.
+
+### Recoverable RED evidence
+
+- Landing/candidate RED: 3 failed files. The candidate export, landing runtime,
+  and route did not exist; the service file recorded 6 expected failures with 47
+  existing passes.
+- Commission calculation RED: 3 expected failures and 53 passes because
+  `calculateAffiliateOrderCommission` did not exist.
+- Checkout exclusivity RED: 2 expected failures and 21 passes because affiliate
+  quote composition was not invoked and dual referral/affiliate eligibility was
+  incorrectly returned as quoted instead of `internal_conflict`.
+- Lifecycle PGlite RED: 1 expected failure and 13 passes with PostgreSQL error
+  `column "approval_eligible_at" does not exist` before the generated migration.
+
+### Transaction, idempotency, and privacy scenarios
+
+- Active profile plus exactly one current active policy issues one signed
+  30-day envelope; inactive/suspended/rejected profiles and missing/overlapping
+  policies issue none.
+- Hostile Host/origin/query input cannot change the fixed trusted `/catalog`
+  redirect. Missing trusted-origin configuration returns no redirect location
+  and no cookie.
+- Signed-envelope verification, active partner/policy reload, 30-day last-click
+  eligibility, self-attribution rejection, and customer-referral XOR affiliate
+  selection occur server-side.
+- Checkout preparation and exact replay retain exactly one affiliate attribution
+  and one affiliate order snapshot.
+- Verified payment and replay retain one pending commission. In the fixed PGlite
+  scenario, authoritative merchandise of 9,250 minor units creates a 925-unit
+  gross commission; tax and shipping do not enter the basis.
+- Verified delivery and replay retain pending status while setting eligibility
+  exactly to `2026-09-27T12:04:00.000Z`, 30 days after the fixed delivery time.
+- A cumulative 4,625-unit refund followed by a 9,250-unit chargeback leaves one
+  925-unit fully reversed commission; event replays add nothing.
+- Suspended and rejected partners cannot create new commissions. Day 180 is
+  eligible at 5%; day 181 returns zero.
+- Browser and owner-facing results omit referred-buyer identity, order lines,
+  addresses, payment IDs, raw cookie, IP/device facts, credentials, and private
+  partner identity. Existing owner commission reads remain aggregate/redacted.
+
+### GREEN and validation evidence
+
+- Controller-confirmed focused 6B unit lane: 3 files, 84/84 tests.
+- Expanded affected unit lane: 9 files, 130/130 tests.
+- Dedicated Task 6B PGlite transaction file: 1 file, 14/14 tests.
+- Expanded affected PGlite lane: 8 files, 251/251 tests.
+- Full unit suite: 86 files, 1021/1021 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- Second `npm run db:generate`: exit 0, no schema changes.
+- `npm run db:check`: exit 0.
+- Working and staged `git diff --check`: exit 0; only expected Windows LF/CRLF
+  working-copy notices appeared.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no
+  real-PostgreSQL or contention claim is made.
+- All tests used fixed clocks/IDs and synthetic data. No external services,
+  secrets, production credentials, or production data were used.
+
+### Implementation commit
+
+```text
+7e9a5e540ad4eccc72dfc0c004e1ab3b9faac37f
+feat(growth): add affiliate commission lifecycle
+```
+
+### Remaining Task 6 boundary
+
+Task 6C payout batching, approval consumption, externally paid recording,
+provider/reference storage, and cash transmission remain unstarted. Task 7 UI
+and all production/external operations remain unstarted.
