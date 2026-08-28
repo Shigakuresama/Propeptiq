@@ -365,6 +365,73 @@ Task 6C payout batching, approval consumption, externally paid recording,
 provider/reference storage, and cash transmission remain unstarted. Task 7 UI
 and all production/external operations remain unstarted.
 
+## 6C review fix round 1/5 — Authoritative policy snapshots and exclusive mutations
+
+Independent review found four Important defects: superseded database policies
+were not mapped to the retired domain state, payout thresholds other than the
+immutable Task 6 V1 value could reach the transaction, and the generic growth
+repository exposed unaudited reserve/paid mutation bypasses.
+
+### Recoverable RED evidence
+
+- Pure service RED: 2 failures and 66 passes; stored thresholds 4,999 and 5,001
+  were accepted instead of requiring exactly 5,000 minor.
+- Payout PGlite RED: 3 failures and 6 passes; a superseded earned-policy
+  snapshot returned `persistence_conflict`, while drifted 4,999/5,100 threshold
+  rows were not rejected as persistence conflicts.
+- Repository-surface RED: 1 failure and 32 skipped; the public repository still
+  exposed `reserveAffiliatePayout` and `markAffiliatePayoutPaid`.
+- Schema RED: 1 failure and 14 skipped; a 5,100-minor affiliate policy row was
+  accepted by migrated PGlite.
+
+### Fix and invariant evidence
+
+- The payout transaction explicitly maps database `superseded` policy history
+  to domain `retired`, so already-earned approved commissions remain payable.
+- Both the pure draft builder and locked server transaction require the stored
+  immutable V1 policy threshold to equal exactly 5,000 minor. Additive migration
+  `0017_glamorous_randall.sql` adds the matching database check; no prior SQL or
+  numbered snapshot changed.
+- The generic growth repository no longer exports or implements either direct
+  payout reservation or direct paid-recording mutation. Payout writes remain
+  exclusive to the Task 6C service/transaction authority with its server
+  selection, MFA/authorization, CAS, idempotency, and atomic redacted audit.
+- Existing payout PGlite coverage continues to prove exact create/paid replay,
+  conflicting payload and stale-version rejection, one audit per applied
+  transition, and rollback without partial payout, commission, or audit writes.
+- No browser-supplied money authority, UI, provider call, webhook, HTTP call,
+  policy activation, or production/external operation was added.
+
+### Review-fix GREEN and validation evidence
+
+- Focused service/actions/authorization/domain: 4 files, 166/166 tests.
+- Payout, growth-repository, and schema PGlite: 3 files, 56/56 tests.
+- Full unit suite: 86 files, 1,046/1,046 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- `npm run db:generate`: additive `0017_glamorous_randall.sql`; second run
+  reported no schema changes.
+- `npm run db:check`: exit 0.
+- Historical migration hash check: 34 prior SQL/numbered snapshot artifacts
+  checked, zero mismatches.
+- Direct-bypass source scan: only the two negative regression assertions remain.
+- `git diff --check`: exit 0; only expected Windows LF/CRLF notices appeared.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no
+  real-PostgreSQL or contention claim is made.
+
+### Review-fix implementation commit
+
+```text
+65aa82a65607a42aa8613a296dfa01ae4334e1ad
+fix(growth): enforce authoritative affiliate payouts
+```
+
+### Remaining boundary
+
+Task 7+ UI, automatic payout/provider integration, policy activation, and all
+production/external operations remain unstarted.
+
 ## 6C checkpoint — Reviewed payout batching and externally paid recording
 
 ### Outcome
