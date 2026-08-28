@@ -36,6 +36,13 @@
       "when": 1787709585068,
       "tag": "0004_soft_whiplash",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787904170862,
+      "tag": "0005_pink_fat_cobra",
+      "breakpoints": true
     }
   ]
 }
