@@ -33,6 +33,10 @@ import {
 } from "@/domain/eligibility";
 import type { PromotionRecord } from "@/domain/promotions";
 import {
+  releaseCheckoutRewardsInTransaction,
+  reserveCheckoutRewardsInTransaction,
+} from "@/growth/rewards-service";
+import {
   transitionOrder,
   type OrderSnapshot,
   type OrderState,
@@ -1006,21 +1010,21 @@ async function writeCommercialSnapshots(
         promotion.code,
         promotion.name,
         promotion.kind,
-        totals.discountMinor,
+        plan.promotionDiscountMinor,
         plan.authoritativeAt.toISOString(),
       ],
     );
-    for (const line of totals.lines) {
+    for (const allocation of plan.promotionAllocations) {
       await client.query(
         `INSERT INTO order_promotion_allocations
           (id, application_id, order_id, order_item_id, allocated_discount_minor)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5)`,
         [
-          plan.identity.keyedUuid(`promotion-allocation:${line.productId}`),
+          plan.identity.keyedUuid(`promotion-allocation:${allocation.productId}`),
           applicationId,
           plan.identity.orderId,
-          itemIds.get(line.productId),
-          line.discountMinor,
+          itemIds.get(allocation.productId),
+          allocation.discountMinor,
         ],
       );
     }
@@ -1521,6 +1525,32 @@ async function prepareInTransaction(
     existing,
   );
   if (itemIds === null) return { status: "facts_changed_retry" };
+  if (plan.rewardsQuote?.status === "applied") {
+    const rewardReservation = await reserveCheckoutRewardsInTransaction(
+      client,
+      {
+        buyerUserId: plan.buyerUserId,
+        rewardAccountId: plan.rewardsQuote.rewardAccountId,
+        orderId: plan.identity.orderId,
+        checkoutAttemptId: plan.identity.attemptId,
+        loyaltyPolicyId: plan.rewardsQuote.loyaltyPolicyId,
+        loyaltyPolicyVersion: plan.rewardsQuote.loyaltyPolicyVersion,
+        termsVersionId: plan.rewardsQuote.termsVersionId,
+        termsContentHash: plan.rewardsQuote.termsContentHash,
+        idempotencyKey: plan.idempotencyKey,
+        redemptionPoints: plan.rewardsQuote.redemptionPoints,
+        redemptionMinor: plan.rewardsQuote.redemptionMinor,
+        reservedAt: plan.authoritativeAt,
+      },
+      plan.identity.keyedUuid,
+    );
+    if (
+      rewardReservation.status !== "reserved" &&
+      rewardReservation.status !== "idempotent"
+    ) {
+      throw new RewardReservationRejected();
+    }
+  }
   await reserveInventory(client, { ...plan, facts, decision: finalDecision }, providerPreparation, itemIds);
   return {
     status: "prepared",
@@ -1586,6 +1616,13 @@ function isCheckoutIdentityRace(error: unknown): boolean {
     constraint === "checkout_attempts_pkey" ||
     constraint === "orders_pkey"
   );
+}
+
+class RewardReservationRejected extends Error {
+  constructor() {
+    super("Authoritative reward reservation was rejected");
+    this.name = "RewardReservationRejected";
+  }
 }
 
 export async function releaseCheckoutReservationsForDefiniteFailureInTransaction(
@@ -1687,6 +1724,17 @@ export async function releaseCheckoutReservationsForDefiniteFailureInTransaction
       reservation.state === terminalState &&
       safeInteger(reservation.quantityRemaining) === 0,
   );
+  const rewardsRelease = await releaseCheckoutRewardsInTransaction(
+    client,
+    {
+      buyerUserId,
+      orderId: input.orderId,
+      checkoutAttemptId: input.attemptId,
+      releasedAt: new Date(),
+    },
+    keyedUuid,
+  );
+  if (rewardsRelease === "conflict") return { status: "conflict" };
   if (attemptRow.status === input.targetAttemptStatus && allTerminal) {
     return { status: "already_released" };
   }
@@ -1816,6 +1864,9 @@ export function createPostgresCheckoutRepository(dependencies: Readonly<{
           retryOptions,
         );
       } catch (error) {
+        if (error instanceof RewardReservationRejected) {
+          return { status: "facts_changed_retry" };
+        }
         if (!isCheckoutIdentityRace(error)) throw error;
         const winner = await storedAttemptFromClient(
           dependencies.client,

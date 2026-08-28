@@ -15,6 +15,7 @@ import {
   type DefiniteFailureReleaseResult,
   type FactLoadResult,
 } from "@/commerce/checkout-service";
+import type { CheckoutRewardsQuote } from "@/growth/rewards-service";
 
 const ids = {
   buyer: "20000000-0000-4000-8000-000000000001",
@@ -28,6 +29,9 @@ const ids = {
   policy: "20000000-0000-4000-8000-000000000009",
   attestation: "20000000-0000-4000-8000-000000000010",
   acceptance: "20000000-0000-4000-8000-000000000011",
+  rewardAccount: "20000000-0000-4000-8000-000000000012",
+  loyaltyPolicy: "20000000-0000-4000-8000-000000000013",
+  growthTerms: "20000000-0000-4000-8000-000000000014",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -95,7 +99,10 @@ const facts: AuthoritativeCheckoutFacts = {
 const sha256 = async (value: string) =>
   createHash("sha256").update(value).digest("hex");
 
-function setup(overrides: Partial<AuthoritativeCheckoutFacts> = {}) {
+function setup(
+  overrides: Partial<AuthoritativeCheckoutFacts> = {},
+  options: Readonly<{ rewardsQuoteResult?: CheckoutRewardsQuote }> = {},
+) {
   const repository: CheckoutRepository = {
     findAttempt: vi.fn(async () => null),
     loadFacts: vi.fn(
@@ -139,6 +146,15 @@ function setup(overrides: Partial<AuthoritativeCheckoutFacts> = {}) {
       currency: "USD",
     }),
   );
+  const rewardsService = {
+    quoteCheckoutRewards: vi.fn(async () =>
+      options.rewardsQuoteResult ?? {
+        status: "unavailable" as const,
+        reason: "configuration_unavailable" as const,
+      },
+    ),
+    reserveCheckoutRewards: vi.fn(async () => ({ status: "reserved" as const })),
+  };
   const keyed = new Map<string, string>([
     [`${ids.buyer}:${ids.key}:order`, ids.order],
     [`${ids.buyer}:${ids.key}:attempt`, ids.attempt],
@@ -162,8 +178,9 @@ function setup(overrides: Partial<AuthoritativeCheckoutFacts> = {}) {
       maximumQuantityPerLine: 25,
       maximumOrderAmountMinor: 1_000_000,
     },
+    ...{ rewardsService },
   });
-  return { service, repository, shippingQuote, taxQuote };
+  return { service, repository, shippingQuote, taxQuote, rewardsService };
 }
 
 describe("authoritative checkout service", () => {
@@ -185,6 +202,144 @@ describe("authoritative checkout service", () => {
     expect(shippingQuote).not.toHaveBeenCalled();
     expect(taxQuote).not.toHaveBeenCalled();
   });
+
+  it("accepts only requested reward points and projects a server-authoritative redemption row", async () => {
+    const rewardsQuoteResult = Object.freeze({
+      status: "applied" as const,
+      rewardAccountId: ids.rewardAccount,
+      loyaltyPolicyId: ids.loyaltyPolicy,
+      loyaltyPolicyVersion: 1,
+      termsVersionId: ids.growthTerms,
+      termsContentHash: "a".repeat(64),
+      redemptionPoints: 2_000,
+      redemptionMinor: 2_000,
+      maximumPoints: 2_500,
+      eligibleMerchandiseMinor: 8_000,
+      pendingBaseEarnPoints: 160,
+    });
+    const { service, rewardsService, shippingQuote, taxQuote } = setup(
+      {},
+      { rewardsQuoteResult },
+    );
+
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: { ...request, rewardRedemptionPoints: 2_000 },
+    });
+
+    expect(result.status).toBe("quoted");
+    if (result.status !== "quoted") throw new Error("expected rewards quote");
+    expect(rewardsService.quoteCheckoutRewards).toHaveBeenCalledWith({
+      buyerUserId: ids.buyer,
+      requestedPoints: 2_000,
+      postPromotionMerchandiseMinor: 10_000,
+      currency: "USD",
+      now,
+    });
+    expect(shippingQuote).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchandiseTotalMinor: 8_000,
+        items: [
+          {
+            productId: ids.product,
+            quantity: 2,
+            netAmountMinor: 8_000,
+          },
+        ],
+      }),
+    );
+    expect(taxQuote).toHaveBeenCalledWith(
+      expect.objectContaining({ merchandiseTotalMinor: 8_000 }),
+    );
+    expect(result.quote).toMatchObject({
+      currency: "USD",
+      subtotalMinor: 10_000,
+      promotionDiscountMinor: 0,
+      referralDiscountMinor: 0,
+      rewardRedemptionPoints: 2_000,
+      rewardRedemptionMinor: 2_000,
+      discountMinor: 2_000,
+      shippingMinor: 700,
+      taxMinor: 325,
+      totalMinor: 9_025,
+      pendingBaseEarnPoints: 160,
+      rewardsBenefitAvailable: true,
+      rewardsUnavailableReason: null,
+    });
+  });
+
+  it("keeps ordinary checkout available with no growth write when current rewards terms are unavailable", async () => {
+    const { service, rewardsService } = setup(
+      {},
+      {
+        rewardsQuoteResult: Object.freeze({
+          status: "unavailable" as const,
+          reason: "terms_unavailable" as const,
+        }),
+      },
+    );
+
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: { ...request, rewardRedemptionPoints: 500 },
+    });
+
+    expect(result.status).toBe("quoted");
+    if (result.status !== "quoted") throw new Error("expected fallback quote");
+    expect(result.quote).toMatchObject({
+      subtotalMinor: 10_000,
+      promotionDiscountMinor: 0,
+      referralDiscountMinor: 0,
+      rewardRedemptionPoints: 0,
+      rewardRedemptionMinor: 0,
+      discountMinor: 0,
+      totalMinor: 11_025,
+      pendingBaseEarnPoints: 0,
+      rewardsBenefitAvailable: false,
+      rewardsUnavailableReason: "terms_unavailable",
+    });
+    expect(rewardsService.reserveCheckoutRewards).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["rewardRedemptionRate", 0.01],
+    ["availableRewardPoints", 50_000],
+    ["rewardRedemptionMinor", 500],
+    ["pendingBaseEarnPoints", 999_999],
+    ["loyaltyPolicyId", ids.loyaltyPolicy],
+    ["loyaltyPolicyVersion", 99],
+    ["rewardLedgerId", ids.rewardAccount],
+    ["totalMinor", 1],
+  ] as const)(
+    "rejects browser-supplied rewards authority field %s before any server work",
+    async (field, value) => {
+      const { service, repository, rewardsService, shippingQuote, taxQuote } = setup();
+      await expect(
+        service.quote({
+          buyerUserId: ids.buyer,
+          idempotencyKey: ids.key,
+          paymentProviderAvailable: true,
+          request: {
+            ...request,
+            rewardRedemptionPoints: 500,
+            [field]: value,
+          },
+        }),
+      ).resolves.toEqual({
+        status: "invalid_request",
+        reason: "checkout_input_invalid",
+      });
+      expect(repository.findAttempt).not.toHaveBeenCalled();
+      expect(repository.loadFacts).not.toHaveBeenCalled();
+      expect(rewardsService.quoteCheckoutRewards).not.toHaveBeenCalled();
+      expect(shippingQuote).not.toHaveBeenCalled();
+      expect(taxQuote).not.toHaveBeenCalled();
+    },
+  );
 
   it("quotes shipping then tax from authoritative facts with zero writes and a PII-free projection", async () => {
     const { service, repository, shippingQuote, taxQuote } = setup();

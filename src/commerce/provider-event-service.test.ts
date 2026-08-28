@@ -173,17 +173,59 @@ describe("provider event ingress service", () => {
         .mockReturnValueOnce("78000000-0000-4000-8000-000000000011")
         .mockReturnValueOnce("78000000-0000-4000-8000-000000000012"),
       leaseToken: () => "lease_synthetic_6e_full_service",
+      rewardsLifecycle: {
+        reconcileProcessedProviderEvent: vi.fn(async (input) => {
+          calls.push(`rewards:${input.providerEventId}`);
+          return { status: "applied" as const };
+        }),
+      },
     });
     await expect(service.handleDelivery(delivery())).resolves.toEqual({
       status: "processed",
     });
-    expect(calls).toEqual(["register", "process"]);
+    expect(calls).toEqual([
+      "register",
+      "process",
+      "rewards:evt_synthetic_6e_service",
+    ]);
     expect(repository.processClaim).toHaveBeenCalledWith({
       claim,
       authority: expect.any(Object),
       now,
     });
     expect(repository.markClaimFailed).not.toHaveBeenCalled();
+  });
+
+  it("reconciles rewards on an already-processed verified replay without reprocessing the provider journal", async () => {
+    const rewards = vi.fn(async () => ({ status: "idempotent" as const }));
+    const repository = {
+      registerAndClaim: vi.fn(async () => ({ status: "processed" as const })),
+      processClaim: vi.fn(),
+      markClaimFailed: vi.fn(),
+    };
+    const service = createProviderEventServiceV1({
+      authority: authority(),
+      repository,
+      sha256Bytes: async () => "a".repeat(64),
+      clock: () => now,
+      uuid: vi
+        .fn()
+        .mockReturnValueOnce("78000000-0000-4000-8000-000000000031")
+        .mockReturnValueOnce("78000000-0000-4000-8000-000000000032"),
+      leaseToken: () => "lease_synthetic_6e_full_service_replay",
+      rewardsLifecycle: { reconcileProcessedProviderEvent: rewards },
+    });
+
+    await expect(service.handleDelivery(delivery())).resolves.toEqual({
+      status: "processed",
+    });
+    expect(repository.processClaim).not.toHaveBeenCalled();
+    expect(rewards).toHaveBeenCalledTimes(1);
+    expect(rewards).toHaveBeenCalledWith({
+      provider: "stripe",
+      providerEventId: "evt_synthetic_6e_service",
+      now,
+    });
   });
 
   it("marks a still-owned lease failed in a separate call after Transaction B throws", async () => {

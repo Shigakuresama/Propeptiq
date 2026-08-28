@@ -284,16 +284,20 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       attempts: number;
       events: number;
       addresses: number;
+      growthWrites: number;
     }>(`SELECT
       (SELECT count(*)::int FROM orders) AS orders,
       (SELECT count(*)::int FROM checkout_attempts) AS attempts,
       (SELECT count(*)::int FROM inventory_events WHERE event_type = 'reservation') AS events,
-      (SELECT count(*)::int FROM order_shipping_addresses) AS addresses`);
+      (SELECT count(*)::int FROM order_shipping_addresses) AS addresses,
+      ((SELECT count(*)::int FROM reward_redemptions) +
+       (SELECT count(*)::int FROM reward_ledger_entries)) AS "growthWrites"`);
     expect(counts.rows[0]).toEqual({
       orders: 1,
       attempts: 1,
       events: 3,
       addresses: 1,
+      growthWrites: 0,
     });
     const sideEffects = await client.query<{ audits: number; effects: number }>(
       `SELECT (SELECT count(*)::int FROM admin_audit) AS audits,

@@ -141,4 +141,21 @@ describe("fulfillment command orchestration", () => {
       correlationId: "fulfillment-command-6f",
     });
   });
+
+  it.each(["delivered", "already_delivered"] as const)(
+    "reconciles pending rewards after a %s repository result",
+    async (status) => {
+      const repo = repository();
+      repo.transitionShipment.mockResolvedValueOnce({ status });
+      const reconcile = vi.fn(async () => ({ status: "applied" as const }));
+      await expect(markShipmentDelivered({
+        ...common(),
+        executionContext: authority(true),
+        repository: repo,
+        authorize: authorize(),
+        rewardsLifecycle: { reconcileDeliveredOrder: reconcile },
+      })).resolves.toEqual({ status });
+      expect(reconcile).toHaveBeenCalledWith({ orderId, now });
+    },
+  );
 });

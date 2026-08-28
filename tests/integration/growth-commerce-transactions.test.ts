@@ -1,0 +1,713 @@
+import { createHash } from "node:crypto";
+
+import type { PGlite } from "@electric-sql/pglite";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { createCheckoutService } from "@/commerce/checkout-service";
+import { createPostgresCheckoutRepository } from "@/db/repositories/checkout-repository";
+import type { GrowthSqlClient } from "@/db/repositories/growth-repository";
+import {
+  createPostgresRewardsCheckoutAtomicPort,
+  createPostgresRewardsLifecycleService,
+  createRewardsService,
+} from "@/growth/rewards-service";
+
+import { createMigratedPglite } from "./helpers/pglite";
+
+const ids = {
+  buyer: "92000000-0000-4000-8000-000000000001",
+  attestation: "92000000-0000-4000-8000-000000000002",
+  attestationAcceptance: "92000000-0000-4000-8000-000000000003",
+  group: "92000000-0000-4000-8000-000000000004",
+  product: "92000000-0000-4000-8000-000000000005",
+  price: "92000000-0000-4000-8000-000000000006",
+  lot: "92000000-0000-4000-8000-000000000007",
+  destinationPolicy: "92000000-0000-4000-8000-000000000008",
+  loyaltyPolicy: "92000000-0000-4000-8000-000000000009",
+  terms: "92000000-0000-4000-8000-000000000010",
+  termsAcceptance: "92000000-0000-4000-8000-000000000011",
+  rewardAccount: "92000000-0000-4000-8000-000000000012",
+  keyA: "92000000-0000-4000-8000-000000000013",
+  keyB: "92000000-0000-4000-8000-000000000014",
+} as const;
+
+const now = new Date("2026-08-28T12:00:00.000Z");
+const termsText = "Synthetic customer rewards terms version one.";
+const termsHash = createHash("sha256").update(termsText).digest("hex");
+const sha256 = async (value: string) =>
+  createHash("sha256").update(value).digest("hex");
+
+function keyedUuid(label: string): string {
+  const hex = createHash("sha256").update(`task4:${label}`).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+const request = {
+  items: [{ productId: ids.product, quantity: 2 }],
+  destination: {
+    recipientName: "Synthetic Researcher",
+    line1: "100 Test Way",
+    line2: null,
+    city: "Testville",
+    stateCode: "CA",
+    postalCode: "90001",
+    countryCode: "US" as const,
+  },
+  promotionIds: [] as string[],
+  rewardRedemptionPoints: 750,
+};
+
+describe("growth and commerce transaction boundary on PGlite", () => {
+  let client: PGlite;
+
+  beforeEach(async () => {
+    client = await createMigratedPglite();
+    await client.query(
+      `INSERT INTO users (id, clerk_id, email_verified_at)
+       VALUES ($1::uuid, 'clerk-task4-buyer', '2026-08-01T00:00:00.000Z')`,
+      [ids.buyer],
+    );
+    await client.query(
+      `INSERT INTO buyer_profiles
+         (user_id, status, age_confirmed_at, research_purpose, updated_at)
+       VALUES ($1::uuid, 'active', '2026-08-01T00:00:00.000Z',
+               'analytical', '2026-08-27T00:00:00.000Z')`,
+      [ids.buyer],
+    );
+    await client.query(
+      `INSERT INTO attestation_versions
+         (id, version, content_hash, policy_text, effective_at)
+       VALUES ($1::uuid, 1, $2, 'Synthetic research-use policy.',
+               '2026-08-01T00:00:00.000Z')`,
+      [ids.attestation, "b".repeat(64)],
+    );
+    await client.query(
+      `INSERT INTO attestation_acceptances
+         (id, user_id, attestation_version_id, accepted_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, '2026-08-02T00:00:00.000Z')`,
+      [ids.attestationAcceptance, ids.buyer, ids.attestation],
+    );
+    await client.query(
+      `INSERT INTO product_policy_groups (id, slug, name, active)
+       VALUES ($1::uuid, 'task4-group', 'Task 4 group', true)`,
+      [ids.group],
+    );
+    await client.query(
+      `INSERT INTO products
+         (id, slug, name, package_form, material_identity, policy_group_id, status)
+       VALUES ($1::uuid, 'task4-product', 'Synthetic Reference', 'Sealed unit',
+               'Synthetic identity', $2::uuid, 'active')`,
+      [ids.product, ids.group],
+    );
+    await client.query(
+      `INSERT INTO product_prices
+         (id, product_id, version, amount_minor, currency, effective_at)
+       VALUES ($1::uuid, $2::uuid, 1, 5000, 'USD',
+               '2026-08-01T00:00:00.000Z')`,
+      [ids.price, ids.product],
+    );
+    await client.query(
+      `INSERT INTO lots
+         (id, product_id, supplier_name, supplier_lot_code, received_quantity,
+          available_quantity, status, expires_at)
+       VALUES ($1::uuid, $2::uuid, 'Synthetic supplier', 'TASK4-LOT',
+               10, 10, 'released', '2027-01-01T00:00:00.000Z')`,
+      [ids.lot, ids.product],
+    );
+    await client.query(
+      `INSERT INTO destination_policies
+         (id, scope_kind, product_id, state_code, result, version, active, effective_at)
+       VALUES ($1::uuid, 'product', $2::uuid, 'CA', 'allowed', 1, true,
+               '2026-08-01T00:00:00.000Z')`,
+      [ids.destinationPolicy, ids.product],
+    );
+    await client.query(
+      `INSERT INTO loyalty_policies
+         (id, version, status, points_per_dollar, redemption_minor_per_point,
+          minimum_redemption_points, maximum_redemption_basis_points,
+          expires_after_days, effective_at)
+       VALUES ($1::uuid, 1, 'active', 2, 1, 500, 2500, NULL,
+               '2026-08-01T00:00:00.000Z')`,
+      [ids.loyaltyPolicy],
+    );
+    await client.query(
+      `INSERT INTO growth_terms_versions
+         (id, program, version, content_hash, terms_text, effective_at)
+       VALUES ($1::uuid, 'customer_rewards_referrals', 1, $2, $3,
+               '2026-08-01T00:00:00.000Z')`,
+      [ids.terms, termsHash, termsText],
+    );
+    await client.query(
+      `INSERT INTO growth_terms_acceptances
+         (id, user_id, program, terms_version_id, content_hash, accepted_at)
+       VALUES ($1::uuid, $2::uuid, 'customer_rewards_referrals', $3::uuid,
+               $4, '2026-08-02T00:00:00.000Z')`,
+      [ids.termsAcceptance, ids.buyer, ids.terms, termsHash],
+    );
+    await client.query(
+      `INSERT INTO reward_accounts
+         (id, buyer_user_id, pending_points, available_points,
+          created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, 0, 1000,
+               '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')`,
+      [ids.rewardAccount, ids.buyer],
+    );
+  });
+
+  afterEach(async () => client.close());
+
+  function setup() {
+    const runTransaction = <Value>(
+      work: (sqlClient: GrowthSqlClient) => Promise<Value>,
+    ) => client.transaction((transaction) =>
+      work({
+        query: async <Row extends object>(sql: string, params: readonly unknown[] = []) => {
+          const result = await transaction.query<Row>(sql, [...params]);
+          return { rows: result.rows };
+        },
+      }),
+    );
+    const atomicPort = createPostgresRewardsCheckoutAtomicPort({
+      client: { query: (sql, params = []) => client.query(sql, [...params]) },
+      runSerializableTransaction: (work) => runTransaction(work),
+      keyedUuid,
+    });
+    const repository = createPostgresCheckoutRepository({
+      client: { query: (sql, params = []) => client.query(sql, [...params]) },
+      runTransaction: (work) => runTransaction(work),
+      sha256,
+      keyedUuid,
+      retrySleep: async () => undefined,
+    });
+    const rewardsService = createRewardsService({ atomicPort });
+    const service = createCheckoutService({
+      repository,
+      rewardsService,
+      shippingQuotePort: {
+        quoteShipping: async (input) => ({
+          status: "ready",
+          bindingHash: input.bindingHash,
+          reference: "ship_task4",
+          service: "Synthetic Ground",
+          amountMinor: 700,
+          currency: "USD",
+        }),
+      },
+      taxQuotePort: {
+        quoteTax: async (input) => ({
+          status: "ready",
+          bindingHash: input.bindingHash,
+          reference: "tax_task4",
+          amountMinor: 325,
+          currency: "USD",
+        }),
+      },
+      sha256,
+      clock: () => new Date(now),
+      keyedUuid,
+      moneyPolicy: {
+        allowedCurrencies: ["USD"],
+        maximumLineCount: 50,
+        maximumQuantityPerLine: 25,
+        maximumOrderAmountMinor: 1_000_000,
+      },
+    });
+    return { service, repository };
+  }
+
+  async function quote(key: string) {
+    const value = await setup().service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request,
+    });
+    expect(value.status).toBe("quoted");
+    if (value.status !== "quoted") throw new Error("expected quote");
+    return value;
+  }
+
+  function providerPreparation(attemptId: string) {
+    return {
+      authority: "server_prepared_provider_request" as const,
+      provider: "local_test" as const,
+      providerIdempotencyKey: `checkout_attempt:${attemptId}`,
+      providerRequestHash: "c".repeat(64),
+      providerExpiresAt: "2026-08-28T13:00:00.000Z",
+      providerCustomerEmail: "synthetic.buyer@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1 as const,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    };
+  }
+
+  function lifecycleService() {
+    const runTransaction = <Value>(
+      work: (sqlClient: GrowthSqlClient) => Promise<Value>,
+    ) => client.transaction((transaction) =>
+      work({
+        query: async <Row extends object>(sql: string, params: readonly unknown[] = []) => {
+          const result = await transaction.query<Row>(sql, [...params]);
+          return { rows: result.rows };
+        },
+      }),
+    );
+    return createPostgresRewardsLifecycleService({
+      client: { query: (sql, params = []) => client.query(sql, [...params]) },
+      runSerializableTransaction: (work) => runTransaction(work),
+      keyedUuid,
+    });
+  }
+
+  async function seedProcessedPayment(orderId: string, providerEventId: string) {
+    const providerDatabaseId = keyedUuid(`provider:${providerEventId}`);
+    const paymentEventId = keyedUuid(`payment:${providerEventId}`);
+    const total = await client.query<{ totalMinor: number }>(
+      `SELECT total_minor AS "totalMinor" FROM orders WHERE id = $1::uuid`,
+      [orderId],
+    );
+    await client.query(
+      `INSERT INTO provider_events
+         (id, provider, provider_event_id, payload_hash, status, attempt_count,
+          received_at, processed_at, event_type, schema_version,
+          normalized_payload, provider_created_at, livemode)
+       VALUES ($1::uuid, 'stripe', $2, $3, 'processed', 1,
+               $4::timestamptz, $4::timestamptz,
+               'checkout.session.completed', 1, '{}'::jsonb, $4::timestamptz, false)`,
+      [providerDatabaseId, providerEventId, "d".repeat(64), now.toISOString()],
+    );
+    await client.query(
+      `INSERT INTO payment_events
+         (id, provider_event_id, order_id, event_type, provider_payment_id,
+          idempotency_key, amount_minor, currency, occurred_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'payment_verified', $4, $5,
+               $6, 'USD', $7::timestamptz)`,
+      [
+        paymentEventId,
+        providerDatabaseId,
+        orderId,
+        `pi_${providerEventId}`,
+        `stripe:payment:${providerEventId}`,
+        total.rows[0]!.totalMinor,
+        now.toISOString(),
+      ],
+    );
+    return { providerDatabaseId, paymentEventId };
+  }
+
+  async function preparePaidOrder() {
+    const { service } = setup();
+    const quoted = await quote(ids.keyA);
+    const prepared = await service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    );
+    if (prepared.status !== "prepared") throw new Error("expected prepared");
+    await seedProcessedPayment(prepared.orderId, "evt_task4_payment");
+    const lifecycle = lifecycleService();
+    await lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task4_payment",
+      now,
+    });
+    return { prepared, lifecycle };
+  }
+
+  it("reserves points with checkout preparation and exact replay subtracts available balance once", async () => {
+    const { service } = setup();
+    const quoted = await quote(ids.keyA);
+    const prepared = await service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    );
+    expect(prepared).toMatchObject({ status: "prepared" });
+    await expect(
+      service.prepare(
+        quoted.plan,
+        providerPreparation(quoted.plan.identity.attemptId),
+      ),
+    ).resolves.toMatchObject({ status: "loaded" });
+
+    const state = await client.query<{
+      availablePoints: number;
+      reservations: number;
+      ledgerEntries: number;
+      redemptionState: string;
+    }>(
+      `SELECT
+         (SELECT available_points FROM reward_accounts WHERE buyer_user_id = $1::uuid)
+           AS "availablePoints",
+         (SELECT count(*)::int FROM reward_redemptions) AS reservations,
+         (SELECT count(*)::int FROM reward_ledger_entries
+          WHERE kind = 'redemption_reserved') AS "ledgerEntries",
+         (SELECT state FROM reward_redemptions LIMIT 1) AS "redemptionState"`,
+      [ids.buyer],
+    );
+    expect(state.rows[0]).toEqual({
+      availablePoints: 250,
+      reservations: 1,
+      ledgerEntries: 1,
+      redemptionState: "reserved",
+    });
+  });
+
+  it("allows only one of two prequoted attempts to reserve the same available balance", async () => {
+    const first = await quote(ids.keyA);
+    const second = await quote(ids.keyB);
+    const firstService = setup().service;
+    const secondService = setup().service;
+
+    await expect(
+      firstService.prepare(
+        first.plan,
+        providerPreparation(first.plan.identity.attemptId),
+      ),
+    ).resolves.toMatchObject({ status: "prepared" });
+    // Restore the second prequote's inventory fact so only the locked rewards
+    // balance can decide the competing attempt.
+    await client.query(
+      `UPDATE lots SET available_quantity = 10 WHERE id = $1::uuid`,
+      [ids.lot],
+    );
+    await expect(
+      secondService.prepare(
+        second.plan,
+        providerPreparation(second.plan.identity.attemptId),
+      ),
+    ).resolves.toEqual({ status: "facts_changed_retry" });
+
+    const state = await client.query<{
+      availablePoints: number;
+      redemptions: number;
+      orders: number;
+      availableInventory: number;
+    }>(
+      `SELECT
+         (SELECT available_points FROM reward_accounts WHERE buyer_user_id = $1::uuid)
+           AS "availablePoints",
+         (SELECT count(*)::int FROM reward_redemptions) AS redemptions,
+         (SELECT count(*)::int FROM orders) AS orders,
+         (SELECT available_quantity FROM lots WHERE id = $2::uuid)
+           AS "availableInventory"`,
+      [ids.buyer, ids.lot],
+    );
+    expect(state.rows[0]).toEqual({
+      availablePoints: 250,
+      redemptions: 1,
+      orders: 1,
+      availableInventory: 10,
+    });
+  });
+
+  it("releases a failed checkout redemption exactly once in the inventory release transaction", async () => {
+    const { service, repository } = setup();
+    const quoted = await quote(ids.keyA);
+    const prepared = await service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    );
+    if (prepared.status !== "prepared") throw new Error("expected prepared");
+    const release = {
+      authority: "authoritative_provider_terminal" as const,
+      cause: "definite_rejection" as const,
+      providerEvidenceId: "task4-definite-rejection",
+      attemptId: prepared.attemptId,
+      orderId: prepared.orderId,
+      provider: "local_test" as const,
+      providerIdempotencyKey: `checkout_attempt:${prepared.attemptId}`,
+      targetAttemptStatus: "failed" as const,
+    };
+    await expect(repository.releaseDefiniteFailure(release)).resolves.toEqual({
+      status: "released",
+    });
+    await expect(repository.releaseDefiniteFailure(release)).resolves.toEqual({
+      status: "already_released",
+    });
+
+    const state = await client.query<{
+      availablePoints: number;
+      redemptionState: string;
+      reservedEntries: number;
+      releasedEntries: number;
+    }>(
+      `SELECT
+         (SELECT available_points FROM reward_accounts WHERE buyer_user_id = $1::uuid)
+           AS "availablePoints",
+         (SELECT state FROM reward_redemptions LIMIT 1) AS "redemptionState",
+         (SELECT count(*)::int FROM reward_ledger_entries
+          WHERE kind = 'redemption_reserved') AS "reservedEntries",
+         (SELECT count(*)::int FROM reward_ledger_entries
+          WHERE kind = 'redemption_released') AS "releasedEntries"`,
+      [ids.buyer],
+    );
+    expect(state.rows[0]).toEqual({
+      availablePoints: 1_000,
+      redemptionState: "released",
+      reservedEntries: 1,
+      releasedEntries: 1,
+    });
+  });
+
+  it("releases reserved points once when a processed payment-failure journal is replayed", async () => {
+    const { service } = setup();
+    const quoted = await quote(ids.keyA);
+    const prepared = await service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    );
+    if (prepared.status !== "prepared") throw new Error("expected prepared");
+    const providerEventId = "evt_task4_payment_failed";
+    const providerDatabaseId = keyedUuid(`provider:${providerEventId}`);
+    await client.query(
+      `INSERT INTO provider_events
+         (id, provider, provider_event_id, payload_hash, status, attempt_count,
+          processed_at, event_type, schema_version, normalized_payload,
+          provider_created_at, livemode)
+       VALUES ($1::uuid, 'stripe', $2, $3, 'processed', 1, $4::timestamptz,
+               'checkout.session.async_payment_failed', 1, '{}'::jsonb,
+               $4::timestamptz, false)`,
+      [providerDatabaseId, providerEventId, "f".repeat(64), now.toISOString()],
+    );
+    await client.query(
+      `INSERT INTO payment_events
+         (id, provider_event_id, order_id, event_type, provider_payment_id,
+          idempotency_key, amount_minor, currency, occurred_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'payment_failed', NULL, $4,
+               0, 'USD', $5::timestamptz)`,
+      [
+        keyedUuid(`payment:${providerEventId}`),
+        providerDatabaseId,
+        prepared.orderId,
+        `stripe:payment-failed:${providerEventId}`,
+        now.toISOString(),
+      ],
+    );
+    const lifecycle = lifecycleService();
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId,
+      now,
+    })).resolves.toEqual({ status: "applied" });
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId,
+      now,
+    })).resolves.toEqual({ status: "idempotent" });
+    const state = await client.query<{ available: number; redemptionState: string; releases: number }>(
+      `SELECT available_points AS available,
+              (SELECT state FROM reward_redemptions WHERE order_id = $1::uuid)
+                AS "redemptionState",
+              (SELECT count(*)::int FROM reward_ledger_entries
+               WHERE kind = 'redemption_released') AS releases
+       FROM reward_accounts WHERE buyer_user_id = $2::uuid`,
+      [prepared.orderId, ids.buyer],
+    );
+    expect(state.rows[0]).toEqual({
+      available: 1_000,
+      redemptionState: "released",
+      releases: 1,
+    });
+  });
+
+  it("consumes a redemption and appends pending base earn once after verified payment", async () => {
+    const { prepared, lifecycle } = await preparePaidOrder();
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task4_payment",
+      now,
+    })).resolves.toEqual({ status: "idempotent" });
+
+    const state = await client.query<{
+      redemptionState: string;
+      pendingPoints: number;
+      availablePoints: number;
+      earnEntries: number;
+      earnedPoints: number;
+    }>(
+      `SELECT
+         (SELECT state FROM reward_redemptions WHERE order_id = $1::uuid)
+           AS "redemptionState",
+         pending_points AS "pendingPoints", available_points AS "availablePoints",
+         (SELECT count(*)::int FROM reward_ledger_entries
+          WHERE kind = 'order_earned_pending') AS "earnEntries",
+         (SELECT pending_points_delta FROM reward_ledger_entries
+          WHERE kind = 'order_earned_pending') AS "earnedPoints"
+       FROM reward_accounts WHERE buyer_user_id = $2::uuid`,
+      [prepared.orderId, ids.buyer],
+    );
+    expect(state.rows[0]).toEqual({
+      redemptionState: "consumed",
+      pendingPoints: 185,
+      availablePoints: 250,
+      earnEntries: 1,
+      earnedPoints: 185,
+    });
+  });
+
+  it("moves the exact pending earn to available once after verified delivery", async () => {
+    const { prepared, lifecycle } = await preparePaidOrder();
+    const payment = await client.query<{ id: string }>(
+      `SELECT id::text AS id FROM payment_events
+       WHERE order_id = $1::uuid AND event_type = 'payment_verified'`,
+      [prepared.orderId],
+    );
+    const releaseId = keyedUuid(`release:${prepared.orderId}`);
+    await client.query(
+      `INSERT INTO fulfillment_releases
+         (id, order_id, version, idempotency_key, payment_event_id, state,
+          issued_at, expires_at, consumed_at)
+       VALUES ($1::uuid, $2::uuid, 1, $3, $4::uuid, 'consumed',
+               $5::timestamptz, $6::timestamptz, $7::timestamptz)`,
+      [
+        releaseId,
+        prepared.orderId,
+        `release:${prepared.orderId}`,
+        payment.rows[0]!.id,
+        "2026-08-28T12:01:00.000Z",
+        "2026-08-29T12:01:00.000Z",
+        "2026-08-28T12:02:00.000Z",
+      ],
+    );
+    await client.query(
+      `INSERT INTO shipments
+         (id, order_id, fulfillment_release_id, carrier, tracking_reference,
+          state, handed_off_at, delivered_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'SYNTHETIC', $4, 'delivered',
+               $5::timestamptz, $6::timestamptz)`,
+      [
+        keyedUuid(`shipment:${prepared.orderId}`),
+        prepared.orderId,
+        releaseId,
+        `tracking-${prepared.orderId}`,
+        "2026-08-28T12:03:00.000Z",
+        "2026-08-28T12:04:00.000Z",
+      ],
+    );
+
+    await expect(lifecycle.reconcileDeliveredOrder({
+      orderId: prepared.orderId,
+      now: new Date("2026-08-28T12:04:00.000Z"),
+    })).resolves.toEqual({ status: "applied" });
+    await expect(lifecycle.reconcileDeliveredOrder({
+      orderId: prepared.orderId,
+      now: new Date("2026-08-28T12:04:00.000Z"),
+    })).resolves.toEqual({ status: "idempotent" });
+    const balance = await client.query<{ pending: number; available: number; entries: number }>(
+      `SELECT pending_points AS pending, available_points AS available,
+              (SELECT count(*)::int FROM reward_ledger_entries
+               WHERE kind = 'order_earned_available') AS entries
+       FROM reward_accounts WHERE buyer_user_id = $1::uuid`,
+      [ids.buyer],
+    );
+    expect(balance.rows[0]).toEqual({ pending: 0, available: 435, entries: 1 });
+  });
+
+  it("reverses cumulative refund then chargeback earn once and permits a negative delivered balance", async () => {
+    const { prepared, lifecycle } = await preparePaidOrder();
+    const verifiedPayment = await client.query<{ id: string }>(
+      `SELECT id::text AS id FROM payment_events
+       WHERE order_id = $1::uuid AND event_type = 'payment_verified'`,
+      [prepared.orderId],
+    );
+    const releaseId = keyedUuid(`refund-release:${prepared.orderId}`);
+    await client.query(
+      `INSERT INTO fulfillment_releases
+         (id, order_id, version, idempotency_key, payment_event_id, state,
+          issued_at, expires_at, consumed_at)
+       VALUES ($1::uuid, $2::uuid, 1, $3, $4::uuid, 'consumed',
+               $5::timestamptz, $6::timestamptz, $7::timestamptz)`,
+      [
+        releaseId,
+        prepared.orderId,
+        `refund-release:${prepared.orderId}`,
+        verifiedPayment.rows[0]!.id,
+        "2026-08-28T12:01:00.000Z",
+        "2026-08-29T12:01:00.000Z",
+        "2026-08-28T12:02:00.000Z",
+      ],
+    );
+    await client.query(
+      `INSERT INTO shipments
+         (id, order_id, fulfillment_release_id, carrier, tracking_reference,
+          state, handed_off_at, delivered_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'SYNTHETIC-REFUND', $4,
+               'delivered', $5::timestamptz, $6::timestamptz)`,
+      [
+        keyedUuid(`refund-shipment:${prepared.orderId}`),
+        prepared.orderId,
+        releaseId,
+        `refund-tracking-${prepared.orderId}`,
+        "2026-08-28T12:03:00.000Z",
+        "2026-08-28T12:04:00.000Z",
+      ],
+    );
+    await lifecycle.reconcileDeliveredOrder({ orderId: prepared.orderId, now });
+    await client.query(
+      `UPDATE reward_accounts SET available_points = 35
+       WHERE buyer_user_id = $1::uuid`,
+      [ids.buyer],
+    );
+    const insertFinancialEvent = async (
+      providerEventId: string,
+      eventType: "refund_verified" | "dispute_recorded",
+      amountMinor: number,
+    ) => {
+      const providerDatabaseId = keyedUuid(`provider:${providerEventId}`);
+      await client.query(
+        `INSERT INTO provider_events
+           (id, provider, provider_event_id, payload_hash, status, attempt_count,
+            processed_at, event_type, schema_version, normalized_payload,
+            provider_created_at, livemode)
+         VALUES ($1::uuid, 'stripe', $2, $3, 'processed', 1, $4::timestamptz,
+                 $5, 1, '{}'::jsonb, $4::timestamptz, false)`,
+        [providerDatabaseId, providerEventId, "e".repeat(64), now.toISOString(), eventType],
+      );
+      await client.query(
+        `INSERT INTO payment_events
+           (id, provider_event_id, order_id, event_type, provider_payment_id,
+            idempotency_key, amount_minor, currency, occurred_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::payment_event_type,
+                 $5, $6, $7, 'USD', $8::timestamptz)`,
+        [
+          keyedUuid(`payment:${providerEventId}`),
+          providerDatabaseId,
+          prepared.orderId,
+          eventType,
+          `${eventType}_${providerEventId}`,
+          `stripe:${eventType}:${providerEventId}`,
+          amountMinor,
+          now.toISOString(),
+        ],
+      );
+    };
+    await insertFinancialEvent("evt_task4_refund", "refund_verified", 4_625);
+    await lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task4_refund",
+      now,
+    });
+    await insertFinancialEvent("evt_task4_chargeback", "dispute_recorded", 9_250);
+    await lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task4_chargeback",
+      now,
+    });
+    await lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task4_chargeback",
+      now,
+    });
+
+    const state = await client.query<{ available: number; refund: number; chargeback: number }>(
+      `SELECT available_points AS available,
+              (SELECT count(*)::int FROM reward_ledger_entries
+               WHERE kind = 'refund_reversal') AS refund,
+              (SELECT count(*)::int FROM reward_ledger_entries
+               WHERE kind = 'chargeback_reversal') AS chargeback
+       FROM reward_accounts WHERE buyer_user_id = $1::uuid`,
+      [ids.buyer],
+    );
+    expect(state.rows[0]).toEqual({ available: -150, refund: 1, chargeback: 1 });
+  });
+});

@@ -220,7 +220,7 @@ describe("refund submission and recovery", () => {
     expect(adapter.retrieveRefund).not.toHaveBeenCalled();
   });
 
-  it("uses create for an unknown refund and retrieve only for its exact known provider ID", async () => {
+  it("uses exact create/retrieve authority and leaves reward reversal to the signed event", async () => {
     const normalized = {
       status: "normalized",
       refund: {
@@ -251,6 +251,13 @@ describe("refund submission and recovery", () => {
     expect(adapter.createRefund).toHaveBeenCalledWith(
       request,
       `refund_request:${ids.refund}`,
+    );
+    expect(createRepo.applyResult).toHaveBeenCalledTimes(1);
+    const appliedPayload = (
+      createRepo.applyResult.mock.calls as unknown as readonly (readonly [unknown])[]
+    )[0]?.[0];
+    expect(JSON.stringify(appliedPayload)).not.toMatch(
+      /reward|points|ledger/i,
     );
 
     const retrieveRepo = repository({

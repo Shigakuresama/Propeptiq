@@ -354,6 +354,9 @@ export async function submitOrRecoverRefund(input: Readonly<{
   if (projected === null) {
     return Object.freeze({ status: "provider_refund_result_invalid" as const });
   }
+  // A provider SDK response is not signed financial authority. Earned-point
+  // reversal is reconciled only after the corresponding provider event journal
+  // is verified and marked processed.
   return input.repository.applyResult({
     descriptor,
     result: projected,
