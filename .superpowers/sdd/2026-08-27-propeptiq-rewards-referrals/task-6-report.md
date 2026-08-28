@@ -364,3 +364,88 @@ feat(growth): add affiliate commission lifecycle
 Task 6C payout batching, approval consumption, externally paid recording,
 provider/reference storage, and cash transmission remain unstarted. Task 7 UI
 and all production/external operations remain unstarted.
+
+## 6B review fix round 1/5 — Required runtime accounting and merchandise-only reversals
+
+Independent review rejected the initial 6B checkpoint with three Important
+findings: checkout runtime omitted affiliate composition, authoritative lookup
+errors were silently downgraded to ordinary ineligibility, and commission
+reversal used total refund/dispute amounts including tax and shipping.
+
+### Recoverable RED evidence
+
+- Runtime composition RED: 1 expected failure and 5 passes. The real server
+  runtime ignored its supplied authoritative affiliate service, leaving the
+  private checkout plan's affiliate snapshot null. The same regression also
+  requires a cookie-bearing checkout to return `internal_conflict` when the
+  required composition is unavailable.
+- Lookup-semantics RED: 2 expected failures and 81 passes. A thrown
+  authoritative candidate lookup returned `unavailable/policy_unavailable`,
+  and checkout silently emitted an ordinary unattributed quote instead of
+  `internal_conflict`.
+- Merchandise-loss unit RED: 2 expected failures and 4 passes because the
+  authoritative merchandise-loss derivation did not exist.
+- Migrated PGlite RED: 1 expected failure and 13 passes. A tax-only 325-unit
+  refund incorrectly reversed 32 commission units.
+
+### Fix and invariant evidence
+
+- The typed commerce runtime now injects its affiliate checkout service into
+  `createCheckoutService`. Any attribution-cookie checkout with unavailable
+  required affiliate composition fails closed as `internal_conflict`; it cannot
+  create an unattributed order by omission.
+- Affiliate candidate lookup exceptions now produce a distinct private
+  `internal_conflict`, which checkout propagates. Explicit invalid, wrong-program,
+  inactive, self, referral-conflict, and otherwise ineligible results remain
+  normal no-affiliate outcomes and expose no partner identity.
+- Affiliate reversal now derives cumulative verified merchandise loss from
+  locked authoritative order items, tax, shipping, and payment journals. Total
+  verified loss first consumes the combined tax/shipping amount; only the
+  bounded remainder reverses post-discount/post-points merchandise commission.
+- The provider/refund envelope remains total-only. No browser or provider field
+  may supply or invent line allocation, and no raw provider payload, buyer
+  identity, order line, address, payment identifier, cookie, IP, or device fact
+  enters an affiliate result.
+- Unit cases prove tax-only and cumulative tax/shipping-only losses reverse zero,
+  a 5,650-unit cumulative total loss reverses only 4,625 merchandise units, and
+  oversized cumulative refund/chargeback loss is capped at 9,250 merchandise
+  units.
+- Migrated transaction coverage proves tax-only and shipping-only events retain
+  zero reversal, partial merchandise produces a 462-unit reversal, a full
+  10,275-unit chargeback produces one coherent 925-unit full reversal, and
+  replay remains idempotent.
+- No schema or migration was added. Existing payment/refund contracts, provider
+  journal, inventory, Task 4 rewards, and Task 5 referral effects remain in the
+  same serializable lifecycle transaction. No payout or UI behavior was added.
+
+### Review-fix GREEN and validation evidence
+
+- Controller-confirmed review-fix unit lane: 4 files, 95/95 tests.
+- Expanded focused unit lane: 8 files, 136/136 tests.
+- Controller-confirmed Task 6B PGlite: 1 file, 14/14 tests in 36.9 seconds.
+- Full unit suite: 86 files, 1026/1026 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- `npm run db:generate`: exit 0, `No schema changes, nothing to migrate`.
+- `npm run db:check`: exit 0.
+- Working and staged `git diff --check`: exit 0; only expected Windows LF/CRLF
+  working-copy notices appeared.
+- A duplicate eight-file PGlite process and its replacement four-file process
+  were explicitly stopped after controller confirmation; neither produced a
+  failure result or changed files.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no
+  real-PostgreSQL or contention claim is made.
+
+### Review-fix implementation commit
+
+```text
+e9436d5bb0494c25477245012f7e45109e425dd1
+fix(growth): harden affiliate commission lifecycle
+```
+
+### Remaining Task 6 boundary
+
+Task 6C payout batching, approval consumption, externally paid recording,
+provider/reference storage, and cash transmission remain unstarted. Task 7 UI
+and all production/external operations remain unstarted.
