@@ -365,6 +365,95 @@ Task 6C payout batching, approval consumption, externally paid recording,
 provider/reference storage, and cash transmission remain unstarted. Task 7 UI
 and all production/external operations remain unstarted.
 
+## Whole-Task-6 review fix round 1/5 — Historical settlement, payout reversals, and exact replay
+
+Whole-Task-6 review found that a policy superseded after attribution could block
+the already-bound commission, post-payout refund/chargeback handling stopped at
+approved/consumed/paid commissions, and payout idempotency keys did not prove an
+exact immutable request replay.
+
+### Recoverable RED evidence
+
+- Historical-policy lifecycle RED: the migrated transaction case produced one
+  expected failure (`Affiliate policy is inactive`) while two current-status
+  controls passed. A focused unit mutation also failed with an ineligible result
+  instead of the expected 800-minor historical commission.
+- Post-payout reversal RED: two lifecycle cases failed with `Settled affiliate
+  commission reversal requires payout accounting`; the carry-forward case
+  selected 7,000 minor instead of the required 6,000 minor net obligation.
+- Exact-replay RED: two payout cases incorrectly replayed after immutable actor
+  or request-context changes under the same key. The cancellation regression
+  also exposed a `persistence_conflict` when replay tried to reconstruct batch
+  membership from subsequently unlinked commission rows.
+
+### Fix and invariant evidence
+
+- Verified payment now settles against the immutable policy bound to the order
+  while it was eligible. A later database `superseded` state maps to historical
+  `retired` policy semantics for the snapshot calculation; the current partner
+  profile must still be active, so suspended/rejected partners cannot create a
+  new commission. Snapshotted rates, window, currency, and merchandise basis
+  remain authoritative.
+- Refund/chargeback processing remains one serializable transaction. An approved
+  but unpaid payout is cancelled before paid recording, its commission links are
+  released, and the bounded reversal is appended. An already externally paid
+  payout and its provider evidence remain immutable; the reversal is an
+  append-only negative adjustment carried into a future settlement. Cumulative
+  refund/chargeback targets are capped at the original commission and replay is
+  idempotent.
+- Payout creation subtracts outstanding carry-forward adjustments from the
+  server-selected eligible USD commission obligation and consumes each
+  adjustment once. Immutable payout/commission membership preserves the exact
+  creation result even if a later reversal cancels the unpaid obligation.
+- Batch creation and paid recording persist server-computed canonical SHA-256
+  request fingerprints. Reuse of a key replays only the exact immutable request;
+  changed actor, correlation, timestamp, expected version, provider, reference,
+  or other fingerprinted input conflicts. No browser-supplied digest is trusted.
+- Existing authorization, MFA, CAS, redacted one-event admin audit, audit
+  rollback, and no-external-call tests remain in the passing focused lanes. No
+  payout-provider request, webhook, bank operation, automatic payment, or claim
+  that money was sent was added.
+- Migrations `0018_useful_slyde.sql`, `0019_tranquil_gwen_stacy.sql`, and
+  `0020_loose_ulik.sql` are additive. They add cancelled unpaid obligations,
+  append-only commission adjustments, bounded request fingerprints, and
+  immutable payout membership. All 37 prior migration/snapshot artifacts retain
+  their exact hashes.
+
+### GREEN and final verification evidence
+
+- Controller-confirmed repaired unit lane: 2 files, 75/75 tests.
+- Controller-confirmed affected migrated PGlite lane: 3 files, 46/46 tests in
+  about 92 seconds. A separate broader local parallel attempt encountered only
+  setup-hook contention, not a named assertion failure; duplicate reruns were
+  stopped and no additional suite was launched after controller confirmation.
+- Expanded focused unit lane: 5 files, 173/173 tests.
+- Full unit suite: 86 files, 1047/1047 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- `npm run db:generate` twice: exit 0 both times, `No schema changes, nothing
+  to migrate`.
+- `npm run db:check`: exit 0.
+- Working and staged `git diff --check`: exit 0; only expected Windows LF/CRLF
+  working-copy notices appeared.
+- Artifact/workspace-boundary reruns were not applicable because no test driver,
+  artifact composition, workspace configuration, UI, or route file changed.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no
+  real-PostgreSQL or concurrency claim is made.
+
+### Whole-Task-6 review-fix implementation commit
+
+```text
+b411477c6798dc2a32b2978826bdf21b8f577720
+fix(growth): preserve affiliate settlement history
+```
+
+### Remaining boundary
+
+Task 7+ UI, production policy activation, tax-document workflow, payout-provider
+approval, automatic payout, and all production/external operations remain
+unstarted.
+
 ## 6C review fix round 1/5 — Authoritative policy snapshots and exclusive mutations
 
 Independent review found four Important defects: superseded database policies
