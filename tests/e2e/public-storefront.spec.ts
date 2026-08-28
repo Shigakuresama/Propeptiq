@@ -354,7 +354,7 @@ test("owner-supplied catalog is complete, price-free, and serves every illustrat
   request,
 }) => {
   await page.goto("/catalog");
-  await expect(page.locator("article.catalog-listing-card")).toHaveCount(53);
+  await expect(page.locator("article.catalog-listing-card")).toHaveCount(56);
   await expect(page.getByText("103 supplied package configurations")).toBeVisible();
   await expect(page.getByRole("button", { name: /add .* to cart/i })).toHaveCount(0);
   await expect(page.locator("main")).not.toContainText("$");
@@ -366,7 +366,7 @@ test("owner-supplied catalog is complete, price-free, and serves every illustrat
         return url.searchParams.get("url") ?? url.pathname;
       }),
   );
-  expect(new Set(imagePaths).size).toBe(53);
+  expect(new Set(imagePaths).size).toBe(56);
 
   for (const imagePath of imagePaths) {
     const response = await request.get(imagePath);

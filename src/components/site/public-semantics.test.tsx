@@ -42,7 +42,7 @@ describe("public storefront semantics", () => {
       "href",
       "/cart",
     );
-    expect(screen.getByText("53")).toBeVisible();
+    expect(screen.getByText("56")).toBeVisible();
     expect(screen.getByText("Tirzepatide")).toBeVisible();
     expect(
       screen.getByRole("link", { name: /view catalog item: tirzepatide/i }),

@@ -19,6 +19,7 @@ export type BrowseCatalogVariant = Readonly<{
   code: string;
   packageForm: string;
   sourceName?: string;
+  sourcePage?: number;
 }>;
 
 export type BrowseCatalogProduct = Readonly<{
@@ -35,6 +36,7 @@ const variantSchema = z
     code: z.string().trim().min(1),
     packageForm: z.string().trim().min(1),
     sourceName: z.string().trim().min(1).optional(),
+    sourcePage: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -69,6 +71,7 @@ function copyIsPublishable(product: BrowseCatalogProduct): boolean {
       variant.code,
       variant.packageForm,
       variant.sourceName ?? "",
+      variant.sourcePage?.toString() ?? "",
     ]),
   ].join(" ");
   return scanPublicCopy({ text, claims: [] }, publicationPolicy).publishable;
@@ -147,10 +150,14 @@ const ownerSuppliedProducts = [
     { code: "TB5", packageForm: "5mg × 10 vials" },
     { code: "TB10", packageForm: "10mg × 10 vials" },
   ]),
-  product("bpc-tb-blend", "BPC + TB blend", "BPC 5mg + TB 5mg", "blends", [
-    { code: "BB10", packageForm: "10mg × 10 vials", sourceName: "BPC 5mg + TB 5mg" },
-    { code: "BB20", packageForm: "20mg × 10 vials", sourceName: "BPC 10mg + TB 10mg" },
-    { code: "BB40", packageForm: "40mg × 10 vials", sourceName: "BPC 20mg + TB 20mg" },
+  product("bpc-tb-blend", "BPC 5mg + TB 5mg", "BPC 5mg + TB 5mg", "blends", [
+    { code: "BB10", packageForm: "10mg × 10 vials", sourceName: "BPC 5mg + TB 5mg", sourcePage: 2 },
+  ]),
+  product("bpc-tb-blend-bb20", "BPC 10mg + TB 10mg", "BPC 10mg + TB 10mg", "blends", [
+    { code: "BB20", packageForm: "20mg × 10 vials", sourceName: "BPC 10mg + TB 10mg", sourcePage: 2 },
+  ]),
+  product("bpc-tb-blend-bb40", "BPC 20mg + TB 20mg", "BPC 20mg + TB 20mg", "blends", [
+    { code: "BB40", packageForm: "40mg × 10 vials", sourceName: "BPC 20mg + TB 20mg", sourcePage: 2 },
   ]),
   product("aod-9604", "AOD 9604", "AOD 9604", "metabolic", [
     { code: "AOD5", packageForm: "5mg × 10 vials" },
@@ -178,9 +185,11 @@ const ownerSuppliedProducts = [
     { code: "DS5", packageForm: "5mg × 10 vials" },
     { code: "DS10", packageForm: "10mg × 10 vials" },
   ]),
-  product("cjc-1295-no-dac-ipa", "CJC-1295 NO DAC + IPA", "CJC-1295 NO DAC 5mg + IPA 5mg", "endocrine", [
-    { code: "CP10", packageForm: "10mg × 10 vials", sourceName: "CJC-1295 NO DAC 5mg + IPA 5mg" },
-    { code: "CP20", packageForm: "20mg × 10 vials", sourceName: "CJC-1295 NO DAC 10mg + IPA 10mg" },
+  product("cjc-1295-no-dac-ipa", "CJC-1295 NO DAC 5mg + IPA 5mg", "CJC-1295 NO DAC 5mg + IPA 5mg", "endocrine", [
+    { code: "CP10", packageForm: "10mg × 10 vials", sourceName: "CJC-1295 NO DAC 5mg + IPA 5mg", sourcePage: 2 },
+  ]),
+  product("cjc-1295-no-dac-ipa-cp20", "CJC-1295 NO DAC 10mg + IPA 10mg", "CJC-1295 NO DAC 10mg + IPA 10mg", "endocrine", [
+    { code: "CP20", packageForm: "20mg × 10 vials", sourceName: "CJC-1295 NO DAC 10mg + IPA 10mg", sourcePage: 2 },
   ]),
   product("ipamorelin", "Ipamorelin", "Ipamorelin", "endocrine", [
     { code: "IP5", packageForm: "5mg × 10 vials" },
@@ -316,6 +325,14 @@ export function validateBrowseCatalogProduct(
   }
 
   const parsed = result.data as BrowseCatalogProduct;
+  const exactSourceNames = new Set(
+    parsed.variants.map((variant) => variant.sourceName ?? parsed.sourceName),
+  );
+  if (exactSourceNames.size !== 1 || !exactSourceNames.has(parsed.sourceName)) {
+    throw new Error(
+      `Browse catalog product ${parsed.slug} must contain one exact source Name`,
+    );
+  }
   if (!copyIsPublishable(parsed)) {
     throw new Error(`Browse catalog product ${parsed.slug} is not publishable`);
   }

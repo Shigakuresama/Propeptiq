@@ -14,7 +14,7 @@ describe("CatalogExplorer", () => {
     expect(within(sourceFilter).getAllByRole("option")).toHaveLength(57);
     expect(screen.getByRole("combobox", { name: "Source code" })).toBeVisible();
     expect(screen.getByRole("combobox", { name: "Package unit" })).toBeVisible();
-    expect(screen.getAllByRole("article")).toHaveLength(53);
+    expect(screen.getAllByRole("article")).toHaveLength(56);
   });
 
   it("finds source ambiguities without changing the immutable catalog rows", () => {
@@ -44,5 +44,18 @@ describe("CatalogExplorer", () => {
       target: { value: "not-a-source-record" },
     });
     expect(screen.getByText("No catalog records match these filters.")).toBeVisible();
+  });
+
+  it("filters a distinct exact source Name to its one matching card", () => {
+    render(<CatalogExplorer products={browseCatalogProducts} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Source name" }), {
+      target: { value: "BPC 10mg + TB 10mg" },
+    });
+
+    const card = screen.getByRole("article");
+    expect(within(card).getByRole("heading", { name: "BPC 10mg + TB 10mg" })).toBeVisible();
+    expect(within(card).getByText("BB20")).toBeVisible();
+    expect(within(card).getByText("20mg × 10 vials")).toBeVisible();
   });
 });

@@ -16,7 +16,7 @@ describe("owner browse-catalog publication", () => {
     );
     expect(browseCatalogSourceDocumentSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(browseCatalogRowsSha256).toBe(
-      "172dc8d9a1b8989a80c5db124a44a84805350643ef4a4df01ba0c84caf1321f5",
+      "4aea79b4199c53661bd972a55469e7d35a5eee3237c37c60337a4c32bf594867",
     );
     expect(browseCatalogRowsSha256).toMatch(/^[a-f0-9]{64}$/u);
   });
@@ -33,7 +33,7 @@ describe("owner browse-catalog publication", () => {
     const catalog = resolvePublishedBrowseCatalog(browseCatalogPublicationId);
 
     expect(catalog.publicationId).toBe(browseCatalogPublicationId);
-    expect(catalog.products).toHaveLength(53);
+    expect(catalog.products).toHaveLength(56);
     expect(catalog.variantCount).toBe(103);
     expect(catalog.products[0]).not.toHaveProperty("id");
     expect(catalog.products[0]).not.toHaveProperty("price");
