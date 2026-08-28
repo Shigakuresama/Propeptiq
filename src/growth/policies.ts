@@ -202,7 +202,7 @@ export async function loadCurrentReferralPolicy(
   return parsed.value;
 }
 
-async function loadCurrentAffiliatePolicy(
+export async function loadCurrentAffiliatePolicy(
   client: GrowthPolicySqlClient,
   now: Date,
 ): Promise<AffiliatePolicy> {

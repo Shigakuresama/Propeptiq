@@ -1,0 +1,2 @@
+ALTER TABLE "affiliate_commissions" ADD COLUMN "approval_eligible_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "affiliate_commissions" ADD CONSTRAINT "affiliate_commissions_approval_eligibility_after_creation" CHECK ("affiliate_commissions"."approval_eligible_at" is null or "affiliate_commissions"."approval_eligible_at" > "affiliate_commissions"."created_at");

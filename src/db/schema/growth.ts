@@ -880,6 +880,7 @@ export const affiliateCommissions = pgTable(
     grossCommissionMinor: money("gross_commission_minor"),
     reversedCommissionMinor: money("reversed_commission_minor").default(0),
     status: affiliateCommissionStatusEnum("status").default("pending").notNull(),
+    approvalEligibleAt: timestamp("approval_eligible_at", { withTimezone: true }),
     payoutId: uuid("payout_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -962,6 +963,10 @@ export const affiliateCommissions = pgTable(
       sql`(${table.status} in ('pending','reversed') and ${table.payoutId} is null)
         or (${table.status} = 'approved')
         or (${table.status} = 'paid' and ${table.payoutId} is not null)`,
+    ),
+    check(
+      "affiliate_commissions_approval_eligibility_after_creation",
+      sql`${table.approvalEligibleAt} is null or ${table.approvalEligibleAt} > ${table.createdAt}`,
     ),
   ],
 );

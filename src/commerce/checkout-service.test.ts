@@ -17,6 +17,7 @@ import {
 } from "@/commerce/checkout-service";
 import type { CheckoutRewardsQuote } from "@/growth/rewards-service";
 import type { ReferralCheckoutQuote } from "@/growth/referral-service";
+import type { AffiliateCheckoutQuote } from "@/growth/affiliate-service";
 
 const ids = {
   buyer: "20000000-0000-4000-8000-000000000001",
@@ -36,6 +37,9 @@ const ids = {
   referralPolicy: "20000000-0000-4000-8000-000000000015",
   referralCode: "20000000-0000-4000-8000-000000000016",
   referrer: "20000000-0000-4000-8000-000000000017",
+  affiliateProfile: "20000000-0000-4000-8000-000000000019",
+  affiliatePolicy: "20000000-0000-4000-8000-000000000020",
+  affiliateUser: "20000000-0000-4000-8000-000000000021",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -108,6 +112,7 @@ function setup(
   options: Readonly<{
     rewardsQuoteResult?: CheckoutRewardsQuote;
     referralQuoteResult?: ReferralCheckoutQuote;
+    affiliateQuoteResult?: AffiliateCheckoutQuote;
   }> = {},
 ) {
   const repository: CheckoutRepository = {
@@ -169,6 +174,13 @@ function setup(
         reason: "attribution_invalid" as const,
       })),
   };
+  const affiliateService = {
+    quoteAffiliateAttribution: vi.fn(async () =>
+      options.affiliateQuoteResult ?? Object.freeze({
+        status: "unavailable" as const,
+        reason: "attribution_invalid" as const,
+      })),
+  };
   const keyed = new Map<string, string>([
     [`${ids.buyer}:${ids.key}:order`, ids.order],
     [`${ids.buyer}:${ids.key}:attempt`, ids.attempt],
@@ -192,7 +204,7 @@ function setup(
       maximumQuantityPerLine: 25,
       maximumOrderAmountMinor: 1_000_000,
     },
-    ...{ rewardsService, referralService },
+    ...{ rewardsService, referralService, affiliateService },
   });
   return {
     service,
@@ -201,10 +213,83 @@ function setup(
     taxQuote,
     rewardsService,
     referralService,
+    affiliateService,
   };
 }
 
 describe("authoritative checkout service", () => {
+  it("keeps an eligible affiliate snapshot private and does not change checkout totals", async () => {
+    const affiliateQuoteResult = Object.freeze({
+      status: "eligible" as const,
+      code: "aff_6BOpaqueAttribution9",
+      affiliateProfileId: ids.affiliateProfile,
+      affiliateUserId: ids.affiliateUser,
+      existingAttributionId: null,
+      clickedAt: "2026-08-20T12:00:00.000Z",
+      expiresAt: "2026-09-19T12:00:00.000Z",
+      affiliatePolicyId: ids.affiliatePolicy,
+      affiliatePolicyVersion: 1,
+    });
+    const { service, affiliateService } = setup({}, { affiliateQuoteResult });
+
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      attributionCookie: "signed-affiliate-cookie",
+      request,
+    });
+
+    expect(result.status).toBe("quoted");
+    if (result.status !== "quoted") throw new Error("expected affiliate quote");
+    expect(affiliateService.quoteAffiliateAttribution).toHaveBeenCalledWith({
+      buyerUserId: ids.buyer,
+      attributionCookie: "signed-affiliate-cookie",
+      now,
+    });
+    expect(result.quote).toMatchObject({
+      subtotalMinor: 10_000,
+      promotionDiscountMinor: 0,
+      referralDiscountMinor: 0,
+      totalMinor: 11_025,
+    });
+    expect(result.quote).not.toHaveProperty("affiliate");
+    expect(result.quote).not.toHaveProperty("commission");
+    expect(result.plan.affiliateQuote).toEqual(affiliateQuoteResult);
+  });
+
+  it("fails closed when customer-referral and affiliate programs are both eligible", async () => {
+    const referralQuoteResult = Object.freeze({
+      status: "eligible" as const,
+      code: "ref_5BCheckoutOpaque",
+      referralCodeId: ids.referralCode,
+      referrerUserId: ids.referrer,
+      clickedAt: "2026-08-20T12:00:00.000Z",
+      expiresAt: "2026-09-19T12:00:00.000Z",
+      referralPolicyId: ids.referralPolicy,
+      referralPolicyVersion: 1,
+      referralDiscountMinor: 1_000,
+    });
+    const affiliateQuoteResult = Object.freeze({
+      status: "eligible" as const,
+      code: "aff_6BOpaqueAttribution9",
+      affiliateProfileId: ids.affiliateProfile,
+      affiliateUserId: ids.affiliateUser,
+      existingAttributionId: null,
+      clickedAt: "2026-08-20T12:00:00.000Z",
+      expiresAt: "2026-09-19T12:00:00.000Z",
+      affiliatePolicyId: ids.affiliatePolicy,
+      affiliatePolicyVersion: 1,
+    });
+    const { service } = setup({}, { referralQuoteResult, affiliateQuoteResult });
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      attributionCookie: "incoherent-cookie",
+      request,
+    })).resolves.toEqual({ status: "internal_conflict" });
+  });
   it("strictly reparses unknown input before any repository or quote call", async () => {
     const { service, repository, shippingQuote, taxQuote } = setup();
     await expect(

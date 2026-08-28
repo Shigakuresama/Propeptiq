@@ -15,6 +15,16 @@ import {
   scanPublicCopy,
   type PublicationPolicy,
 } from "@/domain/content-policy";
+import {
+  calculateAffiliateCommission,
+  type AffiliatePolicy,
+} from "@/domain/affiliates";
+import {
+  verifyAttributionCookie,
+  type AttributionEnvelopeV1,
+  type AttributionEnvironment,
+} from "@/growth/attribution-cookie";
+import { loadCurrentAffiliatePolicy } from "@/growth/policies";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -25,6 +35,324 @@ const MAXIMUM_CHANNEL_LENGTH = 200;
 
 export type AffiliatePromotionMethod = "website" | "social" | "email" | "other";
 export type AffiliateProfileStatus = "pending" | "active" | "rejected" | "suspended";
+
+export type AffiliateAttributionCandidate = Readonly<{
+  program: "affiliate";
+  code: string;
+  attributionDays: 30;
+}>;
+
+export type AffiliateOrderCommissionResult =
+  | Readonly<{
+      status: "commissioned";
+      orderKind: "first" | "reorder";
+      eligibleMerchandiseMinor: number;
+      commissionMinor: number;
+    }>
+  | Readonly<{ status: "outside_window" | "ineligible"; commissionMinor: 0 }>;
+
+export type EligibleAffiliateCheckoutQuote = Readonly<{
+  status: "eligible";
+  code: string;
+  affiliateProfileId: string;
+  affiliateUserId: string;
+  existingAttributionId: string | null;
+  clickedAt: string;
+  expiresAt: string;
+  affiliatePolicyId: string;
+  affiliatePolicyVersion: number;
+}>;
+
+export type AffiliateCheckoutQuote =
+  | EligibleAffiliateCheckoutQuote
+  | Readonly<{
+      status: "unavailable";
+      reason:
+        | "attribution_invalid"
+        | "program_conflict"
+        | "policy_unavailable"
+        | "profile_inactive"
+        | "self_attribution"
+        | "customer_referral_conflict"
+        | "buyer_ineligible";
+    }>;
+
+type AffiliateCandidateLookup = (input: Readonly<{
+  buyerUserId: string;
+  code: string;
+  clickedAt: string;
+  expiresAt: string;
+  now: Date;
+}>) => Promise<AffiliateCheckoutQuote>;
+
+export class AffiliateBindingConflict extends Error {
+  constructor() {
+    super("Authoritative affiliate binding conflict");
+    this.name = "AffiliateBindingConflict";
+  }
+}
+
+export function createAffiliateCheckoutService(dependencies: Readonly<{
+  verifyCookie: (value: string, now: Date) => AttributionEnvelopeV1 | null;
+  loadCandidate: AffiliateCandidateLookup;
+}>) {
+  return Object.freeze({
+    async quoteAffiliateAttribution(input: Readonly<{
+      buyerUserId: string;
+      attributionCookie: string;
+      now: Date;
+    }>): Promise<AffiliateCheckoutQuote> {
+      if (
+        !UUID_PATTERN.test(input.buyerUserId) ||
+        typeof input.attributionCookie !== "string" ||
+        input.attributionCookie.length === 0 ||
+        !Number.isFinite(input.now.getTime())
+      ) {
+        return Object.freeze({ status: "unavailable", reason: "attribution_invalid" });
+      }
+      const envelope = dependencies.verifyCookie(input.attributionCookie, input.now);
+      if (!envelope) {
+        return Object.freeze({ status: "unavailable", reason: "attribution_invalid" });
+      }
+      if (envelope.program !== "affiliate") {
+        return Object.freeze({ status: "unavailable", reason: "program_conflict" });
+      }
+      let result: AffiliateCheckoutQuote;
+      try {
+        result = await dependencies.loadCandidate({
+          buyerUserId: input.buyerUserId,
+          code: envelope.code,
+          clickedAt: envelope.issuedAt,
+          expiresAt: envelope.expiresAt,
+          now: input.now,
+        });
+      } catch {
+        return Object.freeze({ status: "unavailable", reason: "policy_unavailable" });
+      }
+      if (result.status !== "eligible") return result;
+      if (result.affiliateUserId === input.buyerUserId) {
+        return Object.freeze({ status: "unavailable", reason: "self_attribution" });
+      }
+      return Object.freeze({ ...result });
+    },
+  });
+}
+
+export function createPostgresAffiliateCandidateLookup(dependencies: Readonly<{
+  client: GrowthSqlClient;
+}>): AffiliateCandidateLookup {
+  return async (input) => {
+    const clickedAt = new Date(input.clickedAt);
+    const expiresAt = new Date(input.expiresAt);
+    if (
+      !UUID_PATTERN.test(input.buyerUserId) ||
+      !PUBLIC_CODE_PATTERN.test(input.code) ||
+      !Number.isFinite(clickedAt.getTime()) ||
+      !Number.isFinite(expiresAt.getTime()) ||
+      clickedAt.toISOString() !== input.clickedAt ||
+      expiresAt.toISOString() !== input.expiresAt ||
+      clickedAt > input.now ||
+      expiresAt <= input.now ||
+      input.now.getTime() - clickedAt.getTime() > 30 * 24 * 60 * 60 * 1_000
+    ) {
+      return Object.freeze({ status: "unavailable", reason: "attribution_invalid" });
+    }
+    const policy = await loadCurrentAffiliatePolicy(dependencies.client, input.now);
+    const profiles = await dependencies.client.query<{
+      id: string;
+      userId: string;
+    }>(
+      `SELECT ap.id::text AS id, ap.user_id::text AS "userId"
+       FROM affiliate_profiles ap
+       JOIN buyer_profiles bp ON bp.user_id = ap.user_id
+       WHERE ap.public_code = $1 AND ap.status = 'active' AND bp.status = 'active'
+       ORDER BY ap.id LIMIT 2`,
+      [input.code],
+    );
+    if (profiles.rows.length !== 1) {
+      return Object.freeze({ status: "unavailable", reason: "profile_inactive" });
+    }
+    const profile = profiles.rows[0]!;
+    if (profile.userId === input.buyerUserId) {
+      return Object.freeze({ status: "unavailable", reason: "self_attribution" });
+    }
+    const conflicts = await dependencies.client.query<{
+      referralCount: number | string;
+      qualifiedOrderCount: number | string;
+    }>(
+      `SELECT
+         (SELECT count(*) FROM referral_attributions
+          WHERE referred_user_id = $1::uuid) AS "referralCount",
+         (SELECT count(*) FROM orders WHERE buyer_user_id = $1::uuid
+          AND state IN ('ready_for_checkout','checkout_pending',
+            'paid_pending_fulfillment','paid_on_hold','ready_for_fulfillment',
+            'fulfillment_in_progress','fulfilled')) AS "qualifiedOrderCount"`,
+      [input.buyerUserId],
+    );
+    if (Number(conflicts.rows[0]?.referralCount ?? 1) > 0) {
+      return Object.freeze({ status: "unavailable", reason: "customer_referral_conflict" });
+    }
+    const existing = await dependencies.client.query<{
+      id: string;
+      affiliateProfileId: string;
+      affiliateUserId: string;
+      policyId: string;
+      policyVersion: number | string;
+    }>(
+      `SELECT id::text AS id,
+              affiliate_profile_id::text AS "affiliateProfileId",
+              affiliate_user_id::text AS "affiliateUserId",
+              affiliate_policy_id::text AS "policyId",
+              affiliate_policy_version AS "policyVersion"
+       FROM affiliate_attributions WHERE referred_user_id = $1::uuid
+       ORDER BY bound_at DESC LIMIT 2`,
+      [input.buyerUserId],
+    );
+    if (existing.rows.length > 1) {
+      return Object.freeze({ status: "unavailable", reason: "buyer_ineligible" });
+    }
+    const prior = existing.rows[0];
+    if (prior && (
+      prior.affiliateProfileId !== profile.id ||
+      prior.affiliateUserId !== profile.userId ||
+      prior.policyId !== policy.id ||
+      Number(prior.policyVersion) !== policy.version
+    )) {
+      return Object.freeze({ status: "unavailable", reason: "buyer_ineligible" });
+    }
+    if (!prior && Number(conflicts.rows[0]?.qualifiedOrderCount ?? 1) > 0) {
+      return Object.freeze({ status: "unavailable", reason: "buyer_ineligible" });
+    }
+    return Object.freeze({
+      status: "eligible",
+      code: input.code,
+      affiliateProfileId: profile.id,
+      affiliateUserId: profile.userId,
+      existingAttributionId: prior?.id ?? null,
+      clickedAt: input.clickedAt,
+      expiresAt: input.expiresAt,
+      affiliatePolicyId: policy.id,
+      affiliatePolicyVersion: policy.version,
+    });
+  };
+}
+
+export function createPostgresAffiliateCheckoutService(dependencies: Readonly<{
+  client: GrowthSqlClient;
+  environment: AttributionEnvironment;
+  secret: string;
+}>) {
+  return createAffiliateCheckoutService({
+    verifyCookie(value, now) {
+      return verifyAttributionCookie(value, {
+        environment: dependencies.environment,
+        now,
+        secret: dependencies.secret,
+      });
+    },
+    loadCandidate: createPostgresAffiliateCandidateLookup({ client: dependencies.client }),
+  });
+}
+
+export async function bindAffiliateOrderInTransaction(
+  client: GrowthSqlClient,
+  input: Readonly<{
+    attributionId: string;
+    buyerUserId: string;
+    orderId: string;
+    quote: EligibleAffiliateCheckoutQuote;
+    boundAt: Date;
+  }>,
+): Promise<void> {
+  if (
+    ![input.attributionId, input.buyerUserId, input.orderId,
+      input.quote.affiliateProfileId, input.quote.affiliateUserId,
+      input.quote.affiliatePolicyId].every((value) => UUID_PATTERN.test(value)) ||
+    !Number.isFinite(input.boundAt.getTime())
+  ) {
+    throw new AffiliateBindingConflict();
+  }
+  const clickedAt = new Date(input.quote.clickedAt);
+  const expiresAt = new Date(input.quote.expiresAt);
+  const policy = await loadCurrentAffiliatePolicy(client, input.boundAt)
+    .catch(() => { throw new AffiliateBindingConflict(); });
+  if (
+    clickedAt > input.boundAt || expiresAt <= input.boundAt ||
+    input.boundAt.getTime() - clickedAt.getTime() >
+      policy.attributionDays * 24 * 60 * 60 * 1_000 ||
+    policy.id !== input.quote.affiliatePolicyId ||
+    policy.version !== input.quote.affiliatePolicyVersion ||
+    input.quote.affiliateUserId === input.buyerUserId
+  ) {
+    throw new AffiliateBindingConflict();
+  }
+  const profile = await client.query<{ id: string; userId: string }>(
+    `SELECT ap.id::text AS id, ap.user_id::text AS "userId"
+     FROM affiliate_profiles ap JOIN buyer_profiles bp ON bp.user_id = ap.user_id
+     WHERE ap.id = $1::uuid AND ap.public_code = $2
+       AND ap.status = 'active' AND bp.status = 'active'
+     FOR UPDATE OF ap, bp`,
+    [input.quote.affiliateProfileId, input.quote.code],
+  );
+  if (profile.rows.length !== 1 || profile.rows[0]!.userId !== input.quote.affiliateUserId) {
+    throw new AffiliateBindingConflict();
+  }
+  const conflicts = await client.query<{ kind: string }>(
+    `SELECT 'referral' AS kind FROM referral_attributions
+       WHERE referred_user_id = $1::uuid
+     UNION ALL
+     SELECT 'growth' AS kind FROM order_growth_attributions
+       WHERE order_id = $2::uuid`,
+    [input.buyerUserId, input.orderId],
+  );
+  if (conflicts.rows.length > 0) throw new AffiliateBindingConflict();
+  let attributionId = input.quote.existingAttributionId;
+  if (attributionId === null) {
+    const prior = await client.query<{ kind: string }>(
+      `SELECT 'affiliate' AS kind FROM affiliate_attributions
+         WHERE referred_user_id = $1::uuid
+       UNION ALL
+       SELECT 'order' AS kind FROM orders WHERE buyer_user_id = $1::uuid
+         AND id <> $2::uuid AND state IN ('ready_for_checkout','checkout_pending',
+           'paid_pending_fulfillment','paid_on_hold','ready_for_fulfillment',
+           'fulfillment_in_progress','fulfilled')`,
+      [input.buyerUserId, input.orderId],
+    );
+    if (prior.rows.length > 0) throw new AffiliateBindingConflict();
+    attributionId = input.attributionId;
+    await client.query(
+      `INSERT INTO affiliate_attributions
+         (id, affiliate_profile_id, affiliate_user_id, referred_user_id,
+          affiliate_policy_id, affiliate_policy_version, clicked_at,
+          expires_at, bound_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6,
+               $7::timestamptz, $8::timestamptz, $9::timestamptz)`,
+      [attributionId, input.quote.affiliateProfileId, input.quote.affiliateUserId,
+        input.buyerUserId, policy.id, policy.version, input.quote.clickedAt,
+        input.quote.expiresAt, input.boundAt.toISOString()],
+    );
+  } else {
+    const existing = await client.query<{ id: string }>(
+      `SELECT id::text AS id FROM affiliate_attributions
+       WHERE id = $1::uuid AND affiliate_profile_id = $2::uuid
+         AND affiliate_user_id = $3::uuid AND referred_user_id = $4::uuid
+         AND affiliate_policy_id = $5::uuid AND affiliate_policy_version = $6
+       FOR UPDATE`,
+      [attributionId, input.quote.affiliateProfileId, input.quote.affiliateUserId,
+        input.buyerUserId, policy.id, policy.version],
+    );
+    if (existing.rows.length !== 1) throw new AffiliateBindingConflict();
+  }
+  await client.query(
+    `INSERT INTO order_growth_attributions
+       (order_id, buyer_user_id, program, affiliate_attribution_id,
+        affiliate_policy_id, affiliate_policy_version, created_at)
+     VALUES ($1::uuid, $2::uuid, 'affiliate', $3::uuid, $4::uuid, $5,
+             $6::timestamptz)`,
+    [input.orderId, input.buyerUserId, attributionId, policy.id, policy.version,
+      input.boundAt.toISOString()],
+  );
+}
 
 export type AffiliateApplicationErrorCode =
   | "buyer_inactive"
@@ -145,6 +473,118 @@ export type AffiliateAdminMutationTransaction = (
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteTime(value: unknown): number | null {
+  if (typeof value !== "string" && !(value instanceof Date)) return null;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+export function createAffiliateAttributionCandidate(
+  input: unknown,
+): AffiliateAttributionCandidate | null {
+  if (!isRecord(input)) return null;
+  const { requestedCode, now, rows } = input;
+  if (
+    typeof requestedCode !== "string" ||
+    !PUBLIC_CODE_PATTERN.test(requestedCode) ||
+    !(now instanceof Date) ||
+    !Number.isFinite(now.getTime()) ||
+    !Array.isArray(rows) ||
+    rows.length !== 1
+  ) {
+    return null;
+  }
+
+  const row = rows[0];
+  if (!isRecord(row)) return null;
+  const effectiveAt = finiteTime(row.effectiveAt);
+  const supersededAt = row.supersededAt === null
+    ? null
+    : finiteTime(row.supersededAt);
+  if (
+    row.code !== requestedCode ||
+    row.profileStatus !== "active" ||
+    row.policyStatus !== "active" ||
+    row.attributionDays !== 30 ||
+    effectiveAt === null ||
+    effectiveAt > now.getTime() ||
+    (row.supersededAt !== null &&
+      (supersededAt === null || supersededAt <= now.getTime()))
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    program: "affiliate",
+    code: requestedCode,
+    attributionDays: 30,
+  });
+}
+
+export function calculateAffiliateOrderCommission(input: Readonly<{
+  policy: AffiliatePolicy;
+  partnerStatus: AffiliateProfileStatus;
+  attribution: Readonly<{
+    program: "customer_referral" | "affiliate";
+    code: string;
+    clickedAt: string;
+  }>;
+  firstQualifiedOrderAt: string | null;
+  orderPaidAt: string;
+  merchandiseMinor: number;
+  taxMinor: number;
+  shippingMinor: number;
+  currency: "USD";
+}>): AffiliateOrderCommissionResult {
+  const paidAt = finiteTime(input.orderPaidAt);
+  const firstAt = input.firstQualifiedOrderAt === null
+    ? null
+    : finiteTime(input.firstQualifiedOrderAt);
+  if (
+    input.policy.status !== "active" ||
+    input.partnerStatus !== "active" ||
+    input.attribution.program !== "affiliate" ||
+    paidAt === null ||
+    (input.firstQualifiedOrderAt !== null &&
+      (firstAt === null || paidAt < firstAt)) ||
+    !Number.isSafeInteger(input.merchandiseMinor) ||
+    input.merchandiseMinor < 0 ||
+    !Number.isSafeInteger(input.taxMinor) ||
+    input.taxMinor < 0 ||
+    !Number.isSafeInteger(input.shippingMinor) ||
+    input.shippingMinor < 0 ||
+    input.currency !== "USD"
+  ) {
+    return Object.freeze({ status: "ineligible", commissionMinor: 0 });
+  }
+  const orderKind = firstAt === null ? "first" : "reorder";
+  const daysSinceFirstQualifiedOrder = firstAt === null
+    ? null
+    : Math.floor((paidAt - firstAt) / (24 * 60 * 60 * 1_000));
+  const calculated = calculateAffiliateCommission({
+    policy: input.policy,
+    attribution: input.attribution,
+    partnerStatus: input.partnerStatus,
+    orderKind,
+    daysSinceFirstQualifiedOrder,
+    postDiscountMerchandiseMinor: input.merchandiseMinor,
+    refundedMerchandiseMinor: 0,
+    currency: input.currency,
+  });
+  if (!calculated.ok) {
+    return Object.freeze({ status: "ineligible", commissionMinor: 0 });
+  }
+  if (calculated.value.commissionMinor === 0) {
+    return Object.freeze({ status: "outside_window", commissionMinor: 0 });
+  }
+  return Object.freeze({
+    status: "commissioned",
+    orderKind,
+    eligibleMerchandiseMinor: input.merchandiseMinor,
+    commissionMinor: calculated.value.commissionMinor,
+  });
 }
 
 function isPromotionMethod(value: unknown): value is AffiliatePromotionMethod {

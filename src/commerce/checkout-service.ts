@@ -48,6 +48,10 @@ import type {
   EligibleReferralCheckoutQuote,
   ReferralCheckoutQuote,
 } from "@/growth/referral-service";
+import type {
+  AffiliateCheckoutQuote,
+  EligibleAffiliateCheckoutQuote,
+} from "@/growth/affiliate-service";
 
 export type AuthoritativeLotFact = Readonly<{
   id: string;
@@ -251,6 +255,7 @@ export type AuthoritativeCheckoutPlanData = Readonly<{
   }>[];
   rewardsQuote: CheckoutRewardsQuote | null;
   referralQuote: EligibleReferralCheckoutQuote | null;
+  affiliateQuote: EligibleAffiliateCheckoutQuote | null;
   browserQuote: BrowserCheckoutQuote;
 }>;
 
@@ -559,6 +564,13 @@ export function createCheckoutService(dependencies: Readonly<{
       now: Date;
     }>) => Promise<ReferralCheckoutQuote>;
   }>;
+  affiliateService?: Readonly<{
+    quoteAffiliateAttribution: (input: Readonly<{
+      buyerUserId: string;
+      attributionCookie: string;
+      now: Date;
+    }>) => Promise<AffiliateCheckoutQuote>;
+  }>;
 }>) {
   return Object.freeze({
     async quote(input: Readonly<{
@@ -765,6 +777,7 @@ export function createCheckoutService(dependencies: Readonly<{
               promotionAllocations: Object.freeze([]),
               rewardsQuote: null,
               referralQuote: null,
+              affiliateQuote: null,
               browserQuote: emptyQuote,
             });
           return resultWithOpaquePlan(
@@ -816,6 +829,20 @@ export function createCheckoutService(dependencies: Readonly<{
           : null;
       const referralQuote =
         referralResult?.status === "eligible" ? referralResult : null;
+      const affiliateResult =
+        typeof input.attributionCookie === "string" &&
+        dependencies.affiliateService !== undefined
+          ? await dependencies.affiliateService.quoteAffiliateAttribution({
+              buyerUserId: input.buyerUserId,
+              attributionCookie: input.attributionCookie,
+              now: authoritativeAt,
+            })
+          : null;
+      const affiliateQuote =
+        affiliateResult?.status === "eligible" ? affiliateResult : null;
+      if (referralQuote !== null && affiliateQuote !== null) {
+        return { status: "internal_conflict" };
+      }
       const acquisition = selectBestAcquisitionDiscount({
         candidates: [
           {
@@ -1047,6 +1074,7 @@ export function createCheckoutService(dependencies: Readonly<{
             : Object.freeze([]),
         rewardsQuote,
         referralQuote,
+        affiliateQuote,
         browserQuote: quote,
       });
       return resultWithOpaquePlan({ status: "quoted" as const, quote }, plan);

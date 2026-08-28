@@ -15,6 +15,8 @@ import {
   loadCurrentGrowthTerms,
   loadCurrentLoyaltyPolicy,
 } from "@/growth/policies";
+import { calculateAffiliateOrderCommission } from "@/growth/affiliate-service";
+import type { AffiliatePolicy } from "@/domain/affiliates";
 
 export type RewardsUnavailableReason =
   | "policy_unavailable"
@@ -724,6 +726,332 @@ function combineLifecycleResults(
   });
 }
 
+type AffiliateSettlementRow = {
+  affiliateProfileId: string;
+  affiliateAttributionId: string;
+  affiliateUserId: string;
+  buyerUserId: string;
+  publicCode: string;
+  profileStatus: "pending" | "active" | "rejected" | "suspended";
+  affiliatePolicyId: string;
+  affiliatePolicyVersion: number | string;
+  policyStatus: "draft" | "active" | "superseded";
+  attributionDays: number | string;
+  firstOrderCommissionBasisPoints: number | string;
+  reorderCommissionBasisPoints: number | string;
+  reorderWindowDays: number | string;
+  approvalDelayDays: number | string;
+  payoutThresholdMinor: number | string;
+  currency: string;
+  effectiveAt: Date | string;
+  supersededAt: Date | string | null;
+  clickedAt: Date | string;
+};
+
+function affiliatePolicyFromRow(row: AffiliateSettlementRow): AffiliatePolicy {
+  if (row.policyStatus !== "active") throw new Error("Affiliate policy is inactive");
+  const policy: AffiliatePolicy = Object.freeze({
+    id: row.affiliatePolicyId,
+    version: safeInteger(row.affiliatePolicyVersion),
+    status: "active",
+    attributionDays: safeInteger(row.attributionDays) as 30,
+    firstOrderCommissionBasisPoints: safeInteger(row.firstOrderCommissionBasisPoints),
+    reorderCommissionBasisPoints: safeInteger(row.reorderCommissionBasisPoints),
+    reorderWindowDays: safeInteger(row.reorderWindowDays),
+    approvalDelayDays: safeInteger(row.approvalDelayDays),
+    payoutThresholdMinor: safeInteger(row.payoutThresholdMinor),
+    currency: row.currency as "USD",
+    effectiveAt: new Date(row.effectiveAt).toISOString(),
+    supersededAt: row.supersededAt === null
+      ? null
+      : new Date(row.supersededAt).toISOString(),
+  });
+  if (
+    policy.attributionDays !== 30 ||
+    policy.firstOrderCommissionBasisPoints !== 1_000 ||
+    policy.reorderCommissionBasisPoints !== 500 ||
+    policy.reorderWindowDays !== 180 ||
+    policy.approvalDelayDays !== 30 ||
+    policy.payoutThresholdMinor !== 5_000 ||
+    policy.currency !== "USD"
+  ) {
+    throw new Error("Affiliate policy is incoherent");
+  }
+  return policy;
+}
+
+async function loadAffiliateSettlement(
+  client: RewardsSqlClient,
+  orderId: string,
+): Promise<AffiliateSettlementRow | null> {
+  const result = await client.query<AffiliateSettlementRow>(
+    `SELECT ap.id::text AS "affiliateProfileId",
+            aa.id::text AS "affiliateAttributionId",
+            aa.affiliate_user_id::text AS "affiliateUserId",
+            oga.buyer_user_id::text AS "buyerUserId",
+            ap.public_code AS "publicCode", ap.status AS "profileStatus",
+            pol.id::text AS "affiliatePolicyId",
+            pol.version AS "affiliatePolicyVersion",
+            pol.status AS "policyStatus",
+            pol.attribution_days AS "attributionDays",
+            pol.first_order_commission_basis_points AS "firstOrderCommissionBasisPoints",
+            pol.reorder_commission_basis_points AS "reorderCommissionBasisPoints",
+            pol.reorder_window_days AS "reorderWindowDays",
+            pol.approval_delay_days AS "approvalDelayDays",
+            pol.payout_threshold_minor AS "payoutThresholdMinor",
+            pol.currency, pol.effective_at AS "effectiveAt",
+            pol.superseded_at AS "supersededAt", aa.clicked_at AS "clickedAt"
+     FROM order_growth_attributions oga
+     JOIN affiliate_attributions aa
+       ON aa.id = oga.affiliate_attribution_id
+      AND aa.referred_user_id = oga.buyer_user_id
+      AND aa.affiliate_policy_id = oga.affiliate_policy_id
+      AND aa.affiliate_policy_version = oga.affiliate_policy_version
+     JOIN affiliate_profiles ap
+       ON ap.id = aa.affiliate_profile_id AND ap.user_id = aa.affiliate_user_id
+     JOIN affiliate_policies pol
+       ON pol.id = oga.affiliate_policy_id
+      AND pol.version = oga.affiliate_policy_version
+     WHERE oga.order_id = $1::uuid AND oga.program = 'affiliate'
+     FOR UPDATE OF oga, aa, ap, pol`,
+    [orderId],
+  );
+  if (result.rows.length === 0) return null;
+  if (result.rows.length !== 1) throw new Error("Affiliate attribution is incoherent");
+  return result.rows[0]!;
+}
+
+async function reconcileAffiliatePaymentInTransaction(
+  client: RewardsSqlClient,
+  input: Readonly<{
+    paymentEventId: string;
+    orderId: string;
+    occurredAt: Date;
+  }>,
+  keyedUuid: KeyedUuidGenerator,
+): Promise<RewardsLifecycleResult> {
+  const existing = await client.query<{ id: string }>(
+    `SELECT id::text AS id FROM affiliate_commissions
+     WHERE order_id = $1::uuid FOR UPDATE`,
+    [input.orderId],
+  );
+  if (existing.rows.length === 1) return Object.freeze({ status: "idempotent" });
+  if (existing.rows.length > 1) throw new Error("Affiliate commission is incoherent");
+  const settlement = await loadAffiliateSettlement(client, input.orderId);
+  if (settlement === null) return Object.freeze({ status: "idempotent" });
+  if (settlement.profileStatus !== "active") {
+    return Object.freeze({ status: "idempotent" });
+  }
+  const referralConflict = await client.query<{ count: number | string }>(
+    `SELECT count(*) AS count FROM referral_attributions
+     WHERE referred_user_id = $1::uuid`,
+    [settlement.buyerUserId],
+  );
+  if (safeInteger(referralConflict.rows[0]?.count ?? 0) !== 0) {
+    throw new Error("Affiliate and customer referral conflict");
+  }
+  const policy = affiliatePolicyFromRow(settlement);
+  if (
+    new Date(policy.effectiveAt) > input.occurredAt ||
+    policy.supersededAt !== null ||
+    settlement.affiliateUserId === settlement.buyerUserId
+  ) {
+    return Object.freeze({ status: "idempotent" });
+  }
+  const order = await client.query<{
+    merchandiseMinor: number | string;
+    taxMinor: number | string;
+    shippingMinor: number | string;
+    currency: string;
+  }>(
+    `SELECT COALESCE(sum(oi.total_minor), 0) AS "merchandiseMinor",
+            o.tax_minor AS "taxMinor", o.shipping_minor AS "shippingMinor",
+            o.currency
+     FROM orders o JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.id = $1::uuid
+     GROUP BY o.tax_minor, o.shipping_minor, o.currency`,
+    [input.orderId],
+  );
+  if (order.rows.length !== 1 || order.rows[0]!.currency !== "USD") {
+    throw new Error("Affiliate order basis is unavailable");
+  }
+  const first = await client.query<{ occurredAt: Date | string | null }>(
+    `SELECT min(pe.occurred_at) AS "occurredAt"
+     FROM affiliate_commissions ac
+     JOIN payment_events pe ON pe.order_id = ac.order_id
+       AND pe.event_type = 'payment_verified'
+     WHERE ac.affiliate_attribution_id = $1::uuid
+       AND ac.order_id <> $2::uuid`,
+    [settlement.affiliateAttributionId, input.orderId],
+  );
+  const firstQualifiedOrderAt = first.rows[0]?.occurredAt ?? null;
+  const calculation = calculateAffiliateOrderCommission({
+    policy,
+    partnerStatus: settlement.profileStatus,
+    attribution: {
+      program: "affiliate",
+      code: settlement.publicCode,
+      clickedAt: new Date(settlement.clickedAt).toISOString(),
+    },
+    firstQualifiedOrderAt: firstQualifiedOrderAt === null
+      ? null
+      : new Date(firstQualifiedOrderAt).toISOString(),
+    orderPaidAt: input.occurredAt.toISOString(),
+    merchandiseMinor: safeInteger(order.rows[0]!.merchandiseMinor),
+    taxMinor: safeInteger(order.rows[0]!.taxMinor),
+    shippingMinor: safeInteger(order.rows[0]!.shippingMinor),
+    currency: "USD",
+  });
+  if (calculation.status !== "commissioned") {
+    return Object.freeze({ status: "idempotent" });
+  }
+  const result = await repositoryInCurrentTransaction(client).recordAffiliateCommission({
+    id: keyedUuid(`affiliate-commission:${input.orderId}`),
+    affiliateProfileId: settlement.affiliateProfileId,
+    affiliateAttributionId: settlement.affiliateAttributionId,
+    buyerUserId: settlement.buyerUserId,
+    orderId: input.orderId,
+    affiliatePolicyId: policy.id,
+    affiliatePolicyVersion: policy.version,
+    idempotencyKey: `affiliate-commission:${input.orderId}`,
+    grossCommissionMinor: calculation.commissionMinor,
+    createdAt: input.occurredAt,
+  });
+  return Object.freeze({ status: result.status });
+}
+
+async function reconcileAffiliateDeliveryInTransaction(
+  client: RewardsSqlClient,
+  input: Readonly<{ orderId: string; deliveredAt: Date }>,
+): Promise<RewardsLifecycleResult> {
+  const rows = await client.query<{
+    id: string;
+    status: string;
+    approvalEligibleAt: Date | string | null;
+    approvalDelayDays: number | string;
+  }>(
+    `SELECT ac.id::text AS id, ac.status,
+            ac.approval_eligible_at AS "approvalEligibleAt",
+            pol.approval_delay_days AS "approvalDelayDays"
+     FROM affiliate_commissions ac
+     JOIN affiliate_policies pol
+       ON pol.id = ac.affiliate_policy_id
+      AND pol.version = ac.affiliate_policy_version
+     WHERE ac.order_id = $1::uuid FOR UPDATE OF ac, pol`,
+    [input.orderId],
+  );
+  if (rows.rows.length === 0) return Object.freeze({ status: "idempotent" });
+  if (rows.rows.length !== 1) throw new Error("Affiliate delivery is incoherent");
+  const row = rows.rows[0]!;
+  if (row.status === "reversed") return Object.freeze({ status: "idempotent" });
+  if (row.status !== "pending") throw new Error("Affiliate commission is already settled");
+  const delay = safeInteger(row.approvalDelayDays);
+  if (delay !== 30) throw new Error("Affiliate approval delay is incoherent");
+  const eligibleAt = new Date(input.deliveredAt.getTime() + delay * 24 * 60 * 60 * 1_000);
+  if (row.approvalEligibleAt !== null) {
+    if (new Date(row.approvalEligibleAt).toISOString() !== eligibleAt.toISOString()) {
+      throw new Error("Affiliate approval eligibility conflicts");
+    }
+    return Object.freeze({ status: "idempotent" });
+  }
+  const updated = await client.query<{ id: string }>(
+    `UPDATE affiliate_commissions SET approval_eligible_at = $2::timestamptz,
+            updated_at = $3::timestamptz
+     WHERE id = $1::uuid AND status = 'pending'
+       AND approval_eligible_at IS NULL AND payout_id IS NULL
+     RETURNING id::text AS id`,
+    [row.id, eligibleAt.toISOString(), input.deliveredAt.toISOString()],
+  );
+  if (updated.rows.length !== 1) throw new Error("Affiliate approval eligibility conflict");
+  return Object.freeze({ status: "applied" });
+}
+
+async function reconcileAffiliateReversalInTransaction(
+  client: RewardsSqlClient,
+  input: Readonly<{
+    paymentEventId: string;
+    orderId: string;
+    eventType: "refund_verified" | "dispute_recorded";
+    occurredAt: Date;
+  }>,
+): Promise<RewardsLifecycleResult> {
+  const rows = await client.query<{
+    id: string;
+    status: string;
+    gross: number | string;
+    reversed: number | string;
+    firstBps: number | string;
+    reorderBps: number | string;
+    attributionId: string;
+  }>(
+    `SELECT ac.id::text AS id, ac.status,
+            ac.gross_commission_minor AS gross,
+            ac.reversed_commission_minor AS reversed,
+            pol.first_order_commission_basis_points AS "firstBps",
+            pol.reorder_commission_basis_points AS "reorderBps",
+            ac.affiliate_attribution_id::text AS "attributionId"
+     FROM affiliate_commissions ac
+     JOIN affiliate_policies pol ON pol.id = ac.affiliate_policy_id
+       AND pol.version = ac.affiliate_policy_version
+     WHERE ac.order_id = $1::uuid FOR UPDATE OF ac, pol`,
+    [input.orderId],
+  );
+  if (rows.rows.length === 0) return Object.freeze({ status: "idempotent" });
+  if (rows.rows.length !== 1) throw new Error("Affiliate reversal is incoherent");
+  const row = rows.rows[0]!;
+  if (row.status === "paid" || row.status === "approved") {
+    throw new Error("Settled affiliate commission reversal requires payout accounting");
+  }
+  const merchandise = safeInteger((await client.query<{ amount: number | string }>(
+    `SELECT COALESCE(sum(total_minor), 0) AS amount FROM order_items
+     WHERE order_id = $1::uuid`,
+    [input.orderId],
+  )).rows[0]?.amount ?? 0);
+  if (merchandise <= 0) throw new Error("Affiliate reversal basis is unavailable");
+  const financial = await client.query<{
+    refunded: number | string;
+    disputed: number | string;
+  }>(
+    `SELECT COALESCE(sum(amount_minor) FILTER
+              (WHERE event_type = 'refund_verified'), 0) AS refunded,
+            COALESCE(max(amount_minor) FILTER
+              (WHERE event_type = 'dispute_recorded'), 0) AS disputed
+     FROM payment_events WHERE order_id = $1::uuid`,
+    [input.orderId],
+  );
+  const cumulativeLoss = Math.min(merchandise, Math.max(
+    safeInteger(financial.rows[0]?.refunded ?? 0),
+    safeInteger(financial.rows[0]?.disputed ?? 0),
+  ));
+  const priorOrders = safeInteger((await client.query<{ count: number | string }>(
+    `SELECT count(*) AS count FROM affiliate_commissions
+     WHERE affiliate_attribution_id = $1::uuid AND order_id <> $2::uuid
+       AND created_at < (SELECT created_at FROM affiliate_commissions WHERE id = $3::uuid)`,
+    [row.attributionId, input.orderId, row.id],
+  )).rows[0]?.count ?? 0);
+  const basisPoints = priorOrders === 0
+    ? safeInteger(row.firstBps)
+    : safeInteger(row.reorderBps);
+  const target = Math.min(
+    safeInteger(row.gross),
+    Number((BigInt(cumulativeLoss) * BigInt(basisPoints)) / 10_000n),
+  );
+  const prior = safeInteger(row.reversed);
+  if (target < prior) throw new Error("Affiliate reversal regressed");
+  if (target === prior) return Object.freeze({ status: "idempotent" });
+  const status = target === safeInteger(row.gross) ? "reversed" : "pending";
+  const updated = await client.query<{ id: string }>(
+    `UPDATE affiliate_commissions
+     SET reversed_commission_minor = $2, status = $3::affiliate_commission_status,
+         updated_at = $4::timestamptz
+     WHERE id = $1::uuid AND status IN ('pending','reversed') AND payout_id IS NULL
+     RETURNING id::text AS id`,
+    [row.id, target, status, input.occurredAt.toISOString()],
+  );
+  if (updated.rows.length !== 1) throw new Error("Affiliate reversal conflict");
+  return Object.freeze({ status: "applied" });
+}
+
 async function reconcileEarnReversalInTransaction(
   client: RewardsSqlClient,
   input: Readonly<{
@@ -1039,7 +1367,12 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
             orderId: payment.orderId,
             occurredAt,
           }, dependencies.keyedUuid);
-          return combineLifecycleResults(base, referral);
+          const affiliate = await reconcileAffiliatePaymentInTransaction(client, {
+            paymentEventId: payment.id,
+            orderId: payment.orderId,
+            occurredAt,
+          }, dependencies.keyedUuid);
+          return combineLifecycleResults(base, referral, affiliate);
         }
         if (payment.eventType === "payment_failed") {
           return reconcileFailedPaymentInTransaction(client, {
@@ -1063,7 +1396,13 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
             eventType: payment.eventType,
             occurredAt,
           }, dependencies.keyedUuid);
-          return combineLifecycleResults(base, referral);
+          const affiliate = await reconcileAffiliateReversalInTransaction(client, {
+            paymentEventId: payment.id,
+            orderId: payment.orderId,
+            eventType: payment.eventType,
+            occurredAt,
+          });
+          return combineLifecycleResults(base, referral, affiliate);
         }
         return Object.freeze({ status: "idempotent" });
       }, { isolationLevel: "serializable" });
@@ -1085,6 +1424,10 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
           orderId: input.orderId,
           deliveredAt,
         }, dependencies.keyedUuid);
+        const affiliate = await reconcileAffiliateDeliveryInTransaction(client, {
+          orderId: input.orderId,
+          deliveredAt,
+        });
         const pending = await client.query<{
           rewardAccountId: string;
           buyerUserId: string;
@@ -1101,7 +1444,9 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
              ) FOR UPDATE`,
           [input.orderId],
         );
-        if (pending.rows.length === 0) return referral;
+        if (pending.rows.length === 0) {
+          return combineLifecycleResults(referral, affiliate);
+        }
         if (pending.rows.length !== 1) throw new Error("Reward pending earn is incoherent");
         const earnedPoints = safeInteger(pending.rows[0]!.earnedPoints);
         const reversed = await client.query<{ reversedPoints: number | string }>(
@@ -1117,7 +1462,9 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
         const remainingPoints =
           earnedPoints - safeInteger(reversed.rows[0]?.reversedPoints ?? 0);
         if (remainingPoints < 0) throw new Error("Reward reversal exceeds pending earn");
-        if (remainingPoints === 0) return referral;
+        if (remainingPoints === 0) {
+          return combineLifecycleResults(referral, affiliate);
+        }
         const ledger = await repositoryInCurrentTransaction(client).appendRewardLedger({
           entryId: dependencies.keyedUuid(`reward-ledger:order-earned-available:${input.orderId}`),
           rewardAccountId: pending.rows[0]!.rewardAccountId,
@@ -1130,7 +1477,7 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
           availablePointsDelta: remainingPoints,
           occurredAt: deliveredAt,
         });
-        return combineLifecycleResults(referral, Object.freeze({
+        return combineLifecycleResults(referral, affiliate, Object.freeze({
           status: ledger.status === "applied" ? "applied" : "idempotent",
         }));
       }, { isolationLevel: "serializable" });

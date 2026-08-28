@@ -41,6 +41,10 @@ import {
   ReferralBindingConflict,
 } from "@/growth/referral-service";
 import {
+  AffiliateBindingConflict,
+  bindAffiliateOrderInTransaction,
+} from "@/growth/affiliate-service";
+import {
   transitionOrder,
   type OrderSnapshot,
   type OrderState,
@@ -1532,6 +1536,9 @@ async function prepareInTransaction(
     existing,
   );
   if (itemIds === null) return { status: "facts_changed_retry" };
+  if (plan.referralQuote !== null && plan.affiliateQuote !== null) {
+    throw new AffiliateBindingConflict();
+  }
   if (plan.referralQuote !== null) {
     await bindCustomerReferralOrderInTransaction(client, {
       attributionId: plan.identity.keyedUuid("customer-referral-attribution"),
@@ -1541,6 +1548,15 @@ async function prepareInTransaction(
       idempotencyKey: `customer-referral:${plan.idempotencyKey}`,
       quote: plan.referralQuote,
       referredDiscountMinor: plan.referralDiscountMinor,
+      boundAt: plan.authoritativeAt,
+    });
+  }
+  if (plan.affiliateQuote !== null) {
+    await bindAffiliateOrderInTransaction(client, {
+      attributionId: plan.identity.keyedUuid("affiliate-attribution"),
+      buyerUserId: plan.buyerUserId,
+      orderId: plan.identity.orderId,
+      quote: plan.affiliateQuote,
       boundAt: plan.authoritativeAt,
     });
   }
@@ -1885,7 +1901,8 @@ export function createPostgresCheckoutRepository(dependencies: Readonly<{
       } catch (error) {
         if (
           error instanceof RewardReservationRejected ||
-          error instanceof ReferralBindingConflict
+          error instanceof ReferralBindingConflict ||
+          error instanceof AffiliateBindingConflict
         ) {
           return { status: "facts_changed_retry" };
         }

@@ -4,10 +4,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { VerifiedIdentity } from "@/auth/identity";
 import type { Principal } from "@/domain/authorization";
+import type { AffiliatePolicy } from "@/domain/affiliates";
 
 import {
   AffiliateAdminError,
   AffiliateApplicationError,
+  calculateAffiliateOrderCommission,
+  createAffiliateCheckoutService,
+  createAffiliateAttributionCandidate,
   createAffiliateAdminService,
   createAffiliateService,
   type AffiliateAdminMutationTransaction,
@@ -20,8 +24,261 @@ const termsVersionId = "6a000000-0000-4000-8000-000000000002";
 const acceptanceId = "6a000000-0000-4000-8000-000000000003";
 const profileId = "6a000000-0000-4000-8000-000000000004";
 const publicCode = "aff_6AStableOpaquePartnerCode";
+const attributionCode = "aff_6BOpaqueAttribution9";
 const termsText = "Synthetic affiliate terms version one for service tests.";
 const termsContentHash = createHash("sha256").update(termsText).digest("hex");
+
+const activeAffiliatePolicy: AffiliatePolicy = Object.freeze({
+  id: "6b000000-0000-4000-8000-000000000001",
+  version: 1,
+  status: "active",
+  attributionDays: 30,
+  firstOrderCommissionBasisPoints: 1_000,
+  reorderCommissionBasisPoints: 500,
+  reorderWindowDays: 180,
+  approvalDelayDays: 30,
+  payoutThresholdMinor: 5_000,
+  currency: "USD",
+  effectiveAt: "2026-08-27T00:00:00.000Z",
+  supersededAt: null,
+});
+
+describe("authoritative affiliate commission calculation", () => {
+  it("uses 10 percent for the first qualified order and merchandise after discounts and points only", () => {
+    expect(calculateAffiliateOrderCommission({
+      policy: activeAffiliatePolicy,
+      partnerStatus: "active",
+      attribution: {
+        program: "affiliate",
+        code: attributionCode,
+        clickedAt: "2026-08-28T18:00:00.000Z",
+      },
+      firstQualifiedOrderAt: null,
+      orderPaidAt: now.toISOString(),
+      merchandiseMinor: 8_001,
+      taxMinor: 825,
+      shippingMinor: 1_500,
+      currency: "USD",
+    })).toEqual({
+      status: "commissioned",
+      orderKind: "first",
+      eligibleMerchandiseMinor: 8_001,
+      commissionMinor: 800,
+    });
+  });
+
+  it("uses 5 percent through day 180 inclusive and zero after day 180", () => {
+    const firstQualifiedOrderAt = "2026-03-01T19:00:00.000Z";
+    expect(calculateAffiliateOrderCommission({
+      policy: activeAffiliatePolicy,
+      partnerStatus: "active",
+      attribution: { program: "affiliate", code: attributionCode, clickedAt: firstQualifiedOrderAt },
+      firstQualifiedOrderAt,
+      orderPaidAt: "2026-08-28T19:00:00.000Z",
+      merchandiseMinor: 12_345,
+      taxMinor: 999,
+      shippingMinor: 777,
+      currency: "USD",
+    })).toMatchObject({ status: "commissioned", orderKind: "reorder", commissionMinor: 617 });
+    expect(calculateAffiliateOrderCommission({
+      policy: activeAffiliatePolicy,
+      partnerStatus: "active",
+      attribution: { program: "affiliate", code: attributionCode, clickedAt: firstQualifiedOrderAt },
+      firstQualifiedOrderAt,
+      orderPaidAt: "2026-08-29T19:00:00.000Z",
+      merchandiseMinor: 12_345,
+      taxMinor: 0,
+      shippingMinor: 0,
+      currency: "USD",
+    })).toEqual({ status: "outside_window", commissionMinor: 0 });
+  });
+
+  it("fails closed for customer-referral attribution or a non-active partner", () => {
+    for (const input of [
+      {
+        partnerStatus: "active",
+        attribution: { program: "customer_referral", code: "ref_AbCdEf0123456789", clickedAt: now.toISOString() },
+      },
+      {
+        partnerStatus: "suspended",
+        attribution: { program: "affiliate", code: attributionCode, clickedAt: now.toISOString() },
+      },
+      {
+        partnerStatus: "rejected",
+        attribution: { program: "affiliate", code: attributionCode, clickedAt: now.toISOString() },
+      },
+    ] as const) {
+      expect(calculateAffiliateOrderCommission({
+        policy: activeAffiliatePolicy,
+        firstQualifiedOrderAt: null,
+        orderPaidAt: now.toISOString(),
+        merchandiseMinor: 8_001,
+        taxMinor: 825,
+        shippingMinor: 1_500,
+        currency: "USD",
+        ...input,
+      })).toEqual({ status: "ineligible", commissionMinor: 0 });
+    }
+  });
+});
+
+describe("affiliate checkout attribution", () => {
+  it("verifies an affiliate envelope and returns only a frozen private binding snapshot", async () => {
+    const loadCandidate = vi.fn(async () => Object.freeze({
+      status: "eligible" as const,
+      code: attributionCode,
+      affiliateProfileId: profileId,
+      affiliateUserId: "6b000000-0000-4000-8000-000000000002",
+      existingAttributionId: null,
+      clickedAt: "2026-08-20T19:00:00.000Z",
+      expiresAt: "2026-09-19T19:00:00.000Z",
+      affiliatePolicyId: activeAffiliatePolicy.id,
+      affiliatePolicyVersion: 1,
+    }));
+    const service = createAffiliateCheckoutService({
+      verifyCookie: () => Object.freeze({
+        schemaVersion: 1,
+        program: "affiliate",
+        code: attributionCode,
+        issuedAt: "2026-08-20T19:00:00.000Z",
+        expiresAt: "2026-09-19T19:00:00.000Z",
+      }),
+      loadCandidate,
+    });
+
+    const result = await service.quoteAffiliateAttribution({
+      buyerUserId,
+      attributionCookie: "signed-affiliate-cookie",
+      now,
+    });
+
+    expect(result).toMatchObject({
+      status: "eligible",
+      code: attributionCode,
+      affiliateProfileId: profileId,
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(loadCandidate).toHaveBeenCalledWith({
+      buyerUserId,
+      code: attributionCode,
+      clickedAt: "2026-08-20T19:00:00.000Z",
+      expiresAt: "2026-09-19T19:00:00.000Z",
+      now,
+    });
+  });
+
+  it("fails closed for a customer-referral envelope and self attribution", async () => {
+    const customerProgram = createAffiliateCheckoutService({
+      verifyCookie: () => Object.freeze({
+        schemaVersion: 1,
+        program: "customer_referral",
+        code: "ref_AbCdEf0123456789",
+        issuedAt: "2026-08-20T19:00:00.000Z",
+        expiresAt: "2026-09-19T19:00:00.000Z",
+      }),
+      loadCandidate: vi.fn(),
+    });
+    await expect(customerProgram.quoteAffiliateAttribution({
+      buyerUserId,
+      attributionCookie: "signed-customer-cookie",
+      now,
+    })).resolves.toEqual({ status: "unavailable", reason: "program_conflict" });
+
+    const self = createAffiliateCheckoutService({
+      verifyCookie: () => Object.freeze({
+        schemaVersion: 1,
+        program: "affiliate",
+        code: attributionCode,
+        issuedAt: "2026-08-20T19:00:00.000Z",
+        expiresAt: "2026-09-19T19:00:00.000Z",
+      }),
+      loadCandidate: async () => Object.freeze({
+        status: "eligible",
+        code: attributionCode,
+        affiliateProfileId: profileId,
+        affiliateUserId: buyerUserId,
+        existingAttributionId: null,
+        clickedAt: "2026-08-20T19:00:00.000Z",
+        expiresAt: "2026-09-19T19:00:00.000Z",
+        affiliatePolicyId: activeAffiliatePolicy.id,
+        affiliatePolicyVersion: 1,
+      }),
+    });
+    await expect(self.quoteAffiliateAttribution({
+      buyerUserId,
+      attributionCookie: "signed-self-cookie",
+      now,
+    })).resolves.toEqual({ status: "unavailable", reason: "self_attribution" });
+  });
+});
+
+const affiliatePolicyRow = Object.freeze({
+  code: attributionCode,
+  profileStatus: "active" as const,
+  policyStatus: "active" as const,
+  attributionDays: 30,
+  effectiveAt: "2026-08-28T00:00:00.000Z",
+  supersededAt: null,
+});
+
+describe("affiliate attribution candidate", () => {
+  it("returns one frozen privacy-minimal candidate for an active code and one current active policy", () => {
+    const result = createAffiliateAttributionCandidate({
+      requestedCode: attributionCode,
+      now,
+      rows: [affiliatePolicyRow],
+    });
+
+    expect(result).toEqual({
+      program: "affiliate",
+      code: attributionCode,
+      attributionDays: 30,
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(JSON.stringify(result)).not.toMatch(
+      /buyer|partner|email|channel|profile.?id|user.?id|order|payment|address|ip|device/i,
+    );
+  });
+
+  it.each(["pending", "suspended", "rejected"] as const)(
+    "rejects a %s affiliate profile without exposing whether the code exists",
+    (profileStatus) => {
+      expect(createAffiliateAttributionCandidate({
+        requestedCode: attributionCode,
+        now,
+        rows: [{ ...affiliatePolicyRow, profileStatus }],
+      })).toBeNull();
+    },
+  );
+
+  it("rejects inactive, future, superseded, and overlapping affiliate policies", () => {
+    for (const rows of [
+      [{ ...affiliatePolicyRow, policyStatus: "draft" }],
+      [{ ...affiliatePolicyRow, policyStatus: "retired" }],
+      [{ ...affiliatePolicyRow, effectiveAt: "2026-08-28T19:00:00.001Z" }],
+      [{ ...affiliatePolicyRow, supersededAt: now.toISOString() }],
+      [{ ...affiliatePolicyRow }, { ...affiliatePolicyRow }],
+      [],
+    ]) {
+      expect(createAffiliateAttributionCandidate({
+        requestedCode: attributionCode,
+        now,
+        rows,
+      })).toBeNull();
+    }
+  });
+
+  it("rejects mismatched or malformed codes, non-30-day policy facts, and malformed clocks", () => {
+    for (const input of [
+      { requestedCode: "aff_DifferentOpaqueCode1", now, rows: [affiliatePolicyRow] },
+      { requestedCode: "aff_short", now, rows: [affiliatePolicyRow] },
+      { requestedCode: attributionCode, now, rows: [{ ...affiliatePolicyRow, attributionDays: 31 }] },
+      { requestedCode: attributionCode, now: new Date("invalid"), rows: [affiliatePolicyRow] },
+    ]) {
+      expect(createAffiliateAttributionCandidate(input)).toBeNull();
+    }
+  });
+});
 
 const verifiedIdentity: VerifiedIdentity = Object.freeze({
   clerkUserId: "clerk_task_6a_buyer",

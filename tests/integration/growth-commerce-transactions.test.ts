@@ -11,6 +11,10 @@ import {
   createReferralCheckoutService,
 } from "@/growth/referral-service";
 import {
+  createAffiliateCheckoutService,
+  createPostgresAffiliateCandidateLookup,
+} from "@/growth/affiliate-service";
+import {
   createPostgresRewardsCheckoutAtomicPort,
   createPostgresRewardsLifecycleService,
   createRewardsService,
@@ -36,11 +40,18 @@ const ids = {
   referrer: "92000000-0000-4000-8000-000000000015",
   referralPolicy: "92000000-0000-4000-8000-000000000016",
   referralCode: "92000000-0000-4000-8000-000000000017",
+  affiliatePolicy: "92000000-0000-4000-8000-000000000018",
+  affiliateTerms: "92000000-0000-4000-8000-000000000019",
+  affiliateTermsAcceptance: "92000000-0000-4000-8000-000000000020",
+  affiliateProfile: "92000000-0000-4000-8000-000000000021",
+  affiliateAttribution: "92000000-0000-4000-8000-000000000022",
 } as const;
 
 const now = new Date("2026-08-28T12:00:00.000Z");
 const termsText = "Synthetic customer rewards terms version one.";
 const termsHash = createHash("sha256").update(termsText).digest("hex");
+const affiliateTermsText = "Synthetic affiliate terms version one.";
+const affiliateTermsHash = createHash("sha256").update(affiliateTermsText).digest("hex");
 const sha256 = async (value: string) =>
   createHash("sha256").update(value).digest("hex");
 
@@ -165,6 +176,40 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       [ids.referralCode, ids.referrer],
     );
     await client.query(
+      `INSERT INTO affiliate_policies
+         (id, version, status, attribution_days,
+          first_order_commission_basis_points, reorder_commission_basis_points,
+          reorder_window_days, approval_delay_days, payout_threshold_minor,
+          currency, effective_at)
+       VALUES ($1::uuid, 1, 'active', 30, 1000, 500, 180, 30, 5000,
+               'USD', '2026-08-01T00:00:00.000Z')`,
+      [ids.affiliatePolicy],
+    );
+    await client.query(
+      `INSERT INTO growth_terms_versions
+         (id, program, version, content_hash, terms_text, effective_at)
+       VALUES ($1::uuid, 'affiliate', 1, $2, $3,
+               '2026-08-01T00:00:00.000Z')`,
+      [ids.affiliateTerms, affiliateTermsHash, affiliateTermsText],
+    );
+    await client.query(
+      `INSERT INTO growth_terms_acceptances
+         (id, user_id, program, terms_version_id, content_hash, accepted_at)
+       VALUES ($1::uuid, $2::uuid, 'affiliate', $3::uuid, $4,
+               '2026-08-02T00:00:00.000Z')`,
+      [ids.affiliateTermsAcceptance, ids.referrer, ids.affiliateTerms,
+        affiliateTermsHash],
+    );
+    await client.query(
+      `INSERT INTO affiliate_profiles
+         (id, user_id, public_code, status, version, public_channel,
+          promotion_method, terms_acceptance_id, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, 'aff_6BOpaqueAttribution9', 'active', 2,
+               '@synthetic_affiliate', 'social', $3::uuid,
+               '2026-08-02T00:00:00.000Z', '2026-08-02T00:00:00.000Z')`,
+      [ids.affiliateProfile, ids.referrer, ids.affiliateTermsAcceptance],
+    );
+    await client.query(
       `INSERT INTO growth_terms_acceptances
          (id, user_id, program, terms_version_id, content_hash, accepted_at)
        VALUES ($1::uuid, $2::uuid, 'customer_rewards_referrals', $3::uuid,
@@ -223,10 +268,27 @@ describe("growth and commerce transaction boundary on PGlite", () => {
         client: { query: (sql, params = []) => client.query(sql, [...params]) },
       }),
     });
+    const affiliateService = createAffiliateCheckoutService({
+      verifyCookie(value) {
+        return value === "signed-task6b-cookie"
+          ? Object.freeze({
+              schemaVersion: 1 as const,
+              program: "affiliate" as const,
+              code: "aff_6BOpaqueAttribution9",
+              issuedAt: "2026-08-20T12:00:00.000Z",
+              expiresAt: "2026-09-19T12:00:00.000Z",
+            })
+          : null;
+      },
+      loadCandidate: createPostgresAffiliateCandidateLookup({
+        client: { query: (sql, params = []) => client.query(sql, [...params]) },
+      }),
+    });
     const service = createCheckoutService({
       repository,
       rewardsService,
       referralService,
+      affiliateService,
       shippingQuotePort: {
         quoteShipping: async (input) => ({
           status: "ready",
@@ -391,6 +453,158 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     });
     return { prepared, lifecycle };
   }
+
+  it("appends one pending affiliate commission, schedules delivery eligibility, and applies cumulative proportional reversals", async () => {
+    const { service } = setup();
+    const quoted = await quote(ids.keyA, "signed-task6b-cookie");
+    const prepared = await service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    );
+    if (prepared.status !== "prepared") throw new Error("expected prepared affiliate order");
+    const binding = await client.query<{ attributions: number; snapshots: number }>(
+      `SELECT (SELECT count(*)::int FROM affiliate_attributions) AS attributions,
+              (SELECT count(*)::int FROM order_growth_attributions
+               WHERE order_id = $1::uuid AND program = 'affiliate') AS snapshots`,
+      [prepared.orderId],
+    );
+    expect(binding.rows[0]).toEqual({ attributions: 1, snapshots: 1 });
+    await expect(service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    )).resolves.toMatchObject({ status: "loaded" });
+    const replayedBinding = await client.query<{ attributions: number; snapshots: number }>(
+      `SELECT (SELECT count(*)::int FROM affiliate_attributions) AS attributions,
+              (SELECT count(*)::int FROM order_growth_attributions
+               WHERE order_id = $1::uuid AND program = 'affiliate') AS snapshots`,
+      [prepared.orderId],
+    );
+    expect(replayedBinding.rows[0]).toEqual({ attributions: 1, snapshots: 1 });
+    await seedProcessedPayment(prepared.orderId, "evt_task6b_payment");
+    const lifecycle = lifecycleService();
+
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6b_payment",
+      now,
+    })).resolves.toEqual({ status: "applied" });
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6b_payment",
+      now,
+    })).resolves.toEqual({ status: "idempotent" });
+    const paid = await client.query<{
+      count: number;
+      gross: number;
+      reversed: number;
+      status: string;
+      eligibleAt: Date | string | null;
+    }>(
+      `SELECT count(*)::int AS count, max(gross_commission_minor)::int AS gross,
+              max(reversed_commission_minor)::int AS reversed,
+              max(status)::text AS status,
+              max(approval_eligible_at) AS "eligibleAt"
+       FROM affiliate_commissions WHERE order_id = $1::uuid`,
+      [prepared.orderId],
+    );
+    expect(paid.rows[0]).toEqual({
+      count: 1,
+      gross: 925,
+      reversed: 0,
+      status: "pending",
+      eligibleAt: null,
+    });
+
+    const payment = await client.query<{ id: string }>(
+      `SELECT id::text AS id FROM payment_events
+       WHERE order_id = $1::uuid AND event_type = 'payment_verified'`,
+      [prepared.orderId],
+    );
+    const releaseId = keyedUuid(`task6b-release:${prepared.orderId}`);
+    const deliveredAt = new Date("2026-08-28T12:04:00.000Z");
+    await client.query(
+      `INSERT INTO fulfillment_releases
+         (id, order_id, version, idempotency_key, payment_event_id, state,
+          issued_at, expires_at, consumed_at)
+       VALUES ($1::uuid, $2::uuid, 1, $3, $4::uuid, 'consumed',
+               '2026-08-28T12:01:00.000Z', '2026-08-29T12:01:00.000Z',
+               '2026-08-28T12:02:00.000Z')`,
+      [releaseId, prepared.orderId, `task6b-release:${prepared.orderId}`,
+        payment.rows[0]!.id],
+    );
+    await client.query(
+      `INSERT INTO shipments
+         (id, order_id, fulfillment_release_id, carrier, tracking_reference,
+          state, handed_off_at, delivered_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'SYNTHETIC-6B', $4, 'delivered',
+               '2026-08-28T12:03:00.000Z', $5::timestamptz)`,
+      [keyedUuid(`task6b-shipment:${prepared.orderId}`), prepared.orderId,
+        releaseId, `task6b-${prepared.orderId}`, deliveredAt.toISOString()],
+    );
+    await expect(lifecycle.reconcileDeliveredOrder({
+      orderId: prepared.orderId,
+      now: deliveredAt,
+    })).resolves.toEqual({ status: "applied" });
+    await expect(lifecycle.reconcileDeliveredOrder({
+      orderId: prepared.orderId,
+      now: deliveredAt,
+    })).resolves.toEqual({ status: "idempotent" });
+    const eligibility = await client.query<{ eligibleAt: Date | string }>(
+      `SELECT approval_eligible_at AS "eligibleAt" FROM affiliate_commissions
+       WHERE order_id = $1::uuid`,
+      [prepared.orderId],
+    );
+    expect(new Date(eligibility.rows[0]!.eligibleAt).toISOString())
+      .toBe("2026-09-27T12:04:00.000Z");
+
+    await seedProcessedFinancialEvent({
+      orderId: prepared.orderId,
+      providerEventId: "evt_task6b_refund",
+      eventType: "refund_verified",
+      amountMinor: 4_625,
+      occurredAt: new Date("2026-08-29T12:00:00.000Z"),
+    });
+    await lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6b_refund",
+      now: new Date("2026-08-29T12:00:00.000Z"),
+    });
+    await seedProcessedFinancialEvent({
+      orderId: prepared.orderId,
+      providerEventId: "evt_task6b_chargeback",
+      eventType: "dispute_recorded",
+      amountMinor: 9_250,
+      occurredAt: new Date("2026-08-30T12:00:00.000Z"),
+    });
+    await lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6b_chargeback",
+      now: new Date("2026-08-30T12:00:00.000Z"),
+    });
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6b_chargeback",
+      now: new Date("2026-08-30T12:00:00.000Z"),
+    })).resolves.toEqual({ status: "idempotent" });
+    const reversed = await client.query<{
+      count: number;
+      gross: number;
+      reversed: number;
+      status: string;
+    }>(
+      `SELECT count(*)::int AS count, max(gross_commission_minor)::int AS gross,
+              max(reversed_commission_minor)::int AS reversed,
+              max(status)::text AS status
+       FROM affiliate_commissions WHERE order_id = $1::uuid`,
+      [prepared.orderId],
+    );
+    expect(reversed.rows[0]).toEqual({
+      count: 1,
+      gross: 925,
+      reversed: 925,
+      status: "reversed",
+    });
+  });
 
   it("reserves points with checkout preparation and exact replay subtracts available balance once", async () => {
     const { service } = setup();
