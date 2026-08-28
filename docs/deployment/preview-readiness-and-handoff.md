@@ -9,7 +9,9 @@ migration application, push, merge, deployment, or Production activation.
 
 ## Browse-only boundary
 
-- Preview may render the explicitly labeled synthetic demo catalog only.
+- Preview may render the owner-supplied browse-only catalog only when its exact
+  publication ID is configured. The separate commerce catalog remains limited
+  to explicitly labeled synthetic demo records.
 - Buyer quote and payment-session creation remain closed with no-store `503`
   responses. Shipping, tax, and payment-session creation are unavailable.
 - Preview is neither live-capable nor local-test-capable. The guarded local
@@ -31,6 +33,7 @@ APP_ENV=preview
 VERCEL_ENV=preview
 APP_ORIGIN=https://preview.propeptiq.example.invalid
 CATALOG_DEMO_MODE=enabled
+BROWSE_CATALOG_PUBLICATION=owner-pdf-2026-08-27-07cd4aa0-v1
 LOCAL_TEST_DRIVER=disabled
 LOCAL_TEST_SECRET=
 AUTH_MODE=test

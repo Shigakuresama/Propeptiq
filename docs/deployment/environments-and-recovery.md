@@ -8,8 +8,8 @@ Production accounts, resources, secrets, or deployments currently exist.
 | Environment | Target data and providers | Current allowed use |
 |---|---|---|
 | Local/test | isolated database and clearly labeled test fixtures; provider fakes/test modes | automated and manual development only |
-| Preview | separately provisioned test-only identity/database/provider resources and pre-created synthetic identities; synthetic demo catalog only | **not published or provisioned**; browse-only preparation, with buyer checkout unavailable |
-| Production | separately scoped production resources and real imported records | buyer checkout is inert at this checkpoint, regardless of environment flags; later activation requires separate authorization and every external/application prerequisite |
+| Preview | separately provisioned test-only identity/database/provider resources and pre-created synthetic identities; authorized owner browse manifest plus synthetic commerce demo records | **not published or provisioned**; browse-only preparation, with buyer checkout unavailable |
+| Production | separately scoped production resources, an explicitly authorized owner browse manifest, and real imported commerce records | buyer checkout is inert at this checkpoint, regardless of environment flags; later activation requires separate authorization and every external/application prerequisite |
 
 Never share production credentials or customer data with Local/Preview. Production demo/test catalog mode must hard-fail.
 
@@ -33,6 +33,8 @@ Use reviewed commits, protected production deployment, environment-specific secr
 
 - Provider mode defaults disabled. Preview preparation remains browse-only even with syntactically valid test placeholders, and Production buyer checkout remains unavailable at this checkpoint. External acceptance/configuration is necessary but not sufficient for any later activation.
 - Catalog projection defaults empty when real records are absent.
+- The owner browse-only manifest defaults empty unless `BROWSE_CATALOG_PUBLICATION`
+  exactly matches its recorded publication ID.
 - Destination defaults unavailable when no active rule resolves.
 - Tax/shipping absence denies hosted checkout.
 - Fulfillment release remains disabled when the operating process or application prerequisites are unavailable.

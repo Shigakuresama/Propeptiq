@@ -42,11 +42,14 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  // Scribe and similar browser extensions can add a direct <html> attribute
+  // before React hydrates. React scopes this suppression to this one element.
   return (
     <html
       lang="en"
       data-scroll-behavior="smooth"
       className={cn(geist.variable, newsreader.variable)}
+      suppressHydrationWarning
     >
       <body className="min-h-svh bg-canvas font-sans text-ink antialiased">
         <RuntimeAuthProvider>

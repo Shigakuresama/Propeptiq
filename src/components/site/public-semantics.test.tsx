@@ -1,21 +1,14 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { PublicCatalog } from "@/catalog/types";
+import { browseCatalogProducts } from "@/catalog/browse-catalog";
 import { PublicHome } from "@/components/site/public-home";
 
 import { ProofRail } from "./proof-rail";
 
-const emptyCatalog: PublicCatalog = {
-  source: "production",
-  products: [],
-  promotions: [],
-  qualityRecords: [],
-};
-
 describe("public storefront semantics", () => {
-  it("presents research-use positioning with public catalog and cart actions", () => {
-    render(<PublicHome catalog={emptyCatalog} />);
+  it("presents the owner-supplied catalog without inventing commerce facts", () => {
+    render(<PublicHome products={browseCatalogProducts} variantCount={103} />);
 
     expect(
       screen.getByRole("heading", {
@@ -35,9 +28,12 @@ describe("public storefront semantics", () => {
       "href",
       "/cart",
     );
+    expect(screen.getByText("53")).toBeVisible();
+    expect(screen.getByText("Tirzepatide")).toBeVisible();
     expect(
-      screen.getByText("No active catalog records are currently available."),
-    ).toBeVisible();
+      screen.getByRole("link", { name: /view catalog item: tirzepatide/i }),
+    ).toHaveAttribute("href", `/catalog/items/${browseCatalogProducts[0]!.slug}`);
+    expect(document.body).not.toHaveTextContent(/server-provided prices/i);
     expect(screen.queryByText(/apply|researcher approval/i)).toBeNull();
   });
 

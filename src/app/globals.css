@@ -264,6 +264,71 @@ footer a,
   padding: 0;
 }
 
+.catalog-listing-card {
+  transition:
+    border-color 200ms ease-out,
+    transform 200ms ease-out;
+}
+
+.catalog-listing-card:hover {
+  border-color: color-mix(in srgb, var(--moss) 58%, var(--rule));
+  transform: translateY(-2px);
+}
+
+.catalog-image-frame,
+.catalog-detail-image {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--moss-soft) 72%, var(--canvas));
+}
+
+.catalog-image-frame[data-category="metabolic"] img,
+.catalog-detail-image[data-category="metabolic"] img {
+  object-position: 50% 48%;
+}
+
+.catalog-image-frame[data-category="cellular"] img,
+.catalog-detail-image[data-category="cellular"] img,
+.catalog-image-frame[data-category="cosmetic"] img,
+.catalog-detail-image[data-category="cosmetic"] img {
+  object-position: 50% 52%;
+}
+
+.catalog-image-frame[data-category="laboratory"] img,
+.catalog-detail-image[data-category="laboratory"] img {
+  object-position: 50% 55%;
+}
+
+.catalog-image-frame {
+  aspect-ratio: 4 / 3;
+  border-bottom: 1px solid var(--rule);
+}
+
+.catalog-detail-image {
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--rule);
+  border-radius: 0.875rem;
+  box-shadow: var(--shadow-soft);
+}
+
+.catalog-image-disclosure {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  max-width: calc(100% - 1.5rem);
+  border: 1px solid rgba(244, 241, 232, 0.35);
+  border-radius: 999px;
+  background: rgba(23, 25, 21, 0.82);
+  color: var(--canvas);
+  padding: 0.42rem 0.7rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  backdrop-filter: blur(6px);
+}
+
 .action-primary,
 .action-secondary {
   min-height: 48px;
@@ -553,6 +618,10 @@ footer a {
 }
 
 @media (min-width: 80rem) {
+  .catalog-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .account-layout {
     grid-template-columns: minmax(0, 7fr) minmax(18rem, 5fr);
     gap: 3rem;

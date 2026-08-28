@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { BrandMark } from "@/components/site/brand-mark";
+import { BrandLogo } from "@/components/site/brand-mark";
 import {
   publicNavigation,
   researchRestrictions,
@@ -15,17 +15,16 @@ export function SiteFooter() {
           <Link
             href="/"
             aria-label={`${siteName} home`}
-            className="inline-flex items-center gap-3 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
+            className="inline-flex rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
           >
-            <BrandMark className="border-canvas/20 bg-canvas text-ink" />
-            <span className="text-xs font-semibold tracking-[0.12em]">{siteName}</span>
+            <BrandLogo className="w-48 sm:w-56" />
           </Link>
           <p className="mt-6 font-heading text-3xl leading-tight text-canvas sm:text-4xl">
             Research materials, governed by evidence.
           </p>
           <p className="mt-5 max-w-[62ch] text-sm leading-6 text-canvas/70">
-            {researchRestrictions[0]} {researchRestrictions[1]} Catalog and cart facts
-            are reloaded from authoritative server records.
+            {researchRestrictions[0]} {researchRestrictions[1]} Catalog names and package
+            configurations come from owner-supplied records; cart and checkout facts remain server-authoritative.
           </p>
         </div>
 
