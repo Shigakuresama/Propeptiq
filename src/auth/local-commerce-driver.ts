@@ -30,6 +30,10 @@ const COMMAND_PAYMENT_EVENT_ID = "68000000-0000-4000-8000-000000000003";
 const COMMAND_FULFILLMENT_ORDER_ID = "68000000-0000-4000-8000-000000000004";
 const SYNTHETIC_PROVIDER_PAYMENT_ID = "pi_local_synthetic_staff_refund";
 const FIXED_NOW = "2026-08-26T12:00:00.000Z";
+const LOCAL_AFFILIATE_CODE = "aff_LocalRuntimePartner01";
+const LOCAL_AFFILIATE_PROFILE_ID = "6b000000-0000-4000-8000-000000000021";
+const LOCAL_AFFILIATE_USER_ID = "6b000000-0000-4000-8000-000000000022";
+const LOCAL_AFFILIATE_POLICY_ID = "6b000000-0000-4000-8000-000000000023";
 
 type SharedFacts = Readonly<{
   loadProfile: (userId: string) => BuyerProfileRecord | null;
@@ -683,7 +687,25 @@ export function createLocalCommerceDriverV1(
     paymentProvider: providerHarness.provider,
     shippingQuotePort,
     taxQuotePort,
-    affiliateService: null,
+    async affiliateCandidateLookup(input) {
+      if (input.code !== LOCAL_AFFILIATE_CODE) {
+        return Object.freeze({ status: "unavailable" as const, reason: "profile_inactive" as const });
+      }
+      if (shared.loadProfile(input.buyerUserId)?.status !== "active") {
+        return Object.freeze({ status: "unavailable" as const, reason: "buyer_ineligible" as const });
+      }
+      return Object.freeze({
+        status: "eligible" as const,
+        code: LOCAL_AFFILIATE_CODE,
+        affiliateProfileId: LOCAL_AFFILIATE_PROFILE_ID,
+        affiliateUserId: LOCAL_AFFILIATE_USER_ID,
+        existingAttributionId: null,
+        clickedAt: input.clickedAt,
+        expiresAt: input.expiresAt,
+        affiliatePolicyId: LOCAL_AFFILIATE_POLICY_ID,
+        affiliatePolicyVersion: 1,
+      });
+    },
     rateLimitStore,
     refundRepository,
     fulfillmentRepository,

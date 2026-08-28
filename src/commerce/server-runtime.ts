@@ -22,6 +22,8 @@ import { createRefundFulfillmentRepository } from "@/db/repositories/refund-fulf
 import type { GrowthTransactionRunner } from "@/db/repositories/growth-repository";
 import { connectRuntimeDatabaseSession, withRuntimeTransaction } from "@/db/runtime";
 import { readServerEnv } from "@/env";
+import { createAffiliateCheckoutService } from "@/growth/affiliate-service";
+import { verifyAttributionCookie } from "@/growth/attribution-cookie";
 import { createPostgresRewardsLifecycleService } from "@/growth/rewards-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 
@@ -120,6 +122,18 @@ export async function createCheckoutServerRuntime(
   const now = runtimeNow();
   const contextResult = await localProviderContext(request, now);
   if (!contextResult.ok || contextResult.context.buyerUserId !== request.principal!.actorId) return null;
+  const attributionSecret = request.environment.RATE_LIMIT_SECRET;
+  if (attributionSecret === undefined) return null;
+  const affiliateService = createAffiliateCheckoutService({
+    verifyCookie(value, verifiedAt) {
+      return verifyAttributionCookie(value, {
+        environment: request.environment.APP_ENV,
+        now: verifiedAt,
+        secret: attributionSecret,
+      });
+    },
+    loadCandidate: driver.commerce.affiliateCandidateLookup,
+  });
   const checkoutService = createCheckoutService({
     repository: driver.commerce.checkoutRepository,
     shippingQuotePort: driver.commerce.shippingQuotePort,
@@ -133,9 +147,7 @@ export async function createCheckoutServerRuntime(
       maximumQuantityPerLine: 25,
       maximumOrderAmountMinor: 100_000_000,
     },
-    ...(driver.commerce.affiliateService === null
-      ? {}
-      : { affiliateService: driver.commerce.affiliateService }),
+    affiliateService,
   });
   const orchestrator = createProviderCheckoutOrchestrator({
     checkoutService,

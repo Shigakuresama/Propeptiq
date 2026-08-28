@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getLocalTestDriver } from "local-auth-driver";
 import {
@@ -7,6 +7,7 @@ import {
   isBuyerCheckoutRuntimeReady,
 } from "@/commerce/server-runtime";
 import { parseServerEnv, type ServerEnv } from "@/config/env-schema";
+import { createAttributionCookie } from "@/growth/attribution-cookie";
 
 const origin = "http://127.0.0.1:4631";
 const localEnvironment = {
@@ -84,9 +85,13 @@ const checkoutRequest = {
   promotionIds: ["66000000-0000-4000-8000-000000000001"],
 } as const;
 const idempotencyKey = "6b000000-0000-4000-8000-000000000001";
+const localAffiliateCode = "aff_LocalRuntimePartner01";
+const localAffiliateProfileId = "6b000000-0000-4000-8000-000000000021";
+const localAffiliateUserId = "6b000000-0000-4000-8000-000000000022";
 
 describe("commerce server composition", () => {
   beforeEach(() => getLocalTestDriver().commerce.reset());
+  afterEach(() => vi.useRealTimers());
 
   it("reports buyer checkout ready only for the guarded local request and not the exact Preview matrix", async () => {
     const localRequest = requestForActor("non_admin");
@@ -142,51 +147,45 @@ describe("commerce server composition", () => {
     });
   });
 
-  it("injects authoritative affiliate checkout composition and fails closed when it is unavailable", async () => {
+  it("binds a real signed affiliate cookie through the unmodified deterministic driver", async () => {
+    const fixedNow = new Date("2026-08-28T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(fixedNow);
     const request = requestForActor("non_admin");
-    const eligibleAffiliate = Object.freeze({
-      status: "eligible" as const,
-      code: "aff_RuntimeComposition01",
-      affiliateProfileId: "6b000000-0000-4000-8000-000000000021",
-      affiliateUserId: "6b000000-0000-4000-8000-000000000022",
-      existingAttributionId: null,
-      clickedAt: "2026-08-20T12:00:00.000Z",
-      expiresAt: "2026-09-19T12:00:00.000Z",
-      affiliatePolicyId: "6b000000-0000-4000-8000-000000000023",
-      affiliatePolicyVersion: 1,
+    const cookie = createAttributionCookie({
+      schemaVersion: 1,
+      program: "affiliate",
+      code: localAffiliateCode,
+      issuedAt: fixedNow.toISOString(),
+      expiresAt: "2026-09-27T12:00:00.000Z",
+    }, {
+      environment: "local",
+      now: fixedNow,
+      secret: localEnvironment.RATE_LIMIT_SECRET,
     });
-    const quoteAffiliateAttribution = vi.fn(async () => eligibleAffiliate);
-    const composedRequest = {
-      ...request,
-      localDriver: {
-        ...request.localDriver,
-        commerce: {
-          ...request.localDriver.commerce,
-          affiliateService: Object.freeze({ quoteAffiliateAttribution }),
-        },
-      },
-    } as typeof request;
-    const runtime = await createCheckoutServerRuntime(composedRequest);
+    expect(cookie).not.toBeNull();
+    const runtime = await createCheckoutServerRuntime(request);
     const quoted = await runtime!.quoteCheckout({
       buyerUserId: request.principal!.actorId,
       idempotencyKey,
-      attributionCookie: "signed-runtime-affiliate-cookie",
+      attributionCookie: cookie!.value,
       request: checkoutRequest,
     });
 
     expect(quoted.status).toBe("quoted");
     if (quoted.status !== "quoted") throw new Error("expected affiliate runtime quote");
-    expect(quoted.plan.affiliateQuote).toEqual(eligibleAffiliate);
-    expect(quoteAffiliateAttribution).toHaveBeenCalledTimes(1);
-
-    const unavailableRequest = requestForActor("non_admin");
-    const unavailableRuntime = await createCheckoutServerRuntime(unavailableRequest);
-    await expect(unavailableRuntime!.quoteCheckout({
-      buyerUserId: unavailableRequest.principal!.actorId,
-      idempotencyKey: "6b000000-0000-4000-8000-000000000002",
-      attributionCookie: "signed-runtime-affiliate-cookie",
-      request: checkoutRequest,
-    })).resolves.toEqual({ status: "internal_conflict" });
+    expect(quoted.plan.affiliateQuote).toMatchObject({
+      status: "eligible",
+      code: localAffiliateCode,
+      affiliateProfileId: localAffiliateProfileId,
+      affiliateUserId: localAffiliateUserId,
+      clickedAt: fixedNow.toISOString(),
+      expiresAt: "2026-09-27T12:00:00.000Z",
+    });
+    expect(JSON.stringify(quoted.quote)).not.toContain(localAffiliateProfileId);
+    expect(JSON.stringify(quoted.quote)).not.toContain(localAffiliateUserId);
+    expect(quoted.quote).not.toHaveProperty("affiliate");
+    expect(quoted.quote).not.toHaveProperty("commission");
   });
 
   it("fails closed without mutation for every mismatch in the exact local commerce matrix", async () => {

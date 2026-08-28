@@ -69,13 +69,13 @@ export type LocalCommerceDriverV1 = Readonly<{
   paymentProvider: PaymentProvider;
   shippingQuotePort: ShippingQuotePort;
   taxQuotePort: TaxQuotePort;
-  affiliateService: Readonly<{
-    quoteAffiliateAttribution: (input: Readonly<{
+  affiliateCandidateLookup: (input: Readonly<{
       buyerUserId: string;
-      attributionCookie: string;
+      code: string;
+      clickedAt: string;
+      expiresAt: string;
       now: Date;
     }>) => Promise<AffiliateCheckoutQuote>;
-  }> | null;
   rateLimitStore: RateLimitStore;
   refundRepository: RefundCommandRepository;
   fulfillmentRepository: FulfillmentCommandRepository;
