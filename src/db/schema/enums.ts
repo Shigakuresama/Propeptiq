@@ -180,6 +180,7 @@ export const affiliateCommissionStatusEnum = pgEnum(
 export const affiliatePayoutStateEnum = pgEnum("affiliate_payout_state", [
   "pending",
   "paid",
+  "cancelled",
 ]);
 export const growthAttributionProgramEnum = pgEnum(
   "growth_attribution_program",

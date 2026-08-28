@@ -355,6 +355,36 @@ describe("authoritative affiliate commission calculation", () => {
     })).toEqual({ status: "outside_window", commissionMinor: 0 });
   });
 
+  it("uses retired order-bound economics only while the current partner remains active", () => {
+    const retiredPolicy = Object.freeze({
+      ...activeAffiliatePolicy,
+      status: "retired" as const,
+      supersededAt: "2026-08-28T19:01:00.000Z",
+    });
+    const input = {
+      policy: retiredPolicy,
+      attribution: {
+        program: "affiliate" as const,
+        code: attributionCode,
+        clickedAt: "2026-08-20T19:00:00.000Z",
+      },
+      firstQualifiedOrderAt: null,
+      orderPaidAt: "2026-08-28T19:02:00.000Z",
+      merchandiseMinor: 8_001,
+      taxMinor: 825,
+      shippingMinor: 1_500,
+      currency: "USD" as const,
+    };
+    expect(calculateAffiliateOrderCommission({
+      ...input,
+      partnerStatus: "active",
+    })).toMatchObject({ status: "commissioned", commissionMinor: 800 });
+    for (const partnerStatus of ["suspended", "rejected"] as const) {
+      expect(calculateAffiliateOrderCommission({ ...input, partnerStatus }))
+        .toEqual({ status: "ineligible", commissionMinor: 0 });
+    }
+  });
+
   it("fails closed for customer-referral attribution or a non-active partner", () => {
     for (const input of [
       {

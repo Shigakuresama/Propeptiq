@@ -1,0 +1,4 @@
+ALTER TABLE "affiliate_payouts" ADD COLUMN "request_hash" text;--> statement-breakpoint
+ALTER TABLE "affiliate_payouts" ADD COLUMN "paid_request_hash" text;--> statement-breakpoint
+ALTER TABLE "affiliate_payouts" ADD CONSTRAINT "affiliate_payouts_request_hash_sha256" CHECK ("affiliate_payouts"."request_hash" is null or "affiliate_payouts"."request_hash" ~ '^[0-9a-f]{64}$');--> statement-breakpoint
+ALTER TABLE "affiliate_payouts" ADD CONSTRAINT "affiliate_payouts_paid_request_hash_sha256" CHECK ("affiliate_payouts"."paid_request_hash" is null or "affiliate_payouts"."paid_request_hash" ~ '^[0-9a-f]{64}$');

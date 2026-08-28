@@ -29,6 +29,9 @@ const ids = {
   commissionTwo: "6c100000-0000-4000-8000-000000000017",
   consumedPayout: "6c100000-0000-4000-8000-000000000018",
   payout: "6c100000-0000-4000-8000-000000000019",
+  adjustmentProviderEvent: "6c100000-0000-4000-8000-000000000020",
+  adjustmentPaymentEvent: "6c100000-0000-4000-8000-000000000021",
+  adjustment: "6c100000-0000-4000-8000-000000000022",
 } as const;
 
 const createdAt = new Date("2026-08-28T19:00:00.000Z");
@@ -212,7 +215,7 @@ describe("affiliate payout transactions on PGlite", () => {
   it("atomically selects only eligible unconsumed commission at the exact policy threshold and replays once", async () => {
     const create = createTransaction();
     const first = await create(createInput());
-    const replay = await create(createInput({ payoutId: "6c100000-0000-4000-8000-000000000099" }));
+    const replay = await create(createInput());
 
     expect(first).toEqual({
       status: "applied",
@@ -257,6 +260,93 @@ describe("affiliate payout transactions on PGlite", () => {
       },
       selectedPayoutId: ids.payout,
       consumedPayoutId: ids.consumedPayout,
+    });
+  });
+
+  it("requires an exact canonical creation request for same-key replay", async () => {
+    const create = createTransaction();
+    await create(createInput());
+    for (const conflicting of [
+      createInput({ actorUserId: ids.affiliate }),
+      createInput({ payoutId: "6c100000-0000-4000-8000-000000000099" }),
+      createInput({ profileId: "6c100000-0000-4000-8000-000000000098" }),
+      createInput({ correlationId: "task-6c-create-payout-different-correlation" }),
+      createInput({ createdAt: new Date("2026-08-28T19:00:01.000Z") }),
+    ]) {
+      await expect(create(conflicting)).rejects.toMatchObject({ code: "idempotency_conflict" });
+    }
+    const state = await client.query<{ payouts: number; audits: number }>(
+      `SELECT (SELECT count(*)::int FROM affiliate_payouts) AS payouts,
+              (SELECT count(*)::int FROM admin_audit
+               WHERE action = 'affiliate.payout.created') AS audits`,
+    );
+    expect(state.rows[0]).toEqual({ payouts: 2, audits: 1 });
+  });
+
+  it("consumes one outstanding paid-reversal adjustment against the next payout exactly once", async () => {
+    await client.exec(`
+      UPDATE affiliate_payouts
+      SET state = 'paid', version = 2,
+          paid_idempotency_key = 'task-6-paid-source-evidence',
+          external_provider = 'Synthetic offline operator',
+          external_reference = 'synthetic-source-paid-reference',
+          paid_at = '2026-08-27T12:00:00Z'
+      WHERE id = '${ids.consumedPayout}';
+      UPDATE affiliate_commissions SET status = 'paid'
+      WHERE id = '${ids.commissionTwo}';
+      UPDATE affiliate_commissions SET gross_commission_minor = 7000
+      WHERE id = '${ids.commissionOne}';
+      INSERT INTO provider_events
+        (id, provider, provider_event_id, payload_hash, status, attempt_count,
+         processed_at, event_type, schema_version, normalized_payload,
+         provider_created_at, livemode)
+      VALUES ('${ids.adjustmentProviderEvent}', 'stripe',
+              'evt_task6_paid_adjustment_source', '${"c".repeat(64)}',
+              'processed', 1, '2026-08-27T13:00:00Z', 'refund_verified', 1,
+              '{}'::jsonb, '2026-08-27T13:00:00Z', false);
+      INSERT INTO payment_events
+        (id, provider_event_id, order_id, event_type, provider_payment_id,
+         idempotency_key, amount_minor, currency, occurred_at)
+      VALUES ('${ids.adjustmentPaymentEvent}', '${ids.adjustmentProviderEvent}',
+              '${ids.orderTwo}', 'refund_verified', 'refund_task6_adjustment',
+              'task6-paid-adjustment-source', 1000, 'USD',
+              '2026-08-27T13:00:00Z');
+      INSERT INTO affiliate_commission_adjustments
+        (id, affiliate_profile_id, affiliate_commission_id, source_payout_id,
+         source_payment_event_id, settlement_payout_id, amount_minor, created_at)
+      VALUES ('${ids.adjustment}', '${ids.profile}', '${ids.commissionTwo}',
+              '${ids.consumedPayout}', '${ids.adjustmentPaymentEvent}', NULL,
+              1000, '2026-08-27T13:00:00Z');
+    `);
+
+    const first = await createTransaction()(createInput());
+    expect(first).toMatchObject({
+      status: "applied",
+      payout: { id: ids.payout, amountMinor: 6000 },
+    });
+    const adjustment = await client.query<{ settlementPayoutId: string }>(
+      `SELECT settlement_payout_id::text AS "settlementPayoutId"
+       FROM affiliate_commission_adjustments WHERE id = $1::uuid`,
+      [ids.adjustment],
+    );
+    expect(adjustment.rows).toEqual([{ settlementPayoutId: ids.payout }]);
+
+    await expect(createTransaction()(createInput())).resolves.toEqual({
+      ...first,
+      status: "idempotent",
+    });
+    await expect(paidTransaction()({
+      actorUserId: ids.admin,
+      payoutId: ids.payout,
+      expectedVersion: 1,
+      idempotencyKey: "task-6c-paid-adjusted-payout",
+      providerName: "ACH operator",
+      externalReference: "bank-confirmation-adjusted-001",
+      correlationId: "task-6c-paid-adjusted-correlation",
+      paidAt,
+    })).resolves.toMatchObject({
+      status: "applied",
+      payout: { state: "paid", amountMinor: 6000 },
     });
   });
 
@@ -313,7 +403,7 @@ describe("affiliate payout transactions on PGlite", () => {
     await expect(markPaid({ ...paidInput, expectedVersion: 2 }))
       .rejects.toMatchObject({ code: "version_conflict" });
     const first = await markPaid(paidInput);
-    const replay = await markPaid({ ...paidInput, paidAt: new Date("2026-08-28T21:00:00.000Z") });
+    const replay = await markPaid(paidInput);
     expect(first.status).toBe("applied");
     expect(first.payout).toMatchObject({ state: "paid", version: 2,
       providerName: "ACH operator", externalReference: "bank-confirmation-6c-001",
@@ -327,6 +417,37 @@ describe("affiliate payout transactions on PGlite", () => {
       [ids.commissionOne],
     );
     expect(state.rows[0]).toEqual({ audits: 1, status: "paid" });
+  });
+
+  it("requires an exact canonical paid request for same-key replay", async () => {
+    await createTransaction()(createInput());
+    const markPaid = paidTransaction();
+    const paidInput = {
+      actorUserId: ids.admin,
+      payoutId: ids.payout,
+      expectedVersion: 1,
+      idempotencyKey: "task-6c-record-paid-fingerprint",
+      providerName: "ACH operator",
+      externalReference: "bank-confirmation-fingerprint-001",
+      correlationId: "task-6c-record-paid-fingerprint-correlation",
+      paidAt,
+    };
+    await markPaid(paidInput);
+    for (const conflicting of [
+      { ...paidInput, actorUserId: ids.affiliate },
+      { ...paidInput, expectedVersion: 2 },
+      { ...paidInput, providerName: "Different offline operator" },
+      { ...paidInput, externalReference: "different-bank-reference" },
+      { ...paidInput, correlationId: "task-6c-record-paid-different-correlation" },
+      { ...paidInput, paidAt: new Date("2026-08-28T20:00:01.000Z") },
+    ]) {
+      await expect(markPaid(conflicting)).rejects.toMatchObject({ code: "idempotency_conflict" });
+    }
+    const audits = await client.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM admin_audit
+       WHERE action = 'affiliate.payout.paid'`,
+    );
+    expect(audits.rows).toEqual([{ count: 1 }]);
   });
 
   it("rolls back paid state, evidence, commissions, and paid audit when the audit insert fails", async () => {

@@ -5,13 +5,18 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createCheckoutService } from "@/commerce/checkout-service";
 import { createPostgresCheckoutRepository } from "@/db/repositories/checkout-repository";
-import type { GrowthSqlClient } from "@/db/repositories/growth-repository";
+import type {
+  GrowthSqlClient,
+  GrowthTransactionRunner,
+} from "@/db/repositories/growth-repository";
 import {
   createPostgresReferralCandidateLookup,
   createReferralCheckoutService,
 } from "@/growth/referral-service";
 import {
   createAffiliateCheckoutService,
+  createPostgresAffiliatePayoutCreateTransaction,
+  createPostgresAffiliatePayoutPaidTransaction,
   createPostgresAffiliateCandidateLookup,
 } from "@/growth/affiliate-service";
 import {
@@ -321,13 +326,17 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     return { service, repository };
   }
 
-  async function quote(key: string, attributionCookie?: string) {
+  async function quote(
+    key: string,
+    attributionCookie?: string,
+    checkoutRequest = request,
+  ) {
     const value = await setup().service.quote({
       buyerUserId: ids.buyer,
       idempotencyKey: key,
       paymentProviderAvailable: true,
       ...(attributionCookie === undefined ? {} : { attributionCookie }),
-      request,
+      request: checkoutRequest,
     });
     expect(value.status).toBe("quoted");
     if (value.status !== "quoted") throw new Error("expected quote");
@@ -367,7 +376,66 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     });
   }
 
-  async function seedProcessedPayment(orderId: string, providerEventId: string) {
+  function payoutTransactions() {
+    const runSerializableTransaction: GrowthTransactionRunner = (work) =>
+      client.transaction((transaction) => work({
+        query: async <Row extends object>(sql: string, params: readonly unknown[] = []) => {
+          const result = await transaction.query<Row>(sql, [...params]);
+          return { rows: result.rows };
+        },
+      }));
+    return {
+      create: createPostgresAffiliatePayoutCreateTransaction({ runSerializableTransaction }),
+      markPaid: createPostgresAffiliatePayoutPaidTransaction({ runSerializableTransaction }),
+    };
+  }
+
+  async function prepareAffiliatePayout(providerEventId: string) {
+    await client.query(
+      `UPDATE lots SET received_quantity = 25, available_quantity = 25
+       WHERE id = $1::uuid`,
+      [ids.lot],
+    );
+    const { service } = setup();
+    const quoted = await quote(ids.keyA, "signed-task6b-cookie", {
+      ...request,
+      items: [{ productId: ids.product, quantity: 12 }],
+    });
+    const prepared = await service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    );
+    if (prepared.status !== "prepared") throw new Error("expected prepared affiliate order");
+    await seedProcessedPayment(prepared.orderId, providerEventId);
+    await lifecycleService().reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId,
+      now,
+    });
+    await client.query(
+      `UPDATE affiliate_commissions
+       SET approval_eligible_at = '2026-09-01T00:00:00.000Z'
+       WHERE order_id = $1::uuid`,
+      [prepared.orderId],
+    );
+    const payoutId = keyedUuid(`payout:${providerEventId}`);
+    const payout = payoutTransactions();
+    await payout.create({
+      actorUserId: ids.referrer,
+      payoutId,
+      profileId: ids.affiliateProfile,
+      idempotencyKey: `task6-review-payout:${providerEventId}`,
+      correlationId: `task6-review-payout-correlation:${providerEventId}`,
+      createdAt: new Date("2026-09-30T00:00:00.000Z"),
+    });
+    return { prepared, payoutId, payout };
+  }
+
+  async function seedProcessedPayment(
+    orderId: string,
+    providerEventId: string,
+    occurredAt = now,
+  ) {
     const providerDatabaseId = keyedUuid(`provider:${providerEventId}`);
     const paymentEventId = keyedUuid(`payment:${providerEventId}`);
     const total = await client.query<{ totalMinor: number }>(
@@ -382,7 +450,7 @@ describe("growth and commerce transaction boundary on PGlite", () => {
        VALUES ($1::uuid, 'stripe', $2, $3, 'processed', 1,
                $4::timestamptz, $4::timestamptz,
                'checkout.session.completed', 1, '{}'::jsonb, $4::timestamptz, false)`,
-      [providerDatabaseId, providerEventId, "d".repeat(64), now.toISOString()],
+      [providerDatabaseId, providerEventId, "d".repeat(64), occurredAt.toISOString()],
     );
     await client.query(
       `INSERT INTO payment_events
@@ -397,7 +465,7 @@ describe("growth and commerce transaction boundary on PGlite", () => {
         `pi_${providerEventId}`,
         `stripe:payment:${providerEventId}`,
         total.rows[0]!.totalMinor,
-        now.toISOString(),
+        occurredAt.toISOString(),
       ],
     );
     return { providerDatabaseId, paymentEventId };
@@ -648,6 +716,259 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       gross: 925,
       reversed: 925,
       status: "reversed",
+    });
+  });
+
+  it("settles the immutable order-bound policy after it is superseded while denying a currently ineligible partner", async () => {
+    const { service } = setup();
+    const quoted = await quote(ids.keyA, "signed-task6b-cookie");
+    const prepared = await service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    );
+    if (prepared.status !== "prepared") throw new Error("expected prepared affiliate order");
+
+    await client.query(
+      `UPDATE affiliate_policies
+       SET status = 'superseded', superseded_at = $2::timestamptz
+       WHERE id = $1::uuid`,
+      [ids.affiliatePolicy, "2026-08-28T12:01:00.000Z"],
+    );
+    await seedProcessedPayment(
+      prepared.orderId,
+      "evt_task6_bound_policy_superseded",
+      new Date("2026-08-28T12:02:00.000Z"),
+    );
+
+    const lifecycle = lifecycleService();
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6_bound_policy_superseded",
+      now: new Date("2026-08-28T12:02:00.000Z"),
+    })).resolves.toEqual({ status: "applied" });
+    const commission = await client.query<{
+      count: number;
+      gross: number;
+      status: string;
+      policyId: string;
+      policyVersion: number;
+    }>(
+      `SELECT count(*)::int AS count,
+              max(gross_commission_minor)::int AS gross,
+              max(status)::text AS status,
+              max(affiliate_policy_id::text) AS "policyId",
+              max(affiliate_policy_version)::int AS "policyVersion"
+       FROM affiliate_commissions WHERE order_id = $1::uuid`,
+      [prepared.orderId],
+    );
+    expect(commission.rows[0]).toEqual({
+      count: 1,
+      gross: 925,
+      status: "pending",
+      policyId: ids.affiliatePolicy,
+      policyVersion: 1,
+    });
+  });
+
+  it.each(["suspended", "rejected"] as const)(
+    "does not create a commission for a currently %s partner after order binding",
+    async (profileStatus) => {
+      const { service } = setup();
+      const quoted = await quote(ids.keyA, "signed-task6b-cookie");
+      const prepared = await service.prepare(
+        quoted.plan,
+        providerPreparation(quoted.plan.identity.attemptId),
+      );
+      if (prepared.status !== "prepared") throw new Error("expected prepared affiliate order");
+      await client.query(
+        `UPDATE affiliate_profiles SET status = $2::affiliate_profile_status
+         WHERE id = $1::uuid`,
+        [ids.affiliateProfile, profileStatus],
+      );
+      const providerEventId = `evt_task6_bound_partner_${profileStatus}`;
+      await seedProcessedPayment(prepared.orderId, providerEventId);
+
+      await expect(lifecycleService().reconcileProcessedProviderEvent({
+        provider: "stripe",
+        providerEventId,
+        now,
+      })).resolves.toEqual({ status: "applied" });
+      const commissions = await client.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM affiliate_commissions
+         WHERE order_id = $1::uuid`,
+        [prepared.orderId],
+      );
+      expect(commissions.rows).toEqual([{ count: 0 }]);
+    },
+  );
+
+  it("adjusts then cancels an unpaid payout as cumulative verified loss reaches the original commission", async () => {
+    const { prepared, payoutId, payout } = await prepareAffiliatePayout("evt_task6_unpaid_reversal_payment");
+    const lifecycle = lifecycleService();
+    await seedProcessedFinancialEvent({
+      orderId: prepared.orderId,
+      providerEventId: "evt_task6_unpaid_partial_refund",
+      eventType: "refund_verified",
+      amountMinor: 11_025,
+      occurredAt: new Date("2026-10-01T00:00:00.000Z"),
+    });
+
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6_unpaid_partial_refund",
+      now: new Date("2026-10-01T00:00:00.000Z"),
+    })).resolves.toEqual({ status: "applied" });
+    let state = await client.query<{
+      reversed: number;
+      commissionStatus: string;
+      commissionPayoutId: string | null;
+      payoutAmount: number;
+      payoutState: string;
+      adjustmentTotal: number;
+    }>(
+      `SELECT ac.reversed_commission_minor::int AS reversed,
+              ac.status::text AS "commissionStatus",
+              ac.payout_id::text AS "commissionPayoutId",
+              ap.amount_minor::int AS "payoutAmount",
+              ap.state::text AS "payoutState",
+              (SELECT coalesce(sum(amount_minor), 0)::int
+               FROM affiliate_commission_adjustments
+               WHERE affiliate_commission_id = ac.id) AS "adjustmentTotal"
+       FROM affiliate_commissions ac
+       JOIN affiliate_payouts ap ON ap.id = $2::uuid
+       WHERE ac.order_id = $1::uuid`,
+      [prepared.orderId, payoutId],
+    );
+    expect(state.rows[0]).toEqual({
+      reversed: 1_000,
+      commissionStatus: "approved",
+      commissionPayoutId: null,
+      payoutAmount: 5_925,
+      payoutState: "cancelled",
+      adjustmentTotal: 1_000,
+    });
+
+    await seedProcessedFinancialEvent({
+      orderId: prepared.orderId,
+      providerEventId: "evt_task6_unpaid_full_chargeback",
+      eventType: "dispute_recorded",
+      amountMinor: 60_275,
+      occurredAt: new Date("2026-10-02T00:00:00.000Z"),
+    });
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6_unpaid_full_chargeback",
+      now: new Date("2026-10-02T00:00:00.000Z"),
+    })).resolves.toEqual({ status: "applied" });
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6_unpaid_full_chargeback",
+      now: new Date("2026-10-02T00:00:00.000Z"),
+    })).resolves.toEqual({ status: "idempotent" });
+    state = await client.query(
+      `SELECT ac.reversed_commission_minor::int AS reversed,
+              ac.status::text AS "commissionStatus",
+              ac.payout_id::text AS "commissionPayoutId",
+              ap.amount_minor::int AS "payoutAmount",
+              ap.state::text AS "payoutState",
+              (SELECT coalesce(sum(amount_minor), 0)::int
+               FROM affiliate_commission_adjustments
+               WHERE affiliate_commission_id = ac.id) AS "adjustmentTotal"
+       FROM affiliate_commissions ac
+       JOIN affiliate_payouts ap ON ap.id = $2::uuid
+       WHERE ac.order_id = $1::uuid`,
+      [prepared.orderId, payoutId],
+    );
+    expect(state.rows[0]).toEqual({
+      reversed: 5_925,
+      commissionStatus: "reversed",
+      commissionPayoutId: null,
+      payoutAmount: 5_925,
+      payoutState: "cancelled",
+      adjustmentTotal: 5_925,
+    });
+    await expect(payout.create({
+      actorUserId: ids.referrer,
+      payoutId,
+      profileId: ids.affiliateProfile,
+      idempotencyKey: "task6-review-payout:evt_task6_unpaid_reversal_payment",
+      correlationId: "task6-review-payout-correlation:evt_task6_unpaid_reversal_payment",
+      createdAt: new Date("2026-09-30T00:00:00.000Z"),
+    })).resolves.toMatchObject({
+      status: "idempotent",
+      payout: {
+        id: payoutId,
+        amountMinor: 5_925,
+        commissionIds: [keyedUuid(`affiliate-commission:${prepared.orderId}`)],
+      },
+    });
+  });
+
+  it("preserves paid evidence and appends a bounded outstanding liability adjustment", async () => {
+    const { prepared, payoutId, payout } = await prepareAffiliatePayout("evt_task6_paid_reversal_payment");
+    const paidAt = new Date("2026-10-01T00:00:00.000Z");
+    await payout.markPaid({
+      actorUserId: ids.referrer,
+      payoutId,
+      expectedVersion: 1,
+      idempotencyKey: "task6-review-paid-reversal",
+      providerName: "Synthetic offline operator",
+      externalReference: "synthetic-paid-evidence-001",
+      correlationId: "task6-review-paid-reversal-correlation",
+      paidAt,
+    });
+    await seedProcessedFinancialEvent({
+      orderId: prepared.orderId,
+      providerEventId: "evt_task6_paid_full_refund",
+      eventType: "refund_verified",
+      amountMinor: 60_275,
+      occurredAt: new Date("2026-10-02T00:00:00.000Z"),
+    });
+
+    const lifecycle = lifecycleService();
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6_paid_full_refund",
+      now: new Date("2026-10-02T00:00:00.000Z"),
+    })).resolves.toEqual({ status: "applied" });
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6_paid_full_refund",
+      now: new Date("2026-10-02T00:00:00.000Z"),
+    })).resolves.toEqual({ status: "idempotent" });
+    const state = await client.query<{
+      payoutState: string;
+      payoutAmount: number;
+      provider: string;
+      reference: string;
+      paidAt: Date | string;
+      commissionStatus: string;
+      reversed: number;
+      adjustmentAmount: number;
+      settlementPayoutId: string | null;
+    }>(
+      `SELECT ap.state::text AS "payoutState", ap.amount_minor::int AS "payoutAmount",
+              ap.external_provider AS provider, ap.external_reference AS reference,
+              ap.paid_at AS "paidAt", ac.status::text AS "commissionStatus",
+              ac.reversed_commission_minor::int AS reversed,
+              adj.amount_minor::int AS "adjustmentAmount",
+              adj.settlement_payout_id::text AS "settlementPayoutId"
+       FROM affiliate_payouts ap
+       JOIN affiliate_commissions ac ON ac.payout_id = ap.id
+       JOIN affiliate_commission_adjustments adj ON adj.affiliate_commission_id = ac.id
+       WHERE ap.id = $1::uuid`,
+      [payoutId],
+    );
+    expect({ ...state.rows[0], paidAt: new Date(state.rows[0]!.paidAt).toISOString() }).toEqual({
+      payoutState: "paid",
+      payoutAmount: 5_925,
+      provider: "Synthetic offline operator",
+      reference: "synthetic-paid-evidence-001",
+      paidAt: paidAt.toISOString(),
+      commissionStatus: "paid",
+      reversed: 5_925,
+      adjustmentAmount: 5_925,
+      settlementPayoutId: null,
     });
   });
 

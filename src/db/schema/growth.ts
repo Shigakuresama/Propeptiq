@@ -17,6 +17,7 @@ import {
 
 import { products } from "./catalog";
 import { checkoutAttempts, orders } from "./commerce";
+import { paymentEvents } from "./payment";
 import {
   affiliateCommissionStatusEnum,
   affiliatePayoutStateEnum,
@@ -824,11 +825,13 @@ export const affiliatePayouts = pgTable(
     affiliatePolicyId: uuid("affiliate_policy_id").notNull(),
     affiliatePolicyVersion: integer("affiliate_policy_version").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash"),
     amountMinor: money("amount_minor"),
     currency: text("currency").notNull(),
     state: affiliatePayoutStateEnum("state").default("pending").notNull(),
     version: integer("version").default(1).notNull(),
     paidIdempotencyKey: text("paid_idempotency_key"),
+    paidRequestHash: text("paid_request_hash"),
     externalProvider: text("external_provider"),
     externalReference: text("external_reference"),
     createdAt: createdAt(),
@@ -855,6 +858,10 @@ export const affiliatePayouts = pgTable(
       name: "affiliate_payouts_policy_version_fk",
     }).onDelete("restrict"),
     check("affiliate_payouts_idempotency_nonblank", nonblank(table.idempotencyKey)),
+    check(
+      "affiliate_payouts_request_hash_sha256",
+      sql`${table.requestHash} is null or ${sha256(table.requestHash)}`,
+    ),
     check("affiliate_payouts_amount_safe", safePositiveMoney(table.amountMinor)),
     check("affiliate_payouts_version_positive", sql`${table.version} > 0`),
     check(
@@ -862,12 +869,16 @@ export const affiliatePayouts = pgTable(
       sql`${table.paidIdempotencyKey} is null or ${nonblank(table.paidIdempotencyKey)}`,
     ),
     check(
+      "affiliate_payouts_paid_request_hash_sha256",
+      sql`${table.paidRequestHash} is null or ${sha256(table.paidRequestHash)}`,
+    ),
+    check(
       "affiliate_payouts_currency_usd",
       sql`${currency(table.currency)} and ${table.currency} = 'USD'`,
     ),
     check(
       "affiliate_payouts_external_evidence_coherent",
-      sql`(${table.state} = 'pending' and ${table.externalProvider} is null
+      sql`(${table.state} in ('pending','cancelled') and ${table.externalProvider} is null
             and ${table.externalReference} is null and ${table.paidAt} is null)
         or (${table.state} = 'paid' and ${table.externalProvider} is not null
             and ${nonblank(table.externalProvider)}
@@ -905,6 +916,10 @@ export const affiliateCommissions = pgTable(
   (table) => [
     unique("affiliate_commissions_order_unique").on(table.orderId),
     unique("affiliate_commissions_idempotency_unique").on(table.idempotencyKey),
+    unique("affiliate_commissions_id_profile_unique").on(
+      table.id,
+      table.affiliateProfileId,
+    ),
     foreignKey({
       columns: [
         table.affiliateAttributionId,
@@ -985,6 +1000,70 @@ export const affiliateCommissions = pgTable(
       "affiliate_commissions_approval_eligibility_after_creation",
       sql`${table.approvalEligibleAt} is null or ${table.approvalEligibleAt} > ${table.createdAt}`,
     ),
+  ],
+);
+
+export const affiliateCommissionAdjustments = pgTable(
+  "affiliate_commission_adjustments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    affiliateProfileId: uuid("affiliate_profile_id").notNull(),
+    affiliateCommissionId: uuid("affiliate_commission_id").notNull(),
+    sourcePayoutId: uuid("source_payout_id").notNull(),
+    sourcePaymentEventId: uuid("source_payment_event_id")
+      .notNull()
+      .references(() => paymentEvents.id, { onDelete: "restrict" }),
+    settlementPayoutId: uuid("settlement_payout_id"),
+    amountMinor: money("amount_minor"),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    unique("affiliate_commission_adjustments_event_unique").on(
+      table.affiliateCommissionId,
+      table.sourcePaymentEventId,
+    ),
+    foreignKey({
+      columns: [table.affiliateCommissionId, table.affiliateProfileId],
+      foreignColumns: [affiliateCommissions.id, affiliateCommissions.affiliateProfileId],
+      name: "affiliate_commission_adjustments_commission_profile_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.sourcePayoutId, table.affiliateProfileId],
+      foreignColumns: [affiliatePayouts.id, affiliatePayouts.affiliateProfileId],
+      name: "affiliate_commission_adjustments_source_payout_profile_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.settlementPayoutId, table.affiliateProfileId],
+      foreignColumns: [affiliatePayouts.id, affiliatePayouts.affiliateProfileId],
+      name: "affiliate_commission_adjustments_settlement_payout_profile_fk",
+    }).onDelete("restrict"),
+    check(
+      "affiliate_commission_adjustments_amount_safe",
+      safePositiveMoney(table.amountMinor),
+    ),
+    index("affiliate_commission_adjustments_outstanding_profile_idx")
+      .on(table.affiliateProfileId)
+      .where(sql`${table.settlementPayoutId} is null`),
+  ],
+);
+
+export const affiliatePayoutCommissions = pgTable(
+  "affiliate_payout_commissions",
+  {
+    payoutId: uuid("payout_id")
+      .notNull()
+      .references(() => affiliatePayouts.id, { onDelete: "restrict" }),
+    commissionId: uuid("commission_id")
+      .notNull()
+      .references(() => affiliateCommissions.id, { onDelete: "restrict" }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    primaryKey({
+      name: "affiliate_payout_commissions_pk",
+      columns: [table.payoutId, table.commissionId],
+    }),
+    unique("affiliate_payout_commissions_commission_unique").on(table.commissionId),
   ],
 );
 

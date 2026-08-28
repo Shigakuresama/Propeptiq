@@ -901,6 +901,16 @@ describe("growth database schema", () => {
     );
     await expectRejected(
       client,
+      `UPDATE affiliate_payouts SET request_hash = 'not-a-sha256'
+       WHERE id = '${ids.affiliatePayout}'`,
+    );
+    await expectRejected(
+      client,
+      `UPDATE affiliate_payouts SET paid_request_hash = 'not-a-sha256'
+       WHERE id = '${ids.affiliatePayout}'`,
+    );
+    await expectRejected(
+      client,
       `INSERT INTO affiliate_commissions
         (affiliate_profile_id, affiliate_attribution_id, buyer_user_id, order_id,
          affiliate_policy_id, affiliate_policy_version, idempotency_key,

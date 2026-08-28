@@ -345,11 +345,13 @@ type AffiliatePayoutSqlRow = {
   affiliatePolicyId: string;
   affiliatePolicyVersion: number | string;
   idempotencyKey: string;
+  requestHash: string | null;
   amountMinor: number | string;
   currency: string;
-  state: "pending" | "paid";
+  state: "pending" | "paid" | "cancelled";
   version: number | string;
   paidIdempotencyKey: string | null;
+  paidRequestHash: string | null;
   externalProvider: string | null;
   externalReference: string | null;
   createdAt: Date | string;
@@ -360,8 +362,10 @@ const affiliatePayoutSqlProjection = `id::text AS id,
   affiliate_profile_id::text AS "affiliateProfileId",
   affiliate_policy_id::text AS "affiliatePolicyId",
   affiliate_policy_version AS "affiliatePolicyVersion",
-  idempotency_key AS "idempotencyKey", amount_minor AS "amountMinor",
-  currency, state, version, paid_idempotency_key AS "paidIdempotencyKey",
+  idempotency_key AS "idempotencyKey", request_hash AS "requestHash",
+  amount_minor AS "amountMinor", currency, state, version,
+  paid_idempotency_key AS "paidIdempotencyKey",
+  paid_request_hash AS "paidRequestHash",
   external_provider AS "externalProvider",
   external_reference AS "externalReference", created_at AS "createdAt",
   paid_at AS "paidAt"`;
@@ -371,8 +375,8 @@ async function payoutCommissionIds(
   payoutId: string,
 ): Promise<readonly string[]> {
   const rows = await client.query<{ id: string }>(
-    `SELECT id::text AS id FROM affiliate_commissions
-     WHERE payout_id = $1::uuid ORDER BY id`,
+    `SELECT commission_id::text AS id FROM affiliate_payout_commissions
+     WHERE payout_id = $1::uuid ORDER BY commission_id`,
     [payoutId],
   );
   return Object.freeze(rows.rows.map(({ id }) => id));
@@ -427,11 +431,24 @@ function validCreatePayoutTransactionInput(
     input.createdAt instanceof Date && Number.isFinite(input.createdAt.getTime());
 }
 
+function payoutRequestHash(values: readonly unknown[]): string {
+  return createHash("sha256").update(JSON.stringify(values)).digest("hex");
+}
+
 async function createPayoutWithPostgresClient(
   client: GrowthSqlClient,
   input: Parameters<AffiliatePayoutCreateTransaction>[0],
 ): Promise<Awaited<ReturnType<AffiliatePayoutCreateTransaction>>> {
   if (!validCreatePayoutTransactionInput(input)) throw new AffiliatePayoutError("invalid_input");
+  const requestHash = payoutRequestHash([
+    "affiliate-payout-create-v1",
+    input.actorUserId,
+    input.payoutId,
+    input.profileId,
+    input.idempotencyKey,
+    input.correlationId,
+    input.createdAt.toISOString(),
+  ]);
   const existing = await client.query<AffiliatePayoutSqlRow>(
     `SELECT ${affiliatePayoutSqlProjection} FROM affiliate_payouts
      WHERE idempotency_key = $1 FOR UPDATE`,
@@ -439,7 +456,7 @@ async function createPayoutWithPostgresClient(
   );
   if (existing.rows[0]) {
     const row = existing.rows[0];
-    if (row.affiliateProfileId !== input.profileId) {
+    if (row.requestHash !== requestHash) {
       throw new AffiliatePayoutError("idempotency_conflict");
     }
     const commissionIds = await payoutCommissionIds(client, row.id);
@@ -560,16 +577,37 @@ async function createPayoutWithPostgresClient(
     throw new AffiliatePayoutError("persistence_conflict");
   }
 
+  const adjustments = await client.query<{ id: string; amountMinor: number | string }>(
+    `SELECT id::text AS id, amount_minor AS "amountMinor"
+     FROM affiliate_commission_adjustments
+     WHERE affiliate_profile_id = $1::uuid AND settlement_payout_id IS NULL
+     ORDER BY created_at, id FOR UPDATE`,
+    [draft.affiliateProfileId],
+  );
+  const adjustmentTotal = adjustments.rows.reduce((total, adjustment) => {
+    const next = total + Number(adjustment.amountMinor);
+    if (!Number.isSafeInteger(next) || next < 0) {
+      throw new AffiliatePayoutError("persistence_conflict");
+    }
+    return next;
+  }, 0);
+  const payoutAmountMinor = draft.amountMinor - adjustmentTotal;
+  if (!Number.isSafeInteger(payoutAmountMinor) ||
+      payoutAmountMinor < TASK_6_V1_PAYOUT_THRESHOLD_MINOR) {
+    throw new AffiliatePayoutError("threshold_not_met");
+  }
+
   const inserted = await client.query<AffiliatePayoutSqlRow>(
     `INSERT INTO affiliate_payouts
        (id, affiliate_profile_id, affiliate_policy_id, affiliate_policy_version,
-        idempotency_key, amount_minor, currency, state, version, created_at)
-     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, 'USD', 'pending', 1,
-             $7::timestamptz)
+        idempotency_key, request_hash, amount_minor, currency, state, version,
+        created_at)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, 'USD', 'pending', 1,
+             $8::timestamptz)
      RETURNING ${affiliatePayoutSqlProjection}`,
     [draft.id, draft.affiliateProfileId, draft.affiliatePolicyId,
-      draft.affiliatePolicyVersion, draft.idempotencyKey, draft.amountMinor,
-      draft.createdAt],
+      draft.affiliatePolicyVersion, draft.idempotencyKey, requestHash,
+      payoutAmountMinor, draft.createdAt],
   );
   const consumed = await client.query<{ id: string }>(
     `UPDATE affiliate_commissions
@@ -585,6 +623,27 @@ async function createPayoutWithPostgresClient(
   if (consumed.rows.length !== draft.commissionIds.length) {
     throw new AffiliatePayoutError("persistence_conflict");
   }
+  const memberships = await client.query<{ id: string }>(
+    `INSERT INTO affiliate_payout_commissions (payout_id, commission_id, created_at)
+     SELECT $1::uuid, commission_id, $3::timestamptz
+     FROM unnest($2::uuid[]) AS selected(commission_id)
+     RETURNING commission_id::text AS id`,
+    [draft.id, draft.commissionIds, draft.createdAt],
+  );
+  if (memberships.rows.length !== draft.commissionIds.length) {
+    throw new AffiliatePayoutError("persistence_conflict");
+  }
+  if (adjustments.rows.length > 0) {
+    const consumedAdjustments = await client.query<{ id: string }>(
+      `UPDATE affiliate_commission_adjustments SET settlement_payout_id = $1::uuid
+       WHERE id = ANY($2::uuid[]) AND settlement_payout_id IS NULL
+       RETURNING id::text AS id`,
+      [draft.id, adjustments.rows.map(({ id }) => id)],
+    );
+    if (consumedAdjustments.rows.length !== adjustments.rows.length) {
+      throw new AffiliatePayoutError("persistence_conflict");
+    }
+  }
   try {
     await client.query(
       `INSERT INTO admin_audit
@@ -593,9 +652,12 @@ async function createPayoutWithPostgresClient(
        VALUES ($1::uuid, 'affiliate.payout.created', 'affiliate_payout', $2,
                $3, $4::jsonb, $5::timestamptz)`,
       [input.actorUserId, draft.id, input.correlationId, JSON.stringify({
-        amountMinor: draft.amountMinor,
+        amountMinor: payoutAmountMinor,
         currency: draft.currency,
         commissionCount: draft.commissionIds.length,
+        ...(adjustments.rows.length === 0
+          ? {}
+          : { adjustmentCount: adjustments.rows.length }),
         affiliatePolicyVersion: draft.affiliatePolicyVersion,
         fromVersion: 0,
         toVersion: 1,
@@ -627,6 +689,17 @@ async function markPayoutPaidWithPostgresClient(
   input: Parameters<AffiliatePayoutPaidTransaction>[0],
 ): Promise<Awaited<ReturnType<AffiliatePayoutPaidTransaction>>> {
   if (!validPaidPayoutTransactionInput(input)) throw new AffiliatePayoutError("invalid_input");
+  const requestHash = payoutRequestHash([
+    "affiliate-payout-paid-v1",
+    input.actorUserId,
+    input.payoutId,
+    input.expectedVersion,
+    input.idempotencyKey,
+    input.providerName,
+    input.externalReference,
+    input.correlationId,
+    input.paidAt.toISOString(),
+  ]);
   const loaded = await client.query<AffiliatePayoutSqlRow>(
     `SELECT ${affiliatePayoutSqlProjection} FROM affiliate_payouts
      WHERE id = $1::uuid FOR UPDATE`,
@@ -634,14 +707,13 @@ async function markPayoutPaidWithPostgresClient(
   );
   const row = loaded.rows[0];
   if (!row) throw new AffiliatePayoutError("invalid_transition");
+  if (row.state === "cancelled") throw new AffiliatePayoutError("invalid_transition");
   const commissionIds = await payoutCommissionIds(client, input.payoutId);
   if (row.state === "paid") {
     if (row.paidIdempotencyKey !== input.idempotencyKey) {
       throw new AffiliatePayoutError("invalid_transition");
     }
-    if (Number(row.version) !== input.expectedVersion + 1 ||
-        row.externalProvider !== input.providerName ||
-        row.externalReference !== input.externalReference) {
+    if (row.paidRequestHash !== requestHash) {
       throw new AffiliatePayoutError("idempotency_conflict");
     }
     return Object.freeze({
@@ -659,7 +731,19 @@ async function markPayoutPaidWithPostgresClient(
      ORDER BY id FOR UPDATE`,
     [input.payoutId],
   );
-  const total = commissions.rows.reduce((sum, commission) => sum + Number(commission.netMinor), 0);
+  const settledAdjustments = await client.query<{ amountMinor: number | string }>(
+    `SELECT amount_minor AS "amountMinor" FROM affiliate_commission_adjustments
+     WHERE settlement_payout_id = $1::uuid ORDER BY id FOR UPDATE`,
+    [input.payoutId],
+  );
+  const adjustmentTotal = settledAdjustments.rows.reduce(
+    (sum, adjustment) => sum + Number(adjustment.amountMinor),
+    0,
+  );
+  const total = commissions.rows.reduce(
+    (sum, commission) => sum + Number(commission.netMinor),
+    0,
+  ) - adjustmentTotal;
   if (commissions.rows.length === 0 || total !== Number(row.amountMinor) ||
       commissions.rows.some(({ status }) => status !== "approved")) {
     throw new AffiliatePayoutError("persistence_conflict");
@@ -667,11 +751,11 @@ async function markPayoutPaidWithPostgresClient(
   const updated = await client.query<AffiliatePayoutSqlRow>(
     `UPDATE affiliate_payouts
      SET state = 'paid', version = version + 1, paid_idempotency_key = $3,
-         external_provider = $4, external_reference = $5,
-         paid_at = $6::timestamptz
+         paid_request_hash = $4, external_provider = $5, external_reference = $6,
+         paid_at = $7::timestamptz
      WHERE id = $1::uuid AND state = 'pending' AND version = $2
      RETURNING ${affiliatePayoutSqlProjection}`,
-    [input.payoutId, input.expectedVersion, input.idempotencyKey,
+    [input.payoutId, input.expectedVersion, input.idempotencyKey, requestHash,
       input.providerName, input.externalReference, input.paidAt.toISOString()],
   );
   if (updated.rows.length !== 1) throw new AffiliatePayoutError("version_conflict");
@@ -1237,7 +1321,7 @@ export function calculateAffiliateOrderCommission(input: Readonly<{
     ? null
     : finiteTime(input.firstQualifiedOrderAt);
   if (
-    input.policy.status !== "active" ||
+    (input.policy.status !== "active" && input.policy.status !== "retired") ||
     input.partnerStatus !== "active" ||
     input.attribution.program !== "affiliate" ||
     paidAt === null ||
