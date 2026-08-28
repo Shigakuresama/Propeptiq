@@ -28,13 +28,16 @@ const canonicalSet = {
   ],
 };
 
-function project(sharedSet: unknown) {
+function project(
+  sharedSet: unknown,
+  currentProducts: unknown = [
+    { id: "product-a", active: true, name: "Record A" },
+    { id: "product-b", active: false, name: "Record B" },
+  ],
+) {
   return projectPublicSharedResearchSet({
     sharedSet,
-    currentProducts: [
-      { id: "product-a", active: true, name: "Record A" },
-      { id: "product-b", active: false, name: "Record B" },
-    ],
+    currentProducts,
   });
 }
 
@@ -97,6 +100,24 @@ describe("shared research set policies", () => {
     expect(createSharedResearchSet(Object.create({ code: "set_Q7tcqpk1rXv2ABcd", label: "Analytical comparison set", items }))).toEqual({
       ok: false,
       error: { code: "invalid_input", field: "input" },
+    });
+  });
+
+  it("requires owned public product facts while accepting plain and null-prototype records", () => {
+    const validProduct = { id: "product-a", active: true, name: "Record A" };
+    const inheritedOnlyProduct = Object.create(validProduct);
+    const nullPrototypeProduct = Object.assign(Object.create(null), validProduct);
+    const inactiveProduct = { id: "product-b", active: false, name: "Record B" };
+
+    expect(project(canonicalSet, [inheritedOnlyProduct, inactiveProduct])).toEqual({
+      ok: false,
+      error: { code: "invalid_input", field: "currentProducts[0]" },
+    });
+    expect(project(canonicalSet, [validProduct, inactiveProduct])).toMatchObject({
+      ok: true,
+    });
+    expect(project(canonicalSet, [nullPrototypeProduct, inactiveProduct])).toMatchObject({
+      ok: true,
     });
   });
 
