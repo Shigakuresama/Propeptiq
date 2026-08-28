@@ -152,6 +152,72 @@ timestamp would not satisfy exact expected-version CAS, so generated migration
 feat(growth): add reviewed affiliate applications
 ```
 
+## 6A review fix round 1/5 — Reviewed immutable application replay
+
+Independent review found that an otherwise exact application replay was
+restricted to `pending` version 1. After a valid administrator decision or
+suspension, the owner therefore received `idempotency_conflict` even though the
+stored application identity and acceptance remained immutable.
+
+### Recoverable RED evidence
+
+- Service RED: 3 expected failures and 40 passes. Exact replays returning
+  `active` version 2, `rejected` version 2, or `suspended` version 3 all failed
+  at `validateTransactionResult` with `persistence_conflict`.
+- Migrated PGlite RED: 4 expected failures and 16 passes. Replays after
+  `pending -> active`, `pending -> rejected`, and `active -> suspended` failed
+  with `idempotency_conflict`; replay after a later current-terms change failed
+  early with `terms_mismatch`.
+
+### Fix and invariant evidence
+
+- An existing owner profile is now evaluated before the new-application
+  current-terms lookup. Replay accepts only coherent Task 6A states:
+  `pending`/1, `active`/2, `rejected`/2, or `suspended`/3, and returns that
+  current stored status/version without an update.
+- Replay locks and joins the stored acceptance to its exact affiliate terms
+  row, recomputes SHA-256 from the stored terms text, and requires the stored
+  version/hash plus the browser-supplied version/hash to agree. A later current
+  terms version does not invalidate that immutable acceptance.
+- The one-current-terms lookup and server-computed hash remain mandatory when
+  no existing application is found. The PGlite drift case proves the old terms
+  replay succeeds for its existing owner while a genuinely new buyer using the
+  same stale terms is rejected with no new acceptance/profile.
+- Stored profile ID, acceptance ID, and public code remain authoritative on
+  replay. Fresh unused generated candidates are discarded; candidate ID/code
+  collisions, owner mismatch, accepted-terms mismatch, changed channel/method,
+  and incoherent status/version all conflict without changing rows.
+- PGlite snapshots taken immediately before and after replay prove acceptance
+  count/content, profile count/identity/content/status/version, and audit count
+  are unchanged. Active/rejected retain their one decision audit; suspended
+  retains exactly its decision and suspension audits. Application replay never
+  invokes or repeats an administrator mutation and never rolls status/version
+  backward.
+
+### Review-fix GREEN and validation evidence
+
+- Focused application/admin/action/authorization: 3 files, 129/129 tests.
+- Affiliate service alone: 47/47 tests.
+- Dedicated 6A migrated PGlite: 23/23 tests.
+- Affected migrated PGlite: 3 files, 69/69 tests.
+- Full unit suite: 84 files, 1001/1001 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- `npm run db:generate`: exit 0, `No schema changes, nothing to migrate`.
+- `npm run db:check`: exit 0.
+- Working and staged `git diff --check`: exit 0; only expected Windows LF/CRLF
+  working-copy notices appeared.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no
+  real-PostgreSQL or contention claim is made.
+
+### Review-fix implementation commit
+
+```text
+cfdb3301fd7d9d2b1cf447f8b57fddb118ac0524
+fix(growth): preserve reviewed affiliate application replay
+```
+
 ### Remaining Task 6 boundary
 
 Task 6B attribution/commission lifecycle and Task 6C payout batching/externally
