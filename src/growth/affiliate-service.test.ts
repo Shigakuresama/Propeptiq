@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 import type { VerifiedIdentity } from "@/auth/identity";
+import type { GrowthSqlClient, GrowthTransactionRunner } from "@/db/repositories/growth-repository";
 import type { Principal } from "@/domain/authorization";
 import type { AffiliatePolicy } from "@/domain/affiliates";
 
@@ -16,6 +17,7 @@ import {
   createAffiliatePayoutBatchDraft,
   createAffiliatePayoutService,
   createAffiliateService,
+  createPostgresAffiliatePayoutCreateTransaction,
   type AffiliateAdminMutationTransaction,
   type AffiliateApplicationTransaction,
   type AffiliatePayoutCreateTransaction,
@@ -208,6 +210,78 @@ describe("affiliate payout service", () => {
     });
     expect(Object.isFrozen(result)).toBe(true);
     expect(markPaidInTransaction).not.toHaveBeenCalled();
+  });
+
+  it("replays the original batch after response loss despite a fresh UUID and later server clock", async () => {
+    const correlationId = "task-6c-create-payout-response-loss";
+    const requestHash = createHash("sha256").update(JSON.stringify([
+      "affiliate-payout-create-v1",
+      payoutAdmin.actorId,
+      profileId,
+      payoutDraft.idempotencyKey,
+      correlationId,
+    ])).digest("hex");
+    const sqlClient: GrowthSqlClient = Object.freeze({
+      query: async <Row extends object>(sql: string) => {
+        if (sql.includes("WHERE idempotency_key = $1 FOR UPDATE")) {
+          return { rows: [{
+            id: payoutDraft.id,
+            affiliateProfileId: payoutDraft.affiliateProfileId,
+            affiliatePolicyId: payoutDraft.affiliatePolicyId,
+            affiliatePolicyVersion: payoutDraft.affiliatePolicyVersion,
+            idempotencyKey: payoutDraft.idempotencyKey,
+            requestHash,
+            amountMinor: payoutDraft.amountMinor,
+            currency: payoutDraft.currency,
+            state: payoutDraft.state,
+            version: payoutDraft.version,
+            paidIdempotencyKey: null,
+            paidRequestHash: null,
+            externalProvider: null,
+            externalReference: null,
+            createdAt: payoutDraft.createdAt,
+            paidAt: null,
+          }] as unknown as Row[] };
+        }
+        if (sql.includes("FROM affiliate_payout_commissions")) {
+          return { rows: payoutDraft.commissionIds.map((id) => ({ id })) as unknown as Row[] };
+        }
+        throw new Error(`Unexpected payout replay query: ${sql}`);
+      },
+    });
+    const runSerializableTransaction: GrowthTransactionRunner = async (work) => work(sqlClient);
+    const service = createAffiliatePayoutService({
+      clock: () => new Date("2026-08-28T19:05:00.000Z"),
+      createPayoutId: () => "6c000000-0000-4000-8000-000000000099",
+      createInTransaction: createPostgresAffiliatePayoutCreateTransaction({
+        runSerializableTransaction,
+      }),
+      markPaidInTransaction: vi.fn<AffiliatePayoutPaidTransaction>(),
+    });
+
+    await expect(service.createBatch({
+      principal: payoutAdmin,
+      profileId,
+      idempotencyKey: payoutDraft.idempotencyKey,
+      correlationId,
+    })).resolves.toEqual({
+      status: "idempotent",
+      payout: {
+        id: payoutDraft.id,
+        affiliateProfileId: profileId,
+        affiliatePolicyId: activeAffiliatePolicy.id,
+        affiliatePolicyVersion: 1,
+        amountMinor: 5_000,
+        currency: "USD",
+        state: "pending",
+        version: 1,
+        commissionCount: 2,
+        providerName: null,
+        externalReference: null,
+        createdAt: now.toISOString(),
+        paidAt: null,
+      },
+    });
   });
 
   it.each([

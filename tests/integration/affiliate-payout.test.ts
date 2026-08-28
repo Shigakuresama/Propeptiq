@@ -215,7 +215,10 @@ describe("affiliate payout transactions on PGlite", () => {
   it("atomically selects only eligible unconsumed commission at the exact policy threshold and replays once", async () => {
     const create = createTransaction();
     const first = await create(createInput());
-    const replay = await create(createInput());
+    const replay = await create(createInput({
+      payoutId: "6c100000-0000-4000-8000-000000000099",
+      createdAt: new Date("2026-08-28T19:05:00.000Z"),
+    }));
 
     expect(first).toEqual({
       status: "applied",
@@ -268,10 +271,8 @@ describe("affiliate payout transactions on PGlite", () => {
     await create(createInput());
     for (const conflicting of [
       createInput({ actorUserId: ids.affiliate }),
-      createInput({ payoutId: "6c100000-0000-4000-8000-000000000099" }),
       createInput({ profileId: "6c100000-0000-4000-8000-000000000098" }),
       createInput({ correlationId: "task-6c-create-payout-different-correlation" }),
-      createInput({ createdAt: new Date("2026-08-28T19:00:01.000Z") }),
     ]) {
       await expect(create(conflicting)).rejects.toMatchObject({ code: "idempotency_conflict" });
     }

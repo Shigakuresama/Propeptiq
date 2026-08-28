@@ -443,11 +443,9 @@ async function createPayoutWithPostgresClient(
   const requestHash = payoutRequestHash([
     "affiliate-payout-create-v1",
     input.actorUserId,
-    input.payoutId,
     input.profileId,
     input.idempotencyKey,
     input.correlationId,
-    input.createdAt.toISOString(),
   ]);
   const existing = await client.query<AffiliatePayoutSqlRow>(
     `SELECT ${affiliatePayoutSqlProjection} FROM affiliate_payouts
