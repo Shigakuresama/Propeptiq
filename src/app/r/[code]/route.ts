@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { readServerEnv } from "@/env";
 import { createAttributionCookie } from "@/growth/attribution-cookie";
 import { createReferralLandingRuntime } from "@/growth/referral-landing-runtime";
 
@@ -12,17 +13,34 @@ type ReferralRouteContext = Readonly<{
   params: Promise<Readonly<{ code: string }>>;
 }>;
 
-function catalogRedirect(request: Request): NextResponse {
-  const response = NextResponse.redirect(new URL("/catalog", request.url), 303);
-  response.headers.set("cache-control", "no-store");
-  return response;
+function trustedCatalogRedirect(): NextResponse | null {
+  try {
+    const { APP_ORIGIN: appOrigin } = readServerEnv();
+    if (!appOrigin) return null;
+    const response = NextResponse.redirect(
+      new URL("/catalog", new URL(appOrigin).origin),
+      303,
+    );
+    response.headers.set("cache-control", "no-store");
+    return response;
+  } catch {
+    return null;
+  }
+}
+
+function unavailableResponse(): Response {
+  return new Response(null, {
+    status: 503,
+    headers: { "cache-control": "no-store" },
+  });
 }
 
 export async function GET(
-  request: Request,
+  _request: Request,
   context: ReferralRouteContext,
 ): Promise<Response> {
-  const response = catalogRedirect(request);
+  const response = trustedCatalogRedirect();
+  if (!response) return unavailableResponse();
   try {
     const { code } = await context.params;
     if (!boundedOpaqueCodePattern.test(code)) return response;

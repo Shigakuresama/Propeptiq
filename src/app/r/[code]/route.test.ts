@@ -2,19 +2,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { verifyAttributionCookie } from "@/growth/attribution-cookie";
 
-const { createReferralLandingRuntime, lookup } = vi.hoisted(() => ({
+const { createReferralLandingRuntime, lookup, readServerEnv } = vi.hoisted(() => ({
   createReferralLandingRuntime: vi.fn(),
   lookup: vi.fn(),
+  readServerEnv: vi.fn(),
 }));
 
 vi.mock("@/growth/referral-landing-runtime", () => ({
   createReferralLandingRuntime,
 }));
+vi.mock("@/env", () => ({ readServerEnv }));
 
 import { GET, dynamic } from "./route";
 
 const now = new Date("2026-08-28T12:00:00.000Z");
 const origin = "https://shop.propeptiq.example.test";
+const hostileOrigin = "https://attacker.example";
 const secret = "synthetic-route-attribution-secret-at-least-32-characters";
 const code = "ref_AbCdEf0123456789";
 
@@ -23,6 +26,16 @@ function request(path = `/r/${code}`) {
     headers: {
       "user-agent": "privacy-sensitive-user-agent",
       "x-forwarded-for": "203.0.113.8",
+    },
+  });
+}
+
+function hostileRequest(path = `/r/${code}`) {
+  return new Request(`${hostileOrigin}${path}`, {
+    headers: {
+      host: "attacker.example",
+      "x-forwarded-host": "attacker.example",
+      "x-forwarded-proto": "https",
     },
   });
 }
@@ -42,6 +55,10 @@ describe("GET /r/[code]", () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     vi.clearAllMocks();
+    readServerEnv.mockReturnValue({
+      APP_ENV: "production",
+      APP_ORIGIN: origin,
+    });
     lookup.mockResolvedValue({
       program: "customer_referral",
       code,
@@ -55,6 +72,18 @@ describe("GET /r/[code]", () => {
   });
 
   afterEach(() => vi.useRealTimers());
+
+  it("redirects a hostile request host only to the configured trusted catalog origin", async () => {
+    const response = await GET(
+      hostileRequest(`/r/${code}?return=${encodeURIComponent(hostileOrigin)}`),
+      context(),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${origin}/catalog`);
+    expect(response.headers.get("location")).not.toContain("attacker.example");
+    expect(response.headers.has("set-cookie")).toBe(true);
+  });
 
   it("performs one privacy-minimal lookup, sets an eligible signed cookie, and ignores redirect input", async () => {
     const response = await GET(
@@ -101,7 +130,10 @@ describe("GET /r/[code]", () => {
       `ref_${"A".repeat(65)}`,
       "ref_has.dot123456789",
     ]) {
-      const response = await GET(request(`/r/${invalidCode}`), context(invalidCode));
+      const response = await GET(
+        hostileRequest(`/r/${invalidCode}`),
+        context(invalidCode),
+      );
       expect(response.status).toBe(303);
       expect(response.headers.get("location")).toBe(`${origin}/catalog`);
       expect(response.headers.has("set-cookie")).toBe(false);
@@ -114,25 +146,43 @@ describe("GET /r/[code]", () => {
     const responses: Response[] = [];
 
     lookup.mockResolvedValueOnce(null);
-    responses.push(await GET(request(), context()));
+    responses.push(await GET(hostileRequest(), context()));
 
     createReferralLandingRuntime.mockResolvedValueOnce(null);
-    responses.push(await GET(request(), context()));
+    responses.push(await GET(hostileRequest(), context()));
 
     lookup.mockRejectedValueOnce(new Error("sensitive repository detail"));
-    responses.push(await GET(request(), context()));
+    responses.push(await GET(hostileRequest(), context()));
 
     lookup.mockResolvedValueOnce({
       program: "unknown",
       code,
       attributionDays: 30,
     });
-    responses.push(await GET(request(), context()));
+    responses.push(await GET(hostileRequest(), context()));
 
     for (const response of responses) {
       expect(response.status).toBe(303);
       expect(response.headers.get("location")).toBe(`${origin}/catalog`);
       expect(response.headers.has("set-cookie")).toBe(false);
     }
+  });
+
+  it("fails closed without a configured trusted origin and never reflects the request host", async () => {
+    readServerEnv.mockImplementationOnce(() => {
+      throw new Error("sensitive configuration detail");
+    });
+    const unavailable = await GET(hostileRequest(), context());
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.has("location")).toBe(false);
+    expect(unavailable.headers.has("set-cookie")).toBe(false);
+    expect(createReferralLandingRuntime).not.toHaveBeenCalled();
+
+    readServerEnv.mockReturnValueOnce({ APP_ENV: "local" });
+    const missingOrigin = await GET(hostileRequest(), context());
+    expect(missingOrigin.status).toBe(503);
+    expect(missingOrigin.headers.has("location")).toBe(false);
+    expect(missingOrigin.headers.has("set-cookie")).toBe(false);
+    expect(createReferralLandingRuntime).not.toHaveBeenCalled();
   });
 });
