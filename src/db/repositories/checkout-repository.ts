@@ -37,6 +37,10 @@ import {
   reserveCheckoutRewardsInTransaction,
 } from "@/growth/rewards-service";
 import {
+  bindCustomerReferralOrderInTransaction,
+  ReferralBindingConflict,
+} from "@/growth/referral-service";
+import {
   transitionOrder,
   type OrderSnapshot,
   type OrderState,
@@ -993,7 +997,10 @@ async function writeCommercialSnapshots(
     );
   }
 
-  if (plan.facts.promotion !== null) {
+  if (
+    plan.facts.promotion !== null &&
+    plan.selectedAcquisitionSource === "promotion"
+  ) {
     const promotion = plan.facts.promotion;
     const applicationId = plan.identity.keyedUuid("promotion-application");
     await client.query(
@@ -1525,6 +1532,18 @@ async function prepareInTransaction(
     existing,
   );
   if (itemIds === null) return { status: "facts_changed_retry" };
+  if (plan.referralQuote !== null) {
+    await bindCustomerReferralOrderInTransaction(client, {
+      attributionId: plan.identity.keyedUuid("customer-referral-attribution"),
+      conversionId: plan.identity.keyedUuid("customer-referral-conversion"),
+      buyerUserId: plan.buyerUserId,
+      orderId: plan.identity.orderId,
+      idempotencyKey: `customer-referral:${plan.idempotencyKey}`,
+      quote: plan.referralQuote,
+      referredDiscountMinor: plan.referralDiscountMinor,
+      boundAt: plan.authoritativeAt,
+    });
+  }
   if (plan.rewardsQuote?.status === "applied") {
     const rewardReservation = await reserveCheckoutRewardsInTransaction(
       client,
@@ -1864,7 +1883,10 @@ export function createPostgresCheckoutRepository(dependencies: Readonly<{
           retryOptions,
         );
       } catch (error) {
-        if (error instanceof RewardReservationRejected) {
+        if (
+          error instanceof RewardReservationRejected ||
+          error instanceof ReferralBindingConflict
+        ) {
           return { status: "facts_changed_retry" };
         }
         if (!isCheckoutIdentityRace(error)) throw error;

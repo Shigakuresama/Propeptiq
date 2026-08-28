@@ -32,11 +32,13 @@ export type CheckoutServerRuntimeV1 = Readonly<{
     buyerUserId: string;
     idempotencyKey: string;
     request: unknown;
+    attributionCookie?: string | null;
   }>) => Promise<CheckoutQuoteResult>;
   startSession: (input: Readonly<{
     buyerUserId: string;
     idempotencyKey: string;
     request: unknown;
+    attributionCookie?: string | null;
   }>) => Promise<ProviderCheckoutRouteResult>;
 }>;
 
@@ -149,6 +151,9 @@ export async function createCheckoutServerRuntime(
         idempotencyKey: input.idempotencyKey,
         paymentProviderAvailable: contextResult.context.checkoutCreationAvailable,
         request: input.request,
+        ...(input.attributionCookie === undefined
+          ? {}
+          : { attributionCookie: input.attributionCookie }),
       });
     },
     startSession(input) {
@@ -157,6 +162,9 @@ export async function createCheckoutServerRuntime(
         context: contextResult.context,
         idempotencyKey: input.idempotencyKey,
         request: input.request,
+        ...(input.attributionCookie === undefined
+          ? {}
+          : { attributionCookie: input.attributionCookie }),
       });
     },
   });

@@ -30,6 +30,7 @@ type CheckoutServicePort = Readonly<{
     idempotencyKey: string;
     paymentProviderAvailable: boolean;
     request: unknown;
+    attributionCookie?: string | null;
   }>) => Promise<CheckoutQuoteResult>;
   prepare: (
     plan: AuthoritativeCheckoutPlan,
@@ -348,6 +349,7 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
       context: ProviderExecutionContextV1;
       idempotencyKey: string;
       request: unknown;
+      attributionCookie?: string | null;
     }>): Promise<ProviderCheckoutRouteResult> {
       const context = projectProviderExecutionContextV1(startInput.context);
       if (context === null) return Object.freeze({ status: "invalid" });
@@ -357,6 +359,9 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
           idempotencyKey: startInput.idempotencyKey,
           paymentProviderAvailable: context.checkoutCreationAvailable,
           request: startInput.request,
+          ...(startInput.attributionCookie === undefined
+            ? {}
+            : { attributionCookie: startInput.attributionCookie }),
         });
         const terminal = terminalLoaded(quote);
         if (terminal !== null) return terminal;

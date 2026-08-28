@@ -111,7 +111,12 @@ describe("POST /api/checkout/sessions", () => {
       hostedUrl: `${origin}/__synthetic_local_checkout/70000000-0000-4000-8000-000000000001`,
       expiresAt: "2026-08-26T21:30:00.000Z",
     });
-    expect(startSession).toHaveBeenCalledWith({ buyerUserId, idempotencyKey, request: body });
+    expect(startSession).toHaveBeenCalledWith({
+      buyerUserId,
+      idempotencyKey,
+      request: body,
+      attributionCookie: null,
+    });
   });
 
   it("returns the closed no-store envelope without a session operation for the exact Preview matrix", async () => {

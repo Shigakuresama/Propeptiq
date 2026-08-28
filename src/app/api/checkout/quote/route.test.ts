@@ -139,7 +139,12 @@ describe("POST /api/checkout/quote", () => {
       status: "quoted",
       quote: { totalMinor: 5_141 },
     });
-    expect(quoteCheckout).toHaveBeenCalledWith({ buyerUserId, idempotencyKey, request: body });
+    expect(quoteCheckout).toHaveBeenCalledWith({
+      buyerUserId,
+      idempotencyKey,
+      request: body,
+      attributionCookie: null,
+    });
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 

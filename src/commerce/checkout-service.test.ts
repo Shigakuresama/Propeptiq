@@ -16,6 +16,7 @@ import {
   type FactLoadResult,
 } from "@/commerce/checkout-service";
 import type { CheckoutRewardsQuote } from "@/growth/rewards-service";
+import type { ReferralCheckoutQuote } from "@/growth/referral-service";
 
 const ids = {
   buyer: "20000000-0000-4000-8000-000000000001",
@@ -32,6 +33,9 @@ const ids = {
   rewardAccount: "20000000-0000-4000-8000-000000000012",
   loyaltyPolicy: "20000000-0000-4000-8000-000000000013",
   growthTerms: "20000000-0000-4000-8000-000000000014",
+  referralPolicy: "20000000-0000-4000-8000-000000000015",
+  referralCode: "20000000-0000-4000-8000-000000000016",
+  referrer: "20000000-0000-4000-8000-000000000017",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -101,7 +105,10 @@ const sha256 = async (value: string) =>
 
 function setup(
   overrides: Partial<AuthoritativeCheckoutFacts> = {},
-  options: Readonly<{ rewardsQuoteResult?: CheckoutRewardsQuote }> = {},
+  options: Readonly<{
+    rewardsQuoteResult?: CheckoutRewardsQuote;
+    referralQuoteResult?: ReferralCheckoutQuote;
+  }> = {},
 ) {
   const repository: CheckoutRepository = {
     findAttempt: vi.fn(async () => null),
@@ -155,6 +162,13 @@ function setup(
     ),
     reserveCheckoutRewards: vi.fn(async () => ({ status: "reserved" as const })),
   };
+  const referralService = {
+    quoteCustomerReferral: vi.fn(async () =>
+      options.referralQuoteResult ?? Object.freeze({
+        status: "unavailable" as const,
+        reason: "attribution_invalid" as const,
+      })),
+  };
   const keyed = new Map<string, string>([
     [`${ids.buyer}:${ids.key}:order`, ids.order],
     [`${ids.buyer}:${ids.key}:attempt`, ids.attempt],
@@ -178,9 +192,16 @@ function setup(
       maximumQuantityPerLine: 25,
       maximumOrderAmountMinor: 1_000_000,
     },
-    ...{ rewardsService },
+    ...{ rewardsService, referralService },
   });
-  return { service, repository, shippingQuote, taxQuote, rewardsService };
+  return {
+    service,
+    repository,
+    shippingQuote,
+    taxQuote,
+    rewardsService,
+    referralService,
+  };
 }
 
 describe("authoritative checkout service", () => {
@@ -267,6 +288,124 @@ describe("authoritative checkout service", () => {
       pendingBaseEarnPoints: 160,
       rewardsBenefitAvailable: true,
       rewardsUnavailableReason: null,
+    });
+  });
+
+  it("applies the greater referral acquisition discount and then caps points against the post-referral merchandise", async () => {
+    const referralQuoteResult = Object.freeze({
+      status: "eligible" as const,
+      code: "ref_5BCheckoutOpaque",
+      referralCodeId: ids.referralCode,
+      referrerUserId: ids.referrer,
+      clickedAt: "2026-08-20T12:00:00.000Z",
+      expiresAt: "2026-09-19T12:00:00.000Z",
+      referralPolicyId: ids.referralPolicy,
+      referralPolicyVersion: 1,
+      referralDiscountMinor: 2_500,
+    });
+    const promotion = Object.freeze({
+      authority: "server_resolved_promotion" as const,
+      id: "20000000-0000-4000-8000-000000000018",
+      version: 1,
+      code: "SYNTHETIC1000",
+      name: "Synthetic acquisition promotion",
+      kind: "discount" as const,
+      status: "active" as const,
+      currentlyEffective: true,
+      amountMinor: 1_000,
+      currency: "USD",
+      basisPoints: null,
+      targetProductIds: [ids.product],
+      targetPolicyGroupIds: [],
+    });
+    const rewardsQuoteResult = Object.freeze({
+      status: "applied" as const,
+      rewardAccountId: ids.rewardAccount,
+      loyaltyPolicyId: ids.loyaltyPolicy,
+      loyaltyPolicyVersion: 1,
+      termsVersionId: ids.growthTerms,
+      termsContentHash: "a".repeat(64),
+      redemptionPoints: 1_000,
+      redemptionMinor: 1_000,
+      maximumPoints: 1_875,
+      eligibleMerchandiseMinor: 7_500,
+      pendingBaseEarnPoints: 130,
+    });
+    const { service, referralService, rewardsService } = setup(
+      { promotion },
+      { referralQuoteResult, rewardsQuoteResult },
+    );
+
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      attributionCookie: "signed-referral-cookie",
+      request: {
+        ...request,
+        promotionIds: [promotion.id],
+        rewardRedemptionPoints: 1_000,
+      },
+    });
+
+    expect(result.status).toBe("quoted");
+    if (result.status !== "quoted") throw new Error("expected referral quote");
+    expect(referralService.quoteCustomerReferral).toHaveBeenCalledWith({
+      buyerUserId: ids.buyer,
+      attributionCookie: "signed-referral-cookie",
+      merchandiseSubtotalMinor: 10_000,
+      currency: "USD",
+      now,
+    });
+    expect(rewardsService.quoteCheckoutRewards).toHaveBeenCalledWith({
+      buyerUserId: ids.buyer,
+      requestedPoints: 1_000,
+      postPromotionMerchandiseMinor: 7_500,
+      currency: "USD",
+      now,
+    });
+    expect(result.quote).toMatchObject({
+      subtotalMinor: 10_000,
+      promotionDiscountMinor: 0,
+      referralDiscountMinor: 2_500,
+      rewardRedemptionMinor: 1_000,
+      discountMinor: 3_500,
+      totalMinor: 7_525,
+    });
+    expect(JSON.stringify(result.quote)).not.toContain(ids.referrer);
+    expect(projectAuthoritativeCheckoutPlan(result.plan)?.referralQuote).toEqual(
+      referralQuoteResult,
+    );
+  });
+
+  it("projects a referral acquisition discount when no points redemption was requested", async () => {
+    const referralQuoteResult = Object.freeze({
+      status: "eligible" as const,
+      code: "ref_5BCheckoutOpaque",
+      referralCodeId: ids.referralCode,
+      referrerUserId: ids.referrer,
+      clickedAt: "2026-08-20T12:00:00.000Z",
+      expiresAt: "2026-09-19T12:00:00.000Z",
+      referralPolicyId: ids.referralPolicy,
+      referralPolicyVersion: 1,
+      referralDiscountMinor: 1_000,
+    });
+    const { service } = setup({}, { referralQuoteResult });
+
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      attributionCookie: "signed-referral-cookie",
+      request,
+    });
+
+    expect(result.status).toBe("quoted");
+    if (result.status !== "quoted") throw new Error("expected referral quote");
+    expect(result.quote).toMatchObject({
+      promotionDiscountMinor: 0,
+      referralDiscountMinor: 1_000,
+      discountMinor: 1_000,
     });
   });
 
@@ -359,6 +498,8 @@ describe("authoritative checkout service", () => {
       currency: "USD",
       subtotalMinor: 10_000,
       discountMinor: 0,
+      promotionDiscountMinor: 0,
+      referralDiscountMinor: 0,
       shippingMinor: 700,
       taxMinor: 325,
       totalMinor: 11_025,

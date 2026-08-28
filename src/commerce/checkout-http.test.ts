@@ -63,10 +63,10 @@ function request(
 function fixture(overrides: Partial<Parameters<typeof createCheckoutHttpHandlers>[0]> = {}) {
   let count = 0;
   const quoteCheckout = vi.fn<(
-    input: Readonly<{ buyerUserId: string; idempotencyKey: string; request: unknown }>,
+    input: Readonly<{ buyerUserId: string; idempotencyKey: string; request: unknown; attributionCookie: string | null }>,
   ) => Promise<CheckoutQuoteResult>>(async () => ({ status: "quoted", quote } as CheckoutQuoteResult));
   const startSession = vi.fn<(
-    input: Readonly<{ buyerUserId: string; idempotencyKey: string; request: unknown }>,
+    input: Readonly<{ buyerUserId: string; idempotencyKey: string; request: unknown; attributionCookie: string | null }>,
   ) => Promise<ProviderCheckoutRouteResult>>(async () => ({
     status: "open",
     orderId: "61000000-0000-4000-8000-000000000003",
@@ -93,7 +93,9 @@ async function json(response: Response) {
 describe("checkout HTTP controllers", () => {
   it("projects a ready quote through the exact safe envelope", async () => {
     const { handlers, quoteCheckout } = fixture();
-    const response = await handlers.quote(request("/api/checkout/quote"));
+    const response = await handlers.quote(request("/api/checkout/quote", requestBody, {
+      cookie: "unrelated=1; propeptiq_attribution_v1=signed-task5b-cookie",
+    }));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await json(response)).toEqual({ status: "quoted", quote });
@@ -101,6 +103,7 @@ describe("checkout HTTP controllers", () => {
       buyerUserId: buyerId,
       idempotencyKey: key,
       request: requestBody,
+      attributionCookie: "signed-task5b-cookie",
     });
   });
 

@@ -171,7 +171,7 @@ export async function loadCurrentLoyaltyPolicy(
   return parsed.value;
 }
 
-async function loadCurrentReferralPolicy(
+export async function loadCurrentReferralPolicy(
   client: GrowthPolicySqlClient,
   now: Date,
 ): Promise<ReferralPolicy> {

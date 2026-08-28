@@ -35,6 +35,7 @@ import {
 } from "@/domain/money";
 import {
   calculatePromotionDiscount,
+  selectBestAcquisitionDiscount,
   type PromotionRecord,
 } from "@/domain/promotions";
 import type { OrderState } from "@/domain/orders";
@@ -43,6 +44,10 @@ import type {
   AppliedCheckoutRewards,
   RewardsCheckoutReservationResult,
 } from "@/growth/rewards-service";
+import type {
+  EligibleReferralCheckoutQuote,
+  ReferralCheckoutQuote,
+} from "@/growth/referral-service";
 
 export type AuthoritativeLotFact = Readonly<{
   id: string;
@@ -238,11 +243,14 @@ export type AuthoritativeCheckoutPlanData = Readonly<{
   taxQuote: TaxQuote | null;
   totals: OrderTotals | null;
   promotionDiscountMinor: number;
+  referralDiscountMinor: number;
+  selectedAcquisitionSource: "promotion" | "referral";
   promotionAllocations: readonly Readonly<{
     productId: string;
     discountMinor: number;
   }>[];
   rewardsQuote: CheckoutRewardsQuote | null;
+  referralQuote: EligibleReferralCheckoutQuote | null;
   browserQuote: BrowserCheckoutQuote;
 }>;
 
@@ -423,16 +431,20 @@ function browserQuote(
   facts: AuthoritativeCheckoutFacts,
   totals: OrderTotals,
   promotionDiscountMinor: number,
+  referralDiscountMinor: number,
   rewardsQuote: CheckoutRewardsQuote | null,
 ): BrowserCheckoutQuote {
   const byProduct = new Map(facts.items.map((item) => [item.productId, item]));
   const rewardsProjection =
     rewardsQuote === null
-      ? {}
+      ? {
+          promotionDiscountMinor,
+          referralDiscountMinor,
+        }
       : rewardsQuote.status === "applied"
         ? {
             promotionDiscountMinor,
-            referralDiscountMinor: 0,
+            referralDiscountMinor,
             rewardRedemptionPoints: rewardsQuote.redemptionPoints,
             rewardRedemptionMinor: rewardsQuote.redemptionMinor,
             pendingBaseEarnPoints: rewardsQuote.pendingBaseEarnPoints,
@@ -441,7 +453,7 @@ function browserQuote(
           }
         : {
             promotionDiscountMinor,
-            referralDiscountMinor: 0,
+            referralDiscountMinor,
             rewardRedemptionPoints: 0,
             rewardRedemptionMinor: 0,
             pendingBaseEarnPoints: 0,
@@ -538,18 +550,33 @@ export function createCheckoutService(dependencies: Readonly<{
       reservedAt: Date;
     }>) => Promise<RewardsCheckoutReservationResult>;
   }>;
+  referralService?: Readonly<{
+    quoteCustomerReferral: (input: Readonly<{
+      buyerUserId: string;
+      attributionCookie: string;
+      merchandiseSubtotalMinor: number;
+      currency: "USD";
+      now: Date;
+    }>) => Promise<ReferralCheckoutQuote>;
+  }>;
 }>) {
   return Object.freeze({
     async quote(input: Readonly<{
       buyerUserId: string;
       idempotencyKey: string;
       paymentProviderAvailable: boolean;
+      attributionCookie?: string | null;
       request: unknown;
     }>): Promise<CheckoutQuoteResult> {
       if (
         !isCanonicalUuid(input.buyerUserId) ||
         !isCanonicalUuid(input.idempotencyKey) ||
         typeof input.paymentProviderAvailable !== "boolean"
+        || (input.attributionCookie !== undefined &&
+          input.attributionCookie !== null &&
+          (typeof input.attributionCookie !== "string" ||
+            input.attributionCookie.length === 0 ||
+            input.attributionCookie.length > 2_048))
       ) {
         return { status: "invalid_request", reason: "checkout_input_invalid" };
       }
@@ -733,8 +760,11 @@ export function createCheckoutService(dependencies: Readonly<{
               taxQuote: null,
               totals: null,
               promotionDiscountMinor: 0,
+              referralDiscountMinor: 0,
+              selectedAcquisitionSource: "promotion",
               promotionAllocations: Object.freeze([]),
               rewardsQuote: null,
+              referralQuote: null,
               browserQuote: emptyQuote,
             });
           return resultWithOpaquePlan(
@@ -769,14 +799,71 @@ export function createCheckoutService(dependencies: Readonly<{
           (candidate) => candidate.productId === item.productId,
         )!.quantity,
       }));
+      const merchandiseSubtotalMinor = priceLines.reduce(
+        (sum, line) => sum + line.unitAmountMinor * line.quantity,
+        0,
+      );
+      const referralResult =
+        typeof input.attributionCookie === "string" &&
+        dependencies.referralService !== undefined
+          ? await dependencies.referralService.quoteCustomerReferral({
+              buyerUserId: input.buyerUserId,
+              attributionCookie: input.attributionCookie,
+              merchandiseSubtotalMinor,
+              currency: "USD",
+              now: authoritativeAt,
+            })
+          : null;
+      const referralQuote =
+        referralResult?.status === "eligible" ? referralResult : null;
+      const acquisition = selectBestAcquisitionDiscount({
+        candidates: [
+          {
+            source: "promotion",
+            discountMinor: promotionResult.value.discountMinor,
+          },
+          ...(referralQuote === null
+            ? []
+            : [{
+                source: "referral" as const,
+                discountMinor: referralQuote.referralDiscountMinor,
+              }]),
+        ],
+      });
+      if (!acquisition.ok) return { status: "internal_conflict" };
+      const promotionDiscountMinor =
+        acquisition.value.source === "promotion"
+          ? acquisition.value.discountMinor
+          : 0;
+      const referralDiscountMinor =
+        acquisition.value.source === "referral"
+          ? acquisition.value.discountMinor
+          : 0;
+      const acquisitionAllocationByProduct = new Map<string, number>();
+      if (acquisition.value.source === "promotion") {
+        for (const allocation of promotionResult.value.allocations) {
+          acquisitionAllocationByProduct.set(
+            allocation.productId,
+            allocation.discountMinor,
+          );
+        }
+      } else {
+        let remaining = referralDiscountMinor;
+        for (const line of priceLines.toSorted((left, right) =>
+          left.productId.localeCompare(right.productId))) {
+          const gross = line.unitAmountMinor * line.quantity;
+          const allocated = Math.min(remaining, gross);
+          acquisitionAllocationByProduct.set(line.productId, allocated);
+          remaining -= allocated;
+        }
+        if (remaining !== 0) return { status: "internal_conflict" };
+      }
       const postPromotionLines = priceLines.map((line) => ({
         productId: line.productId,
         quantity: line.quantity,
         netAmountMinor:
           line.unitAmountMinor * line.quantity -
-          (promotionResult.value.allocations.find(
-            (allocation) => allocation.productId === line.productId,
-          )?.discountMinor ?? 0),
+          (acquisitionAllocationByProduct.get(line.productId) ?? 0),
       }));
       const postPromotionMerchandiseMinor = postPromotionLines.reduce(
         (sum, line) => sum + line.netAmountMinor,
@@ -900,13 +987,13 @@ export function createCheckoutService(dependencies: Readonly<{
           discount: {
             authority: "server_calculated_discount",
             amountMinor:
-              promotionResult.value.discountMinor + rewardRedemptionMinor,
+              promotionDiscountMinor + referralDiscountMinor + rewardRedemptionMinor,
             currency: "USD",
-            allocations: promotionResult.value.allocations.map((allocation) => ({
-              productId: allocation.productId,
+            allocations: priceLines.map((line) => ({
+              productId: line.productId,
               discountMinor:
-                allocation.discountMinor +
-                (rewardAllocationByProduct.get(allocation.productId) ?? 0),
+                (acquisitionAllocationByProduct.get(line.productId) ?? 0) +
+                (rewardAllocationByProduct.get(line.productId) ?? 0),
             })),
           },
           shipping: {
@@ -932,7 +1019,8 @@ export function createCheckoutService(dependencies: Readonly<{
         decision,
         facts,
         totalsResult.value,
-        promotionResult.value.discountMinor,
+        promotionDiscountMinor,
+        referralDiscountMinor,
         rewardsQuote,
       );
       const plan = makePlan({
@@ -950,9 +1038,15 @@ export function createCheckoutService(dependencies: Readonly<{
         shippingQuote,
         taxQuote,
         totals: totalsResult.value,
-        promotionDiscountMinor: promotionResult.value.discountMinor,
-        promotionAllocations: promotionResult.value.allocations,
+        promotionDiscountMinor,
+        referralDiscountMinor,
+        selectedAcquisitionSource: acquisition.value.source,
+        promotionAllocations:
+          acquisition.value.source === "promotion"
+            ? promotionResult.value.allocations
+            : Object.freeze([]),
         rewardsQuote,
+        referralQuote,
         browserQuote: quote,
       });
       return resultWithOpaquePlan({ status: "quoted" as const, quote }, plan);

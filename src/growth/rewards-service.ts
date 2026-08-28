@@ -585,6 +585,141 @@ async function reconcileVerifiedPaymentInTransaction(
   return Object.freeze({ status: applied ? "applied" : "idempotent" });
 }
 
+async function reconcileReferralPaymentInTransaction(
+  client: RewardsSqlClient,
+  input: Readonly<{
+    paymentEventId: string;
+    orderId: string;
+    occurredAt: Date;
+  }>,
+  keyedUuid: KeyedUuidGenerator,
+): Promise<RewardsLifecycleResult> {
+  const conversion = await client.query<{
+    id: string;
+    idempotencyKey: string;
+    referrerUserId: string;
+    rewardPoints: number | string;
+  }>(
+    `SELECT rc.id::text AS id, rc.idempotency_key AS "idempotencyKey",
+            ra.referrer_user_id::text AS "referrerUserId",
+            rc.referrer_reward_points AS "rewardPoints"
+     FROM referral_conversions rc
+     JOIN referral_attributions ra ON ra.id = rc.referral_attribution_id
+     JOIN order_growth_attributions oga
+       ON oga.order_id = rc.first_order_id
+      AND oga.program = 'customer_referral'
+      AND oga.referral_attribution_id = rc.referral_attribution_id
+      AND oga.referral_policy_id = rc.referral_policy_id
+      AND oga.referral_policy_version = rc.referral_policy_version
+     WHERE rc.first_order_id = $1::uuid
+     FOR UPDATE OF rc, ra, oga`,
+    [input.orderId],
+  );
+  if (conversion.rows.length === 0) {
+    return Object.freeze({ status: "idempotent" });
+  }
+  if (conversion.rows.length !== 1) {
+    throw new Error("Referral payment conversion is incoherent");
+  }
+  const row = conversion.rows[0]!;
+  const points = safeInteger(row.rewardPoints);
+  let applied = false;
+  if (points > 0) {
+    const ledger = await repositoryInCurrentTransaction(client).appendRewardLedger({
+      entryId: keyedUuid(`reward-ledger:referral-earned-pending:${row.id}`),
+      rewardAccountId: keyedUuid(`reward-account:${row.referrerUserId}`),
+      buyerUserId: row.referrerUserId,
+      kind: "referral_earned_pending",
+      sourceType: "referral_conversion",
+      sourceId: row.id,
+      idempotencyKey: `reward-referral-earned-pending:${row.id}`,
+      pendingPointsDelta: points,
+      availablePointsDelta: 0,
+      occurredAt: input.occurredAt,
+    });
+    applied = ledger.status === "applied";
+  }
+  const qualified = await repositoryInCurrentTransaction(client)
+    .qualifyReferralConversion({
+      conversionId: row.id,
+      idempotencyKey: row.idempotencyKey,
+      qualifiedAt: input.occurredAt,
+    });
+  applied ||= qualified.status === "applied";
+  return Object.freeze({ status: applied ? "applied" : "idempotent" });
+}
+
+async function reconcileReferralDeliveryInTransaction(
+  client: RewardsSqlClient,
+  input: Readonly<{ orderId: string; deliveredAt: Date }>,
+  keyedUuid: KeyedUuidGenerator,
+): Promise<RewardsLifecycleResult> {
+  const pending = await client.query<{
+    conversionId: string;
+    rewardAccountId: string;
+    referrerUserId: string;
+    earnedPoints: number | string;
+  }>(
+    `SELECT rc.id::text AS "conversionId",
+            le.reward_account_id::text AS "rewardAccountId",
+            le.buyer_user_id::text AS "referrerUserId",
+            le.pending_points_delta AS "earnedPoints"
+     FROM referral_conversions rc
+     JOIN reward_ledger_entries le
+       ON le.source_id = rc.id::text
+      AND le.source_type = 'referral_conversion'
+      AND le.kind = 'referral_earned_pending'
+     WHERE rc.first_order_id = $1::uuid AND rc.status = 'qualified'
+     FOR UPDATE OF rc, le`,
+    [input.orderId],
+  );
+  if (pending.rows.length === 0) return Object.freeze({ status: "idempotent" });
+  if (pending.rows.length !== 1) {
+    throw new Error("Referral pending reward is incoherent");
+  }
+  const row = pending.rows[0]!;
+  const reversed = await client.query<{ points: number | string }>(
+    `SELECT COALESCE(-sum(pending_points_delta), 0) AS points
+     FROM reward_ledger_entries
+     WHERE reward_account_id = $1::uuid
+       AND source_type = 'referral_payment_event'
+       AND kind IN ('refund_reversal', 'chargeback_reversal')
+       AND source_id IN (
+         SELECT id::text FROM payment_events WHERE order_id = $2::uuid
+       )`,
+    [row.rewardAccountId, input.orderId],
+  );
+  const remaining = safeInteger(row.earnedPoints) -
+    safeInteger(reversed.rows[0]?.points ?? 0);
+  if (remaining < 0) throw new Error("Referral reversal exceeds pending reward");
+  if (remaining === 0) return Object.freeze({ status: "idempotent" });
+  const ledger = await repositoryInCurrentTransaction(client).appendRewardLedger({
+    entryId: keyedUuid(`reward-ledger:referral-earned-available:${row.conversionId}`),
+    rewardAccountId: row.rewardAccountId,
+    buyerUserId: row.referrerUserId,
+    kind: "referral_earned_available",
+    sourceType: "referral_conversion",
+    sourceId: row.conversionId,
+    idempotencyKey: `reward-referral-earned-available:${row.conversionId}`,
+    pendingPointsDelta: -remaining,
+    availablePointsDelta: remaining,
+    occurredAt: input.deliveredAt,
+  });
+  return Object.freeze({
+    status: ledger.status === "applied" ? "applied" : "idempotent",
+  });
+}
+
+function combineLifecycleResults(
+  ...results: readonly RewardsLifecycleResult[]
+): RewardsLifecycleResult {
+  return Object.freeze({
+    status: results.some((result) => result.status === "applied")
+      ? "applied"
+      : "idempotent",
+  });
+}
+
 async function reconcileEarnReversalInTransaction(
   client: RewardsSqlClient,
   input: Readonly<{
@@ -682,6 +817,131 @@ async function reconcileEarnReversalInTransaction(
   return Object.freeze({ status: ledger.status === "applied" ? "applied" : "idempotent" });
 }
 
+async function reconcileReferralReversalInTransaction(
+  client: RewardsSqlClient,
+  input: Readonly<{
+    paymentEventId: string;
+    orderId: string;
+    eventType: "refund_verified" | "dispute_recorded";
+    occurredAt: Date;
+  }>,
+  keyedUuid: KeyedUuidGenerator,
+): Promise<RewardsLifecycleResult> {
+  const conversion = await client.query<{
+    id: string;
+    idempotencyKey: string;
+    referrerUserId: string;
+    rewardAccountId: string;
+    rewardPoints: number | string;
+    status: "qualified" | "reversed";
+  }>(
+    `SELECT rc.id::text AS id, rc.idempotency_key AS "idempotencyKey",
+            ra.referrer_user_id::text AS "referrerUserId",
+            acc.id::text AS "rewardAccountId",
+            rc.referrer_reward_points AS "rewardPoints", rc.status
+     FROM referral_conversions rc
+     JOIN referral_attributions ra ON ra.id = rc.referral_attribution_id
+     JOIN reward_accounts acc ON acc.buyer_user_id = ra.referrer_user_id
+     WHERE rc.first_order_id = $1::uuid AND rc.status IN ('qualified', 'reversed')
+     FOR UPDATE OF rc, ra, acc`,
+    [input.orderId],
+  );
+  if (conversion.rows.length === 0) return Object.freeze({ status: "idempotent" });
+  if (conversion.rows.length !== 1) {
+    throw new Error("Referral reversal conversion is incoherent");
+  }
+  const row = conversion.rows[0]!;
+  const rewardPoints = safeInteger(row.rewardPoints);
+  if (rewardPoints === 0) {
+    return Object.freeze({ status: "idempotent" });
+  }
+  const merchandise = await client.query<{ amountMinor: number | string }>(
+    `SELECT COALESCE(sum(total_minor), 0) AS "amountMinor"
+     FROM order_items WHERE order_id = $1::uuid`,
+    [input.orderId],
+  );
+  const eligibleMinor = safeInteger(merchandise.rows[0]?.amountMinor ?? 0);
+  if (eligibleMinor <= 0) return Object.freeze({ status: "idempotent" });
+  const financial = await client.query<{
+    refundedMinor: number | string;
+    disputedMinor: number | string;
+  }>(
+    `SELECT
+       COALESCE(sum(amount_minor) FILTER (WHERE event_type = 'refund_verified'), 0)
+         AS "refundedMinor",
+       COALESCE(max(amount_minor) FILTER (WHERE event_type = 'dispute_recorded'), 0)
+         AS "disputedMinor"
+     FROM payment_events WHERE order_id = $1::uuid`,
+    [input.orderId],
+  );
+  const cumulativeLoss = Math.min(
+    eligibleMinor,
+    Math.max(
+      safeInteger(financial.rows[0]?.refundedMinor ?? 0),
+      safeInteger(financial.rows[0]?.disputedMinor ?? 0),
+    ),
+  );
+  const target = Math.floor((rewardPoints * cumulativeLoss) / eligibleMinor);
+  const prior = await client.query<{ points: number | string }>(
+    `SELECT COALESCE(-sum(pending_points_delta + available_points_delta), 0)
+              AS points
+     FROM reward_ledger_entries
+     WHERE reward_account_id = $1::uuid
+       AND source_type = 'referral_payment_event'
+       AND kind IN ('refund_reversal', 'chargeback_reversal')
+       AND source_id IN (
+         SELECT id::text FROM payment_events WHERE order_id = $2::uuid
+       )`,
+    [row.rewardAccountId, input.orderId],
+  );
+  const reversedPoints = safeInteger(prior.rows[0]?.points ?? 0);
+  if (row.status === "reversed") {
+    if (target !== rewardPoints || reversedPoints !== rewardPoints) {
+      throw new Error("Reversed referral conversion is incoherent");
+    }
+    return Object.freeze({ status: "idempotent" });
+  }
+  const incremental = target - reversedPoints;
+  let applied = false;
+  if (incremental > 0) {
+    const delivered = await client.query<{ exists: boolean }>(
+      `SELECT EXISTS(
+         SELECT 1 FROM reward_ledger_entries
+         WHERE kind = 'referral_earned_available'
+           AND source_type = 'referral_conversion' AND source_id = $1
+       ) AS exists`,
+      [row.id],
+    );
+    const isDelivered = delivered.rows[0]?.exists === true;
+    const kind = input.eventType === "refund_verified"
+      ? "refund_reversal" as const
+      : "chargeback_reversal" as const;
+    const ledger = await repositoryInCurrentTransaction(client).appendRewardLedger({
+      entryId: keyedUuid(`reward-ledger:referral-${kind}:${input.paymentEventId}`),
+      rewardAccountId: row.rewardAccountId,
+      buyerUserId: row.referrerUserId,
+      kind,
+      sourceType: "referral_payment_event",
+      sourceId: input.paymentEventId,
+      idempotencyKey: `reward-referral-${kind}:${input.paymentEventId}`,
+      pendingPointsDelta: isDelivered ? 0 : -incremental,
+      availablePointsDelta: isDelivered ? -incremental : 0,
+      occurredAt: input.occurredAt,
+    });
+    applied = ledger.status === "applied";
+  }
+  if (target === rewardPoints) {
+    const reversed = await repositoryInCurrentTransaction(client)
+      .reverseReferralConversion({
+        conversionId: row.id,
+        idempotencyKey: row.idempotencyKey,
+        reversedAt: input.occurredAt,
+      });
+    applied ||= reversed.status === "applied";
+  }
+  return Object.freeze({ status: applied ? "applied" : "idempotent" });
+}
+
 async function reconcileFailedPaymentInTransaction(
   client: RewardsSqlClient,
   input: Readonly<{ orderId: string; occurredAt: Date }>,
@@ -749,12 +1009,18 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
         const payment = payments.rows[0]!;
         const occurredAt = new Date(payment.occurredAt);
         if (payment.eventType === "payment_verified") {
-          return reconcileVerifiedPaymentInTransaction(client, {
+          const base = await reconcileVerifiedPaymentInTransaction(client, {
             paymentEventId: payment.id,
             orderId: payment.orderId,
             occurredAt,
             now: input.now,
           }, dependencies.keyedUuid);
+          const referral = await reconcileReferralPaymentInTransaction(client, {
+            paymentEventId: payment.id,
+            orderId: payment.orderId,
+            occurredAt,
+          }, dependencies.keyedUuid);
+          return combineLifecycleResults(base, referral);
         }
         if (payment.eventType === "payment_failed") {
           return reconcileFailedPaymentInTransaction(client, {
@@ -766,12 +1032,19 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
           payment.eventType === "refund_verified" ||
           payment.eventType === "dispute_recorded"
         ) {
-          return reconcileEarnReversalInTransaction(client, {
+          const base = await reconcileEarnReversalInTransaction(client, {
             paymentEventId: payment.id,
             orderId: payment.orderId,
             eventType: payment.eventType,
             occurredAt,
           }, dependencies.keyedUuid);
+          const referral = await reconcileReferralReversalInTransaction(client, {
+            paymentEventId: payment.id,
+            orderId: payment.orderId,
+            eventType: payment.eventType,
+            occurredAt,
+          }, dependencies.keyedUuid);
+          return combineLifecycleResults(base, referral);
         }
         return Object.freeze({ status: "idempotent" });
       }, { isolationLevel: "serializable" });
@@ -788,6 +1061,11 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
           [input.orderId],
         );
         if (shipment.rows.length !== 1) throw new Error("Reward delivery is not verified");
+        const deliveredAt = new Date(shipment.rows[0]!.deliveredAt);
+        const referral = await reconcileReferralDeliveryInTransaction(client, {
+          orderId: input.orderId,
+          deliveredAt,
+        }, dependencies.keyedUuid);
         const pending = await client.query<{
           rewardAccountId: string;
           buyerUserId: string;
@@ -804,7 +1082,7 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
              ) FOR UPDATE`,
           [input.orderId],
         );
-        if (pending.rows.length === 0) return Object.freeze({ status: "idempotent" });
+        if (pending.rows.length === 0) return referral;
         if (pending.rows.length !== 1) throw new Error("Reward pending earn is incoherent");
         const earnedPoints = safeInteger(pending.rows[0]!.earnedPoints);
         const reversed = await client.query<{ reversedPoints: number | string }>(
@@ -820,7 +1098,7 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
         const remainingPoints =
           earnedPoints - safeInteger(reversed.rows[0]?.reversedPoints ?? 0);
         if (remainingPoints < 0) throw new Error("Reward reversal exceeds pending earn");
-        if (remainingPoints === 0) return Object.freeze({ status: "idempotent" });
+        if (remainingPoints === 0) return referral;
         const ledger = await repositoryInCurrentTransaction(client).appendRewardLedger({
           entryId: dependencies.keyedUuid(`reward-ledger:order-earned-available:${input.orderId}`),
           rewardAccountId: pending.rows[0]!.rewardAccountId,
@@ -831,9 +1109,11 @@ export function createPostgresRewardsLifecycleService(dependencies: Readonly<{
           idempotencyKey: `reward-order-earned-available:${input.orderId}`,
           pendingPointsDelta: -remainingPoints,
           availablePointsDelta: remainingPoints,
-          occurredAt: new Date(shipment.rows[0]!.deliveredAt),
+          occurredAt: deliveredAt,
         });
-        return Object.freeze({ status: ledger.status === "applied" ? "applied" : "idempotent" });
+        return combineLifecycleResults(referral, Object.freeze({
+          status: ledger.status === "applied" ? "applied" : "idempotent",
+        }));
       }, { isolationLevel: "serializable" });
     },
   });

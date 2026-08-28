@@ -7,6 +7,10 @@ import { createCheckoutService } from "@/commerce/checkout-service";
 import { createPostgresCheckoutRepository } from "@/db/repositories/checkout-repository";
 import type { GrowthSqlClient } from "@/db/repositories/growth-repository";
 import {
+  createPostgresReferralCandidateLookup,
+  createReferralCheckoutService,
+} from "@/growth/referral-service";
+import {
   createPostgresRewardsCheckoutAtomicPort,
   createPostgresRewardsLifecycleService,
   createRewardsService,
@@ -29,6 +33,9 @@ const ids = {
   rewardAccount: "92000000-0000-4000-8000-000000000012",
   keyA: "92000000-0000-4000-8000-000000000013",
   keyB: "92000000-0000-4000-8000-000000000014",
+  referrer: "92000000-0000-4000-8000-000000000015",
+  referralPolicy: "92000000-0000-4000-8000-000000000016",
+  referralCode: "92000000-0000-4000-8000-000000000017",
 } as const;
 
 const now = new Date("2026-08-28T12:00:00.000Z");
@@ -64,15 +71,20 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     client = await createMigratedPglite();
     await client.query(
       `INSERT INTO users (id, clerk_id, email_verified_at)
-       VALUES ($1::uuid, 'clerk-task4-buyer', '2026-08-01T00:00:00.000Z')`,
-      [ids.buyer],
+       VALUES
+         ($1::uuid, 'clerk-task4-buyer', '2026-08-01T00:00:00.000Z'),
+         ($2::uuid, 'clerk-task5b-referrer', '2026-08-01T00:00:00.000Z')`,
+      [ids.buyer, ids.referrer],
     );
     await client.query(
       `INSERT INTO buyer_profiles
          (user_id, status, age_confirmed_at, research_purpose, updated_at)
-       VALUES ($1::uuid, 'active', '2026-08-01T00:00:00.000Z',
-               'analytical', '2026-08-27T00:00:00.000Z')`,
-      [ids.buyer],
+       VALUES
+         ($1::uuid, 'active', '2026-08-01T00:00:00.000Z',
+          'analytical', '2026-08-27T00:00:00.000Z'),
+         ($2::uuid, 'active', '2026-08-01T00:00:00.000Z',
+          'analytical', '2026-08-27T00:00:00.000Z')`,
+      [ids.buyer, ids.referrer],
     );
     await client.query(
       `INSERT INTO attestation_versions
@@ -138,6 +150,21 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       [ids.terms, termsHash, termsText],
     );
     await client.query(
+      `INSERT INTO referral_policies
+         (id, version, status, attribution_days, referred_discount_basis_points,
+          referred_discount_cap_minor, referrer_points_per_dollar,
+          referrer_reward_cap_points, effective_at)
+       VALUES ($1::uuid, 1, 'active', 30, 1000, 2500, 5, 2500,
+               '2026-08-01T00:00:00.000Z')`,
+      [ids.referralPolicy],
+    );
+    await client.query(
+      `INSERT INTO referral_codes (id, owner_user_id, code, status, created_at)
+       VALUES ($1::uuid, $2::uuid, 'ref_5BGrowthCommerce', 'active',
+               '2026-08-20T00:00:00.000Z')`,
+      [ids.referralCode, ids.referrer],
+    );
+    await client.query(
       `INSERT INTO growth_terms_acceptances
          (id, user_id, program, terms_version_id, content_hash, accepted_at)
        VALUES ($1::uuid, $2::uuid, 'customer_rewards_referrals', $3::uuid,
@@ -180,9 +207,26 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       retrySleep: async () => undefined,
     });
     const rewardsService = createRewardsService({ atomicPort });
+    const referralService = createReferralCheckoutService({
+      verifyCookie(value) {
+        return value === "signed-task5b-cookie"
+          ? Object.freeze({
+              schemaVersion: 1 as const,
+              program: "customer_referral" as const,
+              code: "ref_5BGrowthCommerce",
+              issuedAt: "2026-08-20T12:00:00.000Z",
+              expiresAt: "2026-09-19T12:00:00.000Z",
+            })
+          : null;
+      },
+      loadCandidate: createPostgresReferralCandidateLookup({
+        client: { query: (sql, params = []) => client.query(sql, [...params]) },
+      }),
+    });
     const service = createCheckoutService({
       repository,
       rewardsService,
+      referralService,
       shippingQuotePort: {
         quoteShipping: async (input) => ({
           status: "ready",
@@ -215,11 +259,12 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     return { service, repository };
   }
 
-  async function quote(key: string) {
+  async function quote(key: string, attributionCookie?: string) {
     const value = await setup().service.quote({
       buyerUserId: ids.buyer,
       idempotencyKey: key,
       paymentProviderAvailable: true,
+      ...(attributionCookie === undefined ? {} : { attributionCookie }),
       request,
     });
     expect(value.status).toBe("quoted");
@@ -349,6 +394,296 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       reservations: 1,
       ledgerEntries: 1,
       redemptionState: "reserved",
+    });
+  });
+
+  it("binds one server-verified referral to the first prepared order and snapshots only the winning acquisition discount", async () => {
+    const { service } = setup();
+    const quoted = await quote(ids.keyA, "signed-task5b-cookie");
+    expect(quoted.quote).toMatchObject({
+      promotionDiscountMinor: 0,
+      referralDiscountMinor: 1_000,
+      rewardRedemptionMinor: 750,
+      discountMinor: 1_750,
+    });
+
+    const prepared = await service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    );
+    expect(prepared).toMatchObject({ status: "prepared" });
+    if (prepared.status !== "prepared") throw new Error("expected prepared referral order");
+    await expect(service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    )).resolves.toMatchObject({ status: "loaded" });
+
+    const growth = await client.query<{
+      attributions: number;
+      orderAttributions: number;
+      conversions: number;
+      policyId: string;
+      policyVersion: number;
+      referredDiscountMinor: number;
+      referrerRewardPoints: number;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM referral_attributions) AS attributions,
+         (SELECT count(*)::int FROM order_growth_attributions) AS "orderAttributions",
+         (SELECT count(*)::int FROM referral_conversions) AS conversions,
+         rc.referral_policy_id::text AS "policyId",
+         rc.referral_policy_version AS "policyVersion",
+         rc.referred_discount_minor AS "referredDiscountMinor",
+         rc.referrer_reward_points AS "referrerRewardPoints"
+       FROM referral_conversions rc`,
+    );
+    expect(growth.rows[0]).toEqual({
+      attributions: 1,
+      orderAttributions: 1,
+      conversions: 1,
+      policyId: ids.referralPolicy,
+      policyVersion: 1,
+      referredDiscountMinor: 1_000,
+      referrerRewardPoints: 412,
+    });
+
+    await seedProcessedPayment(prepared.orderId, "evt_task5b_referral_payment");
+    const lifecycle = lifecycleService();
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_referral_payment",
+      now,
+    })).resolves.toEqual({ status: "applied" });
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_referral_payment",
+      now,
+    })).resolves.toEqual({ status: "idempotent" });
+    const referralReward = await client.query<{
+      pending: number;
+      available: number;
+      entries: number;
+      conversionStatus: string;
+    }>(
+      `SELECT pending_points AS pending, available_points AS available,
+              (SELECT count(*)::int FROM reward_ledger_entries
+               WHERE buyer_user_id = $1::uuid
+                 AND kind = 'referral_earned_pending') AS entries,
+              (SELECT status FROM referral_conversions
+               WHERE first_order_id = $2::uuid) AS "conversionStatus"
+       FROM reward_accounts WHERE buyer_user_id = $1::uuid`,
+      [ids.referrer, prepared.orderId],
+    );
+    expect(referralReward.rows[0]).toEqual({
+      pending: 412,
+      available: 0,
+      entries: 1,
+      conversionStatus: "qualified",
+    });
+
+    const payment = await client.query<{ id: string }>(
+      `SELECT id::text AS id FROM payment_events
+       WHERE order_id = $1::uuid AND event_type = 'payment_verified'`,
+      [prepared.orderId],
+    );
+    const releaseId = keyedUuid(`task5b-release:${prepared.orderId}`);
+    await client.query(
+      `INSERT INTO fulfillment_releases
+         (id, order_id, version, idempotency_key, payment_event_id, state,
+          issued_at, expires_at, consumed_at)
+       VALUES ($1::uuid, $2::uuid, 1, $3, $4::uuid, 'consumed',
+               $5::timestamptz, $6::timestamptz, $7::timestamptz)`,
+      [releaseId, prepared.orderId, `task5b-release:${prepared.orderId}`,
+        payment.rows[0]!.id, "2026-08-28T12:01:00.000Z",
+        "2026-08-29T12:01:00.000Z", "2026-08-28T12:02:00.000Z"],
+    );
+    await client.query(
+      `INSERT INTO shipments
+         (id, order_id, fulfillment_release_id, carrier, tracking_reference,
+          state, handed_off_at, delivered_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'SYNTHETIC-5B', $4,
+               'delivered', $5::timestamptz, $6::timestamptz)`,
+      [keyedUuid(`task5b-shipment:${prepared.orderId}`), prepared.orderId,
+        releaseId, `task5b-${prepared.orderId}`, "2026-08-28T12:03:00.000Z",
+        "2026-08-28T12:04:00.000Z"],
+    );
+    await expect(lifecycle.reconcileDeliveredOrder({
+      orderId: prepared.orderId,
+      now: new Date("2026-08-28T12:04:00.000Z"),
+    })).resolves.toEqual({ status: "applied" });
+    await expect(lifecycle.reconcileDeliveredOrder({
+      orderId: prepared.orderId,
+      now: new Date("2026-08-28T12:04:00.000Z"),
+    })).resolves.toEqual({ status: "idempotent" });
+    const deliveredReward = await client.query<{
+      pending: number;
+      available: number;
+      entries: number;
+    }>(
+      `SELECT pending_points AS pending, available_points AS available,
+              (SELECT count(*)::int FROM reward_ledger_entries
+               WHERE buyer_user_id = $1::uuid
+                 AND kind = 'referral_earned_available') AS entries
+       FROM reward_accounts WHERE buyer_user_id = $1::uuid`,
+      [ids.referrer],
+    );
+    expect(deliveredReward.rows[0]).toEqual({
+      pending: 0,
+      available: 412,
+      entries: 1,
+    });
+
+    // Spending after delivery may leave the referrer unable to cover a later
+    // authoritative reversal; the approved ledger permits a negative balance.
+    await client.query(
+      `UPDATE reward_accounts SET available_points = 100
+       WHERE buyer_user_id = $1::uuid`,
+      [ids.referrer],
+    );
+    const insertFinancialEvent = async (
+      providerEventId: string,
+      eventType: "refund_verified" | "dispute_recorded",
+      amountMinor: number,
+      occurredAt = now,
+    ) => {
+      const providerDatabaseId = keyedUuid(`provider:${providerEventId}`);
+      await client.query(
+        `INSERT INTO provider_events
+           (id, provider, provider_event_id, payload_hash, status, attempt_count,
+            processed_at, event_type, schema_version, normalized_payload,
+            provider_created_at, livemode)
+         VALUES ($1::uuid, 'stripe', $2, $3, 'processed', 1,
+                 $4::timestamptz, $5, 1, '{}'::jsonb,
+                 $4::timestamptz, false)`,
+        [providerDatabaseId, providerEventId, "a".repeat(64),
+          occurredAt.toISOString(), eventType],
+      );
+      await client.query(
+        `INSERT INTO payment_events
+           (id, provider_event_id, order_id, event_type, provider_payment_id,
+            idempotency_key, amount_minor, currency, occurred_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::payment_event_type,
+                 $5, $6, $7, 'USD', $8::timestamptz)`,
+        [keyedUuid(`payment:${providerEventId}`), providerDatabaseId,
+          prepared.orderId, eventType, `${eventType}_${providerEventId}`,
+          `stripe:${eventType}:${providerEventId}`, amountMinor,
+          occurredAt.toISOString()],
+      );
+    };
+    await insertFinancialEvent("evt_task5b_refund", "refund_verified", 4_125);
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_refund",
+      now,
+    })).resolves.toEqual({ status: "applied" });
+    await insertFinancialEvent("evt_task5b_chargeback", "dispute_recorded", 8_250);
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_chargeback",
+      now,
+    })).resolves.toEqual({ status: "applied" });
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_chargeback",
+      now,
+    })).resolves.toEqual({ status: "idempotent" });
+    await insertFinancialEvent(
+      "evt_task5b_post_full_refund",
+      "refund_verified",
+      100,
+      new Date("2026-08-28T12:00:01.000Z"),
+    );
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_post_full_refund",
+      now,
+    })).resolves.toEqual({ status: "idempotent" });
+    const reversedReward = await client.query<{
+      available: number;
+      reversals: number;
+      reversedPoints: number;
+      conversionStatus: string;
+    }>(
+      `SELECT available_points AS available,
+              (SELECT count(*)::int FROM reward_ledger_entries
+               WHERE buyer_user_id = $1::uuid
+                 AND source_type = 'referral_payment_event'
+                 AND kind IN ('refund_reversal', 'chargeback_reversal')) AS reversals,
+              (SELECT -sum(available_points_delta)::int FROM reward_ledger_entries
+               WHERE buyer_user_id = $1::uuid
+                 AND source_type = 'referral_payment_event') AS "reversedPoints",
+              (SELECT status FROM referral_conversions
+               WHERE first_order_id = $2::uuid) AS "conversionStatus"
+       FROM reward_accounts WHERE buyer_user_id = $1::uuid`,
+      [ids.referrer, prepared.orderId],
+    );
+    expect(reversedReward.rows[0]).toEqual({
+      available: -312,
+      reversals: 2,
+      reversedPoints: 412,
+      conversionStatus: "reversed",
+    });
+  });
+
+  it.each([
+    ["revoked code", async () => client.query(
+      `UPDATE referral_codes SET status = 'revoked', revoked_at = $2::timestamptz
+       WHERE id = $1::uuid`,
+      [ids.referralCode, now.toISOString()],
+    )],
+    ["overlapping current policy", async () => {
+      await client.query(`DROP INDEX referral_policies_current_active_unique`);
+      await client.query(
+        `INSERT INTO referral_policies
+           (id, version, status, attribution_days, referred_discount_basis_points,
+            referred_discount_cap_minor, referrer_points_per_dollar,
+            referrer_reward_cap_points, effective_at)
+         VALUES ($1::uuid, 2, 'active', 30, 1000, 2500, 5, 2500,
+                 '2026-08-20T00:00:00.000Z')`,
+        [keyedUuid("task5b-overlapping-referral-policy")],
+      );
+    }],
+  ] as const)("rolls back checkout, rewards, inventory, and growth writes for %s after quote", async (_label, mutate) => {
+    const { service } = setup();
+    const quoted = await quote(ids.keyA, "signed-task5b-cookie");
+    await mutate();
+
+    await expect(service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    )).resolves.toEqual({ status: "facts_changed_retry" });
+
+    const state = await client.query<{
+      orders: number;
+      attempts: number;
+      reservations: number;
+      redemptions: number;
+      attributions: number;
+      conversions: number;
+      availableQuantity: number;
+      availablePoints: number;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM orders) AS orders,
+         (SELECT count(*)::int FROM checkout_attempts) AS attempts,
+         (SELECT count(*)::int FROM inventory_reservations) AS reservations,
+         (SELECT count(*)::int FROM reward_redemptions) AS redemptions,
+         (SELECT count(*)::int FROM referral_attributions) AS attributions,
+         (SELECT count(*)::int FROM referral_conversions) AS conversions,
+         (SELECT available_quantity FROM lots WHERE id = $1::uuid) AS "availableQuantity",
+         (SELECT available_points FROM reward_accounts WHERE buyer_user_id = $2::uuid)
+           AS "availablePoints"`,
+      [ids.lot, ids.buyer],
+    );
+    expect(state.rows[0]).toEqual({
+      orders: 0,
+      attempts: 0,
+      reservations: 0,
+      redemptions: 0,
+      attributions: 0,
+      conversions: 0,
+      availableQuantity: 10,
+      availablePoints: 1_000,
     });
   });
 
