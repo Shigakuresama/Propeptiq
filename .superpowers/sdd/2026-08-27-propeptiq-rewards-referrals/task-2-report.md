@@ -120,3 +120,100 @@ feat(db): add versioned growth ledgers and attribution
 - PGlite proves generated migration application and the tested PostgreSQL schema constraints; it does not prove real PostgreSQL concurrency or deployment state.
 - The binding persistence lifecycle uses `superseded`; Task 1's pure-domain terminal name is `retired`. Task 3 must make that mapping explicit when loading policies rather than treating the two labels as interchangeable.
 - Reward ledger rows are modeled and consumed as append-only history. Task 3 must expose insert-only repository operations and transactional balance projection updates; no repository behavior is part of Task 2.
+
+## Fix round 1 — growth history integrity
+
+### Outcome
+
+Resolved the validated Task 2 review defects without changing committed migration history. Exact selected-program settlement is now enforced in both directions: a referral conversion can exist only for a matching `customer_referral` order-growth row, and an affiliate commission can exist only for a matching `affiliate` row. The order, buyer, selected attribution, policy id, and policy version must all match. A settled order-growth row cannot then be changed or deleted so that those facts detach.
+
+Affiliate payout consumption now uses a composite FK over payout id, affiliate profile, affiliate policy id, and affiliate policy version. Referral conversions persist their exact referral policy id/version and bind those facts to the selected attribution. Reward ledger entries reject every UPDATE and DELETE. All three policy tables and `growth_terms_versions` reject deletion and immutable fact changes while preserving the forward lifecycle transitions required by Task 8.
+
+No production policy or terms row was seeded or activated. The `retired` domain to `superseded` persistence mapper remains explicitly deferred to Task 3; no cast was added.
+
+### Fix-round RED evidence
+
+Focused command before schema or migration changes:
+
+```text
+npm run test:integration -- tests/integration/growth-schema.test.ts
+```
+
+Exit 1: 1 test file failed; 6 tests failed and 6 passed. The six failures each showed a forbidden mutation resolving successfully:
+
+- immutable policy/terms facts could be updated;
+- a reward ledger entry could be updated;
+- a commission under affiliate policy A could consume a payout under affiliate policy B for the same profile;
+- an order selecting customer referral could receive an affiliate commission;
+- an order selecting affiliate could receive a referral conversion;
+- settlement rows could use attribution/policy facts different from the selected order-growth facts.
+
+### Fix-round GREEN evidence
+
+Final focused command:
+
+```text
+npm run test:integration -- --run tests/integration/growth-schema.test.ts
+```
+
+Exit 0: 1 test file passed and 12 of 12 tests passed. The focused suite now covers both cross-program directions; attribution, policy, and buyer mismatch; payout-policy mismatch; reward ledger UPDATE and DELETE; immutable policy/terms UPDATE and DELETE; permitted forward policy/terms lifecycle changes; forbidden lifecycle reversal/retiming; and prevention of deleting an order-growth row after settlement.
+
+Full unit suite:
+
+```text
+npm test
+```
+
+Exit 0: 71 test files passed and 786 of 786 tests passed.
+
+### Generated follow-up migrations
+
+- `src/db/migrations/0006_growth_settlement_targets.sql`
+  - Adds exact referral policy facts to referral conversions and their exact attribution FK.
+  - Adds the payout/profile/policy/version composite unique target.
+  - SQL SHA-256: `2291C10E9924754F21AA7E98A1A2440E7BB540DECD0E0B564E2B80389A67AD1E`.
+- `src/db/migrations/0007_affiliate_payout_policy_fk.sql`
+  - Replaces the payout/profile FK with the exact payout/profile/policy/version FK.
+  - SQL SHA-256: `18853558D8E0963473EA0288F14B251A4818D89F6F6D3F65811E0292EC3864B7`.
+- `src/db/migrations/0008_growth_history_integrity.sql`
+  - Generated with `drizzle-kit generate --custom`, then populated with the sanctioned PostgreSQL trigger/function SQL for exact selected-program settlement, reverse settlement integrity, append-only reward ledger history, and immutable versioned policy/terms facts.
+  - SQL SHA-256: `2DDDE0877DEA40DAB134982EB44AEE7F06540D4BA09AFADEB1B96F028AF1A300`.
+
+Generated snapshot SHA-256 values:
+
+- `0006_snapshot.json`: `24B91DB65EDA658760814C577C7E571BDBBF5743399254B1904776F391B39169`.
+- `0007_snapshot.json`: `F570732679EF731A5AD2774763DB1AA5513292A86BE43BFE5A2D3C4C74081A5E`.
+- `0008_snapshot.json`: `847D67DD3FD7CC5B23449647B31E6156B192916B7A1B309E4B8655D3531D17C1`.
+- Final generated journal: `AA0CDC71CEA07481C3D09BDF694D1892B4CD5EAB3E8EBC36477A557782A7C5A9`.
+
+The journal contains the expected generated appends for indices 6, 7, and 8. No generated snapshot was hand-edited.
+
+### Immutable history comparison
+
+All 13 artifacts that predated fix round 1 remain byte-identical to the captured baseline:
+
+- SQL `0000` through committed `0005`: 6 of 6 SHA-256 hashes match.
+- Numbered snapshots `0000` through committed `0005`: 6 of 6 SHA-256 hashes match.
+- `src/db/migrations/README.md`: 1 of 1 SHA-256 hash matches.
+
+In particular, committed `0005_pink_fat_cobra.sql` remains `949654DEB62464B1AD6BDB8A559517CF4E63122A270E475190D8FA549D2A6050`, and `0005_snapshot.json` remains `D5E144CB8E024C9FF0E91800DB1D541F4C4D2959225EDD99ADCF9162E8E2C0BF`.
+
+### Fix-round validation
+
+- `npm run db:generate` — exit 0 with exact no-change evidence: `No schema changes, nothing to migrate 😴`.
+- `npm run db:check` — exit 0; `Everything's fine 🐶🔥`.
+- `npm run typecheck` — exit 0.
+- `git diff --check` — exit 0; only the repository's working-copy line-ending warnings were emitted.
+- Focused PGlite integration — exit 0; 12 of 12 tests passed.
+- Full unit suite — exit 0; 786 of 786 tests passed.
+
+### Fix-round implementation commit
+
+```text
+9c550163cf6c2e00fdff4b5b6028751824e10dc2
+fix(db): enforce growth history integrity
+```
+
+### Remaining boundary
+
+PGlite proves migration application and the tested PostgreSQL constraints/triggers. This round did not use an external PostgreSQL database and makes no real-concurrency or deployment claim.
