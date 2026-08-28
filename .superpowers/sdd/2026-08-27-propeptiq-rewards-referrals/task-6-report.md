@@ -365,6 +365,143 @@ Task 6C payout batching, approval consumption, externally paid recording,
 provider/reference storage, and cash transmission remain unstarted. Task 7 UI
 and all production/external operations remain unstarted.
 
+## 6C checkpoint — Reviewed payout batching and externally paid recording
+
+### Outcome
+
+Implemented Task 6C only from clean base
+`35e7c21bdb51e2bc7f338e1b03009ddd56030d03`. One MFA-authenticated
+administrator with `affiliate:payout` may create a payout obligation for one
+active affiliate profile. The serializable transaction selects commission
+server-side, groups it by its immutable affiliate-policy snapshot, includes
+only approval-eligible pending or approved, unpaid, unconsumed USD commission,
+approves eligible pending rows in the same transaction, totals exact net minor
+units, and enforces the snapshot's 5,000-minor minimum.
+
+Creation consumes every selected commission once, records one pending payout,
+and appends exactly one concise redacted `admin_audit` event atomically. Exact
+same-key/profile replay returns the stored immutable creation result without a
+second audit; a changed profile conflicts. Row locks, serializable retry, strict
+update predicates, a unique creation key, and payout links prevent stale or
+concurrent attempts from consuming the same row twice.
+
+Paid recording is a separate expected-version CAS transition. It requires a
+bounded nonempty externally supplied provider name and reference after an
+operator pays outside the application, stores a unique paid-operation
+idempotency key, advances version 1 to 2, marks linked commission paid, and
+appends exactly one redacted audit in the same transaction. Exact replay returns
+the original paid time/evidence; stale, conflicting, and double-paid attempts
+write nothing. No Stripe Connect, bank, payment-provider, webhook, HTTP,
+automatic payout, provider approval, policy activation, production operation,
+Task 7 UI, or Task 8 form was added.
+
+### Changed implementation files
+
+- `src/growth/affiliate-service.ts`
+- `src/growth/affiliate-service.test.ts`
+- `src/growth/actions.ts`
+- `src/growth/actions.test.ts`
+- `src/db/repositories/growth-repository.ts`
+- `tests/integration/growth-repository.test.ts`
+- `tests/integration/affiliate-payout.test.ts`
+- `src/db/schema/growth.ts`
+- `src/db/migrations/0016_parallel_madelyne_pryor.sql`
+- `src/db/migrations/meta/0016_snapshot.json`
+- `src/db/migrations/meta/_journal.json`
+
+### Schema and repository boundary
+
+Generated migration `0016_parallel_madelyne_pryor.sql` adds only positive
+`affiliate_payouts.version`, nullable unique
+`affiliate_payouts.paid_idempotency_key`, and bounded external-evidence
+checks. Historical migrations and snapshots were not edited. The pre-existing
+generic growth repository paid transition now also requires expected-version
+CAS and a separate paid idempotency key; it can no longer bypass the Task 6C
+paid-recording contract. A second `npm run db:generate` reported
+`No schema changes, nothing to migrate`; `npm run db:check` passed.
+
+### Recoverable RED evidence
+
+- Pure payout-draft RED: 1 expected failure and 59 passes because
+  `createAffiliatePayoutBatchDraft` did not exist.
+- Payout-service RED: 5 expected failures and 60 passes because
+  `createAffiliatePayoutService` did not exist.
+- Migrated payout-transaction RED: after correcting one invalid test-fixture
+  order enum, 4/4 expected failures were caused by missing PostgreSQL payout
+  transaction constructors.
+- Approval transition RED: 1 expected failure and 4 passes because an
+  approval-eligible pending commission was not selected.
+- Repository CAS RED: the focused repository test rejected the first paid
+  transition because the old path treated the creation key as paid authority
+  and had no expected-version contract.
+- Immutable-policy RED: 1 expected failure and 65 passes because a retired
+  policy snapshot was incorrectly rejected for an already-earned obligation.
+- Action-boundary RED: 8 expected failures and 53 passes because the payout
+  create/paid action factories did not exist.
+
+### Idempotency, audit, authorization, and privacy proof
+
+- The create action accepts only profile ID, idempotency key, and correlation
+  ID. Exact-form parsing rejects browser totals, currency, commission IDs,
+  policy version/rates, and payment outcome.
+- The paid action accepts only payout ID, expected version, paid-operation key,
+  bounded provider/reference evidence, and correlation ID. Service and action
+  authorization both require `affiliate:payout` plus MFA.
+- PGlite proves the exact 5,000-minor boundary, already-consumed exclusion,
+  pending-to-approved consumption, exact replay, conflicting replay, stale
+  version, exact paid replay, double-paid denial, and one audit per successful
+  transition.
+- Forced creation-audit and paid-audit constraint failures prove payout,
+  commission, evidence, version, and audit rows roll back together.
+- Audit metadata contains amount/currency/count/policy version for creation and
+  state/version movement for paid recording. It contains no commission IDs,
+  provider/reference, referred-customer identity, order lines, address,
+  payment IDs, cookie/IP/device facts, or credentials.
+- Existing owner reads remain aggregate and redacted; provider/reference is not
+  projected in the owner affiliate read model. Suspended/rejected history
+  remains readable while creation requires an active affiliate profile.
+
+### GREEN and validation evidence
+
+- Controller-confirmed affiliate service/actions: 2 files, 127/127 tests.
+- Controller-confirmed dedicated payout PGlite: 1 file, 6/6 tests.
+- Focused affiliate/action/authorization/domain lane: 4 files, 164/164 at the
+  recorded checkpoint; the final additional immutable-policy case is included
+  in the controller-confirmed 127/127 service/action result.
+- Focused five-file PGlite regression checkpoint: 5 files, 89/89 tests; final
+  payout additions were revalidated at 6/6 and the changed generic repository
+  CAS case at 1/1.
+- Full unit suite: 86 files, 1,044/1,044 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- Production artifact scanner: 9/9 tests.
+- `npm run verify:workspace-boundary`: exit 0.
+- Second `npm run db:generate`: exit 0, no schema changes.
+- `npm run db:check`: exit 0.
+- Working and staged `git diff --check`: exit 0; only expected Windows
+  LF/CRLF working-copy notices appeared.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent
+  and `TEST_DATABASE_CONFIRMATION` was not exactly
+  `isolated-test-database`; no real-PostgreSQL contention claim is made.
+- One redundant final two-file PGlite run was stopped after controller
+  confirmation; it produced no failure result and changed no files.
+
+### Implementation commit
+
+```text
+c49b133
+feat(growth): add reviewed affiliate commissions and payout ledger
+```
+
+### Remaining boundary and concerns
+
+Task 6C records obligations and externally completed payment evidence only.
+Real PostgreSQL contention remains unverified because the exact isolated-test
+guards were absent. Task 7+ UI, admin forms, E2E, policy activation,
+production/external operations, tax-document upload, dual approval,
+per-action reauthentication, automatic payout, and payout-provider approval
+remain outside this checkpoint.
+
 ## 6B review fix round 3/5 — Customer-referral runtime composition
 
 Round-3 review found that the real checkout runtime constructed only the
