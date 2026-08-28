@@ -7,7 +7,7 @@ export function BrandMark({ className }: { className?: string }) {
     <span
       aria-hidden="true"
       className={cn(
-        "relative block size-10 shrink-0 overflow-hidden rounded-full border border-ink/15 bg-ink",
+        "relative block size-10 shrink-0 overflow-hidden",
         className,
       )}
     >

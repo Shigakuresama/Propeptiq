@@ -16,6 +16,11 @@ describe("PROPEPTIQ brand artwork", () => {
     expect(decorativeMark?.getAttribute("src")).toContain(
       "%2Fbrand%2Fpropeptiq-logo.png",
     );
+    expect(decorativeMark?.parentElement).not.toHaveClass(
+      "rounded-full",
+      "border",
+      "bg-ink",
+    );
     expect(screen.getByRole("img", { name: "PROPEPTIQ LABS" })).toBeVisible();
   });
 });
