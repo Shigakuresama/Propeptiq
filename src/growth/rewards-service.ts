@@ -599,10 +599,11 @@ async function reconcileReferralPaymentInTransaction(
     idempotencyKey: string;
     referrerUserId: string;
     rewardPoints: number | string;
+    status: "pending" | "qualified" | "reversed";
   }>(
     `SELECT rc.id::text AS id, rc.idempotency_key AS "idempotencyKey",
             ra.referrer_user_id::text AS "referrerUserId",
-            rc.referrer_reward_points AS "rewardPoints"
+            rc.referrer_reward_points AS "rewardPoints", rc.status
      FROM referral_conversions rc
      JOIN referral_attributions ra ON ra.id = rc.referral_attribution_id
      JOIN order_growth_attributions oga
@@ -622,6 +623,9 @@ async function reconcileReferralPaymentInTransaction(
     throw new Error("Referral payment conversion is incoherent");
   }
   const row = conversion.rows[0]!;
+  if (row.status === "reversed") {
+    return Object.freeze({ status: "idempotent" });
+  }
   const points = safeInteger(row.rewardPoints);
   let applied = false;
   if (points > 0) {
@@ -831,7 +835,7 @@ async function reconcileReferralReversalInTransaction(
     id: string;
     idempotencyKey: string;
     referrerUserId: string;
-    rewardAccountId: string;
+    rewardAccountId: string | null;
     rewardPoints: number | string;
     status: "qualified" | "reversed";
   }>(
@@ -841,9 +845,9 @@ async function reconcileReferralReversalInTransaction(
             rc.referrer_reward_points AS "rewardPoints", rc.status
      FROM referral_conversions rc
      JOIN referral_attributions ra ON ra.id = rc.referral_attribution_id
-     JOIN reward_accounts acc ON acc.buyer_user_id = ra.referrer_user_id
+     LEFT JOIN reward_accounts acc ON acc.buyer_user_id = ra.referrer_user_id
      WHERE rc.first_order_id = $1::uuid AND rc.status IN ('qualified', 'reversed')
-     FOR UPDATE OF rc, ra, acc`,
+     FOR UPDATE OF rc, ra`,
     [input.orderId],
   );
   if (conversion.rows.length === 0) return Object.freeze({ status: "idempotent" });
@@ -852,8 +856,18 @@ async function reconcileReferralReversalInTransaction(
   }
   const row = conversion.rows[0]!;
   const rewardPoints = safeInteger(row.rewardPoints);
-  if (rewardPoints === 0) {
-    return Object.freeze({ status: "idempotent" });
+  if (rewardPoints > 0) {
+    if (row.rewardAccountId === null) {
+      throw new Error("Referral reward account is unavailable");
+    }
+    const account = await client.query<{ id: string }>(
+      `SELECT id::text AS id FROM reward_accounts
+       WHERE id = $1::uuid AND buyer_user_id = $2::uuid FOR UPDATE`,
+      [row.rewardAccountId, row.referrerUserId],
+    );
+    if (account.rows.length !== 1) {
+      throw new Error("Referral reward account is incoherent");
+    }
   }
   const merchandise = await client.query<{ amountMinor: number | string }>(
     `SELECT COALESCE(sum(total_minor), 0) AS "amountMinor"
@@ -881,22 +895,24 @@ async function reconcileReferralReversalInTransaction(
       safeInteger(financial.rows[0]?.disputedMinor ?? 0),
     ),
   );
+  const fullLoss = cumulativeLoss === eligibleMinor;
   const target = Math.floor((rewardPoints * cumulativeLoss) / eligibleMinor);
-  const prior = await client.query<{ points: number | string }>(
-    `SELECT COALESCE(-sum(pending_points_delta + available_points_delta), 0)
-              AS points
-     FROM reward_ledger_entries
-     WHERE reward_account_id = $1::uuid
-       AND source_type = 'referral_payment_event'
-       AND kind IN ('refund_reversal', 'chargeback_reversal')
-       AND source_id IN (
-         SELECT id::text FROM payment_events WHERE order_id = $2::uuid
-       )`,
-    [row.rewardAccountId, input.orderId],
-  );
-  const reversedPoints = safeInteger(prior.rows[0]?.points ?? 0);
+  const reversedPoints = row.rewardAccountId === null
+    ? 0
+    : safeInteger((await client.query<{ points: number | string }>(
+        `SELECT COALESCE(-sum(pending_points_delta + available_points_delta), 0)
+                  AS points
+         FROM reward_ledger_entries
+         WHERE reward_account_id = $1::uuid
+           AND source_type = 'referral_payment_event'
+           AND kind IN ('refund_reversal', 'chargeback_reversal')
+           AND source_id IN (
+             SELECT id::text FROM payment_events WHERE order_id = $2::uuid
+           )`,
+        [row.rewardAccountId, input.orderId],
+      )).rows[0]?.points ?? 0);
   if (row.status === "reversed") {
-    if (target !== rewardPoints || reversedPoints !== rewardPoints) {
+    if (!fullLoss || reversedPoints !== rewardPoints) {
       throw new Error("Reversed referral conversion is incoherent");
     }
     return Object.freeze({ status: "idempotent" });
@@ -904,6 +920,9 @@ async function reconcileReferralReversalInTransaction(
   const incremental = target - reversedPoints;
   let applied = false;
   if (incremental > 0) {
+    if (row.rewardAccountId === null) {
+      throw new Error("Referral reward account is unavailable");
+    }
     const delivered = await client.query<{ exists: boolean }>(
       `SELECT EXISTS(
          SELECT 1 FROM reward_ledger_entries
@@ -930,7 +949,7 @@ async function reconcileReferralReversalInTransaction(
     });
     applied = ledger.status === "applied";
   }
-  if (target === rewardPoints) {
+  if (fullLoss) {
     const reversed = await repositoryInCurrentTransaction(client)
       .reverseReferralConversion({
         conversionId: row.id,

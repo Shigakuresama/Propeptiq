@@ -341,6 +341,39 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     return { providerDatabaseId, paymentEventId };
   }
 
+  async function seedProcessedFinancialEvent(input: Readonly<{
+    orderId: string;
+    providerEventId: string;
+    eventType: "refund_verified" | "dispute_recorded";
+    amountMinor: number;
+    occurredAt: Date;
+  }>) {
+    const providerDatabaseId = keyedUuid(`provider:${input.providerEventId}`);
+    await client.query(
+      `INSERT INTO provider_events
+         (id, provider, provider_event_id, payload_hash, status, attempt_count,
+          processed_at, event_type, schema_version, normalized_payload,
+          provider_created_at, livemode)
+       VALUES ($1::uuid, 'stripe', $2, $3, 'processed', 1,
+               $4::timestamptz, $5, 1, '{}'::jsonb,
+               $4::timestamptz, false)`,
+      [providerDatabaseId, input.providerEventId, "9".repeat(64),
+        input.occurredAt.toISOString(), input.eventType],
+    );
+    await client.query(
+      `INSERT INTO payment_events
+         (id, provider_event_id, order_id, event_type, provider_payment_id,
+          idempotency_key, amount_minor, currency, occurred_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::payment_event_type,
+               $5, $6, $7, 'USD', $8::timestamptz)`,
+      [keyedUuid(`payment:${input.providerEventId}`), providerDatabaseId,
+        input.orderId, input.eventType,
+        `${input.eventType}_${input.providerEventId}`,
+        `stripe:${input.eventType}:${input.providerEventId}`,
+        input.amountMinor, input.occurredAt.toISOString()],
+    );
+  }
+
   async function preparePaidOrder() {
     const { service } = setup();
     const quoted = await quote(ids.keyA);
@@ -622,6 +655,103 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       reversals: 2,
       reversedPoints: 412,
       conversionStatus: "reversed",
+    });
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_referral_payment",
+      now,
+    })).resolves.toEqual({ status: "idempotent" });
+    const paymentReplay = await client.query<{
+      conversionStatus: string;
+      referralEntries: number;
+    }>(
+      `SELECT
+         (SELECT status FROM referral_conversions
+          WHERE first_order_id = $1::uuid) AS "conversionStatus",
+         (SELECT count(*)::int FROM reward_ledger_entries
+          WHERE buyer_user_id = $2::uuid
+            AND kind IN ('referral_earned_pending', 'referral_earned_available',
+                         'refund_reversal', 'chargeback_reversal'))
+           AS "referralEntries"`,
+      [prepared.orderId, ids.referrer],
+    );
+    expect(paymentReplay.rows[0]).toEqual({
+      conversionStatus: "reversed",
+      referralEntries: 4,
+    });
+  });
+
+  it("fully reverses a qualified zero-point referral without appending ledger points", async () => {
+    await client.query(
+      `UPDATE product_prices SET amount_minor = 1 WHERE id = $1::uuid`,
+      [ids.price],
+    );
+    const { service } = setup();
+    const quoted = await quote(ids.keyA, "signed-task5b-cookie");
+    const prepared = await service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    );
+    if (prepared.status !== "prepared") throw new Error("expected prepared zero-point referral");
+    await seedProcessedPayment(prepared.orderId, "evt_task5b_zero_referral_payment");
+    const lifecycle = lifecycleService();
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_zero_referral_payment",
+      now,
+    })).resolves.toEqual({ status: "applied" });
+    await seedProcessedFinancialEvent({
+      orderId: prepared.orderId,
+      providerEventId: "evt_task5b_zero_referral_partial_refund",
+      eventType: "refund_verified",
+      amountMinor: 1,
+      occurredAt: new Date("2026-08-28T12:00:01.000Z"),
+    });
+
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_zero_referral_partial_refund",
+      now: new Date("2026-08-28T12:00:01.000Z"),
+    })).resolves.toEqual({ status: "idempotent" });
+    const partialState = await client.query<{ status: string }>(
+      `SELECT status FROM referral_conversions WHERE first_order_id = $1::uuid`,
+      [prepared.orderId],
+    );
+    expect(partialState.rows[0]).toEqual({ status: "qualified" });
+    await seedProcessedFinancialEvent({
+      orderId: prepared.orderId,
+      providerEventId: "evt_task5b_zero_referral_final_refund",
+      eventType: "refund_verified",
+      amountMinor: 1,
+      occurredAt: new Date("2026-08-28T12:00:02.000Z"),
+    });
+
+    await expect(lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task5b_zero_referral_final_refund",
+      now: new Date("2026-08-28T12:00:02.000Z"),
+    })).resolves.toEqual({ status: "applied" });
+    const state = await client.query<{
+      status: string;
+      rewardPoints: number;
+      referralLedgerEntries: number;
+      referrerAccounts: number;
+    }>(
+      `SELECT status, referrer_reward_points AS "rewardPoints",
+              (SELECT count(*)::int FROM reward_ledger_entries
+               WHERE source_type IN ('referral_conversion',
+                                     'referral_payment_event'))
+                AS "referralLedgerEntries",
+              (SELECT count(*)::int FROM reward_accounts
+               WHERE buyer_user_id = $1::uuid) AS "referrerAccounts"
+       FROM referral_conversions WHERE first_order_id = $2::uuid`,
+      [ids.referrer, prepared.orderId],
+    );
+    expect(state.rows[0]).toEqual({
+      status: "reversed",
+      rewardPoints: 0,
+      referralLedgerEntries: 0,
+      referrerAccounts: 0,
     });
   });
 
