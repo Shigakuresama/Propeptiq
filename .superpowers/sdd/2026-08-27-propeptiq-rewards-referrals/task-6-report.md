@@ -365,6 +365,75 @@ Task 6C payout batching, approval consumption, externally paid recording,
 provider/reference storage, and cash transmission remain unstarted. Task 7 UI
 and all production/external operations remain unstarted.
 
+## 6B review fix round 3/5 — Customer-referral runtime composition
+
+Round-3 review found that the real checkout runtime constructed only the
+affiliate attribution service. A valid signed customer-referral cookie could
+therefore reach checkout without an authoritative referral service and silently
+produce an ordinary undiscounted, unbound order.
+
+### Recoverable RED evidence
+
+- Untouched-driver runtime RED: 1 expected failure and 6 passes. A real signed
+  V1 customer-referral cookie passed through `getLocalTestDriver()` and
+  `createCheckoutServerRuntime`, but checkout returned zero referral discount
+  instead of the policy-derived 480 units.
+- Failure-semantics RED: 2 expected failures and 41 passes. Missing referral
+  composition emitted an ordinary quote, while a thrown authoritative referral
+  candidate lookup was downgraded to `unavailable/policy_unavailable`.
+
+### Fix and invariant evidence
+
+- The guarded deterministic driver now exposes one bounded authoritative
+  referral candidate and the current 10%-capped-at-2,500 policy fixture. The
+  server runtime constructs `createReferralCheckoutService` with the same real
+  V1 environment-bound verifier and server secret used by affiliate attribution,
+  then injects both services into checkout.
+- The real runtime regression proves the signed referral cookie applies a
+  480-unit discount, preserves the private referral code/referrer/policy binding,
+  creates the checkout session/order, and produces no affiliate snapshot.
+- The reciprocal affiliate regression proves its private plan has no referral
+  snapshot. Browser quote serialization contains no referral code, referral-code
+  ID, referrer identity, affiliate identity, commission, or reward authority.
+- Missing referral composition and thrown authoritative lookup now return
+  `internal_conflict` without preparation, shipping, or tax calls. Explicit
+  invalid/inactive/ineligible/no-attribution outcomes and ordinary no-cookie
+  checkout retain their existing behavior.
+- Local-driver and production-artifact guards remain intact. No schema,
+  migration, payout, UI, external provider call, production operation, or
+  browser-supplied identity/money authority was added.
+
+### Review-fix GREEN and validation evidence
+
+- Focused referral/runtime/checkout lane: 3 files, 50/50 tests.
+- Focused runtime/referral/checkout/local-driver/harness lane: 8 files, 76/76 tests.
+- Affected Task 6B PGlite transactions: 1 file, 14/14 tests.
+- Full unit suite: 86 files, 1029/1029 tests.
+- Production artifact scanner: 9/9 tests; production artifact scan: 736 files,
+  50,405,441 bytes, zero forbidden matches.
+- `npm run typecheck`, `npm run lint`, and
+  `npm run verify:workspace-boundary`: exit 0.
+- `npm run db:generate`: exit 0, `No schema changes, nothing to migrate`;
+  `npm run db:check`: exit 0.
+- Working `git diff --check`: exit 0; only expected Windows LF/CRLF
+  working-copy notices appeared.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no real
+  PostgreSQL or contention claim is made.
+
+### Review-fix implementation commit
+
+```text
+bcef20949e9872bd7ae429580a9c69c70f3c01ba
+fix(commerce): compose referral attribution runtime
+```
+
+### Remaining Task 6 boundary
+
+Task 6C payout batching, approval consumption, externally paid recording,
+provider/reference storage, and cash transmission remain unstarted. Task 7 UI
+and all production/external operations remain unstarted.
+
 ## 6B review fix round 2/5 — Real deterministic affiliate runtime composition
 
 Round-2 re-review found that the round-1 runtime test manually replaced the
