@@ -816,6 +816,12 @@ export function createCheckoutService(dependencies: Readonly<{
         (sum, line) => sum + line.unitAmountMinor * line.quantity,
         0,
       );
+      if (
+        typeof input.attributionCookie === "string" &&
+        dependencies.referralService === undefined
+      ) {
+        return { status: "internal_conflict" };
+      }
       const referralResult =
         typeof input.attributionCookie === "string" &&
         dependencies.referralService !== undefined
@@ -827,6 +833,9 @@ export function createCheckoutService(dependencies: Readonly<{
               now: authoritativeAt,
             })
           : null;
+      if (referralResult?.status === "internal_conflict") {
+        return { status: "internal_conflict" };
+      }
       const referralQuote =
         referralResult?.status === "eligible" ? referralResult : null;
       const affiliateResult =

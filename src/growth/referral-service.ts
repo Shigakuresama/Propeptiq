@@ -105,6 +105,7 @@ export type EligibleReferralCheckoutQuote = Readonly<{
 
 export type ReferralCheckoutQuote =
   | EligibleReferralCheckoutQuote
+  | Readonly<{ status: "internal_conflict" }>
   | Readonly<{
       status: "unavailable";
       reason: ReferralCheckoutUnavailableReason;
@@ -400,7 +401,7 @@ export function createReferralCheckoutService(dependencies: Readonly<{
           now: input.now,
         });
       } catch {
-        return referralUnavailable("policy_unavailable");
+        return Object.freeze({ status: "internal_conflict" });
       }
       if (candidate.status === "unavailable") {
         return referralUnavailable(candidate.reason);

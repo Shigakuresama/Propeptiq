@@ -113,6 +113,7 @@ function setup(
     rewardsQuoteResult?: CheckoutRewardsQuote;
     referralQuoteResult?: ReferralCheckoutQuote;
     affiliateQuoteResult?: AffiliateCheckoutQuote;
+    omitReferralService?: boolean;
   }> = {},
 ) {
   const repository: CheckoutRepository = {
@@ -204,7 +205,11 @@ function setup(
       maximumQuantityPerLine: 25,
       maximumOrderAmountMinor: 1_000_000,
     },
-    ...{ rewardsService, referralService, affiliateService },
+    ...{
+      rewardsService,
+      ...(options.omitReferralService ? {} : { referralService }),
+      affiliateService,
+    },
   });
   return {
     service,
@@ -218,6 +223,23 @@ function setup(
 }
 
 describe("authoritative checkout service", () => {
+  it("fails closed when a signed attribution cookie has no referral composition", async () => {
+    const { service, repository, shippingQuote, taxQuote } = setup({}, {
+      omitReferralService: true,
+    });
+
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      attributionCookie: "signed-attribution-cookie",
+      request,
+    })).resolves.toEqual({ status: "internal_conflict" });
+    expect(repository.prepare).not.toHaveBeenCalled();
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+  });
+
   it("keeps an eligible affiliate snapshot private and does not change checkout totals", async () => {
     const affiliateQuoteResult = Object.freeze({
       status: "eligible" as const,

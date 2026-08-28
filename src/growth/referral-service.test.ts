@@ -406,6 +406,29 @@ describe("customer referral checkout attribution", () => {
     })).resolves.toEqual({ status: "unavailable", reason });
   });
 
+  it("reports an internal conflict when authoritative candidate lookup fails", async () => {
+    const service = createReferralCheckoutService({
+      verifyCookie: () => Object.freeze({
+        schemaVersion: 1 as const,
+        program: "customer_referral" as const,
+        code: referralCode,
+        issuedAt: "2026-08-20T18:00:00.000Z",
+        expiresAt: "2026-09-19T18:00:00.000Z",
+      }),
+      loadCandidate: async () => {
+        throw new Error("synthetic authoritative lookup outage");
+      },
+    });
+
+    await expect(service.quoteCustomerReferral({
+      buyerUserId,
+      attributionCookie: "signed-cookie",
+      merchandiseSubtotalMinor: 10_000,
+      currency: "USD",
+      now,
+    })).resolves.toEqual({ status: "internal_conflict" });
+  });
+
   it("rejects self-referral from authoritative owner facts", async () => {
     const service = createReferralCheckoutService({
       verifyCookie: () => Object.freeze({

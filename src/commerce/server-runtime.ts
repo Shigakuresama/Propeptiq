@@ -24,6 +24,7 @@ import { connectRuntimeDatabaseSession, withRuntimeTransaction } from "@/db/runt
 import { readServerEnv } from "@/env";
 import { createAffiliateCheckoutService } from "@/growth/affiliate-service";
 import { verifyAttributionCookie } from "@/growth/attribution-cookie";
+import { createReferralCheckoutService } from "@/growth/referral-service";
 import { createPostgresRewardsLifecycleService } from "@/growth/rewards-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 
@@ -134,6 +135,16 @@ export async function createCheckoutServerRuntime(
     },
     loadCandidate: driver.commerce.affiliateCandidateLookup,
   });
+  const referralService = createReferralCheckoutService({
+    verifyCookie(value, verifiedAt) {
+      return verifyAttributionCookie(value, {
+        environment: request.environment.APP_ENV,
+        now: verifiedAt,
+        secret: attributionSecret,
+      });
+    },
+    loadCandidate: driver.commerce.referralCandidateLookup,
+  });
   const checkoutService = createCheckoutService({
     repository: driver.commerce.checkoutRepository,
     shippingQuotePort: driver.commerce.shippingQuotePort,
@@ -147,6 +158,7 @@ export async function createCheckoutServerRuntime(
       maximumQuantityPerLine: 25,
       maximumOrderAmountMinor: 100_000_000,
     },
+    referralService,
     affiliateService,
   });
   const orchestrator = createProviderCheckoutOrchestrator({

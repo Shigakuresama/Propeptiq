@@ -34,6 +34,10 @@ const LOCAL_AFFILIATE_CODE = "aff_LocalRuntimePartner01";
 const LOCAL_AFFILIATE_PROFILE_ID = "6b000000-0000-4000-8000-000000000021";
 const LOCAL_AFFILIATE_USER_ID = "6b000000-0000-4000-8000-000000000022";
 const LOCAL_AFFILIATE_POLICY_ID = "6b000000-0000-4000-8000-000000000023";
+const LOCAL_REFERRAL_CODE = "ref_LocalRuntimeReferrer01";
+const LOCAL_REFERRAL_CODE_ID = "6b000000-0000-4000-8000-000000000031";
+const LOCAL_REFERRER_USER_ID = "6b000000-0000-4000-8000-000000000032";
+const LOCAL_REFERRAL_POLICY_ID = "6b000000-0000-4000-8000-000000000033";
 
 type SharedFacts = Readonly<{
   loadProfile: (userId: string) => BuyerProfileRecord | null;
@@ -704,6 +708,31 @@ export function createLocalCommerceDriverV1(
         expiresAt: input.expiresAt,
         affiliatePolicyId: LOCAL_AFFILIATE_POLICY_ID,
         affiliatePolicyVersion: 1,
+      });
+    },
+    async referralCandidateLookup(input) {
+      if (input.code !== LOCAL_REFERRAL_CODE) {
+        return Object.freeze({ status: "unavailable" as const, reason: "code_inactive" as const });
+      }
+      if (shared.loadProfile(input.buyerUserId)?.status !== "active") {
+        return Object.freeze({ status: "unavailable" as const, reason: "policy_unavailable" as const });
+      }
+      return Object.freeze({
+        status: "eligible" as const,
+        referralCodeId: LOCAL_REFERRAL_CODE_ID,
+        referrerUserId: LOCAL_REFERRER_USER_ID,
+        policy: Object.freeze({
+          id: LOCAL_REFERRAL_POLICY_ID,
+          version: 1,
+          status: "active" as const,
+          attributionDays: 30 as const,
+          referredDiscountBasisPoints: 1_000,
+          referredDiscountCapMinor: 2_500,
+          referrerPointsPerDollar: 5,
+          referrerRewardCapPoints: 2_500,
+          effectiveAt: "2026-08-01T00:00:00.000Z",
+          supersededAt: null,
+        }),
       });
     },
     rateLimitStore,

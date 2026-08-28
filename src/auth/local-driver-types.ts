@@ -15,6 +15,7 @@ import type { RefundCommandRepository } from "@/commerce/refund-service";
 import type { ProviderSessionRepository } from "@/db/repositories/provider-session-repository";
 import type { Principal } from "@/domain/authorization";
 import type { AffiliateCheckoutQuote } from "@/growth/affiliate-service";
+import type { ReferralCandidateLookup } from "@/growth/referral-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 import type { StorageVerifier } from "@/security/storage";
 
@@ -76,6 +77,7 @@ export type LocalCommerceDriverV1 = Readonly<{
       expiresAt: string;
       now: Date;
     }>) => Promise<AffiliateCheckoutQuote>;
+  referralCandidateLookup: ReferralCandidateLookup;
   rateLimitStore: RateLimitStore;
   refundRepository: RefundCommandRepository;
   fulfillmentRepository: FulfillmentCommandRepository;
