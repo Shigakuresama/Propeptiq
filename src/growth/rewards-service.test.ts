@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createRewardsService,
+  deriveVerifiedAffiliateMerchandiseLoss,
   type RewardsCheckoutAtomicPort,
   type RewardsCheckoutSnapshot,
 } from "@/growth/rewards-service";
@@ -22,6 +23,45 @@ const ids = {
 
 const now = new Date("2026-08-28T12:00:00.000Z");
 const termsHash = "a".repeat(64);
+
+describe("verified affiliate merchandise loss", () => {
+  const authoritativeOrder = Object.freeze({
+    merchandiseMinor: 9_250,
+    taxMinor: 325,
+    shippingMinor: 700,
+  });
+
+  it("does not reverse commission for tax-only or shipping-only cumulative loss", () => {
+    expect(deriveVerifiedAffiliateMerchandiseLoss({
+      ...authoritativeOrder,
+      refundedMinor: 325,
+      disputedMinor: 0,
+    })).toBe(0);
+    expect(deriveVerifiedAffiliateMerchandiseLoss({
+      ...authoritativeOrder,
+      refundedMinor: 1_025,
+      disputedMinor: 0,
+    })).toBe(0);
+  });
+
+  it("reverses only partial merchandise and caps cumulative refund or chargeback at merchandise", () => {
+    expect(deriveVerifiedAffiliateMerchandiseLoss({
+      ...authoritativeOrder,
+      refundedMinor: 5_650,
+      disputedMinor: 0,
+    })).toBe(4_625);
+    expect(deriveVerifiedAffiliateMerchandiseLoss({
+      ...authoritativeOrder,
+      refundedMinor: 5_650,
+      disputedMinor: 10_275,
+    })).toBe(9_250);
+    expect(deriveVerifiedAffiliateMerchandiseLoss({
+      ...authoritativeOrder,
+      refundedMinor: 20_000,
+      disputedMinor: 30_000,
+    })).toBe(9_250);
+  });
+});
 
 function availableSnapshot(availablePoints = 10_000): RewardsCheckoutSnapshot {
   return Object.freeze({

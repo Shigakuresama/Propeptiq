@@ -133,6 +133,9 @@ export async function createCheckoutServerRuntime(
       maximumQuantityPerLine: 25,
       maximumOrderAmountMinor: 100_000_000,
     },
+    ...(driver.commerce.affiliateService === null
+      ? {}
+      : { affiliateService: driver.commerce.affiliateService }),
   });
   const orchestrator = createProviderCheckoutOrchestrator({
     checkoutService,

@@ -830,14 +830,24 @@ export function createCheckoutService(dependencies: Readonly<{
       const referralQuote =
         referralResult?.status === "eligible" ? referralResult : null;
       const affiliateResult =
-        typeof input.attributionCookie === "string" &&
-        dependencies.affiliateService !== undefined
-          ? await dependencies.affiliateService.quoteAffiliateAttribution({
+        typeof input.attributionCookie === "string"
+          ? dependencies.affiliateService === undefined
+            ? null
+            : await dependencies.affiliateService.quoteAffiliateAttribution({
               buyerUserId: input.buyerUserId,
               attributionCookie: input.attributionCookie,
               now: authoritativeAt,
             })
           : null;
+      if (
+        typeof input.attributionCookie === "string" &&
+        dependencies.affiliateService === undefined
+      ) {
+        return { status: "internal_conflict" };
+      }
+      if (affiliateResult?.status === "internal_conflict") {
+        return { status: "internal_conflict" };
+      }
       const affiliateQuote =
         affiliateResult?.status === "eligible" ? affiliateResult : null;
       if (referralQuote !== null && affiliateQuote !== null) {

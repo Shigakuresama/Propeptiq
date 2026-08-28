@@ -65,6 +65,7 @@ export type EligibleAffiliateCheckoutQuote = Readonly<{
 
 export type AffiliateCheckoutQuote =
   | EligibleAffiliateCheckoutQuote
+  | Readonly<{ status: "internal_conflict" }>
   | Readonly<{
       status: "unavailable";
       reason:
@@ -127,7 +128,7 @@ export function createAffiliateCheckoutService(dependencies: Readonly<{
           now: input.now,
         });
       } catch {
-        return Object.freeze({ status: "unavailable", reason: "policy_unavailable" });
+        return Object.freeze({ status: "internal_conflict" });
       }
       if (result.status !== "eligible") return result;
       if (result.affiliateUserId === input.buyerUserId) {

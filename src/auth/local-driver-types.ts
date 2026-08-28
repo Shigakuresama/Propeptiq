@@ -14,6 +14,7 @@ import type { PaymentProvider } from "@/commerce/payment-provider";
 import type { RefundCommandRepository } from "@/commerce/refund-service";
 import type { ProviderSessionRepository } from "@/db/repositories/provider-session-repository";
 import type { Principal } from "@/domain/authorization";
+import type { AffiliateCheckoutQuote } from "@/growth/affiliate-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 import type { StorageVerifier } from "@/security/storage";
 
@@ -68,6 +69,13 @@ export type LocalCommerceDriverV1 = Readonly<{
   paymentProvider: PaymentProvider;
   shippingQuotePort: ShippingQuotePort;
   taxQuotePort: TaxQuotePort;
+  affiliateService: Readonly<{
+    quoteAffiliateAttribution: (input: Readonly<{
+      buyerUserId: string;
+      attributionCookie: string;
+      now: Date;
+    }>) => Promise<AffiliateCheckoutQuote>;
+  }> | null;
   rateLimitStore: RateLimitStore;
   refundRepository: RefundCommandRepository;
   fulfillmentRepository: FulfillmentCommandRepository;

@@ -258,6 +258,35 @@ describe("authoritative checkout service", () => {
     expect(result.plan.affiliateQuote).toEqual(affiliateQuoteResult);
   });
 
+  it("continues only for explicit affiliate ineligibility and fails closed for lookup conflict", async () => {
+    const explicitlyIneligible = setup({}, {
+      affiliateQuoteResult: Object.freeze({
+        status: "unavailable" as const,
+        reason: "profile_inactive" as const,
+      }),
+    });
+    await expect(explicitlyIneligible.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      attributionCookie: "signed-inactive-affiliate-cookie",
+      request,
+    })).resolves.toMatchObject({ status: "quoted" });
+
+    const lookupConflict = setup({}, {
+      affiliateQuoteResult: Object.freeze({
+        status: "internal_conflict" as const,
+      }) as unknown as AffiliateCheckoutQuote,
+    });
+    await expect(lookupConflict.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      attributionCookie: "signed-affiliate-cookie",
+      request,
+    })).resolves.toEqual({ status: "internal_conflict" });
+  });
+
   it("fails closed when customer-referral and affiliate programs are both eligible", async () => {
     const referralQuoteResult = Object.freeze({
       status: "eligible" as const,

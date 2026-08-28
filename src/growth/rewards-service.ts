@@ -122,6 +122,35 @@ function unavailable(reason: RewardsUnavailableReason): CheckoutRewardsQuote {
   return Object.freeze({ status: "unavailable" as const, reason });
 }
 
+export function deriveVerifiedAffiliateMerchandiseLoss(input: Readonly<{
+  merchandiseMinor: number;
+  taxMinor: number;
+  shippingMinor: number;
+  refundedMinor: number;
+  disputedMinor: number;
+}>): number {
+  const values = [
+    input.merchandiseMinor,
+    input.taxMinor,
+    input.shippingMinor,
+    input.refundedMinor,
+    input.disputedMinor,
+  ];
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0)) {
+    throw new Error("Affiliate financial loss facts are invalid");
+  }
+  const totalLoss = BigInt(Math.max(input.refundedMinor, input.disputedMinor));
+  const nonMerchandise = BigInt(input.taxMinor) + BigInt(input.shippingMinor);
+  const merchandiseLoss = totalLoss > nonMerchandise
+    ? totalLoss - nonMerchandise
+    : 0n;
+  return Number(
+    merchandiseLoss > BigInt(input.merchandiseMinor)
+      ? BigInt(input.merchandiseMinor)
+      : merchandiseLoss,
+  );
+}
+
 function validAvailableSnapshot(
   value: Extract<RewardsCheckoutSnapshot, { status: "available" }>,
 ): boolean {
@@ -1002,11 +1031,20 @@ async function reconcileAffiliateReversalInTransaction(
   if (row.status === "paid" || row.status === "approved") {
     throw new Error("Settled affiliate commission reversal requires payout accounting");
   }
-  const merchandise = safeInteger((await client.query<{ amount: number | string }>(
-    `SELECT COALESCE(sum(total_minor), 0) AS amount FROM order_items
-     WHERE order_id = $1::uuid`,
+  const order = await client.query<{
+    merchandise: number | string;
+    tax: number | string;
+    shipping: number | string;
+  }>(
+    `SELECT COALESCE(sum(oi.total_minor), 0) AS merchandise,
+            o.tax_minor AS tax, o.shipping_minor AS shipping
+     FROM orders o JOIN order_items oi ON oi.order_id = o.id
+     WHERE o.id = $1::uuid
+     GROUP BY o.tax_minor, o.shipping_minor`,
     [input.orderId],
-  )).rows[0]?.amount ?? 0);
+  );
+  if (order.rows.length !== 1) throw new Error("Affiliate reversal basis is unavailable");
+  const merchandise = safeInteger(order.rows[0]!.merchandise);
   if (merchandise <= 0) throw new Error("Affiliate reversal basis is unavailable");
   const financial = await client.query<{
     refunded: number | string;
@@ -1019,10 +1057,13 @@ async function reconcileAffiliateReversalInTransaction(
      FROM payment_events WHERE order_id = $1::uuid`,
     [input.orderId],
   );
-  const cumulativeLoss = Math.min(merchandise, Math.max(
-    safeInteger(financial.rows[0]?.refunded ?? 0),
-    safeInteger(financial.rows[0]?.disputed ?? 0),
-  ));
+  const cumulativeLoss = deriveVerifiedAffiliateMerchandiseLoss({
+    merchandiseMinor: merchandise,
+    taxMinor: safeInteger(order.rows[0]!.tax),
+    shippingMinor: safeInteger(order.rows[0]!.shipping),
+    refundedMinor: safeInteger(financial.rows[0]?.refunded ?? 0),
+    disputedMinor: safeInteger(financial.rows[0]?.disputed ?? 0),
+  });
   const priorOrders = safeInteger((await client.query<{ count: number | string }>(
     `SELECT count(*) AS count FROM affiliate_commissions
      WHERE affiliate_attribution_id = $1::uuid AND order_id <> $2::uuid

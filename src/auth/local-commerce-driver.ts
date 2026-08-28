@@ -683,6 +683,7 @@ export function createLocalCommerceDriverV1(
     paymentProvider: providerHarness.provider,
     shippingQuotePort,
     taxQuotePort,
+    affiliateService: null,
     rateLimitStore,
     refundRepository,
     fulfillmentRepository,

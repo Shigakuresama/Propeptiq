@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getLocalTestDriver } from "local-auth-driver";
 import {
@@ -140,6 +140,53 @@ describe("commerce server composition", () => {
       providerSessionCount: 1,
       reservationCount: 1,
     });
+  });
+
+  it("injects authoritative affiliate checkout composition and fails closed when it is unavailable", async () => {
+    const request = requestForActor("non_admin");
+    const eligibleAffiliate = Object.freeze({
+      status: "eligible" as const,
+      code: "aff_RuntimeComposition01",
+      affiliateProfileId: "6b000000-0000-4000-8000-000000000021",
+      affiliateUserId: "6b000000-0000-4000-8000-000000000022",
+      existingAttributionId: null,
+      clickedAt: "2026-08-20T12:00:00.000Z",
+      expiresAt: "2026-09-19T12:00:00.000Z",
+      affiliatePolicyId: "6b000000-0000-4000-8000-000000000023",
+      affiliatePolicyVersion: 1,
+    });
+    const quoteAffiliateAttribution = vi.fn(async () => eligibleAffiliate);
+    const composedRequest = {
+      ...request,
+      localDriver: {
+        ...request.localDriver,
+        commerce: {
+          ...request.localDriver.commerce,
+          affiliateService: Object.freeze({ quoteAffiliateAttribution }),
+        },
+      },
+    } as typeof request;
+    const runtime = await createCheckoutServerRuntime(composedRequest);
+    const quoted = await runtime!.quoteCheckout({
+      buyerUserId: request.principal!.actorId,
+      idempotencyKey,
+      attributionCookie: "signed-runtime-affiliate-cookie",
+      request: checkoutRequest,
+    });
+
+    expect(quoted.status).toBe("quoted");
+    if (quoted.status !== "quoted") throw new Error("expected affiliate runtime quote");
+    expect(quoted.plan.affiliateQuote).toEqual(eligibleAffiliate);
+    expect(quoteAffiliateAttribution).toHaveBeenCalledTimes(1);
+
+    const unavailableRequest = requestForActor("non_admin");
+    const unavailableRuntime = await createCheckoutServerRuntime(unavailableRequest);
+    await expect(unavailableRuntime!.quoteCheckout({
+      buyerUserId: unavailableRequest.principal!.actorId,
+      idempotencyKey: "6b000000-0000-4000-8000-000000000002",
+      attributionCookie: "signed-runtime-affiliate-cookie",
+      request: checkoutRequest,
+    })).resolves.toEqual({ status: "internal_conflict" });
   });
 
   it("fails closed without mutation for every mismatch in the exact local commerce matrix", async () => {

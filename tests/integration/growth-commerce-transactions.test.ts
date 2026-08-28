@@ -559,21 +559,66 @@ describe("growth and commerce transaction boundary on PGlite", () => {
 
     await seedProcessedFinancialEvent({
       orderId: prepared.orderId,
-      providerEventId: "evt_task6b_refund",
+      providerEventId: "evt_task6b_tax_refund",
       eventType: "refund_verified",
-      amountMinor: 4_625,
+      amountMinor: 325,
       occurredAt: new Date("2026-08-29T12:00:00.000Z"),
     });
     await lifecycle.reconcileProcessedProviderEvent({
       provider: "stripe",
-      providerEventId: "evt_task6b_refund",
+      providerEventId: "evt_task6b_tax_refund",
       now: new Date("2026-08-29T12:00:00.000Z"),
     });
+    let reversal = await client.query<{ reversed: number; status: string }>(
+      `SELECT reversed_commission_minor::int AS reversed, status::text
+       FROM affiliate_commissions WHERE order_id = $1::uuid`,
+      [prepared.orderId],
+    );
+    expect(reversal.rows[0]).toEqual({ reversed: 0, status: "pending" });
+
+    await seedProcessedFinancialEvent({
+      orderId: prepared.orderId,
+      providerEventId: "evt_task6b_shipping_refund",
+      eventType: "refund_verified",
+      amountMinor: 700,
+      occurredAt: new Date("2026-08-29T12:01:00.000Z"),
+    });
+    await lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6b_shipping_refund",
+      now: new Date("2026-08-29T12:01:00.000Z"),
+    });
+    reversal = await client.query<{ reversed: number; status: string }>(
+      `SELECT reversed_commission_minor::int AS reversed, status::text
+       FROM affiliate_commissions WHERE order_id = $1::uuid`,
+      [prepared.orderId],
+    );
+    expect(reversal.rows[0]).toEqual({ reversed: 0, status: "pending" });
+
+    await seedProcessedFinancialEvent({
+      orderId: prepared.orderId,
+      providerEventId: "evt_task6b_merchandise_refund",
+      eventType: "refund_verified",
+      amountMinor: 4_625,
+      occurredAt: new Date("2026-08-29T12:02:00.000Z"),
+    });
+    await lifecycle.reconcileProcessedProviderEvent({
+      provider: "stripe",
+      providerEventId: "evt_task6b_merchandise_refund",
+      now: new Date("2026-08-29T12:02:00.000Z"),
+    });
+    reversal = await client.query<{ reversed: number; status: string }>(
+      `SELECT reversed_commission_minor::int AS reversed, status::text
+       FROM affiliate_commissions WHERE order_id = $1::uuid`,
+      [prepared.orderId],
+    );
+    expect(reversal.rows[0]).toEqual({ reversed: 462, status: "pending" });
+
     await seedProcessedFinancialEvent({
       orderId: prepared.orderId,
       providerEventId: "evt_task6b_chargeback",
       eventType: "dispute_recorded",
-      amountMinor: 9_250,
+      amountMinor: 10_275,
       occurredAt: new Date("2026-08-30T12:00:00.000Z"),
     });
     await lifecycle.reconcileProcessedProviderEvent({

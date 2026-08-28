@@ -167,6 +167,27 @@ describe("affiliate checkout attribution", () => {
     });
   });
 
+  it("reports an internal conflict when the authoritative candidate lookup fails", async () => {
+    const service = createAffiliateCheckoutService({
+      verifyCookie: () => Object.freeze({
+        schemaVersion: 1,
+        program: "affiliate",
+        code: attributionCode,
+        issuedAt: "2026-08-20T19:00:00.000Z",
+        expiresAt: "2026-09-19T19:00:00.000Z",
+      }),
+      loadCandidate: async () => {
+        throw new Error("synthetic authoritative lookup failure");
+      },
+    });
+
+    await expect(service.quoteAffiliateAttribution({
+      buyerUserId,
+      attributionCookie: "signed-affiliate-cookie",
+      now,
+    })).resolves.toEqual({ status: "internal_conflict" });
+  });
+
   it("fails closed for a customer-referral envelope and self attribution", async () => {
     const customerProgram = createAffiliateCheckoutService({
       verifyCookie: () => Object.freeze({
