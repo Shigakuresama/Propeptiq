@@ -19,6 +19,25 @@ function create(overrides: Record<string, unknown> = {}) {
   });
 }
 
+const canonicalSet = {
+  code: "set_Q7tcqpk1rXv2ABcd",
+  label: "Analytical comparison set",
+  items: [
+    { productId: "product-a", quantity: 1 },
+    { productId: "product-b", quantity: 25 },
+  ],
+};
+
+function project(sharedSet: unknown) {
+  return projectPublicSharedResearchSet({
+    sharedSet,
+    currentProducts: [
+      { id: "product-a", active: true, name: "Record A" },
+      { id: "product-b", active: false, name: "Record B" },
+    ],
+  });
+}
+
 describe("shared research set policies", () => {
   it("accepts a neutral label and 2–8 unique active product quantities", () => {
     expect(create()).toEqual({ ok: true, value: { code: "set_Q7tcqpk1rXv2ABcd", label: "Analytical comparison set", items: [{ productId: "product-a", quantity: 1 }, { productId: "product-b", quantity: 25 }] } });
@@ -50,6 +69,34 @@ describe("shared research set policies", () => {
     expect(projectPublicSharedResearchSet({ sharedSet: created.ok ? created.value : null, currentProducts: [{ id: "product-a", active: true, name: "Record A" }, { id: "product-b", active: false, name: "Record B" }] })).toEqual({
       ok: true,
       value: { code: "set_Q7tcqpk1rXv2ABcd", label: "Analytical comparison set", omittedProductIds: ["product-b"], items: [{ productId: "product-a", quantity: 1, name: "Record A" }] },
+    });
+  });
+
+  it.each([
+    ["an extra description", { ...canonicalSet, description: "not allowed" }, "unexpected_field", "description"],
+    ["a prohibited label", { ...canonicalSet, label: "Treatment comparison set" }, "invalid_label", "label"],
+    ["an invalid opaque code", { ...canonicalSet, code: "set name" }, "invalid_code", "code"],
+    ["too few items", { ...canonicalSet, items: [canonicalSet.items[0]] }, "invalid_input", "items"],
+    ["duplicate items", { ...canonicalSet, items: [canonicalSet.items[0], { ...canonicalSet.items[1], productId: "product-a" }] }, "invalid_item", "items[1].productId"],
+    ["an invalid quantity", { ...canonicalSet, items: [{ ...canonicalSet.items[0], quantity: 26 }, canonicalSet.items[1]] }, "invalid_item", "items[0].quantity"],
+  ] as const)("rejects a public projection with %s", (_name, sharedSet, code, field) => {
+    expect(project(sharedSet)).toEqual({ ok: false, error: { code, field } });
+  });
+
+  it("rejects sparse, inherited, and non-own shared-set inputs before public projection", () => {
+    const sparse = [canonicalSet.items[0]];
+    sparse.length = 2;
+    expect(project({ ...canonicalSet, items: sparse })).toEqual({
+      ok: false,
+      error: { code: "invalid_input", field: "items" },
+    });
+    expect(project(Object.create(canonicalSet))).toEqual({
+      ok: false,
+      error: { code: "invalid_input", field: "sharedSet" },
+    });
+    expect(createSharedResearchSet(Object.create({ code: "set_Q7tcqpk1rXv2ABcd", label: "Analytical comparison set", items }))).toEqual({
+      ok: false,
+      error: { code: "invalid_input", field: "input" },
     });
   });
 

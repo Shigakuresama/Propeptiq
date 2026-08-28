@@ -71,6 +71,10 @@ function unexpectedField(value: Record<string, unknown>, allowed: readonly strin
   return null;
 }
 
+function hasOwnFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
+  return fields.every((field) => Object.hasOwn(value, field));
+}
+
 function isNonBlank(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -91,8 +95,10 @@ function fail(code: RewardPolicyError["code"], field: string): Result<never, Rew
 
 export function parseLoyaltyPolicy(input: unknown): Result<LoyaltyPolicy, RewardPolicyError> {
   if (!isRecord(input)) return fail("invalid_policy", "policy");
-  const extra = unexpectedField(input, ["id", "version", "status", "pointsPerDollar", "redemptionMinorPerPoint", "minimumRedemptionPoints", "maximumRedemptionBasisPoints", "expiresAfterDays", "effectiveAt", "supersededAt"]);
+  const fields = ["id", "version", "status", "pointsPerDollar", "redemptionMinorPerPoint", "minimumRedemptionPoints", "maximumRedemptionBasisPoints", "expiresAfterDays", "effectiveAt", "supersededAt"] as const;
+  const extra = unexpectedField(input, fields);
   if (extra !== null) return fail("unexpected_field", extra);
+  if (!hasOwnFields(input, fields)) return fail("invalid_policy", "policy");
   if (!isNonBlank(input.id)) return fail("invalid_policy", "id");
   const version = input.version;
   if (!isSafeInteger(version) || version <= 0) return fail("invalid_policy", "version");

@@ -42,6 +42,13 @@ describe("rewards domain policies", () => {
     expect(parseLoyaltyPolicy(policy())).toEqual({ ok: true, value: policy() });
   });
 
+  it("rejects a policy whose required fields are inherited", () => {
+    expect(parseLoyaltyPolicy(Object.create(policy()))).toEqual({
+      ok: false,
+      error: { code: "invalid_policy", field: "policy" },
+    });
+  });
+
   it("rejects unknown keys, sparse arrays, non-finite values, and unsafe integers", () => {
     expect(parseLoyaltyPolicy({ ...policy(), extra: true })).toEqual({
       ok: false,
