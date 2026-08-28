@@ -754,20 +754,30 @@ describe("growth policy and repository boundary", () => {
 
     const paid = {
       payoutId: ids.payoutReplacement,
-      idempotencyKey: "owner-payout-replacement-key",
+      expectedVersion: 1,
+      idempotencyKey: "owner-payout-paid-key",
       externalProvider: "synthetic-manual-provider",
       externalReference: "synthetic-private-reference",
       paidAt: new Date("2026-08-30T12:00:00.000Z"),
     };
+    await expect(
+      repository.markAffiliatePayoutPaid({ ...paid, expectedVersion: 2 }),
+    ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
     await expect(repository.markAffiliatePayoutPaid(paid)).resolves.toMatchObject({
       status: "applied",
-      payout: { state: "paid", paidAt: paid.paidAt.toISOString() },
+      payout: { state: "paid", version: 2, paidAt: paid.paidAt.toISOString() },
     });
-    await expect(repository.markAffiliatePayoutPaid(paid)).resolves.toMatchObject({
-      status: "idempotent",
+    await expect(repository.markAffiliatePayoutPaid({
+      ...paid,
+      paidAt: new Date("2026-08-31T12:00:00.000Z"),
+    })).resolves.toMatchObject({
+      status: "idempotent", payout: { paidAt: paid.paidAt.toISOString() },
     });
     await expect(
       repository.markAffiliatePayoutPaid({ ...paid, externalReference: "conflicting-reference" }),
+    ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    await expect(
+      repository.markAffiliatePayoutPaid({ ...paid, idempotencyKey: "owner-payout-paid-key-two" }),
     ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
     const commission = await client.query<{ status: string; payoutId: string }>(`
       SELECT status, payout_id::text AS "payoutId" FROM affiliate_commissions

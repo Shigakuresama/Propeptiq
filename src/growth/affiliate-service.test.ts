@@ -13,9 +13,13 @@ import {
   createAffiliateCheckoutService,
   createAffiliateAttributionCandidate,
   createAffiliateAdminService,
+  createAffiliatePayoutBatchDraft,
+  createAffiliatePayoutService,
   createAffiliateService,
   type AffiliateAdminMutationTransaction,
   type AffiliateApplicationTransaction,
+  type AffiliatePayoutCreateTransaction,
+  type AffiliatePayoutPaidTransaction,
 } from "./affiliate-service";
 
 const now = new Date("2026-08-28T19:00:00.000Z");
@@ -41,6 +45,247 @@ const activeAffiliatePolicy: AffiliatePolicy = Object.freeze({
   currency: "USD",
   effectiveAt: "2026-08-27T00:00:00.000Z",
   supersededAt: null,
+});
+
+describe("affiliate payout batch draft", () => {
+  it("selects only eligible approved unpaid USD commission and enforces the immutable 5000-minor threshold", () => {
+    const draft = createAffiliatePayoutBatchDraft({
+      payoutId: "6c000000-0000-4000-8000-000000000001",
+      idempotencyKey: "affiliate-payout-batch:6c:one",
+      createdAt: now,
+      profile: Object.freeze({ id: profileId, status: "active" as const }),
+      policy: activeAffiliatePolicy,
+      commissions: Object.freeze([
+        Object.freeze({ id: "6c000000-0000-4000-8000-000000000011", affiliateProfileId: profileId, affiliatePolicyId: activeAffiliatePolicy.id, affiliatePolicyVersion: 1, grossCommissionMinor: 2_700, reversedCommissionMinor: 200, currency: "USD", status: "approved" as const, approvalEligibleAt: "2026-08-27T19:00:00.000Z", payoutId: null }),
+        Object.freeze({ id: "6c000000-0000-4000-8000-000000000012", affiliateProfileId: profileId, affiliatePolicyId: activeAffiliatePolicy.id, affiliatePolicyVersion: 1, grossCommissionMinor: 2_500, reversedCommissionMinor: 0, currency: "USD", status: "approved" as const, approvalEligibleAt: "2026-08-28T19:00:00.000Z", payoutId: null }),
+        Object.freeze({ id: "6c000000-0000-4000-8000-000000000013", affiliateProfileId: profileId, affiliatePolicyId: activeAffiliatePolicy.id, affiliatePolicyVersion: 1, grossCommissionMinor: 9_000, reversedCommissionMinor: 0, currency: "EUR", status: "approved" as const, approvalEligibleAt: "2026-08-27T19:00:00.000Z", payoutId: null }),
+        Object.freeze({ id: "6c000000-0000-4000-8000-000000000014", affiliateProfileId: profileId, affiliatePolicyId: activeAffiliatePolicy.id, affiliatePolicyVersion: 1, grossCommissionMinor: 6_000, reversedCommissionMinor: 0, currency: "USD", status: "approved" as const, approvalEligibleAt: "2026-08-27T19:00:00.000Z", payoutId: "6c000000-0000-4000-8000-000000000099" }),
+      ]),
+    });
+
+    expect(draft).toEqual({
+      id: "6c000000-0000-4000-8000-000000000001",
+      affiliateProfileId: profileId,
+      affiliatePolicyId: activeAffiliatePolicy.id,
+      affiliatePolicyVersion: 1,
+      idempotencyKey: "affiliate-payout-batch:6c:one",
+      amountMinor: 5_000,
+      currency: "USD",
+      state: "pending",
+      version: 1,
+      commissionIds: [
+        "6c000000-0000-4000-8000-000000000011",
+        "6c000000-0000-4000-8000-000000000012",
+      ],
+      providerName: null,
+      externalReference: null,
+      paidAt: null,
+      createdAt: now.toISOString(),
+    });
+    expect(Object.isFrozen(draft)).toBe(true);
+    expect(Object.isFrozen(draft.commissionIds)).toBe(true);
+
+    expect(() => createAffiliatePayoutBatchDraft({
+      payoutId: "6c000000-0000-4000-8000-000000000002",
+      idempotencyKey: "affiliate-payout-batch:6c:below",
+      createdAt: now,
+      profile: Object.freeze({ id: profileId, status: "active" as const }),
+      policy: activeAffiliatePolicy,
+      commissions: Object.freeze([
+        Object.freeze({ id: "6c000000-0000-4000-8000-000000000021", affiliateProfileId: profileId, affiliatePolicyId: activeAffiliatePolicy.id, affiliatePolicyVersion: 1, grossCommissionMinor: 4_999, reversedCommissionMinor: 0, currency: "USD", status: "approved" as const, approvalEligibleAt: "2026-08-27T19:00:00.000Z", payoutId: null }),
+      ]),
+    })).toThrow(/threshold/u);
+  });
+
+  it("honors a retired immutable policy snapshot for an active affiliate obligation", () => {
+    const retiredPolicy = Object.freeze({
+      ...activeAffiliatePolicy,
+      status: "retired" as const,
+      supersededAt: "2026-08-20T00:00:00.000Z",
+    });
+    expect(createAffiliatePayoutBatchDraft({
+      payoutId: "6c000000-0000-4000-8000-000000000003",
+      idempotencyKey: "affiliate-payout-batch:6c:retired-policy",
+      createdAt: now,
+      profile: Object.freeze({ id: profileId, status: "active" as const }),
+      policy: retiredPolicy,
+      commissions: Object.freeze([
+        Object.freeze({ id: "6c000000-0000-4000-8000-000000000031", affiliateProfileId: profileId, affiliatePolicyId: retiredPolicy.id, affiliatePolicyVersion: 1, grossCommissionMinor: 5_000, reversedCommissionMinor: 0, currency: "USD", status: "approved" as const, approvalEligibleAt: "2026-08-27T19:00:00.000Z", payoutId: null }),
+      ]),
+    })).toMatchObject({ amountMinor: 5_000, affiliatePolicyVersion: 1 });
+  });
+});
+
+const payoutAdmin: Principal = Object.freeze({
+  actorId: "6c000000-0000-4000-8000-000000000090",
+  clerkUserId: "clerk_task_6c_payout_admin",
+  buyerStatus: null,
+  capabilities: Object.freeze(["affiliate:payout"] as const),
+  mfaSatisfied: true,
+});
+
+const payoutDraft = Object.freeze({
+  id: "6c000000-0000-4000-8000-000000000001",
+  affiliateProfileId: profileId,
+  affiliatePolicyId: activeAffiliatePolicy.id,
+  affiliatePolicyVersion: 1,
+  idempotencyKey: "affiliate-payout-batch:6c:one",
+  amountMinor: 5_000,
+  currency: "USD" as const,
+  state: "pending" as const,
+  version: 1 as const,
+  commissionIds: Object.freeze([
+    "6c000000-0000-4000-8000-000000000011",
+    "6c000000-0000-4000-8000-000000000012",
+  ]),
+  providerName: null,
+  externalReference: null,
+  paidAt: null,
+  createdAt: now.toISOString(),
+});
+
+describe("affiliate payout service", () => {
+  it("authorizes one MFA payout principal and keeps money and commission selection server-side", async () => {
+    const createInTransaction = vi.fn<AffiliatePayoutCreateTransaction>()
+      .mockResolvedValue(Object.freeze({ status: "applied", payout: payoutDraft }));
+    const markPaidInTransaction = vi.fn<AffiliatePayoutPaidTransaction>();
+    const service = createAffiliatePayoutService({
+      clock: () => new Date(now),
+      createPayoutId: () => payoutDraft.id,
+      createInTransaction,
+      markPaidInTransaction,
+    });
+
+    const result = await service.createBatch({
+      principal: payoutAdmin,
+      profileId,
+      idempotencyKey: payoutDraft.idempotencyKey,
+      correlationId: "task-6c-create-payout-one",
+    });
+
+    expect(createInTransaction).toHaveBeenCalledWith({
+      actorUserId: payoutAdmin.actorId,
+      payoutId: payoutDraft.id,
+      profileId,
+      idempotencyKey: payoutDraft.idempotencyKey,
+      correlationId: "task-6c-create-payout-one",
+      createdAt: now,
+    });
+    expect(result).toEqual({
+      status: "created",
+      payout: {
+        id: payoutDraft.id,
+        affiliateProfileId: profileId,
+        affiliatePolicyId: activeAffiliatePolicy.id,
+        affiliatePolicyVersion: 1,
+        amountMinor: 5_000,
+        currency: "USD",
+        state: "pending",
+        version: 1,
+        commissionCount: 2,
+        providerName: null,
+        externalReference: null,
+        createdAt: now.toISOString(),
+        paidAt: null,
+      },
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(markPaidInTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing MFA", { ...payoutAdmin, mfaSatisfied: false }],
+    ["missing payout capability", { ...payoutAdmin, capabilities: Object.freeze(["growth:manage"] as const) }],
+  ])("denies %s before a payout transaction", async (_label, principal) => {
+    const createInTransaction = vi.fn<AffiliatePayoutCreateTransaction>();
+    const service = createAffiliatePayoutService({
+      clock: () => new Date(now),
+      createPayoutId: () => payoutDraft.id,
+      createInTransaction,
+      markPaidInTransaction: vi.fn<AffiliatePayoutPaidTransaction>(),
+    });
+
+    await expect(service.createBatch({
+      principal,
+      profileId,
+      idempotencyKey: payoutDraft.idempotencyKey,
+      correlationId: "task-6c-create-payout-denied",
+    })).rejects.toMatchObject({ code: "authorization_denied" });
+    expect(createInTransaction).not.toHaveBeenCalled();
+  });
+
+  it("records an externally completed payment with expected-version CAS and bounded evidence", async () => {
+    const paidAt = new Date("2026-08-28T20:00:00.000Z");
+    const markPaidInTransaction = vi.fn<AffiliatePayoutPaidTransaction>()
+      .mockResolvedValue(Object.freeze({
+        status: "applied",
+        payout: Object.freeze({
+          ...payoutDraft,
+          state: "paid" as const,
+          version: 2,
+          providerName: "ACH operator",
+          externalReference: "bank-confirmation-6c-001",
+          paidAt: paidAt.toISOString(),
+        }),
+      }));
+    const service = createAffiliatePayoutService({
+      clock: () => new Date(paidAt),
+      createPayoutId: () => payoutDraft.id,
+      createInTransaction: vi.fn<AffiliatePayoutCreateTransaction>(),
+      markPaidInTransaction,
+    });
+
+    const result = await service.markPaid({
+      principal: payoutAdmin,
+      payoutId: payoutDraft.id,
+      expectedVersion: 1,
+      idempotencyKey: "affiliate-payout-paid:6c:one",
+      providerName: "ACH operator",
+      externalReference: "bank-confirmation-6c-001",
+      correlationId: "task-6c-record-paid-one",
+    });
+
+    expect(markPaidInTransaction).toHaveBeenCalledWith({
+      actorUserId: payoutAdmin.actorId,
+      payoutId: payoutDraft.id,
+      expectedVersion: 1,
+      idempotencyKey: "affiliate-payout-paid:6c:one",
+      providerName: "ACH operator",
+      externalReference: "bank-confirmation-6c-001",
+      correlationId: "task-6c-record-paid-one",
+      paidAt,
+    });
+    expect(result).toMatchObject({
+      status: "paid",
+      payout: {
+        state: "paid",
+        version: 2,
+        providerName: "ACH operator",
+        externalReference: "bank-confirmation-6c-001",
+      },
+    });
+  });
+
+  it("denies paid recording without a nonempty external reference before persistence", async () => {
+    const markPaidInTransaction = vi.fn<AffiliatePayoutPaidTransaction>();
+    const service = createAffiliatePayoutService({
+      clock: () => new Date(now),
+      createPayoutId: () => payoutDraft.id,
+      createInTransaction: vi.fn<AffiliatePayoutCreateTransaction>(),
+      markPaidInTransaction,
+    });
+
+    await expect(service.markPaid({
+      principal: payoutAdmin,
+      payoutId: payoutDraft.id,
+      expectedVersion: 1,
+      idempotencyKey: "affiliate-payout-paid:6c:missing-reference",
+      providerName: "ACH operator",
+      externalReference: "",
+      correlationId: "task-6c-record-paid-missing-reference",
+    })).rejects.toMatchObject({ code: "invalid_input" });
+    expect(markPaidInTransaction).not.toHaveBeenCalled();
+  });
 });
 
 describe("authoritative affiliate commission calculation", () => {

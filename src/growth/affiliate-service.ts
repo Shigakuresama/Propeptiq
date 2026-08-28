@@ -36,6 +36,695 @@ const MAXIMUM_CHANNEL_LENGTH = 200;
 export type AffiliatePromotionMethod = "website" | "social" | "email" | "other";
 export type AffiliateProfileStatus = "pending" | "active" | "rejected" | "suspended";
 
+export type AffiliatePayoutCommissionCandidate = Readonly<{
+  id: string;
+  affiliateProfileId: string;
+  affiliatePolicyId: string;
+  affiliatePolicyVersion: number;
+  grossCommissionMinor: number;
+  reversedCommissionMinor: number;
+  currency: string;
+  status: "pending" | "approved" | "paid" | "reversed";
+  approvalEligibleAt: string | null;
+  payoutId: string | null;
+}>;
+
+export type AffiliatePayoutBatchDraft = Readonly<{
+  id: string;
+  affiliateProfileId: string;
+  affiliatePolicyId: string;
+  affiliatePolicyVersion: number;
+  idempotencyKey: string;
+  amountMinor: number;
+  currency: "USD";
+  state: "pending";
+  version: 1;
+  commissionIds: readonly string[];
+  providerName: null;
+  externalReference: null;
+  paidAt: null;
+  createdAt: string;
+}>;
+
+export type AffiliatePayoutTransactionRecord = Readonly<{
+  id: string;
+  affiliateProfileId: string;
+  affiliatePolicyId: string;
+  affiliatePolicyVersion: number;
+  idempotencyKey: string;
+  amountMinor: number;
+  currency: "USD";
+  state: "pending" | "paid";
+  version: number;
+  commissionIds: readonly string[];
+  providerName: string | null;
+  externalReference: string | null;
+  paidAt: string | null;
+  createdAt: string;
+}>;
+
+export type AffiliatePayoutCreateTransaction = (input: Readonly<{
+  actorUserId: string;
+  payoutId: string;
+  profileId: string;
+  idempotencyKey: string;
+  correlationId: string;
+  createdAt: Date;
+}>) => Promise<Readonly<{
+  status: "applied" | "idempotent";
+  payout: AffiliatePayoutTransactionRecord;
+}>>;
+
+export type AffiliatePayoutPaidTransaction = (input: Readonly<{
+  actorUserId: string;
+  payoutId: string;
+  expectedVersion: number;
+  idempotencyKey: string;
+  providerName: string;
+  externalReference: string;
+  correlationId: string;
+  paidAt: Date;
+}>) => Promise<Readonly<{
+  status: "applied" | "idempotent";
+  payout: AffiliatePayoutTransactionRecord;
+}>>;
+
+export type AffiliatePayoutErrorCode =
+  | "authorization_denied"
+  | "invalid_input"
+  | "profile_ineligible"
+  | "threshold_not_met"
+  | "idempotency_conflict"
+  | "version_conflict"
+  | "invalid_transition"
+  | "audit_conflict"
+  | "persistence_conflict";
+
+export class AffiliatePayoutError extends Error {
+  constructor(readonly code: AffiliatePayoutErrorCode) {
+    super(code);
+    this.name = "AffiliatePayoutError";
+  }
+}
+
+export function createAffiliatePayoutBatchDraft(input: Readonly<{
+  payoutId: string;
+  idempotencyKey: string;
+  createdAt: Date;
+  profile: Readonly<{ id: string; status: AffiliateProfileStatus }>;
+  policy: AffiliatePolicy;
+  commissions: readonly AffiliatePayoutCommissionCandidate[];
+}>): AffiliatePayoutBatchDraft {
+  const createdAt = input.createdAt.getTime();
+  if (!UUID_PATTERN.test(input.payoutId) || !UUID_PATTERN.test(input.profile.id) ||
+      input.idempotencyKey.length < 1 || input.idempotencyKey.length > 200 ||
+      !Number.isFinite(createdAt) || input.profile.status !== "active" ||
+      (input.policy.status !== "active" && input.policy.status !== "retired") ||
+      input.policy.currency !== "USD" ||
+      !Number.isSafeInteger(input.policy.version) || input.policy.version < 1 ||
+      !Number.isSafeInteger(input.policy.payoutThresholdMinor) ||
+      input.policy.payoutThresholdMinor < 1) {
+    throw new Error("Invalid affiliate payout batch request");
+  }
+
+  const eligible = input.commissions.filter((commission) => {
+    const eligibleAt = commission.approvalEligibleAt === null
+      ? Number.NaN
+      : new Date(commission.approvalEligibleAt).getTime();
+    return UUID_PATTERN.test(commission.id) &&
+      commission.affiliateProfileId === input.profile.id &&
+      commission.affiliatePolicyId === input.policy.id &&
+      commission.affiliatePolicyVersion === input.policy.version &&
+      commission.status === "approved" && commission.payoutId === null &&
+      commission.currency === input.policy.currency &&
+      Number.isFinite(eligibleAt) && eligibleAt <= createdAt &&
+      Number.isSafeInteger(commission.grossCommissionMinor) &&
+      Number.isSafeInteger(commission.reversedCommissionMinor) &&
+      commission.grossCommissionMinor >= commission.reversedCommissionMinor &&
+      commission.reversedCommissionMinor >= 0;
+  }).sort((left, right) => left.id.localeCompare(right.id));
+
+  const commissionIds = eligible.map((commission) => commission.id);
+  if (new Set(commissionIds).size !== commissionIds.length) {
+    throw new Error("Duplicate affiliate payout commission");
+  }
+  const amountMinor = eligible.reduce((total, commission) => {
+    const next = total + commission.grossCommissionMinor - commission.reversedCommissionMinor;
+    if (!Number.isSafeInteger(next)) throw new Error("Invalid affiliate payout total");
+    return next;
+  }, 0);
+  if (amountMinor < input.policy.payoutThresholdMinor) {
+    throw new Error("Affiliate payout threshold not met");
+  }
+
+  return Object.freeze({
+    id: input.payoutId,
+    affiliateProfileId: input.profile.id,
+    affiliatePolicyId: input.policy.id,
+    affiliatePolicyVersion: input.policy.version,
+    idempotencyKey: input.idempotencyKey,
+    amountMinor,
+    currency: "USD",
+    state: "pending",
+    version: 1,
+    commissionIds: Object.freeze(commissionIds),
+    providerName: null,
+    externalReference: null,
+    paidAt: null,
+    createdAt: input.createdAt.toISOString(),
+  });
+}
+
+function boundedPayoutText(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value === value.trim() &&
+    value.length > 0 && value.length <= maximum &&
+    !/[\p{Cc}\p{Cf}]/u.test(value);
+}
+
+function authorizeAffiliatePayout(principal: Principal): void {
+  const decision = authorizeOperation({
+    principal,
+    operation: "affiliate.payout",
+    resource: { relation: "capability_only" },
+  });
+  if (!decision.allowed) throw new AffiliatePayoutError("authorization_denied");
+}
+
+function payoutProjection(record: AffiliatePayoutTransactionRecord) {
+  return Object.freeze({
+    id: record.id,
+    affiliateProfileId: record.affiliateProfileId,
+    affiliatePolicyId: record.affiliatePolicyId,
+    affiliatePolicyVersion: record.affiliatePolicyVersion,
+    amountMinor: record.amountMinor,
+    currency: record.currency,
+    state: record.state,
+    version: record.version,
+    commissionCount: record.commissionIds.length,
+    providerName: record.providerName,
+    externalReference: record.externalReference,
+    createdAt: record.createdAt,
+    paidAt: record.paidAt,
+  });
+}
+
+function validPayoutRecord(record: unknown): record is AffiliatePayoutTransactionRecord {
+  if (!isRecord(record) || !Array.isArray(record.commissionIds)) return false;
+  return UUID_PATTERN.test(String(record.id ?? "")) &&
+    UUID_PATTERN.test(String(record.affiliateProfileId ?? "")) &&
+    UUID_PATTERN.test(String(record.affiliatePolicyId ?? "")) &&
+    Number.isSafeInteger(record.affiliatePolicyVersion) &&
+    (record.affiliatePolicyVersion as number) > 0 &&
+    boundedPayoutText(record.idempotencyKey, 200) &&
+    Number.isSafeInteger(record.amountMinor) && (record.amountMinor as number) > 0 &&
+    record.currency === "USD" &&
+    (record.state === "pending" || record.state === "paid") &&
+    Number.isSafeInteger(record.version) && (record.version as number) > 0 &&
+    record.commissionIds.length > 0 &&
+    record.commissionIds.every((id) => typeof id === "string" && UUID_PATTERN.test(id)) &&
+    new Set(record.commissionIds).size === record.commissionIds.length &&
+    typeof record.createdAt === "string" && Number.isFinite(new Date(record.createdAt).getTime()) &&
+    ((record.state === "pending" && record.version === 1 &&
+      record.providerName === null && record.externalReference === null && record.paidAt === null) ||
+      (record.state === "paid" && boundedPayoutText(record.providerName, 120) &&
+        boundedPayoutText(record.externalReference, 200) &&
+        typeof record.paidAt === "string" && Number.isFinite(new Date(record.paidAt).getTime())));
+}
+
+export function createAffiliatePayoutService(dependencies: Readonly<{
+  clock: () => Date;
+  createPayoutId: () => string;
+  createInTransaction: AffiliatePayoutCreateTransaction;
+  markPaidInTransaction: AffiliatePayoutPaidTransaction;
+}>) {
+  return Object.freeze({
+    async createBatch(value: unknown) {
+      if (!isRecord(value) || Object.keys(value).length !== 4 ||
+          !Object.hasOwn(value, "principal") || !Object.hasOwn(value, "profileId") ||
+          !Object.hasOwn(value, "idempotencyKey") || !Object.hasOwn(value, "correlationId") ||
+          !UUID_PATTERN.test(String(value.profileId ?? "")) ||
+          !boundedPayoutText(value.idempotencyKey, 200) ||
+          !boundedPayoutText(value.correlationId, 200) ||
+          (value.correlationId as string).length < 16) {
+        throw new AffiliatePayoutError("invalid_input");
+      }
+      authorizeAffiliatePayout(value.principal as Principal);
+      const createdAt = dependencies.clock();
+      const payoutId = dependencies.createPayoutId();
+      if (!Number.isFinite(createdAt.getTime()) || !UUID_PATTERN.test(payoutId)) {
+        throw new AffiliatePayoutError("invalid_input");
+      }
+      const result = await dependencies.createInTransaction(Object.freeze({
+        actorUserId: (value.principal as Principal).actorId,
+        payoutId,
+        profileId: value.profileId as string,
+        idempotencyKey: value.idempotencyKey as string,
+        correlationId: value.correlationId as string,
+        createdAt: new Date(createdAt),
+      }));
+      if (!isRecord(result) || (result.status !== "applied" && result.status !== "idempotent") ||
+          !validPayoutRecord(result.payout) || result.payout.affiliateProfileId !== value.profileId ||
+          result.payout.idempotencyKey !== value.idempotencyKey ||
+          result.payout.state !== "pending" || result.payout.version !== 1 ||
+          (result.status === "applied" && result.payout.id !== payoutId) ||
+          new Date(result.payout.createdAt).getTime() > createdAt.getTime()) {
+        throw new AffiliatePayoutError("persistence_conflict");
+      }
+      return Object.freeze({
+        status: result.status === "applied" ? "created" as const : "idempotent" as const,
+        payout: payoutProjection(result.payout),
+      });
+    },
+
+    async markPaid(value: unknown) {
+      if (!isRecord(value) || Object.keys(value).length !== 7 ||
+          !Object.hasOwn(value, "principal") || !UUID_PATTERN.test(String(value.payoutId ?? "")) ||
+          !Number.isSafeInteger(value.expectedVersion) || (value.expectedVersion as number) < 1 ||
+          !boundedPayoutText(value.idempotencyKey, 200) ||
+          !boundedPayoutText(value.providerName, 120) ||
+          !boundedPayoutText(value.externalReference, 200) ||
+          !boundedPayoutText(value.correlationId, 200) ||
+          (value.correlationId as string).length < 16) {
+        throw new AffiliatePayoutError("invalid_input");
+      }
+      authorizeAffiliatePayout(value.principal as Principal);
+      const paidAt = dependencies.clock();
+      if (!Number.isFinite(paidAt.getTime())) throw new AffiliatePayoutError("invalid_input");
+      const result = await dependencies.markPaidInTransaction(Object.freeze({
+        actorUserId: (value.principal as Principal).actorId,
+        payoutId: value.payoutId as string,
+        expectedVersion: value.expectedVersion as number,
+        idempotencyKey: value.idempotencyKey as string,
+        providerName: value.providerName as string,
+        externalReference: value.externalReference as string,
+        correlationId: value.correlationId as string,
+        paidAt: new Date(paidAt),
+      }));
+      if (!isRecord(result) || (result.status !== "applied" && result.status !== "idempotent") ||
+          !validPayoutRecord(result.payout) || result.payout.id !== value.payoutId ||
+          result.payout.state !== "paid" ||
+          result.payout.version !== (value.expectedVersion as number) + 1 ||
+          result.payout.providerName !== value.providerName ||
+          result.payout.externalReference !== value.externalReference ||
+          result.payout.paidAt === null ||
+          new Date(result.payout.paidAt).getTime() > paidAt.getTime()) {
+        throw new AffiliatePayoutError("persistence_conflict");
+      }
+      return Object.freeze({
+        status: result.status === "applied" ? "paid" as const : "idempotent" as const,
+        payout: payoutProjection(result.payout),
+      });
+    },
+  });
+}
+
+type AffiliatePayoutSqlRow = {
+  id: string;
+  affiliateProfileId: string;
+  affiliatePolicyId: string;
+  affiliatePolicyVersion: number | string;
+  idempotencyKey: string;
+  amountMinor: number | string;
+  currency: string;
+  state: "pending" | "paid";
+  version: number | string;
+  paidIdempotencyKey: string | null;
+  externalProvider: string | null;
+  externalReference: string | null;
+  createdAt: Date | string;
+  paidAt: Date | string | null;
+};
+
+const affiliatePayoutSqlProjection = `id::text AS id,
+  affiliate_profile_id::text AS "affiliateProfileId",
+  affiliate_policy_id::text AS "affiliatePolicyId",
+  affiliate_policy_version AS "affiliatePolicyVersion",
+  idempotency_key AS "idempotencyKey", amount_minor AS "amountMinor",
+  currency, state, version, paid_idempotency_key AS "paidIdempotencyKey",
+  external_provider AS "externalProvider",
+  external_reference AS "externalReference", created_at AS "createdAt",
+  paid_at AS "paidAt"`;
+
+async function payoutCommissionIds(
+  client: GrowthSqlClient,
+  payoutId: string,
+): Promise<readonly string[]> {
+  const rows = await client.query<{ id: string }>(
+    `SELECT id::text AS id FROM affiliate_commissions
+     WHERE payout_id = $1::uuid ORDER BY id`,
+    [payoutId],
+  );
+  return Object.freeze(rows.rows.map(({ id }) => id));
+}
+
+function payoutRecord(
+  row: AffiliatePayoutSqlRow,
+  commissionIds: readonly string[],
+): AffiliatePayoutTransactionRecord {
+  const createdAt = new Date(row.createdAt);
+  const paidAt = row.paidAt === null ? null : new Date(row.paidAt);
+  const record = Object.freeze({
+    id: row.id,
+    affiliateProfileId: row.affiliateProfileId,
+    affiliatePolicyId: row.affiliatePolicyId,
+    affiliatePolicyVersion: Number(row.affiliatePolicyVersion),
+    idempotencyKey: row.idempotencyKey,
+    amountMinor: Number(row.amountMinor),
+    currency: row.currency as "USD",
+    state: row.state,
+    version: Number(row.version),
+    commissionIds: Object.freeze([...commissionIds]),
+    providerName: row.externalProvider,
+    externalReference: row.externalReference,
+    paidAt: paidAt === null ? null : paidAt.toISOString(),
+    createdAt: createdAt.toISOString(),
+  });
+  if (!validPayoutRecord(record)) throw new AffiliatePayoutError("persistence_conflict");
+  return record;
+}
+
+function payoutCreationReplayRecord(
+  row: AffiliatePayoutSqlRow,
+  commissionIds: readonly string[],
+): AffiliatePayoutTransactionRecord {
+  return payoutRecord({
+    ...row,
+    state: "pending",
+    version: 1,
+    externalProvider: null,
+    externalReference: null,
+    paidAt: null,
+  }, commissionIds);
+}
+
+function validCreatePayoutTransactionInput(
+  input: Parameters<AffiliatePayoutCreateTransaction>[0],
+): boolean {
+  return UUID_PATTERN.test(input.actorUserId) && UUID_PATTERN.test(input.payoutId) &&
+    UUID_PATTERN.test(input.profileId) && boundedPayoutText(input.idempotencyKey, 200) &&
+    boundedPayoutText(input.correlationId, 200) && input.correlationId.length >= 16 &&
+    input.createdAt instanceof Date && Number.isFinite(input.createdAt.getTime());
+}
+
+async function createPayoutWithPostgresClient(
+  client: GrowthSqlClient,
+  input: Parameters<AffiliatePayoutCreateTransaction>[0],
+): Promise<Awaited<ReturnType<AffiliatePayoutCreateTransaction>>> {
+  if (!validCreatePayoutTransactionInput(input)) throw new AffiliatePayoutError("invalid_input");
+  const existing = await client.query<AffiliatePayoutSqlRow>(
+    `SELECT ${affiliatePayoutSqlProjection} FROM affiliate_payouts
+     WHERE idempotency_key = $1 FOR UPDATE`,
+    [input.idempotencyKey],
+  );
+  if (existing.rows[0]) {
+    const row = existing.rows[0];
+    if (row.affiliateProfileId !== input.profileId) {
+      throw new AffiliatePayoutError("idempotency_conflict");
+    }
+    const commissionIds = await payoutCommissionIds(client, row.id);
+    return Object.freeze({
+      status: "idempotent" as const,
+      payout: payoutCreationReplayRecord(row, commissionIds),
+    });
+  }
+
+  const profiles = await client.query<{ id: string; status: AffiliateProfileStatus }>(
+    `SELECT id::text AS id, status FROM affiliate_profiles
+     WHERE id = $1::uuid FOR UPDATE`,
+    [input.profileId],
+  );
+  if (profiles.rows.length !== 1 || profiles.rows[0]?.status !== "active") {
+    throw new AffiliatePayoutError("profile_ineligible");
+  }
+
+  type CandidateRow = {
+    id: string;
+    affiliateProfileId: string;
+    affiliatePolicyId: string;
+    affiliatePolicyVersion: number | string;
+    grossCommissionMinor: number | string;
+    reversedCommissionMinor: number | string;
+    status: "pending" | "approved";
+    approvalEligibleAt: Date | string;
+    payoutId: null;
+    policyStatus: "draft" | "active" | "retired";
+    attributionDays: number | string;
+    firstOrderCommissionBasisPoints: number | string;
+    reorderCommissionBasisPoints: number | string;
+    reorderWindowDays: number | string;
+    approvalDelayDays: number | string;
+    payoutThresholdMinor: number | string;
+    currency: string;
+    effectiveAt: Date | string;
+    supersededAt: Date | string | null;
+  };
+  const candidates = await client.query<CandidateRow>(
+    `SELECT ac.id::text AS id,
+            ac.affiliate_profile_id::text AS "affiliateProfileId",
+            ac.affiliate_policy_id::text AS "affiliatePolicyId",
+            ac.affiliate_policy_version AS "affiliatePolicyVersion",
+            ac.gross_commission_minor AS "grossCommissionMinor",
+            ac.reversed_commission_minor AS "reversedCommissionMinor",
+            ac.status, ac.approval_eligible_at AS "approvalEligibleAt",
+            ac.payout_id::text AS "payoutId", ap.status AS "policyStatus",
+            ap.attribution_days AS "attributionDays",
+            ap.first_order_commission_basis_points AS "firstOrderCommissionBasisPoints",
+            ap.reorder_commission_basis_points AS "reorderCommissionBasisPoints",
+            ap.reorder_window_days AS "reorderWindowDays",
+            ap.approval_delay_days AS "approvalDelayDays",
+            ap.payout_threshold_minor AS "payoutThresholdMinor",
+            ap.currency, ap.effective_at AS "effectiveAt",
+            ap.superseded_at AS "supersededAt"
+     FROM affiliate_commissions ac
+     JOIN affiliate_policies ap
+       ON ap.id = ac.affiliate_policy_id
+      AND ap.version = ac.affiliate_policy_version
+     WHERE ac.affiliate_profile_id = $1::uuid
+       AND ac.status IN ('pending', 'approved')
+       AND ac.payout_id IS NULL
+       AND ac.approval_eligible_at IS NOT NULL
+       AND ac.approval_eligible_at <= $2::timestamptz
+       AND ap.currency = 'USD'
+     ORDER BY ac.approval_eligible_at, ac.created_at, ac.id
+     FOR UPDATE OF ac`,
+    [input.profileId, input.createdAt.toISOString()],
+  );
+  const first = candidates.rows[0];
+  if (!first) throw new AffiliatePayoutError("threshold_not_met");
+  const sameSnapshot = candidates.rows.filter((row) =>
+    row.affiliatePolicyId === first.affiliatePolicyId &&
+    Number(row.affiliatePolicyVersion) === Number(first.affiliatePolicyVersion));
+  const policy = Object.freeze({
+    id: first.affiliatePolicyId,
+    version: Number(first.affiliatePolicyVersion),
+    status: first.policyStatus,
+    attributionDays: Number(first.attributionDays),
+    firstOrderCommissionBasisPoints: Number(first.firstOrderCommissionBasisPoints),
+    reorderCommissionBasisPoints: Number(first.reorderCommissionBasisPoints),
+    reorderWindowDays: Number(first.reorderWindowDays),
+    approvalDelayDays: Number(first.approvalDelayDays),
+    payoutThresholdMinor: Number(first.payoutThresholdMinor),
+    currency: first.currency,
+    effectiveAt: new Date(first.effectiveAt).toISOString(),
+    supersededAt: first.supersededAt === null ? null : new Date(first.supersededAt).toISOString(),
+  }) as AffiliatePolicy;
+  let draft: AffiliatePayoutBatchDraft;
+  try {
+    draft = createAffiliatePayoutBatchDraft({
+      payoutId: input.payoutId,
+      idempotencyKey: input.idempotencyKey,
+      createdAt: input.createdAt,
+      profile: profiles.rows[0]!,
+      policy,
+      commissions: sameSnapshot.map((row) => Object.freeze({
+        id: row.id,
+        affiliateProfileId: row.affiliateProfileId,
+        affiliatePolicyId: row.affiliatePolicyId,
+        affiliatePolicyVersion: Number(row.affiliatePolicyVersion),
+        grossCommissionMinor: Number(row.grossCommissionMinor),
+        reversedCommissionMinor: Number(row.reversedCommissionMinor),
+        currency: row.currency,
+        status: "approved" as const,
+        approvalEligibleAt: new Date(row.approvalEligibleAt).toISOString(),
+        payoutId: row.payoutId,
+      })),
+    });
+  } catch (error) {
+    if (error instanceof Error && /threshold/u.test(error.message)) {
+      throw new AffiliatePayoutError("threshold_not_met");
+    }
+    throw new AffiliatePayoutError("persistence_conflict");
+  }
+
+  const inserted = await client.query<AffiliatePayoutSqlRow>(
+    `INSERT INTO affiliate_payouts
+       (id, affiliate_profile_id, affiliate_policy_id, affiliate_policy_version,
+        idempotency_key, amount_minor, currency, state, version, created_at)
+     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, 'USD', 'pending', 1,
+             $7::timestamptz)
+     RETURNING ${affiliatePayoutSqlProjection}`,
+    [draft.id, draft.affiliateProfileId, draft.affiliatePolicyId,
+      draft.affiliatePolicyVersion, draft.idempotencyKey, draft.amountMinor,
+      draft.createdAt],
+  );
+  const consumed = await client.query<{ id: string }>(
+    `UPDATE affiliate_commissions
+     SET status = 'approved', payout_id = $1::uuid, updated_at = $3::timestamptz
+     WHERE id = ANY($2::uuid[]) AND affiliate_profile_id = $4::uuid
+       AND affiliate_policy_id = $5::uuid AND affiliate_policy_version = $6
+       AND status IN ('pending', 'approved') AND payout_id IS NULL
+       AND approval_eligible_at <= $3::timestamptz
+     RETURNING id::text AS id`,
+    [draft.id, draft.commissionIds, draft.createdAt, draft.affiliateProfileId,
+      draft.affiliatePolicyId, draft.affiliatePolicyVersion],
+  );
+  if (consumed.rows.length !== draft.commissionIds.length) {
+    throw new AffiliatePayoutError("persistence_conflict");
+  }
+  try {
+    await client.query(
+      `INSERT INTO admin_audit
+         (actor_user_id, action, resource_type, resource_id, correlation_id,
+          metadata, occurred_at)
+       VALUES ($1::uuid, 'affiliate.payout.created', 'affiliate_payout', $2,
+               $3, $4::jsonb, $5::timestamptz)`,
+      [input.actorUserId, draft.id, input.correlationId, JSON.stringify({
+        amountMinor: draft.amountMinor,
+        currency: draft.currency,
+        commissionCount: draft.commissionIds.length,
+        affiliatePolicyVersion: draft.affiliatePolicyVersion,
+        fromVersion: 0,
+        toVersion: 1,
+      }), draft.createdAt],
+    );
+  } catch {
+    throw new AffiliatePayoutError("audit_conflict");
+  }
+  return Object.freeze({
+    status: "applied" as const,
+    payout: payoutRecord(inserted.rows[0]!, draft.commissionIds),
+  });
+}
+
+function validPaidPayoutTransactionInput(
+  input: Parameters<AffiliatePayoutPaidTransaction>[0],
+): boolean {
+  return UUID_PATTERN.test(input.actorUserId) && UUID_PATTERN.test(input.payoutId) &&
+    Number.isSafeInteger(input.expectedVersion) && input.expectedVersion > 0 &&
+    boundedPayoutText(input.idempotencyKey, 200) &&
+    boundedPayoutText(input.providerName, 120) &&
+    boundedPayoutText(input.externalReference, 200) &&
+    boundedPayoutText(input.correlationId, 200) && input.correlationId.length >= 16 &&
+    input.paidAt instanceof Date && Number.isFinite(input.paidAt.getTime());
+}
+
+async function markPayoutPaidWithPostgresClient(
+  client: GrowthSqlClient,
+  input: Parameters<AffiliatePayoutPaidTransaction>[0],
+): Promise<Awaited<ReturnType<AffiliatePayoutPaidTransaction>>> {
+  if (!validPaidPayoutTransactionInput(input)) throw new AffiliatePayoutError("invalid_input");
+  const loaded = await client.query<AffiliatePayoutSqlRow>(
+    `SELECT ${affiliatePayoutSqlProjection} FROM affiliate_payouts
+     WHERE id = $1::uuid FOR UPDATE`,
+    [input.payoutId],
+  );
+  const row = loaded.rows[0];
+  if (!row) throw new AffiliatePayoutError("invalid_transition");
+  const commissionIds = await payoutCommissionIds(client, input.payoutId);
+  if (row.state === "paid") {
+    if (row.paidIdempotencyKey !== input.idempotencyKey) {
+      throw new AffiliatePayoutError("invalid_transition");
+    }
+    if (Number(row.version) !== input.expectedVersion + 1 ||
+        row.externalProvider !== input.providerName ||
+        row.externalReference !== input.externalReference) {
+      throw new AffiliatePayoutError("idempotency_conflict");
+    }
+    return Object.freeze({
+      status: "idempotent" as const,
+      payout: payoutRecord(row, commissionIds),
+    });
+  }
+  if (Number(row.version) !== input.expectedVersion) {
+    throw new AffiliatePayoutError("version_conflict");
+  }
+  const commissions = await client.query<{ id: string; status: string; netMinor: number | string }>(
+    `SELECT id::text AS id, status,
+            gross_commission_minor - reversed_commission_minor AS "netMinor"
+     FROM affiliate_commissions WHERE payout_id = $1::uuid
+     ORDER BY id FOR UPDATE`,
+    [input.payoutId],
+  );
+  const total = commissions.rows.reduce((sum, commission) => sum + Number(commission.netMinor), 0);
+  if (commissions.rows.length === 0 || total !== Number(row.amountMinor) ||
+      commissions.rows.some(({ status }) => status !== "approved")) {
+    throw new AffiliatePayoutError("persistence_conflict");
+  }
+  const updated = await client.query<AffiliatePayoutSqlRow>(
+    `UPDATE affiliate_payouts
+     SET state = 'paid', version = version + 1, paid_idempotency_key = $3,
+         external_provider = $4, external_reference = $5,
+         paid_at = $6::timestamptz
+     WHERE id = $1::uuid AND state = 'pending' AND version = $2
+     RETURNING ${affiliatePayoutSqlProjection}`,
+    [input.payoutId, input.expectedVersion, input.idempotencyKey,
+      input.providerName, input.externalReference, input.paidAt.toISOString()],
+  );
+  if (updated.rows.length !== 1) throw new AffiliatePayoutError("version_conflict");
+  const paidCommissions = await client.query<{ id: string }>(
+    `UPDATE affiliate_commissions SET status = 'paid', updated_at = $2::timestamptz
+     WHERE payout_id = $1::uuid AND status = 'approved'
+     RETURNING id::text AS id`,
+    [input.payoutId, input.paidAt.toISOString()],
+  );
+  if (paidCommissions.rows.length !== commissions.rows.length) {
+    throw new AffiliatePayoutError("persistence_conflict");
+  }
+  try {
+    await client.query(
+      `INSERT INTO admin_audit
+         (actor_user_id, action, resource_type, resource_id, correlation_id,
+          metadata, occurred_at)
+       VALUES ($1::uuid, 'affiliate.payout.paid', 'affiliate_payout', $2,
+               $3, $4::jsonb, $5::timestamptz)`,
+      [input.actorUserId, input.payoutId, input.correlationId, JSON.stringify({
+        fromState: "pending",
+        toState: "paid",
+        fromVersion: input.expectedVersion,
+        toVersion: input.expectedVersion + 1,
+      }), input.paidAt.toISOString()],
+    );
+  } catch {
+    throw new AffiliatePayoutError("audit_conflict");
+  }
+  return Object.freeze({
+    status: "applied" as const,
+    payout: payoutRecord(updated.rows[0]!, commissionIds),
+  });
+}
+
+export function createPostgresAffiliatePayoutCreateTransaction(
+  dependencies: Readonly<{ runSerializableTransaction: GrowthTransactionRunner }>,
+): AffiliatePayoutCreateTransaction {
+  return (input) => runSerializableWithRetry(
+    () => dependencies.runSerializableTransaction(
+      (client) => createPayoutWithPostgresClient(client, input),
+      { isolationLevel: "serializable" },
+    ),
+  );
+}
+
+export function createPostgresAffiliatePayoutPaidTransaction(
+  dependencies: Readonly<{ runSerializableTransaction: GrowthTransactionRunner }>,
+): AffiliatePayoutPaidTransaction {
+  return (input) => runSerializableWithRetry(
+    () => dependencies.runSerializableTransaction(
+      (client) => markPayoutPaidWithPostgresClient(client, input),
+      { isolationLevel: "serializable" },
+    ),
+  );
+}
+
 export type AffiliateAttributionCandidate = Readonly<{
   program: "affiliate";
   code: string;

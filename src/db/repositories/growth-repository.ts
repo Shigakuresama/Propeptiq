@@ -116,6 +116,9 @@ export type AffiliatePayoutRecord = Readonly<{
   amountMinor: number;
   currency: "USD";
   state: "pending" | "paid";
+  version: number;
+  externalProvider: string | null;
+  externalReference: string | null;
   createdAt: string;
   paidAt: string | null;
 }>;
@@ -190,6 +193,7 @@ export type GrowthRepository = Readonly<{
   }>) => Promise<PersistenceResult<"payout", AffiliatePayoutRecord>>;
   markAffiliatePayoutPaid: (input: Readonly<{
     payoutId: string;
+    expectedVersion: number;
     idempotencyKey: string;
     externalProvider: string;
     externalReference: string;
@@ -322,6 +326,8 @@ type PayoutRow = {
   amountMinor: number | string;
   currency: "USD";
   state: "pending" | "paid";
+  version: number | string;
+  paidIdempotencyKey: string | null;
   createdAt: Date | string;
   externalProvider: string | null;
   externalReference: string | null;
@@ -999,6 +1005,9 @@ function projectPayout(row: PayoutRow): AffiliatePayoutRecord {
     amountMinor: safeInteger(row.amountMinor),
     currency: row.currency,
     state: row.state,
+    version: safeInteger(row.version),
+    externalProvider: row.externalProvider,
+    externalReference: row.externalReference,
     createdAt: toIso(row.createdAt),
     paidAt: row.paidAt === null ? null : toIso(row.paidAt),
   });
@@ -1008,7 +1017,8 @@ const payoutProjection = `id::text AS id, affiliate_profile_id::text AS "affilia
   affiliate_policy_id::text AS "affiliatePolicyId",
   affiliate_policy_version AS "affiliatePolicyVersion",
   idempotency_key AS "idempotencyKey", amount_minor AS "amountMinor", currency,
-  state, created_at AS "createdAt", external_provider AS "externalProvider",
+  state, version, paid_idempotency_key AS "paidIdempotencyKey",
+  created_at AS "createdAt", external_provider AS "externalProvider",
   external_reference AS "externalReference", paid_at AS "paidAt"`;
 
 async function payoutCommissionIds(client: GrowthSqlClient, payoutId: string): Promise<string[]> {
@@ -1098,6 +1108,7 @@ async function markPayoutPaidInTransaction(
   input: Parameters<GrowthRepository["markAffiliatePayoutPaid"]>[0],
 ): Promise<PersistenceResult<"payout", AffiliatePayoutRecord>> {
   if (!uuidPattern.test(input.payoutId) || !nonblank(input.idempotencyKey) ||
+      !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion <= 0 ||
       !nonblank(input.externalProvider) || input.externalProvider.length > 120 ||
       !nonblank(input.externalReference) || input.externalReference.length > 200 ||
       !Number.isFinite(input.paidAt.getTime())) {
@@ -1108,22 +1119,26 @@ async function markPayoutPaidInTransaction(
     [input.payoutId],
   );
   const row = loaded.rows[0];
-  if (!row || row.idempotencyKey !== input.idempotencyKey) throw new GrowthPersistenceConflict();
+  if (!row) throw new GrowthPersistenceConflict();
   if (row.state === "paid") {
-    if (row.externalProvider !== input.externalProvider ||
-        row.externalReference !== input.externalReference ||
-        row.paidAt === null || toIso(row.paidAt) !== input.paidAt.toISOString()) {
+    if (row.paidIdempotencyKey !== input.idempotencyKey ||
+        safeInteger(row.version) !== input.expectedVersion + 1 ||
+        row.externalProvider !== input.externalProvider ||
+        row.externalReference !== input.externalReference || row.paidAt === null) {
       throw new GrowthPersistenceConflict();
     }
     return Object.freeze({ status: "idempotent", payout: projectPayout(row) });
   }
+  if (safeInteger(row.version) !== input.expectedVersion) throw new GrowthPersistenceConflict();
   const updated = await client.query<PayoutRow>(
     `UPDATE affiliate_payouts
-     SET state = 'paid', external_provider = $2, external_reference = $3,
-         paid_at = $4::timestamptz
-     WHERE id = $1::uuid AND state = 'pending'
+     SET state = 'paid', version = version + 1, paid_idempotency_key = $3,
+         external_provider = $4, external_reference = $5,
+         paid_at = $6::timestamptz
+     WHERE id = $1::uuid AND state = 'pending' AND version = $2
      RETURNING ${payoutProjection}`,
-    [input.payoutId, input.externalProvider, input.externalReference, input.paidAt.toISOString()],
+    [input.payoutId, input.expectedVersion, input.idempotencyKey,
+      input.externalProvider, input.externalReference, input.paidAt.toISOString()],
   );
   if (!updated.rows[0]) throw new GrowthPersistenceConflict();
   const commissions = await client.query<{ id: string }>(

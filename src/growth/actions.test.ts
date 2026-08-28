@@ -6,11 +6,14 @@ import type { Principal } from "@/domain/authorization";
 
 import {
   createAffiliateApplicationAction,
+  createAffiliatePayoutBatchAction,
+  createAffiliatePayoutPaidAction,
   createCustomerReferralEnrollmentAction,
   createSharedSetMutationAction,
 } from "./actions";
 import {
   AffiliateApplicationError,
+  AffiliatePayoutError,
   type AffiliateApplicationResult,
 } from "./affiliate-service";
 import { SharedSetServiceError } from "./shared-set-service";
@@ -20,6 +23,8 @@ const buyerUserId = "53000000-0000-4000-8000-000000000001";
 const otherOwnerUserId = "53000000-0000-4000-8000-000000000099";
 const termsVersionId = "53000000-0000-4000-8000-000000000002";
 const termsContentHash = "a".repeat(64);
+const payoutProfileId = "6c200000-0000-4000-8000-000000000001";
+const payoutId = "6c200000-0000-4000-8000-000000000002";
 const identity: VerifiedIdentity = Object.freeze({
   clerkUserId: "clerk_task_5b_action",
   primaryEmail: "buyer@example.test",
@@ -374,6 +379,149 @@ describe("affiliate application action boundary", () => {
       state: "error",
       code: actionCode,
       application: null,
+    });
+  });
+});
+
+const payoutPrincipal: Principal = Object.freeze({
+  actorId: "6c200000-0000-4000-8000-000000000090",
+  clerkUserId: "clerk_task_6c_action_admin",
+  buyerStatus: null,
+  capabilities: Object.freeze(["affiliate:payout"] as const),
+  mfaSatisfied: true,
+});
+
+const payoutActionResult = Object.freeze({
+  status: "created" as const,
+  payout: Object.freeze({
+    id: payoutId,
+    affiliateProfileId: payoutProfileId,
+    affiliatePolicyId: "6c200000-0000-4000-8000-000000000003",
+    affiliatePolicyVersion: 1,
+    amountMinor: 5_000,
+    currency: "USD" as const,
+    state: "pending" as const,
+    version: 1,
+    commissionCount: 1,
+    providerName: null,
+    externalReference: null,
+    createdAt: now.toISOString(),
+    paidAt: null,
+  }),
+});
+
+function payoutBatchForm() {
+  const value = new FormData();
+  value.set("profileId", payoutProfileId);
+  value.set("idempotencyKey", "task-6c-payout-action-create-one");
+  value.set("correlationId", "task-6c-payout-action-create-correlation");
+  return value;
+}
+
+function payoutPaidForm() {
+  const value = new FormData();
+  value.set("payoutId", payoutId);
+  value.set("expectedVersion", "1");
+  value.set("idempotencyKey", "task-6c-payout-action-paid-one");
+  value.set("providerName", "ACH operator");
+  value.set("externalReference", "bank-confirmation-6c-action-001");
+  value.set("correlationId", "task-6c-payout-action-paid-correlation");
+  return value;
+}
+
+describe("affiliate payout action boundary", () => {
+  it("accepts only profile and idempotency authority for server-selected batching", async () => {
+    const createBatch = vi.fn(async () => payoutActionResult);
+    const action = createAffiliatePayoutBatchAction({
+      environment: { APP_ENV: "production", APP_ORIGIN: "https://propeptiq.example" },
+      loadPrincipal: async () => payoutPrincipal,
+      createBatch,
+    });
+
+    await expect(action(request(), payoutBatchForm())).resolves.toEqual({
+      state: "success",
+      code: "created",
+      payout: payoutActionResult.payout,
+    });
+    expect(createBatch).toHaveBeenCalledWith({
+      principal: payoutPrincipal,
+      profileId: payoutProfileId,
+      idempotencyKey: "task-6c-payout-action-create-one",
+      correlationId: "task-6c-payout-action-create-correlation",
+    });
+  });
+
+  it.each(["amountMinor", "currency", "commissionIds", "affiliatePolicyVersion", "paymentOutcome"])(
+    "rejects browser-supplied %s authority before service selection",
+    async (field) => {
+      const createBatch = vi.fn();
+      const action = createAffiliatePayoutBatchAction({
+        environment: { APP_ENV: "production", APP_ORIGIN: "https://propeptiq.example" },
+        loadPrincipal: async () => payoutPrincipal,
+        createBatch,
+      });
+      const supplied = payoutBatchForm();
+      supplied.set(field, "browser-value");
+
+      await expect(action(request(), supplied)).resolves.toEqual({
+        state: "error", code: "invalid", payout: null,
+      });
+      expect(createBatch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("passes only expected-version and bounded external evidence to paid recording", async () => {
+    const paidResult = Object.freeze({
+      status: "paid" as const,
+      payout: Object.freeze({
+        ...payoutActionResult.payout,
+        state: "paid" as const,
+        version: 2,
+        providerName: "ACH operator",
+        externalReference: "bank-confirmation-6c-action-001",
+        paidAt: now.toISOString(),
+      }),
+    });
+    const markPaid = vi.fn(async () => paidResult);
+    const action = createAffiliatePayoutPaidAction({
+      environment: { APP_ENV: "production", APP_ORIGIN: "https://propeptiq.example" },
+      loadPrincipal: async () => payoutPrincipal,
+      markPaid,
+    });
+
+    await expect(action(request(), payoutPaidForm())).resolves.toEqual({
+      state: "success", code: "paid", payout: paidResult.payout,
+    });
+    expect(markPaid).toHaveBeenCalledWith({
+      principal: payoutPrincipal,
+      payoutId,
+      expectedVersion: 1,
+      idempotencyKey: "task-6c-payout-action-paid-one",
+      providerName: "ACH operator",
+      externalReference: "bank-confirmation-6c-action-001",
+      correlationId: "task-6c-payout-action-paid-correlation",
+    });
+  });
+
+  it("denies missing external evidence, wrong origin, and service conflicts without leaking internals", async () => {
+    const markPaid = vi.fn(async () => {
+      throw new AffiliatePayoutError("version_conflict");
+    });
+    const action = createAffiliatePayoutPaidAction({
+      environment: { APP_ENV: "production", APP_ORIGIN: "https://propeptiq.example" },
+      loadPrincipal: async () => payoutPrincipal,
+      markPaid,
+    });
+    const missing = payoutPaidForm();
+    missing.set("externalReference", "");
+    await expect(action(request(), missing)).resolves.toEqual({
+      state: "error", code: "invalid", payout: null,
+    });
+    await expect(action(request("https://evil.example"), payoutPaidForm())).resolves.toEqual({
+      state: "error", code: "origin", payout: null,
+    });
+    await expect(action(request(), payoutPaidForm())).resolves.toEqual({
+      state: "error", code: "conflict", payout: null,
     });
   });
 });

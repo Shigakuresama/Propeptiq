@@ -18,6 +18,7 @@ import type {
 } from "@/growth/affiliate-service";
 import {
   AffiliateApplicationError,
+  AffiliatePayoutError,
   createAffiliateService,
   createPostgresAffiliateApplicationTransaction,
 } from "@/growth/affiliate-service";
@@ -520,6 +521,181 @@ export async function submitAffiliateApplicationAction(
   } catch {
     return affiliateFailure("unavailable");
   }
+}
+
+type AffiliatePayoutActionPayout = Readonly<{
+  id: string;
+  affiliateProfileId: string;
+  affiliatePolicyId: string;
+  affiliatePolicyVersion: number;
+  amountMinor: number;
+  currency: "USD";
+  state: "pending" | "paid";
+  version: number;
+  commissionCount: number;
+  providerName: string | null;
+  externalReference: string | null;
+  createdAt: string;
+  paidAt: string | null;
+}>;
+
+export type AffiliatePayoutActionResult = Readonly<{
+  state: "success" | "error";
+  code:
+    | "created"
+    | "paid"
+    | "idempotent"
+    | "threshold"
+    | "ineligible"
+    | "conflict"
+    | "identity"
+    | "invalid"
+    | "origin"
+    | "unavailable";
+  payout: AffiliatePayoutActionPayout | null;
+}>;
+
+function payoutActionFailure(
+  code: Exclude<AffiliatePayoutActionResult["code"], "created" | "paid" | "idempotent">,
+): AffiliatePayoutActionResult {
+  return Object.freeze({ state: "error", code, payout: null });
+}
+
+function exactPayoutFields(formData: FormData, fields: readonly string[]): boolean {
+  const supplied = [...formData.keys()].filter((key) => !key.startsWith("$ACTION_"));
+  return supplied.length === fields.length && new Set(supplied).size === fields.length &&
+    fields.every((field) => supplied.includes(field));
+}
+
+function boundedActionText(value: FormDataEntryValue | null, maximum: number): value is string {
+  return typeof value === "string" && value === value.trim() && value.length > 0 &&
+    value.length <= maximum && !/[\p{Cc}\p{Cf}]/u.test(value);
+}
+
+function mapPayoutActionError(error: unknown): AffiliatePayoutActionResult {
+  if (!(error instanceof AffiliatePayoutError)) return payoutActionFailure("unavailable");
+  if (error.code === "authorization_denied") return payoutActionFailure("identity");
+  if (error.code === "invalid_input") return payoutActionFailure("invalid");
+  if (error.code === "profile_ineligible") return payoutActionFailure("ineligible");
+  if (error.code === "threshold_not_met") return payoutActionFailure("threshold");
+  if (error.code === "idempotency_conflict" || error.code === "version_conflict" ||
+      error.code === "invalid_transition") return payoutActionFailure("conflict");
+  return payoutActionFailure("unavailable");
+}
+
+function payoutPrincipalAllowed(principal: Principal | null): principal is Principal {
+  if (principal === null) return false;
+  return authorizeOperation({
+    principal,
+    operation: "affiliate.payout",
+    resource: { relation: "capability_only" },
+  }).allowed;
+}
+
+export function createAffiliatePayoutBatchAction(dependencies: Readonly<{
+  environment: Readonly<{ APP_ENV: "local" | "preview" | "production"; APP_ORIGIN?: string }>;
+  loadPrincipal: () => Promise<Principal | null>;
+  createBatch: (input: Readonly<{
+    principal: Principal;
+    profileId: string;
+    idempotencyKey: string;
+    correlationId: string;
+  }>) => Promise<Readonly<{
+    status: "created" | "idempotent";
+    payout: AffiliatePayoutActionPayout;
+  }>>;
+}>) {
+  return async (request: Request, formData: FormData): Promise<AffiliatePayoutActionResult> => {
+    try {
+      assertMutationOrigin(request, dependencies.environment);
+    } catch {
+      return payoutActionFailure("origin");
+    }
+    const fields = ["profileId", "idempotencyKey", "correlationId"] as const;
+    if (!exactPayoutFields(formData, fields)) return payoutActionFailure("invalid");
+    const profileId = formData.get("profileId");
+    const idempotencyKey = formData.get("idempotencyKey");
+    const correlationId = formData.get("correlationId");
+    if (typeof profileId !== "string" || !UUID_PATTERN.test(profileId) ||
+        !boundedActionText(idempotencyKey, 200) ||
+        !boundedActionText(correlationId, 200) || correlationId.length < 16) {
+      return payoutActionFailure("invalid");
+    }
+    const principal = await dependencies.loadPrincipal();
+    if (!payoutPrincipalAllowed(principal)) return payoutActionFailure("identity");
+    try {
+      const result = await dependencies.createBatch({
+        principal, profileId, idempotencyKey, correlationId,
+      });
+      return Object.freeze({
+        state: "success" as const,
+        code: result.status,
+        payout: Object.freeze({ ...result.payout }),
+      });
+    } catch (error) {
+      return mapPayoutActionError(error);
+    }
+  };
+}
+
+export function createAffiliatePayoutPaidAction(dependencies: Readonly<{
+  environment: Readonly<{ APP_ENV: "local" | "preview" | "production"; APP_ORIGIN?: string }>;
+  loadPrincipal: () => Promise<Principal | null>;
+  markPaid: (input: Readonly<{
+    principal: Principal;
+    payoutId: string;
+    expectedVersion: number;
+    idempotencyKey: string;
+    providerName: string;
+    externalReference: string;
+    correlationId: string;
+  }>) => Promise<Readonly<{
+    status: "paid" | "idempotent";
+    payout: AffiliatePayoutActionPayout;
+  }>>;
+}>) {
+  return async (request: Request, formData: FormData): Promise<AffiliatePayoutActionResult> => {
+    try {
+      assertMutationOrigin(request, dependencies.environment);
+    } catch {
+      return payoutActionFailure("origin");
+    }
+    const fields = ["payoutId", "expectedVersion", "idempotencyKey", "providerName",
+      "externalReference", "correlationId"] as const;
+    if (!exactPayoutFields(formData, fields)) return payoutActionFailure("invalid");
+    const payoutId = formData.get("payoutId");
+    const expectedVersionText = formData.get("expectedVersion");
+    const idempotencyKey = formData.get("idempotencyKey");
+    const providerName = formData.get("providerName");
+    const externalReference = formData.get("externalReference");
+    const correlationId = formData.get("correlationId");
+    const expectedVersion = typeof expectedVersionText === "string" && /^[1-9][0-9]*$/u.test(expectedVersionText)
+      ? Number(expectedVersionText)
+      : Number.NaN;
+    if (typeof payoutId !== "string" || !UUID_PATTERN.test(payoutId) ||
+        !Number.isSafeInteger(expectedVersion) ||
+        !boundedActionText(idempotencyKey, 200) ||
+        !boundedActionText(providerName, 120) ||
+        !boundedActionText(externalReference, 200) ||
+        !boundedActionText(correlationId, 200) || correlationId.length < 16) {
+      return payoutActionFailure("invalid");
+    }
+    const principal = await dependencies.loadPrincipal();
+    if (!payoutPrincipalAllowed(principal)) return payoutActionFailure("identity");
+    try {
+      const result = await dependencies.markPaid({
+        principal, payoutId, expectedVersion, idempotencyKey, providerName,
+        externalReference, correlationId,
+      });
+      return Object.freeze({
+        state: "success" as const,
+        code: result.status,
+        payout: Object.freeze({ ...result.payout }),
+      });
+    } catch (error) {
+      return mapPayoutActionError(error);
+    }
+  };
 }
 
 type SharedSetService = ReturnType<typeof createSharedSetService>;

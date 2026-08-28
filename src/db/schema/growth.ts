@@ -823,6 +823,8 @@ export const affiliatePayouts = pgTable(
     amountMinor: money("amount_minor"),
     currency: text("currency").notNull(),
     state: affiliatePayoutStateEnum("state").default("pending").notNull(),
+    version: integer("version").default(1).notNull(),
+    paidIdempotencyKey: text("paid_idempotency_key"),
     externalProvider: text("external_provider"),
     externalReference: text("external_reference"),
     createdAt: createdAt(),
@@ -830,6 +832,9 @@ export const affiliatePayouts = pgTable(
   },
   (table) => [
     unique("affiliate_payouts_idempotency_unique").on(table.idempotencyKey),
+    unique("affiliate_payouts_paid_idempotency_unique").on(
+      table.paidIdempotencyKey,
+    ),
     unique("affiliate_payouts_id_profile_unique").on(
       table.id,
       table.affiliateProfileId,
@@ -847,6 +852,11 @@ export const affiliatePayouts = pgTable(
     }).onDelete("restrict"),
     check("affiliate_payouts_idempotency_nonblank", nonblank(table.idempotencyKey)),
     check("affiliate_payouts_amount_safe", safePositiveMoney(table.amountMinor)),
+    check("affiliate_payouts_version_positive", sql`${table.version} > 0`),
+    check(
+      "affiliate_payouts_paid_idempotency_nonblank",
+      sql`${table.paidIdempotencyKey} is null or ${nonblank(table.paidIdempotencyKey)}`,
+    ),
     check(
       "affiliate_payouts_currency_usd",
       sql`${currency(table.currency)} and ${table.currency} = 'USD'`,
@@ -857,8 +867,11 @@ export const affiliatePayouts = pgTable(
             and ${table.externalReference} is null and ${table.paidAt} is null)
         or (${table.state} = 'paid' and ${table.externalProvider} is not null
             and ${nonblank(table.externalProvider)}
+            and char_length(${table.externalProvider}) <= 120
             and ${table.externalReference} is not null
-            and ${nonblank(table.externalReference)} and ${table.paidAt} is not null)`,
+            and ${nonblank(table.externalReference)}
+            and char_length(${table.externalReference}) <= 200
+            and ${table.paidAt} is not null)`,
     ),
   ],
 );
