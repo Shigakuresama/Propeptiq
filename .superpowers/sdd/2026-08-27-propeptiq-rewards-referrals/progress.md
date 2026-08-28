@@ -80,6 +80,7 @@
 - Ruling: Task 2 migration immutability applies to pre-existing SQL, numbered snapshots, and README; Drizzle's generated append to `meta/_journal.json` is expected and reviewed, not treated as historical tampering — cost if wrong: a literal all-file hash check would make any valid new generated migration impossible.
 - Ruling: Task 3 adds a narrow immutable `shared_research_set_mutations` receipt table because the existing set row cannot prove idempotent CAS replay; a timestamp/payload heuristic is rejected — cost if wrong: one additional table/migration for correctness and future cleanup/retention policy.
 - Ruling: Task 4 reverses points earned from refunded/charged-back merchandise but does not invent an unstated policy for restoring already consumed redemption points; checkout cancellation before payment still releases reservations — cost if wrong: refund redemption restoration requires a later explicit owner/terms decision.
+- Ruling: Task 5 is executed as three serial, independently reviewable slices after the first oversized assignment discarded only its own uncommitted scratch files: 5A signed attribution and fixed redirect, 5B enrollment/binding/discount/lifecycle, and 5C shared sets/actions/pages. No existing tracked work was lost; the final Task 5 checkpoint retains the brief's required integration review and commit subject — cost if wrong: additional checkpoint commits and review time in exchange for recoverable progress.
 
 ## Task progress
 
@@ -111,3 +112,4 @@
 - Task 4: implementation complete (`439d291`, verification `49ec860`; unit 803/803, required PGlite 27/27, type/lint/db/diff pass; guarded PostgreSQL contention NOT RUN because exact guards absent); independent review in progress.
 - Task 4: fix round 1/5 addressed (`5866468`; future-dated acceptance rejected against authoritative `input.now`, payment/delivery lifecycle fail-closed and both production composition seams wired; focused 26/26, unit 805/805, affected PGlite 85/85, type/lint/diff pass; schema checks and guarded PostgreSQL lane NOT RUN under their stated guards); fresh re-review clean.
 - Task 4: complete (range `439d291..ba8317f`, independent review clean after 1/5 fix rounds; guarded real-PostgreSQL contention lane remains NOT RUN/no claim).
+- Task 5: first oversized assignment stopped clean at `a046d2e` after mistakenly deleting only its own uncommitted scratch files via narrow patches; no reset/clean/checkout, tracked diff, or HEAD movement occurred. Restarting as serial slices 5A–5C.
