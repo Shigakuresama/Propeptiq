@@ -71,7 +71,6 @@ const ids = {
   redemptionAccount: "83000000-0000-4000-8000-000000000046",
   redemptionAttempt: "83000000-0000-4000-8000-000000000047",
   redemption: "83000000-0000-4000-8000-000000000048",
-  payoutReplacement: "83000000-0000-4000-8000-000000000049",
   commissionReplacement: "83000000-0000-4000-8000-000000000050",
   activationAcceptance: "83000000-0000-4000-8000-000000000051",
   activationReferralCode: "83000000-0000-4000-8000-000000000052",
@@ -175,6 +174,12 @@ function expectDeeplyFrozen(value: unknown): void {
 
 describe("growth policy and repository boundary", () => {
   let client: PGlite;
+
+  it("does not expose direct unaudited affiliate payout mutations", () => {
+    const repository = growthRepository(client);
+    expect(repository).not.toHaveProperty("reserveAffiliatePayout");
+    expect(repository).not.toHaveProperty("markAffiliatePayoutPaid");
+  });
 
   beforeEach(async () => {
     client = await createMigratedPglite();
@@ -714,77 +719,6 @@ describe("growth policy and repository boundary", () => {
       expect(receipts.rows).toEqual([{ total: 0 }]);
     },
   );
-
-  it("records an affiliate payout and marks it paid without exposing or swallowing conflicting payment evidence", async () => {
-    await seedCurrentPoliciesAndTerms(client);
-    await seedOwnerPrivacyFixture(client);
-    await client.exec(`
-      DELETE FROM affiliate_commissions WHERE id = '${ids.ownerCommission}';
-      DELETE FROM affiliate_payouts WHERE id = '${ids.ownerPayout}';
-      INSERT INTO affiliate_commissions
-        (id, affiliate_profile_id, affiliate_attribution_id, buyer_user_id,
-         order_id, affiliate_policy_id, affiliate_policy_version, idempotency_key,
-         gross_commission_minor, reversed_commission_minor, status)
-      VALUES ('${ids.ownerCommission}', '${ids.ownerAffiliateProfile}', '${ids.ownerAffiliateAttribution}', '${ids.affiliateBuyer}',
-              '${ids.ownerAffiliateOrder}', '${ids.affiliatePolicy}', 1,
-              'owner-commission-key', 900, 0, 'approved');
-    `);
-    const repository = growthRepository(client);
-    const reservation = {
-      payoutId: ids.payoutReplacement,
-      affiliateProfileId: ids.ownerAffiliateProfile,
-      affiliatePolicyId: ids.affiliatePolicy,
-      affiliatePolicyVersion: 1,
-      idempotencyKey: "owner-payout-replacement-key",
-      amountMinor: 900,
-      currency: "USD" as const,
-      commissionIds: [ids.ownerCommission],
-      createdAt: now,
-    };
-    await expect(repository.reserveAffiliatePayout(reservation)).resolves.toMatchObject({
-      status: "applied",
-      payout: { id: ids.payoutReplacement, state: "pending", amountMinor: 900 },
-    });
-    await expect(repository.reserveAffiliatePayout(reservation)).resolves.toMatchObject({
-      status: "idempotent",
-    });
-    await expect(
-      repository.reserveAffiliatePayout({ ...reservation, amountMinor: 901 }),
-    ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
-
-    const paid = {
-      payoutId: ids.payoutReplacement,
-      expectedVersion: 1,
-      idempotencyKey: "owner-payout-paid-key",
-      externalProvider: "synthetic-manual-provider",
-      externalReference: "synthetic-private-reference",
-      paidAt: new Date("2026-08-30T12:00:00.000Z"),
-    };
-    await expect(
-      repository.markAffiliatePayoutPaid({ ...paid, expectedVersion: 2 }),
-    ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
-    await expect(repository.markAffiliatePayoutPaid(paid)).resolves.toMatchObject({
-      status: "applied",
-      payout: { state: "paid", version: 2, paidAt: paid.paidAt.toISOString() },
-    });
-    await expect(repository.markAffiliatePayoutPaid({
-      ...paid,
-      paidAt: new Date("2026-08-31T12:00:00.000Z"),
-    })).resolves.toMatchObject({
-      status: "idempotent", payout: { paidAt: paid.paidAt.toISOString() },
-    });
-    await expect(
-      repository.markAffiliatePayoutPaid({ ...paid, externalReference: "conflicting-reference" }),
-    ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
-    await expect(
-      repository.markAffiliatePayoutPaid({ ...paid, idempotencyKey: "owner-payout-paid-key-two" }),
-    ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
-    const commission = await client.query<{ status: string; payoutId: string }>(`
-      SELECT status, payout_id::text AS "payoutId" FROM affiliate_commissions
-      WHERE id = '${ids.ownerCommission}'
-    `);
-    expect(commission.rows).toEqual([{ status: "paid", payoutId: ids.payoutReplacement }]);
-  });
 
   it("records and reverses an affiliate commission with exact key and payload replay", async () => {
     await seedCurrentPoliciesAndTerms(client);

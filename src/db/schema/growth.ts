@@ -207,6 +207,10 @@ export const affiliatePolicies = pgTable(
       safePositiveMoney(table.payoutThresholdMinor),
     ),
     check(
+      "affiliate_policies_payout_threshold_v1",
+      sql`${table.payoutThresholdMinor} = 5000`,
+    ),
+    check(
       "affiliate_policies_currency_usd",
       sql`${currency(table.currency)} and ${table.currency} = 'USD'`,
     ),

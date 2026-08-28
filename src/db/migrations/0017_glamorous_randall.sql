@@ -1,0 +1,1 @@
+ALTER TABLE "affiliate_policies" ADD CONSTRAINT "affiliate_policies_payout_threshold_v1" CHECK ("affiliate_policies"."payout_threshold_minor" = 5000);

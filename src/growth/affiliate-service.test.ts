@@ -114,6 +114,23 @@ describe("affiliate payout batch draft", () => {
       ]),
     })).toMatchObject({ amountMinor: 5_000, affiliatePolicyVersion: 1 });
   });
+
+  it.each([4_999, 5_001])(
+    "rejects a stored payout threshold of %i instead of redefining the Task 6 V1 contract",
+    (payoutThresholdMinor) => {
+      const policy = Object.freeze({ ...activeAffiliatePolicy, payoutThresholdMinor });
+      expect(() => createAffiliatePayoutBatchDraft({
+        payoutId: "6c000000-0000-4000-8000-000000000004",
+        idempotencyKey: `affiliate-payout-batch:6c:threshold:${payoutThresholdMinor}`,
+        createdAt: now,
+        profile: Object.freeze({ id: profileId, status: "active" as const }),
+        policy,
+        commissions: Object.freeze([
+          Object.freeze({ id: "6c000000-0000-4000-8000-000000000041", affiliateProfileId: profileId, affiliatePolicyId: policy.id, affiliatePolicyVersion: 1, grossCommissionMinor: payoutThresholdMinor, reversedCommissionMinor: 0, currency: "USD", status: "approved" as const, approvalEligibleAt: "2026-08-27T19:00:00.000Z", payoutId: null }),
+        ]),
+      })).toThrow(/5,000/u);
+    },
+  );
 });
 
 const payoutAdmin: Principal = Object.freeze({

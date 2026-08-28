@@ -943,6 +943,20 @@ describe("growth database schema", () => {
     );
   });
 
+  it("rejects affiliate policy rows whose immutable V1 payout threshold is not exactly 5000 minor", async () => {
+    client = await createMigratedPglite();
+    await expectRejected(
+      client,
+      `INSERT INTO affiliate_policies
+         (id, version, status, attribution_days,
+          first_order_commission_basis_points, reorder_commission_basis_points,
+          reorder_window_days, approval_delay_days, payout_threshold_minor,
+          currency, effective_at)
+       VALUES ('82000000-0000-4000-8000-000000000099', 99, 'draft', 30,
+               1000, 500, 180, 30, 5100, 'USD', '2026-08-28T00:00:00Z')`,
+    );
+  });
+
   it("rejects an affiliate commission when the order selected customer referral", async () => {
     client = await createMigratedPglite();
     await insertCoreFixture(client);

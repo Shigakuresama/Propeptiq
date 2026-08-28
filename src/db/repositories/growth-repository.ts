@@ -107,22 +107,6 @@ export type SharedSetMutationRecord = Readonly<{
   updatedAt: string;
 }>;
 
-export type AffiliatePayoutRecord = Readonly<{
-  id: string;
-  affiliateProfileId: string;
-  affiliatePolicyId: string;
-  affiliatePolicyVersion: number;
-  idempotencyKey: string;
-  amountMinor: number;
-  currency: "USD";
-  state: "pending" | "paid";
-  version: number;
-  externalProvider: string | null;
-  externalReference: string | null;
-  createdAt: string;
-  paidAt: string | null;
-}>;
-
 export type AffiliateCommissionRecord = Readonly<{
   id: string;
   affiliateProfileId: string;
@@ -180,25 +164,6 @@ export type GrowthRepository = Readonly<{
     expectedUpdatedAt: Date;
     deactivatedAt: Date;
   }>) => Promise<PersistenceResult<"set", SharedSetMutationRecord>>;
-  reserveAffiliatePayout: (input: Readonly<{
-    payoutId: string;
-    affiliateProfileId: string;
-    affiliatePolicyId: string;
-    affiliatePolicyVersion: number;
-    idempotencyKey: string;
-    amountMinor: number;
-    currency: "USD";
-    commissionIds: readonly string[];
-    createdAt: Date;
-  }>) => Promise<PersistenceResult<"payout", AffiliatePayoutRecord>>;
-  markAffiliatePayoutPaid: (input: Readonly<{
-    payoutId: string;
-    expectedVersion: number;
-    idempotencyKey: string;
-    externalProvider: string;
-    externalReference: string;
-    paidAt: Date;
-  }>) => Promise<PersistenceResult<"payout", AffiliatePayoutRecord>>;
   recordAffiliateCommission: (input: Readonly<{
     id: string;
     affiliateProfileId: string;
@@ -315,23 +280,6 @@ type SharedSetMutationReceiptRow = {
   resultItemCount: number | string;
   resultUpdatedAt: Date | string;
   appliedAt: Date | string;
-};
-
-type PayoutRow = {
-  id: string;
-  affiliateProfileId: string;
-  affiliatePolicyId: string;
-  affiliatePolicyVersion: number | string;
-  idempotencyKey: string;
-  amountMinor: number | string;
-  currency: "USD";
-  state: "pending" | "paid";
-  version: number | string;
-  paidIdempotencyKey: string | null;
-  createdAt: Date | string;
-  externalProvider: string | null;
-  externalReference: string | null;
-  paidAt: Date | string | null;
 };
 
 type CommissionRow = {
@@ -995,162 +943,6 @@ async function deactivateSharedSetInTransaction(
   return Object.freeze({ status: "applied", set: result });
 }
 
-function projectPayout(row: PayoutRow): AffiliatePayoutRecord {
-  return Object.freeze({
-    id: row.id,
-    affiliateProfileId: row.affiliateProfileId,
-    affiliatePolicyId: row.affiliatePolicyId,
-    affiliatePolicyVersion: safeInteger(row.affiliatePolicyVersion),
-    idempotencyKey: row.idempotencyKey,
-    amountMinor: safeInteger(row.amountMinor),
-    currency: row.currency,
-    state: row.state,
-    version: safeInteger(row.version),
-    externalProvider: row.externalProvider,
-    externalReference: row.externalReference,
-    createdAt: toIso(row.createdAt),
-    paidAt: row.paidAt === null ? null : toIso(row.paidAt),
-  });
-}
-
-const payoutProjection = `id::text AS id, affiliate_profile_id::text AS "affiliateProfileId",
-  affiliate_policy_id::text AS "affiliatePolicyId",
-  affiliate_policy_version AS "affiliatePolicyVersion",
-  idempotency_key AS "idempotencyKey", amount_minor AS "amountMinor", currency,
-  state, version, paid_idempotency_key AS "paidIdempotencyKey",
-  created_at AS "createdAt", external_provider AS "externalProvider",
-  external_reference AS "externalReference", paid_at AS "paidAt"`;
-
-async function payoutCommissionIds(client: GrowthSqlClient, payoutId: string): Promise<string[]> {
-  const result = await client.query<{ id: string }>(
-    `SELECT id::text AS id FROM affiliate_commissions
-     WHERE payout_id = $1::uuid ORDER BY id`,
-    [payoutId],
-  );
-  return result.rows.map(({ id }) => id);
-}
-
-async function reservePayoutInTransaction(
-  client: GrowthSqlClient,
-  input: Parameters<GrowthRepository["reserveAffiliatePayout"]>[0],
-): Promise<PersistenceResult<"payout", AffiliatePayoutRecord>> {
-  const commissionIds = [...input.commissionIds].sort();
-  if ([input.payoutId, input.affiliateProfileId, input.affiliatePolicyId, ...commissionIds]
-      .some((value) => !uuidPattern.test(value)) || commissionIds.length === 0 ||
-      new Set(commissionIds).size !== commissionIds.length ||
-      !Number.isSafeInteger(input.affiliatePolicyVersion) || input.affiliatePolicyVersion <= 0 ||
-      !Number.isSafeInteger(input.amountMinor) || input.amountMinor <= 0 || input.currency !== "USD" ||
-      !nonblank(input.idempotencyKey) || !Number.isFinite(input.createdAt.getTime())) {
-    throw new GrowthPersistenceConflict("Invalid affiliate payout payload");
-  }
-  const existing = await client.query<PayoutRow>(
-    `SELECT ${payoutProjection} FROM affiliate_payouts
-     WHERE idempotency_key = $1 FOR UPDATE`,
-    [input.idempotencyKey],
-  );
-  if (existing.rows[0]) {
-    const payout = projectPayout(existing.rows[0]);
-    const linked = await payoutCommissionIds(client, payout.id);
-    if (payout.id !== input.payoutId || payout.affiliateProfileId !== input.affiliateProfileId ||
-        payout.affiliatePolicyId !== input.affiliatePolicyId ||
-        payout.affiliatePolicyVersion !== input.affiliatePolicyVersion ||
-        payout.amountMinor !== input.amountMinor || payout.currency !== input.currency ||
-        payout.createdAt !== input.createdAt.toISOString() || !exactItems(
-          linked.map((productId) => ({ productId, quantity: 1 })),
-          commissionIds.map((productId) => ({ productId, quantity: 1 })),
-        )) throw new GrowthPersistenceConflict();
-    return Object.freeze({ status: "idempotent", payout });
-  }
-  const commissions = await client.query<{
-    id: string; affiliateProfileId: string; affiliatePolicyId: string;
-    affiliatePolicyVersion: number | string; status: string; payoutId: string | null;
-    netMinor: number | string;
-  }>(
-    `SELECT id::text AS id, affiliate_profile_id::text AS "affiliateProfileId",
-            affiliate_policy_id::text AS "affiliatePolicyId",
-            affiliate_policy_version AS "affiliatePolicyVersion", status,
-            payout_id::text AS "payoutId",
-            gross_commission_minor - reversed_commission_minor AS "netMinor"
-     FROM affiliate_commissions WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
-    [commissionIds],
-  );
-  const total = commissions.rows.reduce((sum, row) => sum + safeInteger(row.netMinor), 0);
-  if (commissions.rows.length !== commissionIds.length || total !== input.amountMinor ||
-      commissions.rows.some((row) => row.affiliateProfileId !== input.affiliateProfileId ||
-        row.affiliatePolicyId !== input.affiliatePolicyId ||
-        safeInteger(row.affiliatePolicyVersion) !== input.affiliatePolicyVersion ||
-        row.status !== "approved" || row.payoutId !== null)) {
-    throw new GrowthPersistenceConflict("Affiliate payout commission conflict");
-  }
-  const inserted = await client.query<PayoutRow>(
-    `INSERT INTO affiliate_payouts
-       (id, affiliate_profile_id, affiliate_policy_id, affiliate_policy_version,
-        idempotency_key, amount_minor, currency, state, created_at)
-     VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, 'pending', $8::timestamptz)
-     ON CONFLICT DO NOTHING RETURNING ${payoutProjection}`,
-    [input.payoutId, input.affiliateProfileId, input.affiliatePolicyId,
-      input.affiliatePolicyVersion, input.idempotencyKey, input.amountMinor,
-      input.currency, input.createdAt.toISOString()],
-  );
-  if (!inserted.rows[0]) throw new GrowthPersistenceConflict("Affiliate payout uniqueness conflict");
-  const linked = await client.query<{ id: string }>(
-    `UPDATE affiliate_commissions SET payout_id = $1::uuid, updated_at = $3::timestamptz
-     WHERE id = ANY($2::uuid[]) AND status = 'approved' AND payout_id IS NULL
-     RETURNING id::text AS id`,
-    [input.payoutId, commissionIds, input.createdAt.toISOString()],
-  );
-  if (linked.rows.length !== commissionIds.length) throw new GrowthPersistenceConflict();
-  return Object.freeze({ status: "applied", payout: projectPayout(inserted.rows[0]) });
-}
-
-async function markPayoutPaidInTransaction(
-  client: GrowthSqlClient,
-  input: Parameters<GrowthRepository["markAffiliatePayoutPaid"]>[0],
-): Promise<PersistenceResult<"payout", AffiliatePayoutRecord>> {
-  if (!uuidPattern.test(input.payoutId) || !nonblank(input.idempotencyKey) ||
-      !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion <= 0 ||
-      !nonblank(input.externalProvider) || input.externalProvider.length > 120 ||
-      !nonblank(input.externalReference) || input.externalReference.length > 200 ||
-      !Number.isFinite(input.paidAt.getTime())) {
-    throw new GrowthPersistenceConflict("Invalid affiliate paid payload");
-  }
-  const loaded = await client.query<PayoutRow>(
-    `SELECT ${payoutProjection} FROM affiliate_payouts WHERE id = $1::uuid FOR UPDATE`,
-    [input.payoutId],
-  );
-  const row = loaded.rows[0];
-  if (!row) throw new GrowthPersistenceConflict();
-  if (row.state === "paid") {
-    if (row.paidIdempotencyKey !== input.idempotencyKey ||
-        safeInteger(row.version) !== input.expectedVersion + 1 ||
-        row.externalProvider !== input.externalProvider ||
-        row.externalReference !== input.externalReference || row.paidAt === null) {
-      throw new GrowthPersistenceConflict();
-    }
-    return Object.freeze({ status: "idempotent", payout: projectPayout(row) });
-  }
-  if (safeInteger(row.version) !== input.expectedVersion) throw new GrowthPersistenceConflict();
-  const updated = await client.query<PayoutRow>(
-    `UPDATE affiliate_payouts
-     SET state = 'paid', version = version + 1, paid_idempotency_key = $3,
-         external_provider = $4, external_reference = $5,
-         paid_at = $6::timestamptz
-     WHERE id = $1::uuid AND state = 'pending' AND version = $2
-     RETURNING ${payoutProjection}`,
-    [input.payoutId, input.expectedVersion, input.idempotencyKey,
-      input.externalProvider, input.externalReference, input.paidAt.toISOString()],
-  );
-  if (!updated.rows[0]) throw new GrowthPersistenceConflict();
-  const commissions = await client.query<{ id: string }>(
-    `UPDATE affiliate_commissions SET status = 'paid', updated_at = $2::timestamptz
-     WHERE payout_id = $1::uuid AND status = 'approved'
-     RETURNING id::text AS id`,
-    [input.payoutId, input.paidAt.toISOString()],
-  );
-  if (commissions.rows.length === 0) throw new GrowthPersistenceConflict("Affiliate payout has no commissions");
-  return Object.freeze({ status: "applied", payout: projectPayout(updated.rows[0]) });
-}
-
 const commissionProjection = `id::text AS id,
   affiliate_profile_id::text AS "affiliateProfileId",
   affiliate_attribution_id::text AS "affiliateAttributionId",
@@ -1534,12 +1326,6 @@ export function createPostgresGrowthRepository(dependencies: Readonly<{
     },
     deactivateSharedResearchSet(input) {
       return transaction((client) => deactivateSharedSetInTransaction(client, input));
-    },
-    reserveAffiliatePayout(input) {
-      return transaction((client) => reservePayoutInTransaction(client, input));
-    },
-    markAffiliatePayoutPaid(input) {
-      return transaction((client) => markPayoutPaidInTransaction(client, input));
     },
     recordAffiliateCommission(input) {
       return transaction((client) => recordCommissionInTransaction(client, input));

@@ -127,6 +127,8 @@ export class AffiliatePayoutError extends Error {
   }
 }
 
+const TASK_6_V1_PAYOUT_THRESHOLD_MINOR = 5_000;
+
 export function createAffiliatePayoutBatchDraft(input: Readonly<{
   payoutId: string;
   idempotencyKey: string;
@@ -142,9 +144,8 @@ export function createAffiliatePayoutBatchDraft(input: Readonly<{
       (input.policy.status !== "active" && input.policy.status !== "retired") ||
       input.policy.currency !== "USD" ||
       !Number.isSafeInteger(input.policy.version) || input.policy.version < 1 ||
-      !Number.isSafeInteger(input.policy.payoutThresholdMinor) ||
-      input.policy.payoutThresholdMinor < 1) {
-    throw new Error("Invalid affiliate payout batch request");
+      input.policy.payoutThresholdMinor !== TASK_6_V1_PAYOUT_THRESHOLD_MINOR) {
+    throw new Error("Affiliate payout policy must use the Task 6 V1 threshold of 5,000 minor");
   }
 
   const eligible = input.commissions.filter((commission) => {
@@ -467,7 +468,7 @@ async function createPayoutWithPostgresClient(
     status: "pending" | "approved";
     approvalEligibleAt: Date | string;
     payoutId: null;
-    policyStatus: "draft" | "active" | "retired";
+    policyStatus: "draft" | "active" | "superseded";
     attributionDays: number | string;
     firstOrderCommissionBasisPoints: number | string;
     reorderCommissionBasisPoints: number | string;
@@ -511,13 +512,16 @@ async function createPayoutWithPostgresClient(
   );
   const first = candidates.rows[0];
   if (!first) throw new AffiliatePayoutError("threshold_not_met");
+  if (Number(first.payoutThresholdMinor) !== TASK_6_V1_PAYOUT_THRESHOLD_MINOR) {
+    throw new AffiliatePayoutError("persistence_conflict");
+  }
   const sameSnapshot = candidates.rows.filter((row) =>
     row.affiliatePolicyId === first.affiliatePolicyId &&
     Number(row.affiliatePolicyVersion) === Number(first.affiliatePolicyVersion));
   const policy = Object.freeze({
     id: first.affiliatePolicyId,
     version: Number(first.affiliatePolicyVersion),
-    status: first.policyStatus,
+    status: first.policyStatus === "superseded" ? "retired" : first.policyStatus,
     attributionDays: Number(first.attributionDays),
     firstOrderCommissionBasisPoints: Number(first.firstOrderCommissionBasisPoints),
     reorderCommissionBasisPoints: Number(first.reorderCommissionBasisPoints),

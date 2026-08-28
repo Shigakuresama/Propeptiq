@@ -169,6 +169,46 @@ describe("affiliate payout transactions on PGlite", () => {
     expect(commission.rows).toEqual([{ status: "approved", payoutId: ids.payout }]);
   });
 
+  it("maps a superseded database policy to the retired domain snapshot and pays earned commission", async () => {
+    await client.query(
+      `UPDATE affiliate_policies
+       SET status = 'superseded', superseded_at = '2026-08-20T00:00:00Z'
+       WHERE id = $1::uuid`,
+      [ids.policy],
+    );
+
+    await expect(createTransaction()(createInput())).resolves.toMatchObject({
+      status: "applied",
+      payout: { amountMinor: 5000, affiliatePolicyId: ids.policy },
+    });
+  });
+
+  it.each([4999, 5100])(
+    "fails closed when stored policy threshold drifts to %i even if database guards are missing",
+    async (threshold) => {
+      await client.exec(`
+        DROP TRIGGER affiliate_policies_immutable_history ON affiliate_policies;
+        ALTER TABLE affiliate_policies
+          DROP CONSTRAINT IF EXISTS affiliate_policies_payout_threshold_v1;
+      `);
+      await client.query(
+        `UPDATE affiliate_policies SET payout_threshold_minor = $2 WHERE id = $1::uuid`,
+        [ids.policy, threshold],
+      );
+
+      await expect(createTransaction()(createInput()))
+        .rejects.toMatchObject({ code: "persistence_conflict" });
+      const state = await client.query<{ payouts: number; audits: number; payoutId: string | null }>(
+        `SELECT (SELECT count(*)::int FROM affiliate_payouts) AS payouts,
+                (SELECT count(*)::int FROM admin_audit) AS audits,
+                payout_id::text AS "payoutId"
+         FROM affiliate_commissions WHERE id = $1::uuid`,
+        [ids.commissionOne],
+      );
+      expect(state.rows[0]).toEqual({ payouts: 1, audits: 0, payoutId: null });
+    },
+  );
+
   it("atomically selects only eligible unconsumed commission at the exact policy threshold and replays once", async () => {
     const create = createTransaction();
     const first = await create(createInput());
