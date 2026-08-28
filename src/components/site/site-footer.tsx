@@ -39,6 +39,12 @@ export function SiteFooter() {
             </Link>
           ))}
           <Link
+            href="/partners"
+            className="inline-flex min-h-11 min-w-11 items-center rounded-md px-2 py-2 text-sm text-canvas/75 transition-colors duration-200 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
+          >
+            Partner Program
+          </Link>
+          <Link
             href="/cart"
             className="inline-flex min-h-11 min-w-11 items-center rounded-md px-2 py-2 text-sm text-canvas/75 transition-colors duration-200 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
           >

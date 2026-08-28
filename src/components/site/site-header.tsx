@@ -43,7 +43,7 @@ export function SiteHeader() {
             </span>
           </Link>
 
-          <nav aria-label="Primary" className="ml-auto hidden items-center gap-1 min-[1180px]:flex">
+          <nav aria-label="Primary" className="ml-auto hidden items-center gap-1 xl:flex">
             {publicNavigation.map((item) => (
               <Link
                 key={item.href}
@@ -58,7 +58,7 @@ export function SiteHeader() {
           <Link
             href="/cart"
             aria-label={`Cart, ${itemCount} requested unit${itemCount === 1 ? "" : "s"}`}
-            className="ml-auto inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-[1180px]:ml-3 sm:px-3"
+            className="ml-auto inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:ml-3 sm:px-3"
           >
             <ShoppingBag aria-hidden="true" className="size-4" />
             <span className="hidden sm:inline">Cart</span>
@@ -80,7 +80,7 @@ export function SiteHeader() {
                 variant="outline"
                 size="icon"
                 aria-label="Open navigation"
-                className="size-11 rounded-full border-ink/20 bg-transparent text-ink hover:bg-moss-soft/60 min-[1180px]:hidden"
+                className="size-11 rounded-full border-ink/20 bg-transparent text-ink hover:bg-moss-soft/60 xl:hidden"
               >
                 <Menu className="size-5" aria-hidden="true" />
               </Button>

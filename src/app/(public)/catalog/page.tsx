@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { getPublicBrowseCatalog } from "@/catalog/browse-catalog-server";
-import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
+import { CatalogExplorer } from "@/components/commerce/catalog-explorer";
 import { PageIntro } from "@/components/site/page-intro";
 import { PageTransition } from "@/components/site/page-transition";
 
@@ -23,15 +23,9 @@ export default async function CatalogPage() {
           description={`${catalog.products.length} product families and ${catalog.variantCount} supplied package configurations. Prices and availability are intentionally excluded; imagery is an original illustrative presentation rather than product photography.`}
         />
         {catalog.products.length > 0 ? (
-          <ul className="catalog-grid">
-            {catalog.products.map((product, index) => (
-              <li key={product.slug}>
-                <CatalogListingCard product={product} priority={index < 3} />
-              </li>
-            ))}
-          </ul>
+          <CatalogExplorer products={catalog.products} />
         ) : (
-          <p className="record-sheet text-sm leading-6 text-muted-ink">
+          <p className="record-sheet text-base leading-7 text-muted-ink">
             No owner-approved browse catalog is currently published.
           </p>
         )}

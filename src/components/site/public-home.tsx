@@ -1,28 +1,34 @@
-import { ArrowRight, LibraryBig } from "lucide-react";
+import { ArrowRight, FileCheck2, LibraryBig } from "lucide-react";
 import Link from "next/link";
 
 import type { BrowseCatalogProduct } from "@/catalog/browse-catalog";
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
+import { ProgramStrip } from "@/components/growth/program-strip";
+import { ProofRail } from "@/components/site/proof-rail";
 import { Button } from "@/components/ui/button";
+import type { LoyaltyPolicy } from "@/domain/rewards";
 import { researchRestrictions } from "@/lib/site-content";
 
 export function PublicHome({
+  loyaltyPolicy = null,
   products,
   variantCount,
 }: {
+  loyaltyPolicy?: LoyaltyPolicy | null;
   products: readonly BrowseCatalogProduct[];
   variantCount: number;
 }) {
   return (
     <div>
+      <ProgramStrip loyaltyPolicy={loyaltyPolicy} />
       <section className="border-b border-border">
-        <div className="site-container grid gap-12 py-16 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-center lg:py-24">
+        <div className="site-container grid gap-10 py-12 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-center lg:py-16">
           <div className="max-w-[52rem]">
             <p className="eyebrow">Research-use catalog</p>
-            <h1 className="mt-6 text-balance font-heading text-display leading-[0.98] text-ink">
+            <h1 className="mt-5 text-balance font-heading text-page leading-[1.01] text-ink xl:text-[5rem]">
               Research materials, documented for laboratory work.
             </h1>
-            <p className="mt-7 max-w-[64ch] text-pretty text-lg leading-8 text-muted-ink sm:text-xl">
+            <p className="mt-6 max-w-[64ch] text-pretty text-lg leading-8 text-muted-ink sm:text-xl">
               Explore the owner-supplied product catalog and package configurations.
               Purchasing and operational availability remain separate from this browse-only collection.
             </p>
@@ -30,7 +36,7 @@ export function PublicHome({
               <p>{researchRestrictions[0]}</p>
               <p>{researchRestrictions[1]}</p>
             </div>
-            <div className="mt-9 flex flex-wrap gap-3">
+            <div className="mt-8 flex flex-wrap gap-3">
               <Button asChild className="action-primary">
                 <Link href="/catalog">
                   Browse catalog
@@ -56,7 +62,19 @@ export function PublicHome({
         </div>
       </section>
 
-      <section className="site-section">
+      <section className="border-b border-border py-12 lg:py-14" aria-labelledby="home-evidence-heading">
+        <div className="site-container">
+          <p className="eyebrow">Evidence relationship</p>
+          <h2 id="home-evidence-heading" className="mt-3 max-w-[24ch] font-heading text-3xl text-ink sm:text-4xl">
+            Public records stay linked to their source evidence.
+          </h2>
+          <div className="mt-8">
+            <ProofRail />
+          </div>
+        </div>
+      </section>
+
+      <section className="py-14 lg:py-16">
         <div className="site-container">
           <div className="flex items-center gap-3">
             <LibraryBig aria-hidden="true" className="size-5 text-moss" />
@@ -69,6 +87,21 @@ export function PublicHome({
               </li>
             ))}
           </ul>
+        </div>
+      </section>
+
+      <section className="border-t border-border py-14 lg:py-16" aria-labelledby="quality-callout-heading">
+        <div className="site-container grid gap-6 md:grid-cols-[auto_1fr_auto] md:items-center">
+          <FileCheck2 aria-hidden="true" className="size-6 text-moss" />
+          <div>
+            <p className="eyebrow">Quality records</p>
+            <h2 id="quality-callout-heading" className="mt-3 font-heading text-3xl text-ink">
+              Follow the record, not an unsupported claim.
+            </h2>
+          </div>
+          <Link className="record-link inline-flex min-h-11 items-center" href="/quality-records">
+            View quality records
+          </Link>
         </div>
       </section>
     </div>

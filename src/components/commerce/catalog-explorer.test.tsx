@@ -1,0 +1,48 @@
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it } from "vitest";
+
+import { browseCatalogProducts } from "@/catalog/browse-catalog";
+
+import { CatalogExplorer } from "./catalog-explorer";
+
+describe("CatalogExplorer", () => {
+  it("provides labeled search and exact source-name, code, and package-unit filters", () => {
+    render(<CatalogExplorer products={browseCatalogProducts} />);
+
+    expect(screen.getByRole("searchbox", { name: "Search catalog" })).toBeVisible();
+    const sourceFilter = screen.getByRole("combobox", { name: "Source name" });
+    expect(within(sourceFilter).getAllByRole("option")).toHaveLength(57);
+    expect(screen.getByRole("combobox", { name: "Source code" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Package unit" })).toBeVisible();
+    expect(screen.getAllByRole("article")).toHaveLength(53);
+  });
+
+  it("finds source ambiguities without changing the immutable catalog rows", () => {
+    const snapshot = JSON.stringify(browseCatalogProducts);
+    render(<CatalogExplorer products={browseCatalogProducts} />);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Source code" }), {
+      target: { value: "LPC" },
+    });
+
+    expect(screen.getAllByRole("article")).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: "LI PO-C" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "LI PO-C without B12" })).toBeVisible();
+    expect(JSON.stringify(browseCatalogProducts)).toBe(snapshot);
+  });
+
+  it("searches exact source facts and reports an accessible empty result", () => {
+    render(<CatalogExplorer products={browseCatalogProducts} />);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search catalog" }), {
+      target: { value: "PN5" },
+    });
+    expect(screen.getAllByRole("article")).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "Pinealon" })).toBeVisible();
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search catalog" }), {
+      target: { value: "not-a-source-record" },
+    });
+    expect(screen.getByText("No catalog records match these filters.")).toBeVisible();
+  });
+});

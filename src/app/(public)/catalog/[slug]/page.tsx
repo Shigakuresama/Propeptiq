@@ -6,12 +6,14 @@ import { notFound } from "next/navigation";
 import { findPublicProduct } from "@/catalog/public-catalog";
 import { getPublicCatalog } from "@/catalog/server";
 import { AddToCartButton } from "@/components/commerce/add-to-cart-button";
+import { EarnPoints } from "@/components/growth/earn-points";
 import { DemoNotice } from "@/components/site/demo-notice";
 import {
   PageTransition,
   ProductTitleTransition,
 } from "@/components/site/page-transition";
 import { ProofRail } from "@/components/site/proof-rail";
+import { getPublicGrowthProjection } from "@/growth/public-growth-server";
 
 type ProductPageProps = {
   params: Promise<{ slug: string }>;
@@ -38,7 +40,10 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
 
 export default async function ProductPage({ params }: ProductPageProps) {
   const { slug } = await params;
-  const catalog = await getPublicCatalog();
+  const [catalog, growth] = await Promise.all([
+    getPublicCatalog(),
+    getPublicGrowthProjection(),
+  ]);
   const product = findPublicProduct(catalog, slug);
   if (!product) notFound();
 
@@ -100,6 +105,11 @@ export default async function ProductPage({ params }: ProductPageProps) {
             <p className="mt-4 text-4xl font-semibold tabular-nums text-ink">
               {formatMoney(product.price.amountMinor, product.price.currency)}
             </p>
+            <EarnPoints
+              loyaltyPolicy={growth?.loyalty ?? null}
+              price={product.price}
+              source={catalog.source}
+            />
             <p className="mt-3 text-sm leading-6 text-muted-ink">
               {product.availableQuantity} unit{product.availableQuantity === 1 ? "" : "s"} in the current public projection.
               Tax, shipping, and final discounts are calculated later.
