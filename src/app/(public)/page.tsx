@@ -12,7 +12,7 @@ export default async function HomePage() {
   return (
     <PageTransition>
       <PublicHome
-        loyaltyPolicy={growth?.loyalty ?? null}
+        loyaltyPolicy={growth.status === "active" ? growth.projection.loyalty : null}
         products={catalog.products}
         variantCount={catalog.variantCount}
       />

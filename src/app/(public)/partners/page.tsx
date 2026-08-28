@@ -12,7 +12,8 @@ export const metadata: Metadata = {
 };
 
 export default async function PartnersPage() {
-  const projection = await getPublicGrowthProjection();
+  const result = await getPublicGrowthProjection();
+  const projection = result.status === "active" ? result.projection : null;
   const affiliate =
     projection?.affiliate?.status === "active" ? projection.affiliate : null;
 
@@ -24,7 +25,11 @@ export default async function PartnersPage() {
           title="Partner Program"
           description="Program details appear only when an active server record is available."
         />
-        {affiliate === null ? (
+        {result.status === "read_error" ? (
+          <p className="record-sheet text-base leading-7 text-muted-ink" role="status">
+            The Partner Program is temporarily unavailable. Please try again.
+          </p>
+        ) : affiliate === null ? (
           <p className="record-sheet text-base leading-7 text-muted-ink">
             The Partner Program is not currently available.
           </p>

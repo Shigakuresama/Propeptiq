@@ -7,7 +7,8 @@ import { getPublicGrowthProjection } from "@/growth/public-growth-server";
 export const metadata: Metadata = { title: "Rewards terms" };
 
 export default async function RewardsTermsPage() {
-  const projection = await getPublicGrowthProjection();
+  const result = await getPublicGrowthProjection();
+  const projection = result.status === "active" ? result.projection : null;
   return (
     <PageTransition>
       <PublicTermsRecord
@@ -15,7 +16,11 @@ export default async function RewardsTermsPage() {
         backLabel="Back to Rewards"
         terms={projection?.terms.rewards ?? null}
         title="Rewards terms"
-        unavailableMessage="Current rewards terms are unavailable."
+        unavailableMessage={
+          result.status === "read_error"
+            ? "Current rewards terms are temporarily unavailable. Please try again."
+            : "Current rewards terms are unavailable."
+        }
       />
     </PageTransition>
   );

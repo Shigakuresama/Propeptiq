@@ -47,21 +47,24 @@ describe("database-backed product page rewards", () => {
       qualityRecords: [],
     });
     getPublicGrowthProjectionMock.mockResolvedValue({
-      loyalty: {
-        id: "loyalty-1",
-        version: 1,
-        status: "active",
-        pointsPerDollar: 2,
-        redemptionMinorPerPoint: 1,
-        minimumRedemptionPoints: 500,
-        maximumRedemptionBasisPoints: 2_500,
-        expiresAfterDays: null,
-        effectiveAt: "2026-08-27T00:00:00.000Z",
-        supersededAt: null,
+      status: "active",
+      projection: {
+        loyalty: {
+          id: "loyalty-1",
+          version: 1,
+          status: "active",
+          pointsPerDollar: 2,
+          redemptionMinorPerPoint: 1,
+          minimumRedemptionPoints: 500,
+          maximumRedemptionBasisPoints: 2_500,
+          expiresAfterDays: null,
+          effectiveAt: "2026-08-27T00:00:00.000Z",
+          supersededAt: null,
+        },
+        referral: null,
+        affiliate: null,
+        terms: { rewards: null, partner: null },
       },
-      referral: null,
-      affiliate: null,
-      terms: { rewards: null, partner: null },
     });
 
     render(
@@ -73,20 +76,23 @@ describe("database-backed product page rewards", () => {
     expect(screen.getByText("Earn 112 points")).toBeVisible();
   });
 
-  it("does not show points when the active policy is unavailable", async () => {
-    getPublicCatalogMock.mockResolvedValue({
-      source: "production",
-      products: [product],
-      promotions: [],
-      qualityRecords: [],
-    });
-    getPublicGrowthProjectionMock.mockResolvedValue(null);
+  it.each(["inactive", "read_error"] as const)(
+    "does not show points when the policy read is %s",
+    async (status) => {
+      getPublicCatalogMock.mockResolvedValue({
+        source: "production",
+        products: [product],
+        promotions: [],
+        qualityRecords: [],
+      });
+      getPublicGrowthProjectionMock.mockResolvedValue({ status });
 
-    render(
-      <CartProvider>
-        {await ProductPage({ params: Promise.resolve({ slug: product.slug }) })}
-      </CartProvider>,
-    );
-    expect(screen.queryByText(/Earn \d+ points/)).toBeNull();
-  });
+      render(
+        <CartProvider>
+          {await ProductPage({ params: Promise.resolve({ slug: product.slug }) })}
+        </CartProvider>,
+      );
+      expect(screen.queryByText(/Earn \d+ points/)).toBeNull();
+    },
+  );
 });

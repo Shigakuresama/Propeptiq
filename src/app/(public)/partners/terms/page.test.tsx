@@ -18,15 +18,18 @@ import PartnersTermsPage from "./page";
 describe("public partner terms page", () => {
   it("renders the exact current terms record", async () => {
     getPublicGrowthProjectionMock.mockResolvedValue({
-      loyalty: null,
-      referral: null,
-      affiliate: null,
-      terms: {
-        rewards: null,
-        partner: {
-          version: 5,
-          effectiveAt: "2026-08-27T00:00:00.000Z",
-          termsText: "Server-projected partner terms.",
+      status: "active",
+      projection: {
+        loyalty: null,
+        referral: null,
+        affiliate: null,
+        terms: {
+          rewards: null,
+          partner: {
+            version: 5,
+            effectiveAt: "2026-08-27T00:00:00.000Z",
+            termsText: "Server-projected partner terms.",
+          },
         },
       },
     });
@@ -38,8 +41,17 @@ describe("public partner terms page", () => {
   });
 
   it("fails closed when current terms are unavailable", async () => {
-    getPublicGrowthProjectionMock.mockResolvedValue(null);
+    getPublicGrowthProjectionMock.mockResolvedValue({ status: "inactive" });
     render(await PartnersTermsPage());
     expect(screen.getByText("Current partner terms are unavailable.")).toBeVisible();
+  });
+
+  it("distinguishes a safe read failure from an inactive terms record", async () => {
+    getPublicGrowthProjectionMock.mockResolvedValue({ status: "read_error" });
+    render(await PartnersTermsPage());
+    expect(
+      screen.getByText("Current partner terms are temporarily unavailable. Please try again."),
+    ).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/Server-projected|Version \d+/iu);
   });
 });

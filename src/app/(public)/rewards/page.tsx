@@ -12,7 +12,8 @@ export const metadata: Metadata = {
 };
 
 export default async function RewardsPage() {
-  const projection = await getPublicGrowthProjection();
+  const result = await getPublicGrowthProjection();
+  const projection = result.status === "active" ? result.projection : null;
   const loyalty = projection?.loyalty?.status === "active" ? projection.loyalty : null;
   const referral = projection?.referral?.status === "active" ? projection.referral : null;
   const available = loyalty !== null || referral !== null;
@@ -25,7 +26,11 @@ export default async function RewardsPage() {
           title="Rewards"
           description="Program details appear only when an active server record is available."
         />
-        {!available ? (
+        {result.status === "read_error" ? (
+          <p className="record-sheet text-base leading-7 text-muted-ink" role="status">
+            Rewards are temporarily unavailable. Please try again.
+          </p>
+        ) : !available ? (
           <p className="record-sheet text-base leading-7 text-muted-ink">
             Rewards are not currently available.
           </p>
@@ -35,7 +40,7 @@ export default async function RewardsPage() {
               <section className="record-card" aria-labelledby="loyalty-heading">
                 <BadgeCheck aria-hidden="true" className="size-5 text-moss" />
                 <h2 id="loyalty-heading" className="mt-5 font-heading text-3xl text-ink">
-                  Purchase points
+                  Earn points
                 </h2>
                 <p className="mt-4 text-base leading-7 text-muted-ink">
                   Earn {loyalty.pointsPerDollar} points per eligible dollar.

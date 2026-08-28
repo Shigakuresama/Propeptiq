@@ -7,7 +7,8 @@ import { getPublicGrowthProjection } from "@/growth/public-growth-server";
 export const metadata: Metadata = { title: "Partner terms" };
 
 export default async function PartnersTermsPage() {
-  const projection = await getPublicGrowthProjection();
+  const result = await getPublicGrowthProjection();
+  const projection = result.status === "active" ? result.projection : null;
   return (
     <PageTransition>
       <PublicTermsRecord
@@ -15,7 +16,11 @@ export default async function PartnersTermsPage() {
         backLabel="Back to Partner Program"
         terms={projection?.terms.partner ?? null}
         title="Partner terms"
-        unavailableMessage="Current partner terms are unavailable."
+        unavailableMessage={
+          result.status === "read_error"
+            ? "Current partner terms are temporarily unavailable. Please try again."
+            : "Current partner terms are unavailable."
+        }
       />
     </PageTransition>
   );

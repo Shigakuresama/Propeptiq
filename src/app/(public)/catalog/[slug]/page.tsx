@@ -106,7 +106,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
               {formatMoney(product.price.amountMinor, product.price.currency)}
             </p>
             <EarnPoints
-              loyaltyPolicy={growth?.loyalty ?? null}
+              loyaltyPolicy={
+                growth.status === "active" ? growth.projection.loyalty : null
+              }
               price={product.price}
               source={catalog.source}
             />
