@@ -215,7 +215,36 @@ test("mobile explanatory copy meets the 16px body minimum", async ({ page }) => 
   }
 });
 
-test("mobile header brand and footer navigation targets are at least 44px", async ({ page }) => {
+test("header logo remains uncropped while brand and footer targets stay accessible", async ({ page }) => {
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
+    await page.goto("/");
+
+    const logoStyles = await page
+      .getByRole("banner")
+      .getByRole("link", { name: "PROPEPTIQ LABS home" })
+      .locator("img")
+      .evaluate((image) => {
+        const imageStyles = getComputedStyle(image);
+        const wrapperStyles = getComputedStyle(image.parentElement!);
+        return {
+          backgroundColor: wrapperStyles.backgroundColor,
+          borderRadius: wrapperStyles.borderRadius,
+          objectFit: imageStyles.objectFit,
+          overflow: wrapperStyles.overflow,
+          transform: imageStyles.transform,
+        };
+      });
+
+    expect(logoStyles, `${width}px header logo styles`).toEqual({
+      backgroundColor: "rgba(0, 0, 0, 0)",
+      borderRadius: "0px",
+      objectFit: "contain",
+      overflow: "visible",
+      transform: "none",
+    });
+  }
+
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
 

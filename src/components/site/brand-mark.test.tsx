@@ -19,6 +19,10 @@ describe("PROPEPTIQ brand artwork", () => {
     expect(decorativeMark?.parentElement).not.toHaveClass("rounded-full");
     expect(decorativeMark?.parentElement).not.toHaveClass("border");
     expect(decorativeMark?.parentElement).not.toHaveClass("bg-ink");
+    expect(decorativeMark?.parentElement).not.toHaveClass("overflow-hidden");
+    expect(decorativeMark).toHaveClass("object-contain");
+    expect(decorativeMark).not.toHaveClass("object-cover");
+    expect(decorativeMark).not.toHaveClass("scale-[2.1]");
     expect(screen.getByRole("img", { name: "PROPEPTIQ LABS" })).toBeVisible();
   });
 });
