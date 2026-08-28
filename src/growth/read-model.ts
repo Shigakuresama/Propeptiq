@@ -8,6 +8,18 @@ export type RewardLedgerReadItem = Readonly<{
   availablePointsBalanceAfter: number;
 }>;
 
+export type GrowthReadPage = Readonly<{
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}>;
+
+export type PagedGrowthReadItems<Item> = Readonly<{
+  items: readonly Item[];
+  totalCount: number;
+  page: GrowthReadPage;
+}>;
+
 export type OwnerGrowthSnapshot = Readonly<{
   rewards: Readonly<{
     pendingPoints: number;
@@ -17,7 +29,7 @@ export type OwnerGrowthSnapshot = Readonly<{
       currentPoints: number;
       requiredPoints: number;
     }>;
-    ledger: readonly RewardLedgerReadItem[];
+    ledger: PagedGrowthReadItems<RewardLedgerReadItem>;
   }> | null;
   referrals: Readonly<{
     code: string | null;
@@ -29,20 +41,20 @@ export type OwnerGrowthSnapshot = Readonly<{
       reversed: number;
     }>;
     rewardPointsTotal: number;
-    conversions: readonly Readonly<{
+    conversions: PagedGrowthReadItems<Readonly<{
       reference: string;
       status: "pending" | "qualified" | "reversed";
       rewardPoints: number;
       occurredAt: string;
-    }>[];
+    }>>;
   }>;
-  sharedSets: readonly Readonly<{
+  sharedSets: PagedGrowthReadItems<Readonly<{
     code: string;
     label: string;
     active: boolean;
     itemCount: number;
     updatedAt: string;
-  }>[];
+  }>>;
   affiliate: Readonly<{
     publicCode: string;
     status: "pending" | "active" | "rejected" | "suspended";

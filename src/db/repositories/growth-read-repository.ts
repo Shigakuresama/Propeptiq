@@ -21,8 +21,52 @@ export type GrowthReadRepository = Readonly<{
   readOwnerSnapshot: (input: Readonly<{
     ownerUserId: string;
     now: Date;
+    pages?: Readonly<{
+      ledger?: GrowthReadPageInput;
+      referralConversions?: GrowthReadPageInput;
+      sharedSets?: GrowthReadPageInput;
+    }>;
   }>) => Promise<OwnerGrowthSnapshot>;
 }>;
+
+export type GrowthReadPageInput = Readonly<{
+  limit?: number;
+  offset?: number;
+}>;
+
+type NormalizedGrowthReadPage = Readonly<{ limit: number; offset: number }>;
+
+const defaultPageLimit = 50;
+const maximumPageLimit = 100;
+
+function normalizePage(input: GrowthReadPageInput | undefined): NormalizedGrowthReadPage {
+  if (input !== undefined && (input === null || typeof input !== "object" || Array.isArray(input))) {
+    throw new Error("Invalid owner read page");
+  }
+  const limit = input?.limit ?? defaultPageLimit;
+  const offset = input?.offset ?? 0;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > maximumPageLimit ||
+      !Number.isSafeInteger(offset) || offset < 0) {
+    throw new Error("Invalid owner read page");
+  }
+  return Object.freeze({ limit, offset });
+}
+
+function pageResult<Item>(
+  items: readonly Item[],
+  totalCount: number,
+  page: NormalizedGrowthReadPage,
+) {
+  return {
+    items,
+    totalCount,
+    page: {
+      limit: page.limit,
+      offset: page.offset,
+      hasMore: totalCount > page.offset && totalCount - page.offset > items.length,
+    },
+  };
+}
 
 function safeInteger(value: number | string): number {
   const numeric = Number(value);
@@ -40,14 +84,19 @@ async function loadRewards(
   client: GrowthReadSqlClient,
   ownerUserId: string,
   now: Date,
+  page: NormalizedGrowthReadPage,
 ): Promise<OwnerGrowthSnapshot["rewards"]> {
   const policy = await loadCurrentLoyaltyPolicy(client, now);
   const account = await client.query<{
     pendingPoints: number | string;
     availablePoints: number | string;
+    ledgerTotalCount: number | string;
   }>(
-    `SELECT pending_points AS "pendingPoints", available_points AS "availablePoints"
-     FROM reward_accounts WHERE buyer_user_id = $1::uuid`,
+    `SELECT ra.pending_points AS "pendingPoints", ra.available_points AS "availablePoints",
+            (SELECT count(*)::int FROM reward_ledger_entries le
+             WHERE le.reward_account_id = ra.id
+               AND le.buyer_user_id = ra.buyer_user_id) AS "ledgerTotalCount"
+     FROM reward_accounts ra WHERE ra.buyer_user_id = $1::uuid`,
     [ownerUserId],
   );
   if (account.rows.length === 0) return null;
@@ -70,8 +119,9 @@ async function loadRewards(
      JOIN reward_accounts ra ON ra.id = le.reward_account_id
        AND ra.buyer_user_id = le.buyer_user_id
      WHERE ra.buyer_user_id = $1::uuid
-     ORDER BY le.occurred_at DESC, le.id DESC`,
-    [ownerUserId],
+     ORDER BY le.occurred_at DESC, le.id DESC
+     LIMIT $2 OFFSET $3`,
+    [ownerUserId, page.limit, page.offset],
   );
   const pendingPoints = safeInteger(account.rows[0]!.pendingPoints);
   const availablePoints = safeInteger(account.rows[0]!.availablePoints);
@@ -86,21 +136,26 @@ async function loadRewards(
       ),
       requiredPoints: policy.minimumRedemptionPoints,
     },
-    ledger: ledger.rows.map((row) => ({
-      occurredAt: toIso(row.occurredAt),
-      kind: row.kind,
-      reference: redactGrowthReference(row.sourceId),
-      pendingPointsDelta: safeInteger(row.pendingPointsDelta),
-      availablePointsDelta: safeInteger(row.availablePointsDelta),
-      pendingPointsBalanceAfter: safeInteger(row.pendingPointsBalanceAfter),
-      availablePointsBalanceAfter: safeInteger(row.availablePointsBalanceAfter),
-    })),
+    ledger: pageResult(
+      ledger.rows.map((row) => ({
+        occurredAt: toIso(row.occurredAt),
+        kind: row.kind,
+        reference: redactGrowthReference(row.sourceId),
+        pendingPointsDelta: safeInteger(row.pendingPointsDelta),
+        availablePointsDelta: safeInteger(row.availablePointsDelta),
+        pendingPointsBalanceAfter: safeInteger(row.pendingPointsBalanceAfter),
+        availablePointsBalanceAfter: safeInteger(row.availablePointsBalanceAfter),
+      })),
+      safeInteger(account.rows[0]!.ledgerTotalCount),
+      page,
+    ),
   };
 }
 
 async function loadReferrals(
   client: GrowthReadSqlClient,
   ownerUserId: string,
+  page: NormalizedGrowthReadPage,
 ): Promise<OwnerGrowthSnapshot["referrals"]> {
   const codes = await client.query<{ code: string; status: "active" | "revoked" }>(
     `SELECT code, status FROM referral_codes
@@ -137,33 +192,47 @@ async function loadReferrals(
      FROM referral_conversions rc
      JOIN referral_attributions ra ON ra.id = rc.referral_attribution_id
      WHERE ra.referrer_user_id = $1::uuid
-     ORDER BY rc.created_at DESC, rc.id DESC`,
-    [ownerUserId],
+     ORDER BY rc.created_at DESC, rc.id DESC
+     LIMIT $2 OFFSET $3`,
+    [ownerUserId, page.limit, page.offset],
   );
   const row = summary.rows[0]!;
+  const pending = safeInteger(row.pending);
+  const qualified = safeInteger(row.qualified);
+  const reversed = safeInteger(row.reversed);
   return {
     code: codes.rows[0]?.code ?? null,
     status: codes.rows[0]?.status ?? null,
     counts: {
       attributed: safeInteger(row.attributed),
-      pending: safeInteger(row.pending),
-      qualified: safeInteger(row.qualified),
-      reversed: safeInteger(row.reversed),
+      pending,
+      qualified,
+      reversed,
     },
     rewardPointsTotal: safeInteger(row.rewardPointsTotal),
-    conversions: conversions.rows.map((conversion) => ({
-      reference: redactGrowthReference(conversion.reference),
-      status: conversion.status,
-      rewardPoints: safeInteger(conversion.rewardPoints),
-      occurredAt: toIso(conversion.occurredAt),
-    })),
+    conversions: pageResult(
+      conversions.rows.map((conversion) => ({
+        reference: redactGrowthReference(conversion.reference),
+        status: conversion.status,
+        rewardPoints: safeInteger(conversion.rewardPoints),
+        occurredAt: toIso(conversion.occurredAt),
+      })),
+      pending + qualified + reversed,
+      page,
+    ),
   };
 }
 
 async function loadSharedSets(
   client: GrowthReadSqlClient,
   ownerUserId: string,
+  page: NormalizedGrowthReadPage,
 ): Promise<OwnerGrowthSnapshot["sharedSets"]> {
+  const total = await client.query<{ totalCount: number | string }>(
+    `SELECT count(*)::int AS "totalCount" FROM shared_research_sets
+     WHERE owner_user_id = $1::uuid`,
+    [ownerUserId],
+  );
   const result = await client.query<{
     code: string;
     label: string;
@@ -177,16 +246,21 @@ async function loadSharedSets(
      LEFT JOIN shared_research_set_items i ON i.shared_set_id = s.id
      WHERE s.owner_user_id = $1::uuid
      GROUP BY s.id
-     ORDER BY s.updated_at DESC, s.id DESC`,
-    [ownerUserId],
+     ORDER BY s.updated_at DESC, s.id DESC
+     LIMIT $2 OFFSET $3`,
+    [ownerUserId, page.limit, page.offset],
   );
-  return result.rows.map((row) => ({
-    code: row.code,
-    label: row.label,
-    active: row.active,
-    itemCount: safeInteger(row.itemCount),
-    updatedAt: toIso(row.updatedAt),
-  }));
+  return pageResult(
+    result.rows.map((row) => ({
+      code: row.code,
+      label: row.label,
+      active: row.active,
+      itemCount: safeInteger(row.itemCount),
+      updatedAt: toIso(row.updatedAt),
+    })),
+    safeInteger(total.rows[0]!.totalCount),
+    page,
+  );
 }
 
 async function loadAffiliate(
@@ -262,14 +336,21 @@ export function createPostgresGrowthReadRepository(
   runReadTransaction: GrowthReadTransactionRunner,
 ): GrowthReadRepository {
   return Object.freeze({
-    readOwnerSnapshot(input) {
+    async readOwnerSnapshot(input) {
       if (!Number.isFinite(input.now.getTime())) throw new Error("Invalid owner read time");
-      return runReadTransaction(
+      const pages = input.pages;
+      if (pages !== undefined && (pages === null || typeof pages !== "object" || Array.isArray(pages))) {
+        throw new Error("Invalid owner read page");
+      }
+      const ledgerPage = normalizePage(pages?.ledger);
+      const referralConversionsPage = normalizePage(pages?.referralConversions);
+      const sharedSetsPage = normalizePage(pages?.sharedSets);
+      return await runReadTransaction(
         async (client) => {
           await client.query("SET TRANSACTION READ ONLY");
-          const rewards = await loadRewards(client, input.ownerUserId, input.now);
-          const referrals = await loadReferrals(client, input.ownerUserId);
-          const sharedSets = await loadSharedSets(client, input.ownerUserId);
+          const rewards = await loadRewards(client, input.ownerUserId, input.now, ledgerPage);
+          const referrals = await loadReferrals(client, input.ownerUserId, referralConversionsPage);
+          const sharedSets = await loadSharedSets(client, input.ownerUserId, sharedSetsPage);
           const affiliate = await loadAffiliate(client, input.ownerUserId);
           return deepFreezeGrowthReadModel({ rewards, referrals, sharedSets, affiliate });
         },

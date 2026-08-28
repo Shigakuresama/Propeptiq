@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { runSerializableWithRetry } from "@/db/serializable-retry";
 
 export type GrowthSqlClient = Readonly<{
@@ -162,6 +164,7 @@ export type GrowthRepository = Readonly<{
   replaceSharedResearchSet: (input: Readonly<{
     setId: string;
     ownerUserId: string;
+    idempotencyKey: string;
     expectedUpdatedAt: Date;
     updatedAt: Date;
     label: string;
@@ -170,6 +173,7 @@ export type GrowthRepository = Readonly<{
   deactivateSharedResearchSet: (input: Readonly<{
     setId: string;
     ownerUserId: string;
+    idempotencyKey: string;
     expectedUpdatedAt: Date;
     deactivatedAt: Date;
   }>) => Promise<PersistenceResult<"set", SharedSetMutationRecord>>;
@@ -294,6 +298,21 @@ type SharedSetRow = {
   deactivatedAt: Date | string | null;
 };
 
+type SharedSetMutationReceiptRow = {
+  idempotencyKey: string;
+  sharedSetId: string;
+  ownerUserId: string;
+  kind: "replace" | "deactivate";
+  expectedUpdatedAt: Date | string;
+  payloadHash: string;
+  resultPublicCode: string;
+  resultLabel: string;
+  resultActive: boolean;
+  resultItemCount: number | string;
+  resultUpdatedAt: Date | string;
+  appliedAt: Date | string;
+};
+
 type PayoutRow = {
   id: string;
   affiliateProfileId: string;
@@ -341,6 +360,14 @@ const ledgerKinds = new Set<RewardLedgerKind>([
 
 function nonblank(value: string): boolean {
   return value.trim() === value && value.length > 0 && !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+function boundedOpaqueIdempotencyKey(value: string): boolean {
+  return value.length >= 16 && value.length <= 200 && nonblank(value);
+}
+
+function sha256Text(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function safeInteger(value: number | string): number {
@@ -733,24 +760,143 @@ function exactItems(
     item.productId === right[index]!.productId && item.quantity === right[index]!.quantity);
 }
 
+const sharedSetReceiptProjection = `idempotency_key AS "idempotencyKey",
+  shared_set_id::text AS "sharedSetId", owner_user_id::text AS "ownerUserId", kind,
+  expected_updated_at AS "expectedUpdatedAt", payload_hash AS "payloadHash",
+  result_public_code AS "resultPublicCode", result_label AS "resultLabel",
+  result_active AS "resultActive", result_item_count AS "resultItemCount",
+  result_updated_at AS "resultUpdatedAt", applied_at AS "appliedAt"`;
+
+function sharedSetPayloadHash(payload: Readonly<Record<string, unknown>>): string {
+  return sha256Text(JSON.stringify(payload));
+}
+
+async function loadSharedSetReceipt(
+  client: GrowthSqlClient,
+  idempotencyKey: string,
+): Promise<SharedSetMutationReceiptRow | null> {
+  const receipt = await client.query<SharedSetMutationReceiptRow>(
+    `SELECT ${sharedSetReceiptProjection}
+     FROM shared_research_set_mutations
+     WHERE idempotency_key = $1 FOR UPDATE`,
+    [idempotencyKey],
+  );
+  if (receipt.rows.length > 1) throw new GrowthPersistenceConflict("Duplicate shared set receipt");
+  return receipt.rows[0] ?? null;
+}
+
+function projectSharedSetReceipt(row: SharedSetMutationReceiptRow): SharedSetMutationRecord {
+  const updatedAt = toIso(row.resultUpdatedAt);
+  if (toIso(row.appliedAt) !== updatedAt) {
+    throw new GrowthPersistenceConflict("Malformed shared set receipt");
+  }
+  return Object.freeze({
+    code: row.resultPublicCode,
+    label: row.resultLabel,
+    active: row.resultActive,
+    itemCount: safeInteger(row.resultItemCount),
+    updatedAt,
+  });
+}
+
+function replaySharedSetReceipt(
+  row: SharedSetMutationReceiptRow,
+  expected: Readonly<{
+    idempotencyKey: string;
+    sharedSetId: string;
+    ownerUserId: string;
+    kind: "replace" | "deactivate";
+    expectedUpdatedAt: string;
+    payloadHash: string;
+    resultLabel?: string;
+    resultActive: boolean;
+    resultItemCount?: number;
+    resultUpdatedAt: string;
+  }>,
+): PersistenceResult<"set", SharedSetMutationRecord> {
+  const projected = projectSharedSetReceipt(row);
+  if (row.idempotencyKey !== expected.idempotencyKey ||
+      row.sharedSetId !== expected.sharedSetId || row.ownerUserId !== expected.ownerUserId ||
+      row.kind !== expected.kind || toIso(row.expectedUpdatedAt) !== expected.expectedUpdatedAt ||
+      row.payloadHash !== expected.payloadHash || projected.active !== expected.resultActive ||
+      projected.updatedAt !== expected.resultUpdatedAt ||
+      (expected.resultLabel !== undefined && projected.label !== expected.resultLabel) ||
+      (expected.resultItemCount !== undefined && projected.itemCount !== expected.resultItemCount)) {
+    throw new GrowthPersistenceConflict("Shared set mutation receipt conflict");
+  }
+  return Object.freeze({ status: "idempotent", set: projected });
+}
+
+async function appendSharedSetReceipt(
+  client: GrowthSqlClient,
+  input: Readonly<{
+    idempotencyKey: string;
+    sharedSetId: string;
+    ownerUserId: string;
+    kind: "replace" | "deactivate";
+    expectedUpdatedAt: string;
+    payloadHash: string;
+    result: SharedSetMutationRecord;
+  }>,
+): Promise<void> {
+  const inserted = await client.query<{ idempotencyKey: string }>(
+    `INSERT INTO shared_research_set_mutations
+       (idempotency_key, shared_set_id, owner_user_id, kind, expected_updated_at,
+        payload_hash, result_public_code, result_label, result_active,
+        result_item_count, result_updated_at, applied_at, created_at)
+     VALUES ($1, $2::uuid, $3::uuid, $4, $5::timestamptz, $6, $7, $8, $9,
+             $10, $11::timestamptz, $11::timestamptz, $11::timestamptz)
+     RETURNING idempotency_key AS "idempotencyKey"`,
+    [input.idempotencyKey, input.sharedSetId, input.ownerUserId, input.kind,
+      input.expectedUpdatedAt, input.payloadHash, input.result.code, input.result.label,
+      input.result.active, input.result.itemCount, input.result.updatedAt],
+  );
+  if (inserted.rows[0]?.idempotencyKey !== input.idempotencyKey) {
+    throw new GrowthPersistenceConflict("Shared set receipt append conflict");
+  }
+}
+
 async function replaceSharedSetInTransaction(
   client: GrowthSqlClient,
   input: Parameters<GrowthRepository["replaceSharedResearchSet"]>[0],
 ): Promise<PersistenceResult<"set", SharedSetMutationRecord>> {
   if (!uuidPattern.test(input.setId) || !uuidPattern.test(input.ownerUserId) ||
+      !boundedOpaqueIdempotencyKey(input.idempotencyKey) ||
       input.label.trim() !== input.label || input.label.length < 1 || input.label.length > 120 ||
       !Number.isFinite(input.expectedUpdatedAt.getTime()) || !Number.isFinite(input.updatedAt.getTime()) ||
       input.updatedAt <= input.expectedUpdatedAt) {
     throw new GrowthPersistenceConflict("Invalid shared set mutation");
   }
   const desired = canonicalItems(input.items);
+  const expectedUpdatedAt = input.expectedUpdatedAt.toISOString();
+  const resultUpdatedAt = input.updatedAt.toISOString();
+  const payloadHash = sharedSetPayloadHash({
+    kind: "replace",
+    setId: input.setId,
+    ownerUserId: input.ownerUserId,
+    expectedUpdatedAt,
+    updatedAt: resultUpdatedAt,
+    label: input.label,
+    items: desired,
+  });
+  const receipt = await loadSharedSetReceipt(client, input.idempotencyKey);
+  if (receipt) {
+    return replaySharedSetReceipt(receipt, {
+      idempotencyKey: input.idempotencyKey,
+      sharedSetId: input.setId,
+      ownerUserId: input.ownerUserId,
+      kind: "replace",
+      expectedUpdatedAt,
+      payloadHash,
+      resultLabel: input.label,
+      resultActive: true,
+      resultItemCount: desired.length,
+      resultUpdatedAt,
+    });
+  }
   const loaded = await loadSharedSetMutation(client, input.setId, input.ownerUserId);
   const currentUpdatedAt = toIso(loaded.row.updatedAt);
-  if (currentUpdatedAt === input.updatedAt.toISOString() && loaded.row.active &&
-      loaded.row.label === input.label && exactItems(loaded.items, desired)) {
-    return Object.freeze({ status: "idempotent", set: projectSet(loaded.row, loaded.items.length) });
-  }
-  if (!loaded.row.active || currentUpdatedAt !== input.expectedUpdatedAt.toISOString()) {
+  if (!loaded.row.active || currentUpdatedAt !== expectedUpdatedAt) {
     throw new GrowthPersistenceConflict("Stale shared set mutation");
   }
   await client.query(`DELETE FROM shared_research_set_items WHERE shared_set_id = $1::uuid`, [input.setId]);
@@ -767,11 +913,20 @@ async function replaceSharedSetInTransaction(
        AND active = true AND updated_at = $5::timestamptz
      RETURNING public_code AS code, label, active, updated_at AS "updatedAt",
                deactivated_at AS "deactivatedAt"`,
-    [input.setId, input.ownerUserId, input.label, input.updatedAt.toISOString(),
-      input.expectedUpdatedAt.toISOString()],
+    [input.setId, input.ownerUserId, input.label, resultUpdatedAt, expectedUpdatedAt],
   );
   if (!updated.rows[0]) throw new GrowthPersistenceConflict("Stale shared set mutation");
-  return Object.freeze({ status: "applied", set: projectSet(updated.rows[0], desired.length) });
+  const result = projectSet(updated.rows[0], desired.length);
+  await appendSharedSetReceipt(client, {
+    idempotencyKey: input.idempotencyKey,
+    sharedSetId: input.setId,
+    ownerUserId: input.ownerUserId,
+    kind: "replace",
+    expectedUpdatedAt,
+    payloadHash,
+    result,
+  });
+  return Object.freeze({ status: "applied", set: result });
 }
 
 async function deactivateSharedSetInTransaction(
@@ -779,20 +934,36 @@ async function deactivateSharedSetInTransaction(
   input: Parameters<GrowthRepository["deactivateSharedResearchSet"]>[0],
 ): Promise<PersistenceResult<"set", SharedSetMutationRecord>> {
   if (!uuidPattern.test(input.setId) || !uuidPattern.test(input.ownerUserId) ||
+      !boundedOpaqueIdempotencyKey(input.idempotencyKey) ||
       !Number.isFinite(input.expectedUpdatedAt.getTime()) ||
       !Number.isFinite(input.deactivatedAt.getTime()) ||
       input.deactivatedAt <= input.expectedUpdatedAt) {
     throw new GrowthPersistenceConflict("Invalid shared set deactivation");
   }
-  const loaded = await loadSharedSetMutation(client, input.setId, input.ownerUserId);
-  if (!loaded.row.active) {
-    if (loaded.row.deactivatedAt !== null &&
-        toIso(loaded.row.deactivatedAt) === input.deactivatedAt.toISOString()) {
-      return Object.freeze({ status: "idempotent", set: projectSet(loaded.row, loaded.items.length) });
-    }
-    throw new GrowthPersistenceConflict();
+  const expectedUpdatedAt = input.expectedUpdatedAt.toISOString();
+  const resultUpdatedAt = input.deactivatedAt.toISOString();
+  const payloadHash = sharedSetPayloadHash({
+    kind: "deactivate",
+    setId: input.setId,
+    ownerUserId: input.ownerUserId,
+    expectedUpdatedAt,
+    deactivatedAt: resultUpdatedAt,
+  });
+  const receipt = await loadSharedSetReceipt(client, input.idempotencyKey);
+  if (receipt) {
+    return replaySharedSetReceipt(receipt, {
+      idempotencyKey: input.idempotencyKey,
+      sharedSetId: input.setId,
+      ownerUserId: input.ownerUserId,
+      kind: "deactivate",
+      expectedUpdatedAt,
+      payloadHash,
+      resultActive: false,
+      resultUpdatedAt,
+    });
   }
-  if (toIso(loaded.row.updatedAt) !== input.expectedUpdatedAt.toISOString()) {
+  const loaded = await loadSharedSetMutation(client, input.setId, input.ownerUserId);
+  if (!loaded.row.active || toIso(loaded.row.updatedAt) !== expectedUpdatedAt) {
     throw new GrowthPersistenceConflict("Stale shared set deactivation");
   }
   const updated = await client.query<SharedSetRow>(
@@ -802,11 +973,20 @@ async function deactivateSharedSetInTransaction(
        AND updated_at = $4::timestamptz
      RETURNING public_code AS code, label, active, updated_at AS "updatedAt",
                deactivated_at AS "deactivatedAt"`,
-    [input.setId, input.ownerUserId, input.deactivatedAt.toISOString(),
-      input.expectedUpdatedAt.toISOString()],
+    [input.setId, input.ownerUserId, resultUpdatedAt, expectedUpdatedAt],
   );
   if (!updated.rows[0]) throw new GrowthPersistenceConflict("Stale shared set deactivation");
-  return Object.freeze({ status: "applied", set: projectSet(updated.rows[0], loaded.items.length) });
+  const result = projectSet(updated.rows[0], loaded.items.length);
+  await appendSharedSetReceipt(client, {
+    idempotencyKey: input.idempotencyKey,
+    sharedSetId: input.setId,
+    ownerUserId: input.ownerUserId,
+    kind: "deactivate",
+    expectedUpdatedAt,
+    payloadHash,
+    result,
+  });
+  return Object.freeze({ status: "applied", set: result });
 }
 
 function projectPayout(row: PayoutRow): AffiliatePayoutRecord {
@@ -1085,6 +1265,38 @@ async function recordTermsAcceptanceInTransaction(
       !Number.isFinite(input.acceptedAt.getTime())) {
     throw new GrowthPersistenceConflict("Invalid growth terms acceptance");
   }
+  type TermsRow = {
+    id: string;
+    program: typeof input.program;
+    contentHash: string;
+    termsText: string;
+    effectiveAt: Date | string;
+    supersededAt: Date | string | null;
+  };
+  const currentTerms = await client.query<TermsRow>(
+    `SELECT id::text AS id, program, content_hash AS "contentHash",
+            terms_text AS "termsText", effective_at AS "effectiveAt",
+            superseded_at AS "supersededAt"
+     FROM growth_terms_versions
+     WHERE program = $1::growth_terms_program
+       AND effective_at <= $2::timestamptz
+       AND (superseded_at IS NULL OR superseded_at > $2::timestamptz)
+     ORDER BY effective_at DESC, version DESC, id
+     FOR UPDATE`,
+    [input.program, input.acceptedAt.toISOString()],
+  );
+  const terms = currentTerms.rows[0];
+  if (currentTerms.rows.length !== 1 || !terms || terms.id !== input.termsVersionId ||
+      terms.program !== input.program || terms.termsText.trim().length === 0 ||
+      !/^[0-9a-f]{64}$/u.test(terms.contentHash) ||
+      toIso(terms.effectiveAt) > input.acceptedAt.toISOString() ||
+      (terms.supersededAt !== null && toIso(terms.supersededAt) <= input.acceptedAt.toISOString())) {
+    throw new GrowthPersistenceConflict("Exact current growth terms unavailable");
+  }
+  const computedContentHash = sha256Text(terms.termsText);
+  if (computedContentHash !== terms.contentHash || input.contentHash !== computedContentHash) {
+    throw new GrowthPersistenceConflict("Growth terms content hash mismatch");
+  }
   type Row = { id: string; userId: string; program: typeof input.program;
     termsVersionId: string; contentHash: string; acceptedAt: Date | string };
   const projection = `id::text AS id, user_id::text AS "userId", program,
@@ -1100,7 +1312,7 @@ async function recordTermsAcceptanceInTransaction(
     const row = existing.rows[0]!;
     if (existing.rows.length !== 1 || row.id !== input.id || row.userId !== input.userId ||
         row.program !== input.program || row.termsVersionId !== input.termsVersionId ||
-        row.contentHash !== input.contentHash || toIso(row.acceptedAt) !== input.acceptedAt.toISOString()) {
+        row.contentHash !== computedContentHash || toIso(row.acceptedAt) !== input.acceptedAt.toISOString()) {
       throw new GrowthPersistenceConflict();
     }
     return Object.freeze({ status: "idempotent" as const, acceptance: Object.freeze({
@@ -1114,7 +1326,7 @@ async function recordTermsAcceptanceInTransaction(
      VALUES ($1::uuid, $2::uuid, $3::growth_terms_program, $4::uuid, $5, $6::timestamptz)
      ON CONFLICT DO NOTHING RETURNING ${projection}`,
     [input.id, input.userId, input.program, input.termsVersionId,
-      input.contentHash, input.acceptedAt.toISOString()],
+      computedContentHash, input.acceptedAt.toISOString()],
   );
   if (!inserted.rows[0]) throw new GrowthPersistenceConflict("Growth terms acceptance conflict");
   const row = inserted.rows[0];
@@ -1139,7 +1351,8 @@ async function recordReferralCodeInTransaction(
     code, status, created_at AS "createdAt"`;
   const existing = await client.query<Row>(
     `SELECT ${projection} FROM referral_codes
-     WHERE id = $1::uuid OR owner_user_id = $2::uuid OR code = $3
+     WHERE id = $1::uuid OR code = $3
+        OR (owner_user_id = $2::uuid AND status = 'active')
      ORDER BY id FOR UPDATE`,
     [input.id, input.ownerUserId, input.code],
   );

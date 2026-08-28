@@ -980,6 +980,7 @@ export const sharedResearchSets = pgTable(
   },
   (table) => [
     unique("shared_research_sets_public_code_unique").on(table.publicCode),
+    unique("shared_research_sets_id_owner_unique").on(table.id, table.ownerUserId),
     check(
       "shared_research_sets_public_code_opaque",
       sql`${table.publicCode} ~ '^set_[A-Za-z0-9_-]{16,64}$'`,
@@ -997,6 +998,75 @@ export const sharedResearchSets = pgTable(
     index("shared_research_sets_owner_active_idx").on(
       table.ownerUserId,
       table.active,
+    ),
+  ],
+);
+
+export const sharedResearchSetMutations = pgTable(
+  "shared_research_set_mutations",
+  {
+    idempotencyKey: text("idempotency_key").primaryKey(),
+    sharedSetId: uuid("shared_set_id").notNull(),
+    ownerUserId: uuid("owner_user_id").notNull(),
+    kind: text("kind").notNull(),
+    expectedUpdatedAt: timestamp("expected_updated_at", { withTimezone: true })
+      .notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    resultPublicCode: text("result_public_code").notNull(),
+    resultLabel: text("result_label").notNull(),
+    resultActive: boolean("result_active").notNull(),
+    resultItemCount: integer("result_item_count").notNull(),
+    resultUpdatedAt: timestamp("result_updated_at", { withTimezone: true })
+      .notNull(),
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.sharedSetId, table.ownerUserId],
+      foreignColumns: [sharedResearchSets.id, sharedResearchSets.ownerUserId],
+      name: "shared_research_set_mutations_set_owner_fk",
+    }).onDelete("restrict"),
+    check(
+      "shared_research_set_mutations_idempotency_opaque",
+      sql`char_length(${table.idempotencyKey}) between 16 and 200
+        and ${nonblank(table.idempotencyKey)}
+        and ${table.idempotencyKey} !~ '[[:cntrl:]]'`,
+    ),
+    check(
+      "shared_research_set_mutations_kind_valid",
+      sql`${table.kind} in ('replace', 'deactivate')`,
+    ),
+    check(
+      "shared_research_set_mutations_payload_hash_sha256",
+      sha256(table.payloadHash),
+    ),
+    check(
+      "shared_research_set_mutations_result_code_opaque",
+      sql`${table.resultPublicCode} ~ '^set_[A-Za-z0-9_-]{16,64}$'`,
+    ),
+    check(
+      "shared_research_set_mutations_result_label_bounds",
+      sql`char_length(${table.resultLabel}) between 1 and 120
+        and ${nonblank(table.resultLabel)} and ${table.resultLabel} !~ '[[:cntrl:]]'`,
+    ),
+    check(
+      "shared_research_set_mutations_result_item_count_bounds",
+      sql`${table.resultItemCount} between 2 and 8`,
+    ),
+    check(
+      "shared_research_set_mutations_result_coherent",
+      sql`(${table.kind} = 'replace' and ${table.resultActive} = true)
+        or (${table.kind} = 'deactivate' and ${table.resultActive} = false)`,
+    ),
+    check(
+      "shared_research_set_mutations_time_coherent",
+      sql`${table.resultUpdatedAt} > ${table.expectedUpdatedAt}
+        and ${table.appliedAt} = ${table.resultUpdatedAt}`,
+    ),
+    index("shared_research_set_mutations_set_owner_idx").on(
+      table.sharedSetId,
+      table.ownerUserId,
     ),
   ],
 );

@@ -19,6 +19,8 @@ const customerTermsText = "Synthetic customer growth terms v1";
 const affiliateTermsText = "Synthetic affiliate growth terms v1";
 const customerTermsHash = "dcca1573b268b2ba22c4e3035db64ce1615d2fb6fbcb3bcbd493502b215535dc";
 const affiliateTermsHash = "87490411ae0013e0d401cebddfe232f46bd0aa8df54a31749fbec4537b0262f7";
+const overlappingAffiliateTermsText = "Synthetic overlapping affiliate terms";
+const overlappingAffiliateTermsHash = "4ea4a9cbaa9fbf9c7012ff1281dbc0dab7da5fe7e9c8f029af2660ea91ab5ca9";
 
 const ids = {
   owner: "83000000-0000-4000-8000-000000000001",
@@ -75,6 +77,8 @@ const ids = {
   activationReferralCode: "83000000-0000-4000-8000-000000000052",
   activationSet: "83000000-0000-4000-8000-000000000053",
   activationAffiliateProfile: "83000000-0000-4000-8000-000000000054",
+  revokedReferralCode: "83000000-0000-4000-8000-000000000055",
+  replacementReferralCode: "83000000-0000-4000-8000-000000000056",
 } as const;
 
 function sqlClient(client: PGlite): GrowthSqlClient {
@@ -334,13 +338,13 @@ describe("growth policy and repository boundary", () => {
     await seedCurrentPoliciesAndTerms(client);
     await seedOwnerPrivacyFixture(client);
     const transactionOptions: unknown[] = [];
-    const statements: string[] = [];
+    const statements: Readonly<{ sql: string; params: readonly unknown[] }>[] = [];
     const repository = createPostgresGrowthReadRepository((work, options) => {
       transactionOptions.push(options);
       return client.transaction((transaction) =>
         work({
           query: async <Row extends object>(sql: string, params: readonly unknown[] = []) => {
-            statements.push(sql.replace(/\s+/gu, " ").trim());
+            statements.push({ sql: sql.replace(/\s+/gu, " ").trim(), params });
             const result = await transaction.query<Row>(sql, [...params]);
             return { rows: result.rows };
           },
@@ -351,24 +355,38 @@ describe("growth policy and repository boundary", () => {
     const snapshot = await repository.readOwnerSnapshot({ ownerUserId: ids.owner, now });
 
     expect(transactionOptions).toEqual([{ isolationLevel: "serializable", readOnly: true }]);
-    expect(statements[0]).toMatch(/SET TRANSACTION READ ONLY/i);
+    expect(statements[0]?.sql).toMatch(/SET TRANSACTION READ ONLY/i);
     expect(snapshot).toEqual({
       rewards: expect.objectContaining({
         pendingPoints: 250,
         availablePoints: -50,
         usdEquivalentMinor: -50,
         minimumRedemptionProgress: { currentPoints: 0, requiredPoints: 500 },
+        ledger: {
+          items: [expect.objectContaining({ kind: "order_earned_pending" })],
+          totalCount: 1,
+          page: { limit: 50, offset: 0, hasMore: false },
+        },
       }),
       referrals: expect.objectContaining({
         code: "ref_ABCDEFGHIJKLMNOP",
         counts: { attributed: 1, pending: 0, qualified: 1, reversed: 0 },
         rewardPointsTotal: 125,
+        conversions: {
+          items: [expect.objectContaining({ status: "qualified", rewardPoints: 125 })],
+          totalCount: 1,
+          page: { limit: 50, offset: 0, hasMore: false },
+        },
       }),
-      sharedSets: [expect.objectContaining({
-        code: "set_ABCDEFGHIJKLMNOP",
-        label: "Owner neutral set",
-        itemCount: 2,
-      })],
+      sharedSets: {
+        items: [expect.objectContaining({
+          code: "set_ABCDEFGHIJKLMNOP",
+          label: "Owner neutral set",
+          itemCount: 2,
+        })],
+        totalCount: 1,
+        page: { limit: 50, offset: 0, hasMore: false },
+      },
       affiliate: expect.objectContaining({
         publicCode: "aff_ABCDEFGHIJKLMNOP",
         attributedCount: 1,
@@ -395,6 +413,69 @@ describe("growth policy and repository boundary", () => {
       expect(serialized).not.toContain(forbidden);
     }
     expect(serialized).not.toMatch(/email|clerk|address|productId|orderId|payment|provider|rawIp|cookie|envelope|referredUser/i);
+    expect(serialized).not.toMatch(/idempotency|payloadHash|expectedUpdatedAt|appliedAt/i);
+  });
+
+  it("bounds each owner-history page in SQL while keeping aggregates independent", async () => {
+    await seedCurrentPoliciesAndTerms(client);
+    await seedOwnerPrivacyFixture(client);
+    const statements: Readonly<{ sql: string; params: readonly unknown[] }>[] = [];
+    const repository = createPostgresGrowthReadRepository((work) =>
+      client.transaction((transaction) => work({
+        query: async <Row extends object>(sql: string, params: readonly unknown[] = []) => {
+          statements.push({ sql: sql.replace(/\s+/gu, " ").trim(), params });
+          const result = await transaction.query<Row>(sql, [...params]);
+          return { rows: result.rows };
+        },
+      })),
+    );
+
+    const snapshot = await repository.readOwnerSnapshot({
+      ownerUserId: ids.owner,
+      now,
+      pages: {
+        ledger: { limit: 1, offset: 1 },
+        referralConversions: { limit: 1, offset: 1 },
+        sharedSets: { limit: 1, offset: 1 },
+      },
+    });
+
+    const ledgerPage = statements.find(({ sql }) => /SELECT le\.occurred_at AS/i.test(sql));
+    const conversionPage = statements.find(({ sql }) => /SELECT rc\.id::text AS reference/i.test(sql));
+    const sharedSetPage = statements.find(({ sql }) => /GROUP BY s\.id ORDER BY/i.test(sql));
+    for (const statement of [ledgerPage, conversionPage, sharedSetPage]) {
+      expect(statement?.sql).toMatch(/LIMIT \$2 OFFSET \$3/i);
+      expect(statement?.params).toEqual([ids.owner, 1, 1]);
+    }
+    expect(snapshot.rewards?.ledger).toEqual({
+      items: [], totalCount: 1, page: { limit: 1, offset: 1, hasMore: false },
+    });
+    expect(snapshot.referrals).toMatchObject({
+      counts: { attributed: 1, pending: 0, qualified: 1, reversed: 0 },
+      rewardPointsTotal: 125,
+      conversions: { items: [], totalCount: 1, page: { limit: 1, offset: 1, hasMore: false } },
+    });
+    expect(snapshot.sharedSets).toEqual({
+      items: [], totalCount: 1, page: { limit: 1, offset: 1, hasMore: false },
+    });
+    expectDeeplyFrozen(snapshot);
+  });
+
+  it.each([
+    ["zero limit", { ledger: { limit: 0 } }],
+    ["excessive limit", { referralConversions: { limit: 101 } }],
+    ["negative offset", { sharedSets: { offset: -1 } }],
+    ["unsafe limit", { ledger: { limit: Number.MAX_SAFE_INTEGER + 1 } }],
+    ["unsafe offset", { referralConversions: { offset: Number.MAX_SAFE_INTEGER + 1 } }],
+  ])("rejects an invalid owner-history page: %s", async (_label, pages) => {
+    let transactions = 0;
+    const repository = createPostgresGrowthReadRepository(async () => {
+      transactions += 1;
+      throw new Error("owner read should not start");
+    });
+    await expect(repository.readOwnerSnapshot({ ownerUserId: ids.owner, now, pages }))
+      .rejects.toThrow(/invalid owner read page/i);
+    expect(transactions).toBe(0);
   });
 
   it("reserves a redemption once and rejects the same key with a conflicting immutable payload", async () => {
@@ -488,6 +569,7 @@ describe("growth policy and repository boundary", () => {
     const replacement = {
       setId: ids.ownerSet,
       ownerUserId: ids.owner,
+      idempotencyKey: "shared-set-replace-0001",
       expectedUpdatedAt: new Date("2026-08-28T10:00:00.000Z"),
       updatedAt: now,
       label: "Updated neutral set",
@@ -510,6 +592,27 @@ describe("growth policy and repository boundary", () => {
     await expect(repository.replaceSharedResearchSet(replacement)).resolves.toMatchObject({
       status: "idempotent",
     });
+    await expect(repository.replaceSharedResearchSet({
+      ...replacement,
+      expectedUpdatedAt: new Date("2026-08-28T09:59:59.000Z"),
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    await expect(repository.replaceSharedResearchSet({
+      ...replacement,
+      idempotencyKey: "shared-set-replace-0002",
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    await expect(repository.deactivateSharedResearchSet({
+      setId: ids.ownerSet,
+      ownerUserId: ids.owner,
+      idempotencyKey: replacement.idempotencyKey,
+      expectedUpdatedAt: now,
+      deactivatedAt: new Date("2026-08-29T12:00:00.000Z"),
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    await expect(repository.replaceSharedResearchSet({
+      ...replacement,
+      setId: ids.otherSet,
+      ownerUserId: ids.otherOwner,
+      label: "Other neutral set",
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
     await expect(
       repository.replaceSharedResearchSet({ ...replacement, label: "Conflicting neutral set" }),
     ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
@@ -517,6 +620,7 @@ describe("growth policy and repository boundary", () => {
     const deactivation = {
       setId: ids.ownerSet,
       ownerUserId: ids.owner,
+      idempotencyKey: "shared-set-deactivate-0001",
       expectedUpdatedAt: now,
       deactivatedAt: new Date("2026-08-29T12:00:00.000Z"),
     };
@@ -527,13 +631,89 @@ describe("growth policy and repository boundary", () => {
     await expect(repository.deactivateSharedResearchSet(deactivation)).resolves.toMatchObject({
       status: "idempotent",
     });
+    await expect(repository.deactivateSharedResearchSet({
+      ...deactivation,
+      expectedUpdatedAt: new Date("2026-08-28T11:59:59.000Z"),
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
     await expect(
       repository.deactivateSharedResearchSet({
         ...deactivation,
         deactivatedAt: new Date("2026-08-29T12:00:01.000Z"),
       }),
     ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    const receipts = await client.query<{ kind: string; total: number }>(`
+      SELECT kind, count(*)::int AS total
+      FROM shared_research_set_mutations
+      GROUP BY kind ORDER BY kind
+    `);
+    expect(receipts.rows).toEqual([
+      { kind: "deactivate", total: 1 },
+      { kind: "replace", total: 1 },
+    ]);
+    await expect(client.exec(`
+      UPDATE shared_research_set_mutations SET payload_hash = '${"f".repeat(64)}'
+      WHERE idempotency_key = 'shared-set-replace-0001'
+    `)).rejects.toThrow(/immutable/i);
+    await expect(client.exec(`
+      DELETE FROM shared_research_set_mutations
+      WHERE idempotency_key = 'shared-set-replace-0001'
+    `)).rejects.toThrow(/immutable/i);
   });
+
+  it("rolls back a shared-set CAS when its durable receipt append fails", async () => {
+    await seedCurrentPoliciesAndTerms(client);
+    await seedOwnerPrivacyFixture(client);
+    const input = {
+      setId: ids.ownerSet,
+      ownerUserId: ids.owner,
+      idempotencyKey: "shared-set-receipt-failure-0001",
+      expectedUpdatedAt: new Date("2026-08-28T10:00:00.000Z"),
+      updatedAt: now,
+      label: "Should roll back",
+      items: [
+        { productId: ids.productOne, quantity: 4 },
+        { productId: ids.productTwo, quantity: 5 },
+      ],
+    };
+    await expect(growthRepository(client, /INSERT INTO shared_research_set_mutations/i)
+      .replaceSharedResearchSet(input)).rejects.toThrow("synthetic injected persistence failure");
+    const state = await client.query<{ label: string; updatedAt: Date | string; itemCount: number }>(`
+      SELECT s.label, s.updated_at AS "updatedAt", count(i.product_id)::int AS "itemCount"
+      FROM shared_research_sets s
+      LEFT JOIN shared_research_set_items i ON i.shared_set_id = s.id
+      WHERE s.id = '${ids.ownerSet}' GROUP BY s.id
+    `);
+    expect(state.rows.map((row) => ({ ...row, updatedAt: new Date(row.updatedAt).toISOString() })))
+      .toEqual([{ label: "Owner neutral set", updatedAt: "2026-08-28T10:00:00.000Z", itemCount: 2 }]);
+    const receipts = await client.query<{ total: number }>(
+      `SELECT count(*)::int AS total FROM shared_research_set_mutations`,
+    );
+    expect(receipts.rows).toEqual([{ total: 0 }]);
+  });
+
+  it.each(["too-short", "x".repeat(201)])(
+    "rejects a shared-set mutation idempotency key outside the bounded opaque contract",
+    async (idempotencyKey) => {
+      await seedCurrentPoliciesAndTerms(client);
+      await seedOwnerPrivacyFixture(client);
+      await expect(growthRepository(client).replaceSharedResearchSet({
+        setId: ids.ownerSet,
+        ownerUserId: ids.owner,
+        idempotencyKey,
+        expectedUpdatedAt: new Date("2026-08-28T10:00:00.000Z"),
+        updatedAt: now,
+        label: "Bounded key set",
+        items: [
+          { productId: ids.productOne, quantity: 2 },
+          { productId: ids.productTwo, quantity: 3 },
+        ],
+      })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+      const receipts = await client.query<{ total: number }>(
+        `SELECT count(*)::int AS total FROM shared_research_set_mutations`,
+      );
+      expect(receipts.rows).toEqual([{ total: 0 }]);
+    },
+  );
 
   it("records an affiliate payout and marks it paid without exposing or swallowing conflicting payment evidence", async () => {
     await seedCurrentPoliciesAndTerms(client);
@@ -643,6 +823,160 @@ describe("growth policy and repository boundary", () => {
     await expect(
       repository.reverseAffiliateCommission({ ...reversal, reversedCommissionMinor: 401 }),
     ).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+  });
+
+  it.each([
+    ["missing", "", "83000000-0000-4000-8000-000000000099"],
+    [
+      "future",
+      `DROP TRIGGER growth_terms_versions_immutable_history ON growth_terms_versions;
+       UPDATE growth_terms_versions SET effective_at = '2026-08-29T00:00:00.000Z'
+       WHERE id = '${ids.affiliateTerms}'`,
+      ids.affiliateTerms,
+    ],
+    [
+      "superseded",
+      `DROP TRIGGER growth_terms_versions_immutable_history ON growth_terms_versions;
+       UPDATE growth_terms_versions SET superseded_at = '2026-08-28T11:59:59.000Z'
+       WHERE id = '${ids.affiliateTerms}'`,
+      ids.affiliateTerms,
+    ],
+    [
+      "malformed",
+      `DROP TRIGGER growth_terms_versions_immutable_history ON growth_terms_versions;
+       ALTER TABLE growth_terms_versions DROP CONSTRAINT growth_terms_versions_text_nonblank;
+       UPDATE growth_terms_versions SET terms_text = '   '
+       WHERE id = '${ids.affiliateTerms}'`,
+      ids.affiliateTerms,
+    ],
+    [
+      "overlapping",
+      `DROP TRIGGER growth_terms_versions_immutable_history ON growth_terms_versions;
+       UPDATE growth_terms_versions SET superseded_at = '2026-08-29T00:00:00.000Z'
+       WHERE id = '${ids.affiliateTerms}';
+       INSERT INTO growth_terms_versions
+         (id, program, version, content_hash, terms_text, effective_at)
+       VALUES ('83000000-0000-4000-8000-000000000098', 'affiliate', 2,
+               '${overlappingAffiliateTermsHash}', '${overlappingAffiliateTermsText}',
+               '2026-08-28T00:00:00.000Z')`,
+      ids.affiliateTerms,
+    ],
+  ])("writes no acceptance for a %s exact terms row", async (_label, mutation, termsVersionId) => {
+    await seedCurrentPoliciesAndTerms(client);
+    if (mutation) await client.exec(mutation);
+    await expect(growthRepository(client).recordGrowthTermsAcceptance({
+      id: ids.activationAcceptance,
+      userId: ids.owner,
+      program: "affiliate",
+      termsVersionId,
+      contentHash: affiliateTermsHash,
+      acceptedAt: now,
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    const acceptances = await client.query<{ total: number }>(
+      `SELECT count(*)::int AS total FROM growth_terms_acceptances`,
+    );
+    expect(acceptances.rows).toEqual([{ total: 0 }]);
+  });
+
+  it("writes no acceptance when the caller hash differs from the server-computed terms hash", async () => {
+    await seedCurrentPoliciesAndTerms(client);
+    await expect(growthRepository(client).recordGrowthTermsAcceptance({
+      id: ids.activationAcceptance,
+      userId: ids.owner,
+      program: "affiliate",
+      termsVersionId: ids.affiliateTerms,
+      contentHash: customerTermsHash,
+      acceptedAt: now,
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    const acceptances = await client.query<{ total: number }>(
+      `SELECT count(*)::int AS total FROM growth_terms_acceptances`,
+    );
+    expect(acceptances.rows).toEqual([{ total: 0 }]);
+  });
+
+  it("recomputes the stored terms text hash before accepting even when caller and stored hashes agree", async () => {
+    await seedCurrentPoliciesAndTerms(client);
+    const corruptHash = "f".repeat(64);
+    await client.exec(`
+      DROP TRIGGER growth_terms_versions_immutable_history ON growth_terms_versions;
+      UPDATE growth_terms_versions SET content_hash = '${corruptHash}'
+      WHERE id = '${ids.affiliateTerms}'
+    `);
+    await expect(growthRepository(client).recordGrowthTermsAcceptance({
+      id: ids.activationAcceptance,
+      userId: ids.owner,
+      program: "affiliate",
+      termsVersionId: ids.affiliateTerms,
+      contentHash: corruptHash,
+      acceptedAt: now,
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    const acceptances = await client.query<{ total: number }>(
+      `SELECT count(*)::int AS total FROM growth_terms_acceptances`,
+    );
+    expect(acceptances.rows).toEqual([{ total: 0 }]);
+  });
+
+  it("re-verifies the immutable exact terms row before returning an acceptance replay", async () => {
+    await seedCurrentPoliciesAndTerms(client);
+    const repository = growthRepository(client);
+    const acceptance = {
+      id: ids.activationAcceptance,
+      userId: ids.owner,
+      program: "affiliate" as const,
+      termsVersionId: ids.affiliateTerms,
+      contentHash: affiliateTermsHash,
+      acceptedAt: now,
+    };
+    await expect(repository.recordGrowthTermsAcceptance(acceptance)).resolves.toMatchObject({
+      status: "applied",
+    });
+    await client.exec(`
+      DROP TRIGGER growth_terms_versions_immutable_history ON growth_terms_versions;
+      UPDATE growth_terms_versions SET terms_text = 'Corrupted synthetic terms text'
+      WHERE id = '${ids.affiliateTerms}'
+    `);
+    await expect(repository.recordGrowthTermsAcceptance(acceptance))
+      .rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    const acceptances = await client.query<{ total: number }>(
+      `SELECT count(*)::int AS total FROM growth_terms_acceptances`,
+    );
+    expect(acceptances.rows).toEqual([{ total: 1 }]);
+  });
+
+  it("allows a revoked owner code to be replaced while preserving revoked id and code collisions", async () => {
+    await client.exec(`
+      INSERT INTO referral_codes
+        (id, owner_user_id, code, status, created_at, revoked_at)
+      VALUES
+        ('${ids.revokedReferralCode}', '${ids.owner}', 'ref_RevokedCode00001', 'revoked',
+         '2026-08-27T10:00:00.000Z', '2026-08-27T11:00:00.000Z')
+    `);
+    const repository = growthRepository(client);
+    await expect(repository.recordReferralCode({
+      id: ids.replacementReferralCode,
+      ownerUserId: ids.owner,
+      code: "ref_Replacement00001",
+      createdAt: now,
+    })).resolves.toMatchObject({ status: "applied", referralCode: { status: "active" } });
+    await expect(repository.recordReferralCode({
+      id: ids.revokedReferralCode,
+      ownerUserId: ids.otherOwner,
+      code: "ref_FreshCodeValue001",
+      createdAt: now,
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    await expect(repository.recordReferralCode({
+      id: "83000000-0000-4000-8000-000000000057",
+      ownerUserId: ids.otherOwner,
+      code: "ref_RevokedCode00001",
+      createdAt: now,
+    })).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    const rows = await client.query<{ code: string; status: string }>(`
+      SELECT code, status FROM referral_codes WHERE owner_user_id = '${ids.owner}' ORDER BY code
+    `);
+    expect(rows.rows).toEqual([
+      { code: "ref_Replacement00001", status: "active" },
+      { code: "ref_RevokedCode00001", status: "revoked" },
+    ]);
   });
 
   it("persists exact terms acceptance, referral code, shared set, and affiliate profile facts without service orchestration", async () => {
