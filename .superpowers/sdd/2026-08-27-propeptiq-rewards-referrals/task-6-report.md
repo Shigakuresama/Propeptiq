@@ -365,6 +365,55 @@ Task 6C payout batching, approval consumption, externally paid recording,
 provider/reference storage, and cash transmission remain unstarted. Task 7 UI
 and all production/external operations remain unstarted.
 
+## Final whole-Task-6 re-review fix — Semantic payout creation replay
+
+### RED evidence
+
+- Service retry regression: 1 expected failure, 69 skipped. A semantically
+  identical authorized request after response loss, using the next generated
+  payout UUID and a server clock five minutes later, failed at the persisted
+  fingerprint comparison with `idempotency_conflict`.
+- Migrated PGlite retry regression: 1 expected failure, 11 skipped, at the same
+  fingerprint comparison. The stored batch could not replay when only generated
+  output facts changed.
+
+### Fix and invariant evidence
+
+- The canonical creation fingerprint now contains only immutable request
+  authority facts: actor, affiliate profile, idempotency key, and correlation.
+  Newly generated payout ID and creation time remain validated and persisted for
+  a new batch, but are not treated as caller semantics on retry.
+- The transaction still locks and resolves the existing idempotency row before
+  selecting commissions or writing anything. Exact retry returns the original
+  payout ID, creation time, commission membership, and result with one payout,
+  one consumption, and one concise redacted audit.
+- Changed actor, profile, or correlation under the same creation key still
+  conflicts. Paid-recording actor, correlation, expected-version,
+  provider/reference, and paid-time fingerprint checks remain unchanged and
+  passing. No provider, HTTP, webhook, bank, UI, or external operation was added.
+
+### GREEN and final verification evidence
+
+- Controller-confirmed affiliate service: 70/70 tests.
+- Focused affiliate/actions/authorization: 3 files, 160/160 tests.
+- Controller-confirmed and locally verified payout PGlite: 1 file, 12/12 tests.
+- Full unit suite: 86 files, 1048/1048 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- `npm run db:generate` twice: exit 0 both times with no schema drift.
+- `npm run db:check`: exit 0.
+- All 44 existing migration artifacts retain their exact hashes.
+- Working and staged `git diff --check`: exit 0.
+- No schema/migration, Task 7+ UI, policy activation, or external operation
+  changed.
+
+### Implementation commit
+
+```text
+4a0b41b445a8f342dd88ba9b6ec6e80d8731d545
+fix(growth): replay affiliate payout creation
+```
+
 ## Whole-Task-6 review fix round 1/5 — Historical settlement, payout reversals, and exact replay
 
 Whole-Task-6 review found that a policy superseded after attribution could block
