@@ -12,6 +12,16 @@ import { createPostgresRateLimitStore } from "@/db/repositories/rate-limit-store
 import type { GrowthTransactionRunner } from "@/db/repositories/growth-repository";
 import { withRuntimeTransaction } from "@/db/runtime";
 import type {
+  AffiliateApplicationInput,
+  AffiliateApplicationResult,
+  AffiliatePromotionMethod,
+} from "@/growth/affiliate-service";
+import {
+  AffiliateApplicationError,
+  createAffiliateService,
+  createPostgresAffiliateApplicationTransaction,
+} from "@/growth/affiliate-service";
+import type {
   CustomerReferralEnrollmentInput,
   CustomerReferralEnrollmentResult,
 } from "@/growth/referral-service";
@@ -239,6 +249,276 @@ export async function enrollCustomerReferralAction(
     return result;
   } catch {
     return failure("unavailable");
+  }
+}
+
+export type AffiliateApplicationActionResult = Readonly<{
+  state: "success" | "error";
+  code:
+    | "submitted"
+    | "idempotent"
+    | "conflict"
+    | "identity"
+    | "invalid"
+    | "origin"
+    | "rate_limit"
+    | "unavailable";
+  application: AffiliateApplicationResult["application"] | null;
+}>;
+
+type AffiliateApplicationActor = Readonly<{
+  buyerUserId: string;
+  buyerStatus: "active" | "review" | "blocked";
+  identity: VerifiedIdentity;
+  principal: Principal;
+}>;
+
+function affiliateFailure(
+  code: Exclude<AffiliateApplicationActionResult["code"], "submitted" | "idempotent">,
+): AffiliateApplicationActionResult {
+  return Object.freeze({ state: "error", code, application: null });
+}
+
+function parseAffiliateApplicationForm(formData: FormData): Readonly<{
+  publicChannel: string;
+  promotionMethod: AffiliatePromotionMethod;
+  termsVersionId: string;
+  termsContentHash: string;
+}> | null {
+  const fields = [
+    "publicChannel",
+    "promotionMethod",
+    "acceptCurrentTerms",
+    "termsVersionId",
+    "termsContentHash",
+  ];
+  const suppliedKeys = [...formData.keys()].filter(
+    (key) => !key.startsWith("$ACTION_"),
+  );
+  if (
+    suppliedKeys.length !== fields.length ||
+    new Set(suppliedKeys).size !== fields.length ||
+    !fields.every((field) => suppliedKeys.includes(field))
+  ) {
+    return null;
+  }
+  const publicChannel = formData.get("publicChannel");
+  const promotionMethod = formData.get("promotionMethod");
+  const acceptance = formData.get("acceptCurrentTerms");
+  const termsVersionId = formData.get("termsVersionId");
+  const termsContentHash = formData.get("termsContentHash");
+  if (
+    typeof publicChannel !== "string" ||
+    publicChannel.length === 0 ||
+    publicChannel.length > 200 ||
+    publicChannel !== publicChannel.trim() ||
+    (promotionMethod !== "website" &&
+      promotionMethod !== "social" &&
+      promotionMethod !== "email" &&
+      promotionMethod !== "other") ||
+    acceptance !== "yes" ||
+    typeof termsVersionId !== "string" ||
+    !UUID_PATTERN.test(termsVersionId) ||
+    typeof termsContentHash !== "string" ||
+    !SHA256_PATTERN.test(termsContentHash)
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    publicChannel,
+    promotionMethod,
+    termsVersionId,
+    termsContentHash,
+  });
+}
+
+function mapAffiliateApplicationError(error: unknown): AffiliateApplicationActionResult {
+  if (!(error instanceof AffiliateApplicationError)) {
+    return affiliateFailure("unavailable");
+  }
+  if (error.code === "buyer_inactive" || error.code === "identity_unverified") {
+    return affiliateFailure("identity");
+  }
+  if (error.code === "idempotency_conflict") {
+    return affiliateFailure("conflict");
+  }
+  if (
+    error.code === "content_rejected" ||
+    error.code === "invalid_channel" ||
+    error.code === "invalid_input" ||
+    error.code === "invalid_promotion_method" ||
+    error.code === "terms_mismatch"
+  ) {
+    return affiliateFailure("invalid");
+  }
+  return affiliateFailure("unavailable");
+}
+
+export function createAffiliateApplicationAction(dependencies: Readonly<{
+  environment: Readonly<{
+    APP_ENV: "local" | "preview" | "production";
+    APP_ORIGIN?: string;
+    RATE_LIMIT_SECRET: string;
+  }>;
+  clock: () => Date;
+  limit?: number;
+  rateLimitStore: RateLimitStore;
+  loadActor: () => Promise<AffiliateApplicationActor | null>;
+  applyForAffiliate: (
+    input: AffiliateApplicationInput,
+  ) => Promise<AffiliateApplicationResult>;
+}>) {
+  return async function affiliateApplicationAction(
+    request: Request,
+    formData: FormData,
+  ): Promise<AffiliateApplicationActionResult> {
+    try {
+      assertMutationOrigin(request, dependencies.environment);
+    } catch {
+      return affiliateFailure("origin");
+    }
+    const parsed = parseAffiliateApplicationForm(formData);
+    if (!parsed) return affiliateFailure("invalid");
+    const now = dependencies.clock();
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+      return affiliateFailure("unavailable");
+    }
+    const actor = await dependencies.loadActor();
+    if (
+      actor === null ||
+      actor.buyerStatus !== "active" ||
+      actor.principal.actorId !== actor.buyerUserId ||
+      actor.principal.clerkUserId !== actor.identity.clerkUserId ||
+      actor.principal.buyerStatus !== "active"
+    ) {
+      return affiliateFailure("identity");
+    }
+    const authorization = authorizeOperation({
+      principal: actor.principal,
+      operation: "affiliate.apply.self",
+      resource: { relation: "owner", ownerActorId: actor.buyerUserId },
+    });
+    if (!authorization.allowed) return affiliateFailure("identity");
+
+    try {
+      const decision = await consumeFixedWindowLimit({
+        store: dependencies.rateLimitStore,
+        scope: createRateLimitScope(
+          actor.buyerUserId,
+          "affiliate.application.submit",
+          dependencies.environment.RATE_LIMIT_SECRET,
+        ),
+        limit: dependencies.limit ?? 3,
+        windowMs: 60_000,
+        now,
+      });
+      if (!decision.allowed) return affiliateFailure("rate_limit");
+    } catch {
+      return affiliateFailure("unavailable");
+    }
+
+    try {
+      const result = await dependencies.applyForAffiliate({
+        buyerUserId: actor.buyerUserId,
+        buyerStatus: actor.buyerStatus,
+        identity: actor.identity,
+        ...parsed,
+      });
+      return Object.freeze({
+        state: "success" as const,
+        code: result.status,
+        application: Object.freeze({ ...result.application }),
+      });
+    } catch (error) {
+      return mapAffiliateApplicationError(error);
+    }
+  };
+}
+
+export async function submitAffiliateApplicationAction(
+  formData: FormData,
+): Promise<AffiliateApplicationActionResult> {
+  "use server";
+
+  try {
+    const requestIdentity = await getRequestIdentity();
+    const environment = requestIdentity.environment;
+    const identity = requestIdentity.identity;
+    const principal = requestIdentity.principal;
+    if (
+      identity === null ||
+      principal === null ||
+      principal.clerkUserId !== identity.clerkUserId ||
+      principal.buyerStatus !== "active" ||
+      environment.DATABASE_MODE === "disabled" ||
+      environment.RATE_LIMIT_SECRET === undefined
+    ) {
+      return affiliateFailure("identity");
+    }
+    const authorization = authorizeOperation({
+      principal,
+      operation: "affiliate.apply.self",
+      resource: { relation: "owner", ownerActorId: principal.actorId },
+    });
+    if (!authorization.allowed) return affiliateFailure("identity");
+
+    const incoming = await headers();
+    const suppliedOrigin = incoming.get("origin");
+    const requestUrl = environment.APP_ORIGIN ?? suppliedOrigin ?? "http://localhost";
+    const request = new Request(requestUrl, {
+      method: "POST",
+      headers: {
+        ...(suppliedOrigin === null ? {} : { origin: suppliedOrigin }),
+        ...(incoming.get("host") === null ? {} : { host: incoming.get("host")! }),
+      },
+    });
+    const now = new Date();
+    const runSerializableTransaction: GrowthTransactionRunner = (work, options) =>
+      withRuntimeTransaction(environment, work, options);
+    const service = createAffiliateService({
+      clock: () => new Date(now),
+      createAcceptanceId: randomUUID,
+      createProfileId: randomUUID,
+      createPublicCode: () => `aff_${randomBytes(24).toString("base64url")}`,
+      publicationPolicy: Object.freeze({
+        version: "affiliate-public-channel-v1",
+        activeLotEvidenceIds: Object.freeze([]),
+      }),
+      applyInTransaction: createPostgresAffiliateApplicationTransaction({
+        runSerializableTransaction,
+      }),
+    });
+    const action = createAffiliateApplicationAction({
+      environment: environment.APP_ORIGIN === undefined
+        ? {
+            APP_ENV: environment.APP_ENV,
+            RATE_LIMIT_SECRET: environment.RATE_LIMIT_SECRET,
+          }
+        : {
+            APP_ENV: environment.APP_ENV,
+            APP_ORIGIN: environment.APP_ORIGIN,
+            RATE_LIMIT_SECRET: environment.RATE_LIMIT_SECRET,
+          },
+      clock: () => new Date(now),
+      rateLimitStore: {
+        increment: (window) => withRuntimeTransaction(
+          environment,
+          (client) => createPostgresRateLimitStore(client).increment(window),
+        ),
+      },
+      loadActor: async () => Object.freeze({
+        buyerUserId: principal.actorId,
+        buyerStatus: principal.buyerStatus!,
+        identity,
+        principal,
+      }),
+      applyForAffiliate: service.applyForAffiliate,
+    });
+    const result = await action(request, formData);
+    if (result.state === "success") revalidatePath("/account/partner");
+    return result;
+  } catch {
+    return affiliateFailure("unavailable");
   }
 }
 

@@ -536,6 +536,7 @@ export const affiliateProfiles = pgTable(
       .references(() => users.id, { onDelete: "restrict" }),
     publicCode: text("public_code").notNull(),
     status: affiliateProfileStatusEnum("status").default("pending").notNull(),
+    version: integer("version").default(1).notNull(),
     publicChannel: text("public_channel").notNull(),
     promotionMethod: affiliatePromotionMethodEnum("promotion_method").notNull(),
     termsAcceptanceId: uuid("terms_acceptance_id").notNull(),
@@ -563,6 +564,7 @@ export const affiliateProfiles = pgTable(
       sql`${table.publicCode} ~ '^aff_[A-Za-z0-9_-]{16,64}$'`,
     ),
     check("affiliate_profiles_channel_nonblank", nonblank(table.publicChannel)),
+    check("affiliate_profiles_version_positive", sql`${table.version} > 0`),
     check(
       "affiliate_profiles_terms_program",
       sql`${table.termsProgram} = 'affiliate'`,

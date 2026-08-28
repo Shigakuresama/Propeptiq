@@ -5,9 +5,14 @@ import type { VerifiedIdentity } from "@/auth/identity";
 import type { Principal } from "@/domain/authorization";
 
 import {
+  createAffiliateApplicationAction,
   createCustomerReferralEnrollmentAction,
   createSharedSetMutationAction,
 } from "./actions";
+import {
+  AffiliateApplicationError,
+  type AffiliateApplicationResult,
+} from "./affiliate-service";
 import { SharedSetServiceError } from "./shared-set-service";
 
 const now = new Date("2026-08-28T18:30:00.000Z");
@@ -138,6 +143,238 @@ describe("customer referral enrollment action boundary", () => {
       referralCode: null,
     });
     expect(enrollCustomerReferral).not.toHaveBeenCalled();
+  });
+});
+
+function affiliateRequest(origin = "https://propeptiq.example") {
+  return new Request("https://propeptiq.example/account/partner", {
+    method: "POST",
+    headers: { origin },
+  });
+}
+
+function affiliateForm() {
+  const value = new FormData();
+  value.set("publicChannel", "https://partner.example/research");
+  value.set("promotionMethod", "website");
+  value.set("acceptCurrentTerms", "yes");
+  value.set("termsVersionId", termsVersionId);
+  value.set("termsContentHash", termsContentHash);
+  return value;
+}
+
+function affiliateActionSetup(overrides: Readonly<{
+  buyerStatus?: "active" | "review" | "blocked";
+  principal?: Principal | null;
+  identity?: VerifiedIdentity;
+  limit?: number;
+}> = {}) {
+  let count = 0;
+  const buyerStatus = overrides.buyerStatus ?? "active";
+  const actorIdentity = overrides.identity ?? identity;
+  const principal = overrides.principal === undefined
+    ? Object.freeze({
+        actorId: buyerUserId,
+        clerkUserId: actorIdentity.clerkUserId,
+        buyerStatus,
+        capabilities: Object.freeze([]),
+        mfaSatisfied: false,
+      } satisfies Principal)
+    : overrides.principal;
+  const applyForAffiliate = vi.fn(async (): Promise<AffiliateApplicationResult> => Object.freeze({
+    status: "submitted" as const,
+    application: Object.freeze({
+      publicCode: "aff_6AActionOpaqueCode",
+      status: "pending" as const,
+      version: 1,
+      publicChannel: "https://partner.example/research",
+      promotionMethod: "website" as const,
+      createdAt: now.toISOString(),
+    }),
+  }));
+  const action = createAffiliateApplicationAction({
+    environment: Object.freeze({
+      APP_ENV: "production" as const,
+      APP_ORIGIN: "https://propeptiq.example",
+      RATE_LIMIT_SECRET: "task-6a-action-rate-limit-secret-32-characters",
+    }),
+    clock: () => new Date(now),
+    limit: overrides.limit ?? 3,
+    rateLimitStore: {
+      increment: async () => {
+        count += 1;
+        return count;
+      },
+    },
+    loadActor: async () => principal === null ? null : Object.freeze({
+      buyerUserId,
+      buyerStatus,
+      identity: actorIdentity,
+      principal,
+    }),
+    applyForAffiliate,
+  });
+  return { action, applyForAffiliate };
+}
+
+describe("affiliate application action boundary", () => {
+  it("submits exact lightweight fields for the authenticated active owner and returns a frozen redacted result", async () => {
+    const { action, applyForAffiliate } = affiliateActionSetup();
+
+    const result = await action(affiliateRequest(), affiliateForm());
+
+    expect(result).toEqual({
+      state: "success",
+      code: "submitted",
+      application: {
+        publicCode: "aff_6AActionOpaqueCode",
+        status: "pending",
+        version: 1,
+        publicChannel: "https://partner.example/research",
+        promotionMethod: "website",
+        createdAt: now.toISOString(),
+      },
+    });
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.application)).toBe(true);
+    expect(applyForAffiliate).toHaveBeenCalledWith({
+      buyerUserId,
+      buyerStatus: "active",
+      identity,
+      publicChannel: "https://partner.example/research",
+      promotionMethod: "website",
+      termsVersionId,
+      termsContentHash,
+    });
+    expect(JSON.stringify(result)).not.toContain(identity.primaryEmail!);
+    expect(JSON.stringify(result)).not.toContain(identity.clerkUserId);
+  });
+
+  it("returns immutable idempotent replay status without expanding the result", async () => {
+    const { action, applyForAffiliate } = affiliateActionSetup();
+    applyForAffiliate.mockResolvedValueOnce(Object.freeze({
+      status: "idempotent" as const,
+      application: Object.freeze({
+        publicCode: "aff_6AActionOpaqueCode",
+        status: "pending" as const,
+        version: 1,
+        publicChannel: "https://partner.example/research",
+        promotionMethod: "website" as const,
+        createdAt: now.toISOString(),
+      }),
+    }));
+
+    await expect(action(affiliateRequest(), affiliateForm())).resolves.toMatchObject({
+      state: "success",
+      code: "idempotent",
+      application: { status: "pending", version: 1 },
+    });
+  });
+
+  it.each([
+    ["cross origin", affiliateRequest("https://attacker.example")],
+    ["missing origin", new Request("https://propeptiq.example/account/partner", { method: "POST" })],
+  ] as const)("rejects %s before actor lookup, rate limiting, or mutation", async (_label, hostile) => {
+    const { action, applyForAffiliate } = affiliateActionSetup();
+
+    await expect(action(hostile, affiliateForm())).resolves.toEqual({
+      state: "error",
+      code: "origin",
+      application: null,
+    });
+    expect(applyForAffiliate).not.toHaveBeenCalled();
+  });
+
+  it.each(["review", "blocked"] as const)(
+    "requires an active buyer rather than a %s buyer",
+    async (buyerStatus) => {
+      const { action, applyForAffiliate } = affiliateActionSetup({ buyerStatus });
+
+      await expect(action(affiliateRequest(), affiliateForm())).resolves.toEqual({
+        state: "error",
+        code: "identity",
+        application: null,
+      });
+      expect(applyForAffiliate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("enforces owner scope before rate limiting or application work", async () => {
+    const { action, applyForAffiliate } = affiliateActionSetup({
+      principal: Object.freeze({
+        actorId: otherOwnerUserId,
+        clerkUserId: identity.clerkUserId,
+        buyerStatus: "active",
+        capabilities: Object.freeze([]),
+        mfaSatisfied: false,
+      }),
+    });
+
+    await expect(action(affiliateRequest(), affiliateForm())).resolves.toEqual({
+      state: "error",
+      code: "identity",
+      application: null,
+    });
+    expect(applyForAffiliate).not.toHaveBeenCalled();
+  });
+
+  it("uses one database-backed fixed window for affiliate application submission", async () => {
+    const { action, applyForAffiliate } = affiliateActionSetup({ limit: 2 });
+
+    await expect(action(affiliateRequest(), affiliateForm())).resolves.toMatchObject({ state: "success" });
+    await expect(action(affiliateRequest(), affiliateForm())).resolves.toMatchObject({ state: "success" });
+    await expect(action(affiliateRequest(), affiliateForm())).resolves.toEqual({
+      state: "error",
+      code: "rate_limit",
+      application: null,
+    });
+    expect(applyForAffiliate).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ["missing terms acceptance", "acceptCurrentTerms", null],
+    ["unknown promotion method", "promotionMethod", "podcast"],
+    ["malformed terms version", "termsVersionId", "terms-v1"],
+    ["malformed terms hash", "termsContentHash", "browser-hash"],
+    ["organization document", "organizationDocument", "upload-id"],
+    ["identity upload", "identityUpload", "upload-id"],
+    ["tax upload", "taxDocument", "upload-id"],
+    ["application essay", "essay", "Why I should be accepted"],
+    ["browser owner", "buyerUserId", otherOwnerUserId],
+    ["browser status", "status", "active"],
+  ] as const)("rejects %s as invalid form authority", async (_label, field, value) => {
+    const formData = affiliateForm();
+    if (value === null) formData.delete(field);
+    else formData.set(field, value);
+    const { action, applyForAffiliate } = affiliateActionSetup();
+
+    await expect(action(affiliateRequest(), formData)).resolves.toEqual({
+      state: "error",
+      code: "invalid",
+      application: null,
+    });
+    expect(applyForAffiliate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["identity_unverified", "identity"],
+    ["buyer_inactive", "identity"],
+    ["invalid_channel", "invalid"],
+    ["invalid_promotion_method", "invalid"],
+    ["content_rejected", "invalid"],
+    ["terms_mismatch", "invalid"],
+    ["idempotency_conflict", "conflict"],
+    ["terms_unavailable", "unavailable"],
+    ["persistence_conflict", "unavailable"],
+  ] as const)("maps service %s without leaking details", async (serviceCode, actionCode) => {
+    const { action, applyForAffiliate } = affiliateActionSetup();
+    applyForAffiliate.mockRejectedValueOnce(new AffiliateApplicationError(serviceCode));
+
+    await expect(action(affiliateRequest(), affiliateForm())).resolves.toEqual({
+      state: "error",
+      code: actionCode,
+      application: null,
+    });
   });
 });
 
