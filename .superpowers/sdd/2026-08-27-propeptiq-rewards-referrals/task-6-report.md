@@ -365,6 +365,80 @@ Task 6C payout batching, approval consumption, externally paid recording,
 provider/reference storage, and cash transmission remain unstarted. Task 7 UI
 and all production/external operations remain unstarted.
 
+## 6B review fix round 2/5 — Real deterministic affiliate runtime composition
+
+Round-2 re-review found that the round-1 runtime test manually replaced the
+driver's null affiliate service. The actual deterministic driver therefore still
+returned `internal_conflict` for a valid signed affiliate cookie and did not
+prove real construction.
+
+### Recoverable RED evidence
+
+- Unmodified-driver runtime RED: 1 expected failure and 5 passes. A real V1
+  environment-bound cookie signed at the fixed clock passed through the actual
+  `getLocalTestDriver()` and `createCheckoutServerRuntime` path but returned
+  `internal_conflict` instead of a quoted checkout.
+- First construction attempt remained RED at 1 failure and 5 passes: checkout
+  became quoted, proving service construction was active, but the selected
+  synthetic partner actor had no active buyer profile and the private affiliate
+  snapshot correctly remained null. The candidate authority was corrected to a
+  dedicated deterministic active local partner identity rather than weakening
+  active-buyer validation.
+
+### Fix and invariant evidence
+
+- The deterministic commerce driver now exposes a bounded affiliate candidate
+  authority instead of `affiliateService: null`. The server runtime constructs
+  `createAffiliateCheckoutService` itself using the real V1 verifier, exact
+  request environment, request `RATE_LIMIT_SECRET`, fixed candidate authority,
+  and the existing exact local-commerce readiness matrix.
+- The regression uses the unmodified shared driver, fixed clock, real signing
+  function, and real checkout runtime. It proves the server-only plan contains
+  the eligible profile/user/policy snapshot while the browser quote contains no
+  affiliate/profile/user identity and no commission property.
+- Ordinary checkout without attribution remains quoted through the pre-existing
+  runtime test. Invalid/ineligible cookies remain ordinary no-affiliate outcomes.
+  Missing/non-local/PostgreSQL runtime composition remains unavailable through
+  the existing exact readiness matrix, while the checkout service still fails
+  closed if a cookie reaches it without required affiliate composition.
+- The deterministic candidate exists only behind `LOCAL_TEST_DRIVER=enabled`,
+  disabled database/payment modes, local origin/environment, synthetic adapters,
+  and all pre-existing capability guards. No production database adapter,
+  provider call, secret, partner identity, payout, or UI was added.
+- No persistence, schema, migration, provider journal, reward/referral lifecycle,
+  or commission calculation code changed; no affected PGlite rerun was required.
+
+### Review-fix GREEN and validation evidence
+
+- Signed-cookie server runtime: 1 file, 6/6 tests.
+- Focused runtime/checkout/local-driver lane: 4 files, 37/37 tests.
+- Production artifact scanner tests: 9/9 tests.
+- Full unit suite: 86 files, 1026/1026 tests.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- `npm run verify:workspace-boundary`: exit 0; canonical root, worktree,
+  quarantine exclusion, Playwright root, and config scope all passed.
+- `npm run db:generate`: exit 0, `No schema changes, nothing to migrate`.
+- `npm run db:check`: exit 0.
+- Working and staged `git diff --check`: exit 0; only expected Windows LF/CRLF
+  working-copy notices appeared.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no
+  real-PostgreSQL or contention claim is made.
+
+### Review-fix implementation commit
+
+```text
+988f61583dab88397cfb971492d205597eca42b8
+fix(growth): compose deterministic affiliate checkout
+```
+
+### Remaining Task 6 boundary
+
+Task 6C payout batching, approval consumption, externally paid recording,
+provider/reference storage, and cash transmission remain unstarted. Task 7 UI
+and all production/external operations remain unstarted.
+
 ## 6B review fix round 1/5 — Required runtime accounting and merchandise-only reversals
 
 Independent review rejected the initial 6B checkpoint with three Important
