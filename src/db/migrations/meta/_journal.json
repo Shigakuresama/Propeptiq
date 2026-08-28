@@ -43,6 +43,27 @@
       "when": 1787904170862,
       "tag": "0005_pink_fat_cobra",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787906101832,
+      "tag": "0006_growth_settlement_targets",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787906138434,
+      "tag": "0007_affiliate_payout_policy_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787906161494,
+      "tag": "0008_growth_history_integrity",
+      "breakpoints": true
     }
   ]
 }

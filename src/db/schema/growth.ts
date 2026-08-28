@@ -534,6 +534,8 @@ export const referralConversions = pgTable(
     referralAttributionId: uuid("referral_attribution_id").notNull(),
     referredUserId: uuid("referred_user_id").notNull(),
     firstOrderId: uuid("first_order_id").notNull(),
+    referralPolicyId: uuid("referral_policy_id").notNull(),
+    referralPolicyVersion: integer("referral_policy_version").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     referredDiscountMinor: money("referred_discount_minor"),
     referrerRewardPoints: points("referrer_reward_points"),
@@ -549,12 +551,19 @@ export const referralConversions = pgTable(
     unique("referral_conversions_first_order_unique").on(table.firstOrderId),
     unique("referral_conversions_idempotency_unique").on(table.idempotencyKey),
     foreignKey({
-      columns: [table.referralAttributionId, table.referredUserId],
+      columns: [
+        table.referralAttributionId,
+        table.referredUserId,
+        table.referralPolicyId,
+        table.referralPolicyVersion,
+      ],
       foreignColumns: [
         referralAttributions.id,
         referralAttributions.referredUserId,
+        referralAttributions.referralPolicyId,
+        referralAttributions.referralPolicyVersion,
       ],
-      name: "referral_conversions_attribution_buyer_fk",
+      name: "referral_conversions_attribution_policy_fk",
     }).onDelete("restrict"),
     foreignKey({
       columns: [table.firstOrderId, table.referredUserId],
@@ -711,6 +720,12 @@ export const affiliatePayouts = pgTable(
       table.id,
       table.affiliateProfileId,
     ),
+    unique("affiliate_payouts_id_profile_policy_unique").on(
+      table.id,
+      table.affiliateProfileId,
+      table.affiliatePolicyId,
+      table.affiliatePolicyVersion,
+    ),
     foreignKey({
       columns: [table.affiliatePolicyId, table.affiliatePolicyVersion],
       foreignColumns: [affiliatePolicies.id, affiliatePolicies.version],
@@ -778,9 +793,19 @@ export const affiliateCommissions = pgTable(
       name: "affiliate_commissions_order_buyer_fk",
     }).onDelete("restrict"),
     foreignKey({
-      columns: [table.payoutId, table.affiliateProfileId],
-      foreignColumns: [affiliatePayouts.id, affiliatePayouts.affiliateProfileId],
-      name: "affiliate_commissions_payout_profile_fk",
+      columns: [
+        table.payoutId,
+        table.affiliateProfileId,
+        table.affiliatePolicyId,
+        table.affiliatePolicyVersion,
+      ],
+      foreignColumns: [
+        affiliatePayouts.id,
+        affiliatePayouts.affiliateProfileId,
+        affiliatePayouts.affiliatePolicyId,
+        affiliatePayouts.affiliatePolicyVersion,
+      ],
+      name: "affiliate_commissions_payout_policy_fk",
     }).onDelete("restrict"),
     check(
       "affiliate_commissions_idempotency_nonblank",

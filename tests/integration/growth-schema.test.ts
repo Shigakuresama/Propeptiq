@@ -35,6 +35,13 @@ const ids = {
   affiliatePayout: "82000000-0000-4000-8000-000000000029",
   affiliateCommission: "82000000-0000-4000-8000-000000000030",
   sharedSet: "82000000-0000-4000-8000-000000000031",
+  alternateReferralPolicy: "82000000-0000-4000-8000-000000000032",
+  alternateAffiliatePolicy: "82000000-0000-4000-8000-000000000033",
+  alternateReferralAttribution: "82000000-0000-4000-8000-000000000034",
+  alternateAffiliateAttribution: "82000000-0000-4000-8000-000000000035",
+  alternateAffiliatePayout: "82000000-0000-4000-8000-000000000036",
+  crossProgramReferralConversion: "82000000-0000-4000-8000-000000000037",
+  crossProgramAffiliateCommission: "82000000-0000-4000-8000-000000000038",
 } as const;
 
 const hashA = "a".repeat(64);
@@ -274,6 +281,121 @@ describe("growth database schema", () => {
     `);
   });
 
+  it("keeps versioned policy and terms facts immutable while allowing forward lifecycle transitions", async () => {
+    client = await createMigratedPglite();
+    await insertPolicies(client);
+    await insertTerms(client);
+
+    const immutableMutations = [
+      `UPDATE loyalty_policies SET id = gen_random_uuid() WHERE id = '${ids.loyaltyPolicy}'`,
+      `UPDATE loyalty_policies SET version = 2 WHERE id = '${ids.loyaltyPolicy}'`,
+      `UPDATE loyalty_policies SET points_per_dollar = 3 WHERE id = '${ids.loyaltyPolicy}'`,
+      `UPDATE loyalty_policies SET redemption_minor_per_point = 2 WHERE id = '${ids.loyaltyPolicy}'`,
+      `UPDATE loyalty_policies SET minimum_redemption_points = 600 WHERE id = '${ids.loyaltyPolicy}'`,
+      `UPDATE loyalty_policies SET maximum_redemption_basis_points = 3000 WHERE id = '${ids.loyaltyPolicy}'`,
+      `UPDATE loyalty_policies SET expires_after_days = 365 WHERE id = '${ids.loyaltyPolicy}'`,
+      `UPDATE loyalty_policies SET effective_at = effective_at + interval '1 day' WHERE id = '${ids.loyaltyPolicy}'`,
+      `UPDATE loyalty_policies SET created_at = created_at + interval '1 second' WHERE id = '${ids.loyaltyPolicy}'`,
+      `DELETE FROM loyalty_policies WHERE id = '${ids.loyaltyPolicy}'`,
+      `UPDATE referral_policies SET id = gen_random_uuid() WHERE id = '${ids.referralPolicy}'`,
+      `UPDATE referral_policies SET version = 2 WHERE id = '${ids.referralPolicy}'`,
+      `UPDATE referral_policies SET attribution_days = 31 WHERE id = '${ids.referralPolicy}'`,
+      `UPDATE referral_policies SET referred_discount_basis_points = 1100 WHERE id = '${ids.referralPolicy}'`,
+      `UPDATE referral_policies SET referred_discount_cap_minor = 2600 WHERE id = '${ids.referralPolicy}'`,
+      `UPDATE referral_policies SET referrer_points_per_dollar = 6 WHERE id = '${ids.referralPolicy}'`,
+      `UPDATE referral_policies SET referrer_reward_cap_points = 2600 WHERE id = '${ids.referralPolicy}'`,
+      `UPDATE referral_policies SET effective_at = effective_at + interval '1 day' WHERE id = '${ids.referralPolicy}'`,
+      `UPDATE referral_policies SET created_at = created_at + interval '1 second' WHERE id = '${ids.referralPolicy}'`,
+      `DELETE FROM referral_policies WHERE id = '${ids.referralPolicy}'`,
+      `UPDATE affiliate_policies SET id = gen_random_uuid() WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE affiliate_policies SET version = 2 WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE affiliate_policies SET attribution_days = 31 WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE affiliate_policies SET first_order_commission_basis_points = 1100 WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE affiliate_policies SET reorder_commission_basis_points = 600 WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE affiliate_policies SET reorder_window_days = 181 WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE affiliate_policies SET approval_delay_days = 31 WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE affiliate_policies SET payout_threshold_minor = 5100 WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE affiliate_policies SET effective_at = effective_at + interval '1 day' WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE affiliate_policies SET created_at = created_at + interval '1 second' WHERE id = '${ids.affiliatePolicy}'`,
+      `DELETE FROM affiliate_policies WHERE id = '${ids.affiliatePolicy}'`,
+      `UPDATE growth_terms_versions SET id = gen_random_uuid() WHERE id = '${ids.customerTerms}'`,
+      `UPDATE growth_terms_versions SET version = 2 WHERE id = '${ids.customerTerms}'`,
+      `UPDATE growth_terms_versions SET content_hash = '${hashB}' WHERE id = '${ids.customerTerms}'`,
+      `UPDATE growth_terms_versions SET terms_text = 'Mutated terms' WHERE id = '${ids.customerTerms}'`,
+      `UPDATE growth_terms_versions SET effective_at = effective_at + interval '1 day' WHERE id = '${ids.customerTerms}'`,
+      `UPDATE growth_terms_versions SET created_at = created_at + interval '1 second' WHERE id = '${ids.customerTerms}'`,
+      `DELETE FROM growth_terms_versions WHERE id = '${ids.customerTerms}'`,
+    ];
+
+    for (const statement of immutableMutations) {
+      await expectRejected(client, statement);
+    }
+
+    await client.exec(`
+      UPDATE loyalty_policies
+      SET status = 'superseded', superseded_at = '2026-09-01T00:00:00Z'
+      WHERE id = '${ids.loyaltyPolicy}';
+      UPDATE referral_policies
+      SET status = 'superseded', superseded_at = '2026-09-01T00:00:00Z'
+      WHERE id = '${ids.referralPolicy}';
+      UPDATE affiliate_policies
+      SET status = 'superseded', superseded_at = '2026-09-01T00:00:00Z'
+      WHERE id = '${ids.affiliatePolicy}';
+      UPDATE growth_terms_versions
+      SET superseded_at = '2026-09-01T00:00:00Z'
+      WHERE id = '${ids.customerTerms}';
+    `);
+
+    for (const table of [
+      "loyalty_policies",
+      "referral_policies",
+      "affiliate_policies",
+    ]) {
+      await expectRejected(
+        client,
+        `UPDATE ${table} SET status = 'active', superseded_at = null WHERE version = 1`,
+      );
+      await expectRejected(
+        client,
+        `UPDATE ${table} SET superseded_at = '2026-09-02T00:00:00Z' WHERE version = 1`,
+      );
+    }
+    await expectRejected(
+      client,
+      `UPDATE growth_terms_versions SET superseded_at = null WHERE id = '${ids.customerTerms}'`,
+    );
+    await expectRejected(
+      client,
+      `UPDATE growth_terms_versions
+       SET superseded_at = '2026-09-02T00:00:00Z'
+       WHERE id = '${ids.customerTerms}'`,
+    );
+
+    await client.exec(`
+      INSERT INTO loyalty_policies
+        (version, status, points_per_dollar, redemption_minor_per_point,
+         minimum_redemption_points, maximum_redemption_basis_points,
+         effective_at)
+      VALUES (2, 'draft', 2, 1, 500, 2500, '2026-09-02T00:00:00Z');
+      INSERT INTO referral_policies
+        (version, status, attribution_days, referred_discount_basis_points,
+         referred_discount_cap_minor, referrer_points_per_dollar,
+         referrer_reward_cap_points, effective_at)
+      VALUES (2, 'draft', 30, 1000, 2500, 5, 2500,
+        '2026-09-02T00:00:00Z');
+      INSERT INTO affiliate_policies
+        (version, status, attribution_days,
+         first_order_commission_basis_points, reorder_commission_basis_points,
+         reorder_window_days, approval_delay_days, payout_threshold_minor,
+         currency, effective_at)
+      VALUES (2, 'draft', 30, 1000, 500, 180, 30, 5000, 'USD',
+        '2026-09-02T00:00:00Z');
+      UPDATE loyalty_policies SET status = 'active' WHERE version = 2;
+      UPDATE referral_policies SET status = 'active' WHERE version = 2;
+      UPDATE affiliate_policies SET status = 'active' WHERE version = 2;
+    `);
+  });
+
   it("uses common hash-bound terms acceptances for both programs and makes repeats idempotent", async () => {
     client = await createMigratedPglite();
     await insertCoreFixture(client);
@@ -382,6 +504,16 @@ describe("growth database schema", () => {
     );
     await expectRejected(
       client,
+      `UPDATE reward_ledger_entries
+       SET available_points_delta = -24
+       WHERE id = '${ids.rewardLedger}'`,
+    );
+    await expectRejected(
+      client,
+      `DELETE FROM reward_ledger_entries WHERE id = '${ids.rewardLedger}'`,
+    );
+    await expectRejected(
+      client,
       `DELETE FROM reward_accounts WHERE id = '${ids.rewardAccount}'`,
     );
   });
@@ -468,14 +600,20 @@ describe("growth database schema", () => {
          '${ids.referred}', '${ids.referralPolicy}', 1,
          '2026-08-27T00:00:00Z', '2026-09-26T00:00:00Z',
          '2026-08-28T00:00:00Z');
+      INSERT INTO order_growth_attributions
+        (order_id, buyer_user_id, program, referral_attribution_id,
+         referral_policy_id, referral_policy_version)
+      VALUES
+        ('${ids.referredOrder}', '${ids.referred}', 'customer_referral',
+         '${ids.referralAttribution}', '${ids.referralPolicy}', 1);
       INSERT INTO referral_conversions
         (id, referral_attribution_id, referred_user_id, first_order_id,
-         idempotency_key, referred_discount_minor, referrer_reward_points,
-         status)
+         referral_policy_id, referral_policy_version, idempotency_key,
+         referred_discount_minor, referrer_reward_points, status)
       VALUES
         ('${ids.referralConversion}', '${ids.referralAttribution}',
-         '${ids.referred}', '${ids.referredOrder}', 'growth-referral-conversion',
-         100, 50, 'pending');
+         '${ids.referred}', '${ids.referredOrder}', '${ids.referralPolicy}', 1,
+         'growth-referral-conversion', 100, 50, 'pending');
     `);
 
     await expectRejected(
@@ -515,11 +653,16 @@ describe("growth database schema", () => {
       client,
       `INSERT INTO referral_conversions
         (referral_attribution_id, referred_user_id, first_order_id,
-         idempotency_key, referred_discount_minor, referrer_reward_points,
-         status)
+         referral_policy_id, referral_policy_version, idempotency_key,
+         referred_discount_minor, referrer_reward_points, status)
        VALUES ('${ids.referralAttribution}', '${ids.referred}',
-         '${ids.referredOrder}', 'growth-referral-conversion-two', 100, 50,
-         'qualified')`,
+         '${ids.referredOrder}', '${ids.referralPolicy}', 1,
+         'growth-referral-conversion-two', 100, 50, 'qualified')`,
+    );
+    await expectRejected(
+      client,
+      `DELETE FROM order_growth_attributions
+       WHERE order_id = '${ids.referredOrder}'`,
     );
   });
 
@@ -530,6 +673,12 @@ describe("growth database schema", () => {
     await insertTerms(client);
     await insertAffiliateProfileAndAttribution(client);
     await client.exec(`
+      INSERT INTO order_growth_attributions
+        (order_id, buyer_user_id, program, affiliate_attribution_id,
+         affiliate_policy_id, affiliate_policy_version)
+      VALUES
+        ('${ids.affiliateOrder}', '${ids.affiliateBuyer}', 'affiliate',
+         '${ids.affiliateAttribution}', '${ids.affiliatePolicy}', 1);
       INSERT INTO affiliate_payouts
         (id, affiliate_profile_id, affiliate_policy_id,
          affiliate_policy_version, idempotency_key, amount_minor, currency,
@@ -547,6 +696,22 @@ describe("growth database schema", () => {
          '${ids.affiliateAttribution}', '${ids.affiliateBuyer}', '${ids.affiliateOrder}',
          '${ids.affiliatePolicy}', 1, 'growth-commission-one', 100, 0,
          'approved', '${ids.affiliatePayout}');
+      INSERT INTO affiliate_policies
+        (id, version, status, attribution_days,
+         first_order_commission_basis_points, reorder_commission_basis_points,
+         reorder_window_days, approval_delay_days, payout_threshold_minor,
+         currency, effective_at)
+      VALUES
+        ('${ids.alternateAffiliatePolicy}', 2, 'draft', 30, 1000, 500,
+         180, 30, 5000, 'USD', '2026-09-01T00:00:00Z');
+      INSERT INTO affiliate_payouts
+        (id, affiliate_profile_id, affiliate_policy_id,
+         affiliate_policy_version, idempotency_key, amount_minor, currency,
+         state)
+      VALUES
+        ('${ids.alternateAffiliatePayout}', '${ids.affiliateProfile}',
+         '${ids.alternateAffiliatePolicy}', 2, 'growth-payout-two', 5000,
+         'USD', 'pending');
     `);
 
     await expectRejected(
@@ -608,6 +773,203 @@ describe("growth database schema", () => {
       `UPDATE affiliate_commissions
        SET gross_commission_minor = 9007199254740992
        WHERE id = '${ids.affiliateCommission}'`,
+    );
+    await expectRejected(
+      client,
+      `UPDATE affiliate_commissions
+       SET payout_id = '${ids.alternateAffiliatePayout}'
+       WHERE id = '${ids.affiliateCommission}'`,
+    );
+    await expectRejected(
+      client,
+      `DELETE FROM order_growth_attributions
+       WHERE order_id = '${ids.affiliateOrder}'`,
+    );
+  });
+
+  it("rejects an affiliate commission when the order selected customer referral", async () => {
+    client = await createMigratedPglite();
+    await insertCoreFixture(client);
+    await insertPolicies(client);
+    await insertTerms(client);
+    await insertAffiliateProfileAndAttribution(client);
+    await client.exec(`
+      INSERT INTO referral_codes (id, owner_user_id, code, status)
+      VALUES ('${ids.referralCode}', '${ids.referrer}',
+        'ref_ABCDEFGHIJKLMNOP', 'active');
+      INSERT INTO referral_attributions
+        (id, referral_code_id, referrer_user_id, referred_user_id,
+         referral_policy_id, referral_policy_version, clicked_at, expires_at,
+         bound_at)
+      VALUES
+        ('${ids.referralAttribution}', '${ids.referralCode}', '${ids.referrer}',
+         '${ids.referred}', '${ids.referralPolicy}', 1,
+         '2026-08-27T00:00:00Z', '2026-09-26T00:00:00Z',
+         '2026-08-28T00:00:00Z');
+      INSERT INTO affiliate_attributions
+        (id, affiliate_profile_id, affiliate_user_id, referred_user_id,
+         affiliate_policy_id, affiliate_policy_version, clicked_at,
+         expires_at, bound_at)
+      VALUES
+        ('${ids.alternateAffiliateAttribution}', '${ids.affiliateProfile}',
+         '${ids.affiliate}', '${ids.referred}', '${ids.affiliatePolicy}', 1,
+         '2026-08-27T00:00:00Z', '2026-09-26T00:00:00Z',
+         '2026-08-28T00:00:00Z');
+      INSERT INTO order_growth_attributions
+        (order_id, buyer_user_id, program, referral_attribution_id,
+         referral_policy_id, referral_policy_version)
+      VALUES
+        ('${ids.referredOrder}', '${ids.referred}', 'customer_referral',
+         '${ids.referralAttribution}', '${ids.referralPolicy}', 1);
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO affiliate_commissions
+        (id, affiliate_profile_id, affiliate_attribution_id, buyer_user_id,
+         order_id, affiliate_policy_id, affiliate_policy_version,
+         idempotency_key, gross_commission_minor,
+         reversed_commission_minor, status)
+       VALUES ('${ids.crossProgramAffiliateCommission}',
+         '${ids.affiliateProfile}', '${ids.alternateAffiliateAttribution}',
+         '${ids.referred}', '${ids.referredOrder}', '${ids.affiliatePolicy}', 1,
+         'growth-cross-program-affiliate', 100, 0, 'pending')`,
+    );
+  });
+
+  it("rejects a referral conversion when the order selected affiliate", async () => {
+    client = await createMigratedPglite();
+    await insertCoreFixture(client);
+    await insertPolicies(client);
+    await insertTerms(client);
+    await insertAffiliateProfileAndAttribution(client);
+    await client.exec(`
+      INSERT INTO referral_codes (id, owner_user_id, code, status)
+      VALUES ('${ids.referralCode}', '${ids.referrer}',
+        'ref_ABCDEFGHIJKLMNOP', 'active');
+      INSERT INTO referral_attributions
+        (id, referral_code_id, referrer_user_id, referred_user_id,
+         referral_policy_id, referral_policy_version, clicked_at, expires_at,
+         bound_at)
+      VALUES
+        ('${ids.alternateReferralAttribution}', '${ids.referralCode}',
+         '${ids.referrer}', '${ids.affiliateBuyer}', '${ids.referralPolicy}', 1,
+         '2026-08-27T00:00:00Z', '2026-09-26T00:00:00Z',
+         '2026-08-28T00:00:00Z');
+      INSERT INTO order_growth_attributions
+        (order_id, buyer_user_id, program, affiliate_attribution_id,
+         affiliate_policy_id, affiliate_policy_version)
+      VALUES
+        ('${ids.affiliateOrder}', '${ids.affiliateBuyer}', 'affiliate',
+         '${ids.affiliateAttribution}', '${ids.affiliatePolicy}', 1);
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO referral_conversions
+        (id, referral_attribution_id, referred_user_id, first_order_id,
+         referral_policy_id, referral_policy_version, idempotency_key,
+         referred_discount_minor, referrer_reward_points, status)
+       VALUES ('${ids.crossProgramReferralConversion}',
+         '${ids.alternateReferralAttribution}', '${ids.affiliateBuyer}',
+         '${ids.affiliateOrder}', '${ids.referralPolicy}', 1,
+         'growth-cross-program-referral', 100, 50, 'pending')`,
+    );
+  });
+
+  it("requires settlement attribution, policy, and buyer facts to match the selected order growth facts", async () => {
+    client = await createMigratedPglite();
+    await insertCoreFixture(client);
+    await insertPolicies(client);
+    await insertTerms(client);
+    await insertAffiliateProfileAndAttribution(client);
+    await client.exec(`
+      INSERT INTO referral_policies
+        (id, version, status, attribution_days,
+         referred_discount_basis_points, referred_discount_cap_minor,
+         referrer_points_per_dollar, referrer_reward_cap_points, effective_at)
+      VALUES
+        ('${ids.alternateReferralPolicy}', 2, 'draft', 30, 1000, 2500, 5,
+         2500, '2026-09-01T00:00:00Z');
+      INSERT INTO affiliate_policies
+        (id, version, status, attribution_days,
+         first_order_commission_basis_points, reorder_commission_basis_points,
+         reorder_window_days, approval_delay_days, payout_threshold_minor,
+         currency, effective_at)
+      VALUES
+        ('${ids.alternateAffiliatePolicy}', 2, 'draft', 30, 1000, 500,
+         180, 30, 5000, 'USD', '2026-09-01T00:00:00Z');
+      INSERT INTO referral_codes (id, owner_user_id, code, status)
+      VALUES ('${ids.referralCode}', '${ids.referrer}',
+        'ref_ABCDEFGHIJKLMNOP', 'active');
+      INSERT INTO referral_attributions
+        (id, referral_code_id, referrer_user_id, referred_user_id,
+         referral_policy_id, referral_policy_version, clicked_at, expires_at,
+         bound_at)
+      VALUES
+        ('${ids.referralAttribution}', '${ids.referralCode}', '${ids.referrer}',
+         '${ids.referred}', '${ids.referralPolicy}', 1,
+         '2026-08-27T00:00:00Z', '2026-09-26T00:00:00Z',
+         '2026-08-28T00:00:00Z'),
+        ('${ids.alternateReferralAttribution}', '${ids.referralCode}',
+         '${ids.referrer}', '${ids.referred}',
+         '${ids.alternateReferralPolicy}', 2, '2026-08-27T00:00:00Z',
+         '2026-09-26T00:00:00Z', '2026-08-28T00:00:00Z');
+      INSERT INTO affiliate_attributions
+        (id, affiliate_profile_id, affiliate_user_id, referred_user_id,
+         affiliate_policy_id, affiliate_policy_version, clicked_at,
+         expires_at, bound_at)
+      VALUES
+        ('${ids.alternateAffiliateAttribution}', '${ids.affiliateProfile}',
+         '${ids.affiliate}', '${ids.affiliateBuyer}',
+         '${ids.alternateAffiliatePolicy}', 2, '2026-08-27T00:00:00Z',
+         '2026-09-26T00:00:00Z', '2026-08-28T00:00:00Z');
+      INSERT INTO order_growth_attributions
+        (order_id, buyer_user_id, program, referral_attribution_id,
+         referral_policy_id, referral_policy_version)
+      VALUES
+        ('${ids.referredOrder}', '${ids.referred}', 'customer_referral',
+         '${ids.referralAttribution}', '${ids.referralPolicy}', 1);
+      INSERT INTO order_growth_attributions
+        (order_id, buyer_user_id, program, affiliate_attribution_id,
+         affiliate_policy_id, affiliate_policy_version)
+      VALUES
+        ('${ids.affiliateOrder}', '${ids.affiliateBuyer}', 'affiliate',
+         '${ids.affiliateAttribution}', '${ids.affiliatePolicy}', 1);
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO referral_conversions
+        (referral_attribution_id, referred_user_id, first_order_id,
+         referral_policy_id, referral_policy_version, idempotency_key,
+         referred_discount_minor, referrer_reward_points, status)
+       VALUES ('${ids.alternateReferralAttribution}', '${ids.referred}',
+         '${ids.referredOrder}', '${ids.alternateReferralPolicy}', 2,
+         'growth-referral-mismatched-facts', 100, 50, 'pending')`,
+    );
+    await expectRejected(
+      client,
+      `INSERT INTO affiliate_commissions
+        (affiliate_profile_id, affiliate_attribution_id, buyer_user_id,
+         order_id, affiliate_policy_id, affiliate_policy_version,
+         idempotency_key, gross_commission_minor,
+         reversed_commission_minor, status)
+       VALUES ('${ids.affiliateProfile}',
+         '${ids.alternateAffiliateAttribution}', '${ids.affiliateBuyer}',
+         '${ids.affiliateOrder}', '${ids.alternateAffiliatePolicy}', 2,
+         'growth-affiliate-mismatched-facts', 100, 0, 'pending')`,
+    );
+    await expectRejected(
+      client,
+      `INSERT INTO affiliate_commissions
+        (affiliate_profile_id, affiliate_attribution_id, buyer_user_id,
+         order_id, affiliate_policy_id, affiliate_policy_version,
+         idempotency_key, gross_commission_minor,
+         reversed_commission_minor, status)
+       VALUES ('${ids.affiliateProfile}', '${ids.affiliateAttribution}',
+         '${ids.referred}', '${ids.referredOrder}', '${ids.affiliatePolicy}', 1,
+         'growth-affiliate-mismatched-buyer', 100, 0, 'pending')`,
     );
   });
 
