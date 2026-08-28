@@ -1,0 +1,112 @@
+# SDD ledger — plan: docs/superpowers/plans/2026-08-27-propeptiq-rewards-referrals.md
+
+## Setup
+
+- Isolated linked worktree: `C:/Users/Sergio/Documents/Peptides/propeptiq-labs-app/.worktrees/propeptiq-lightweight-commerce`
+- Branch: `feat/propeptiq-lightweight-commerce`
+- Initial plan/spec commit: `18c2e6b`
+- Baseline dependency setup: `npm install --no-audit --no-fund` — up to date; npm reported only the existing allow-scripts warning.
+- Baseline unit suite: `npm test` — 67 files, 724 tests passed.
+
+## Preflight consistency scan
+
+### Task self-consistency
+
+| Task | Produces / tests | Self-consistency finding |
+|---|---|---|
+| 0 | Binding documentation and traceability | Documentation steps are coherent. Global “failing test per task” wording conflicts with the test-hygiene rule that human prose earns no artificial test. |
+| 1 | Pure domain contracts and authorization | Coherent if “one active version” means validation of one supplied active policy; database cardinality belongs to Task 2/3. |
+| 2 | Growth schema and generated migration | Coherent, but the spec also requires versioned customer rewards/referral terms and click counts; the listed tables name only affiliate term acceptance and no explicit visit table. |
+| 3 | Transactional repositories and private read models | Coherent and depends on Task 2 schema. Owner privacy requirements are explicit. |
+| 4 | Checkout redemption and lifecycle points | Coherent; provider/session expiry support must be implemented through the existing normalized provider-event boundary or an explicit expiration command, never a browser callback. |
+| 5 | Referral cookie, attribution, and shared sets | Coherent. “Browser receives only a signed cookie” does not forbid a privacy-minimal server visit record required by the spec’s click dashboard. |
+| 6 | Affiliate application, commission, and payout ledger | Coherent; payout execution remains outside the app. |
+| 7 | Public/account design and routes | Coherent with the spec. Static navigation may lead to a truthful inactive page; numeric facts remain server-derived. |
+| 8 | One-admin growth management | Coherent with the one-admin model; separate capabilities limit financial commands without requiring a second actor. |
+| 9 | Security, terms, content review | Coherent once Task 2 includes common versioned growth terms for both rewards/referrals and affiliates. |
+| 10 | Browser/full release verification | Coherent. Preview publication is permitted by the user’s request to execute the plan, but it must use an already authorized isolated Vercel project and synthetic configuration; production policy activation remains excluded. |
+
+### Cross-task interfaces and shared files
+
+| Tasks | Producer → consumer / shared surface | Finding |
+|---|---|---|
+| 0 → 1 | Documented V1 economics → pure domain literals | Exact values align. |
+| 0 → 7 | Design/navigation contract → public/account UI | Route and visual requirements align. |
+| 0 → 9 | Terms/content/security requirements → hardening | Align once common growth terms are modeled. |
+| 0 → 10 | Traceability/testing contract → release evidence | Align. |
+| 1 → 2 | Domain policy/status/enums → Drizzle schema | Align; database uniqueness is not duplicated in pure validation. |
+| 1 → 4 | Rewards/referral calculations → checkout/lifecycle | Align; all browser numbers remain non-authoritative. |
+| 1 → 5 | Referral/shared-set contracts → cookie/actions/routes | Align. |
+| 1 → 6 | Affiliate calculations/status → affiliate service | Align. |
+| 1 → 8 | New authorization operations/capabilities → admin gates | Align. |
+| 2 → 3 | Growth tables → transactional repositories/read models | Align. |
+| 2 → 4 | Reward accounts/ledger/redemptions → checkout/provider/refund/fulfillment | Align; serializable reservation is required. |
+| 2 → 5 | Codes/attributions/conversions/sets → referral and set services | Add privacy-minimal anonymous attribution identity so click counts are real without PII. |
+| 2 → 6 | Profiles/terms/commissions/payouts → affiliate service | Replace affiliate-only terms storage with common versioned terms plus program-specific acceptance. |
+| 2 → 8 | Growth policy and financial tables → admin repository/read model | Align. |
+| 3 → 4 | Repository transactions → reward lifecycle service | Align. |
+| 3 → 5 | Repository/read models → referral/set service and dashboards | Align. |
+| 3 → 6 | Repository/read models → affiliate service and dashboard | Align. |
+| 3 → 7 | Private/public read models → components/pages | Align. |
+| 4 ↔ 5 | Checkout discount/redemption → referral attribution and reward | Acquisition discount is exclusive; points redemption stacks within cap. |
+| 4 ↔ 6 | Provider/refund/fulfillment files → commission lifecycle | Shared lifecycle handlers must append all growth effects atomically/idempotently. |
+| 4 → 7 | Quote/result contracts → cart/checkout presentation | Separate promotion, referral, and points rows align. |
+| 4 → 10 | Concurrency/idempotency behavior → integration/E2E gates | Align. |
+| 5 ↔ 6 | Customer-referral vs affiliate attribution | Exactly one program may earn per order; database/order snapshot must enforce exclusivity. |
+| 5 → 7 | Referral/set actions/read models → public/account UI | Align. |
+| 5 → 9 | Cookie/actions → origin, CSRF, rate-limit, privacy tests | Align. |
+| 5 → 10 | Signed links/sets → E2E acceptance | Align. |
+| 6 → 7 | Affiliate application/read model → partner UI | Align; no PII or payout-send control. |
+| 6 → 8 | Affiliate decisions/payout records → admin commands | Align. |
+| 6 → 9 | Terms/profile/public copy → content/security review | Align after common terms tables. |
+| 6 → 10 | Commission/payout lifecycle → E2E/admin acceptance | Align. |
+| 7 ↔ 8 | Account/public shell vs admin shell | Disjoint shells; shared visual tokens and 1024px Sheet behavior align. |
+| 7 → 9 | New public strings/forms → content and accessibility hardening | Align. |
+| 7 → 10 | Responsive routes/components → screenshot/browser gates | Align. |
+| 8 → 9 | Admin mutations → authorization/origin/rate-limit review | Align. |
+| 8 → 10 | Admin behavior → deterministic E2E gates | Align. |
+| 9 → 10 | Security/artifact requirements → final verification | Align. |
+
+## Preflight rulings
+
+- Ruling: Task 0 will not add a fake failing test for human documentation — its validation is source/traceability review and repository checks — cost if wrong: a documentation regression has no automated behavior gate until a consuming implementation test is added.
+- Ruling: Task 1 validates the shape and calculations of one supplied policy; Task 2/3 enforce and load exactly one active version — cost if wrong: policy-cardinality errors would surface later at persistence rather than in pure-domain tests.
+- Ruling: Task 2 will use common `growth_terms_versions` and `growth_terms_acceptances` keyed by program instead of affiliate-only terms tables — the spec requires exact version/hash acceptance for rewards/referrals and affiliates — cost if wrong: slightly broader schema and migration than the table list names.
+- Ruling: Anonymous referral/affiliate landings may append an idempotent, privacy-minimal attribution visit while the browser receives only the signed cookie; no raw IP, email, address, or device fingerprint is stored — cost if wrong: the interpretation of “sets only a signed cookie” may require removing click counts or the server visit table.
+- Ruling: Production growth policies remain inactive and production activation is outside this implementation; an isolated synthetic Preview may be deployed only with an already authorized project/configuration — cost if wrong: final verification may report Preview as unavailable rather than producing a deployment URL.
+- Ruling: Customer rewards/referral enrollment is represented by acceptance of the one current `customer_rewards_referrals` terms version/hash; code activation and value mutations fail closed on missing/stale acceptance, while ordinary catalog/checkout remains available without rewards — cost if wrong: this adds one explicit consent action not separately drawn in the original account wireframe.
+- Ruling: The UI skill's alternate pink palette and Crimson/Atkinson fonts are rejected because `desktop-v3`/`responsive-v2` and the off-white/ink/moss Newsreader/Geist system are binding; only its minimal-layout, dense-ledger, contrast, focus, hover, and reduced-motion guidance is adopted — cost if wrong: less visual novelty, but no brand-system drift.
+- Ruling: The adversarial-review bundle is missing its referenced `brain/principles.md`; its supplied skeptic/architect/minimalist lenses will still be used and the final opposite-model Claude CLI review is available (`claude` 2.1.250), with the missing principle corpus reported explicitly — cost if wrong: the final review cannot claim full compliance with the incomplete bundle.
+- Ruling: Task 2 migration immutability applies to pre-existing SQL, numbered snapshots, and README; Drizzle's generated append to `meta/_journal.json` is expected and reviewed, not treated as historical tampering — cost if wrong: a literal all-file hash check would make any valid new generated migration impossible.
+- Ruling: Task 3 adds a narrow immutable `shared_research_set_mutations` receipt table because the existing set row cannot prove idempotent CAS replay; a timestamp/payload heuristic is rejected — cost if wrong: one additional table/migration for correctness and future cleanup/retention policy.
+- Ruling: Task 4 reverses points earned from refunded/charged-back merchandise but does not invent an unstated policy for restoring already consumed redemption points; checkout cancellation before payment still releases reservations — cost if wrong: refund redemption restoration requires a later explicit owner/terms decision.
+
+## Task progress
+
+- Task 0: minor (deferred): `docs/product-requirements.md` does not repeat the spec's device-fingerprinting and open-ended public-bundle exclusions; final whole-branch review must decide whether cross-document repetition is required.
+- Task 0: fix round 1/5 (1 addressed, 0 open — responsive public navigation now includes Rewards and separates Cart/Account header actions; commits `9cded11..b943253`).
+- Task 0: complete (commits `18c2e6b..b943253`, review clean).
+- Task 1: implementation complete (feature `b8de5ec`, verification record `ba0da0b`; focused 96/96, typecheck and diff check pass); independent review in progress.
+- Task 1: fix round 1/5 open (4 Important — strict shared-set projection, own-field policy parsing, exclusive referral/affiliate attribution, direct-rate affiliate refund reversal); returned to original implementer test-first.
+- Task 1: fix round 1/5 implementation complete (`463e780`, verification `6088fee`; focused 108/108, typecheck and diff check pass); fresh re-review in progress.
+- Task 1: fix round 1/5 re-review (3 addressed, 1 Important open — prototype-only `currentProducts` facts still passed shared-set public projection).
+- Task 1: fix round 2/5 open; own-field public-product regression returned to original implementer.
+- Task 1: fix round 2/5 addressed (`dcb56e9`, verification `f1af461`; focused 109/109, typecheck and diff check pass).
+- Task 1: complete (range `b8de5ec..f1af461`, independent review clean after 2/5 fix rounds).
+- Task 2: implementation in progress from clean `f1af461`; pre-existing migration baseline is 12 files, with SQL/numbered snapshots/README immutable and one generated journal append expected.
+- Task 2: implementation complete (`cc8a922`, verification `6b18ae7`; migration `0005_pink_fat_cobra.sql`, schema 8/8, unit 786/786, second generation/db check/typecheck/diff check pass, 11 immutable hashes preserved); independent review in progress.
+- Task 2: fix round 1/5 open (1 Critical: settlement bypasses selected order program; 3 Important: payout-policy mismatch, mutable reward ledger, mutable versioned policy/terms facts; 1 Minor retired/superseded mapper deferred to Task 3). Returned to original implementer with generated follow-up/custom migration requirement.
+- Task 2: fix round 1/5 implementation complete (`9c55016`, verification `3312fbb`; migrations 0006–0008, focused 12/12, unit 786/786, db generation/check/typecheck/diff check and 13 immutable prior hashes pass); fresh re-review in progress.
+- Task 2: fix round 1/5 re-review (payout policy, append-only ledger, and immutable policies/terms addressed; selected-program settlement only serially addressed). Fix round 2/5 open for concurrency-safe composite settlement FKs and trigger `search_path` hardening; guarded PG test required when credentials exist.
+- Task 2: fix round 2/5 implementation complete (`8b5eeb0`, verification `55158cc`; migrations 0009–0011, focused 14/14, unit 786/786, lint/type/db/diff pass, 19 prior artifacts immutable; guarded PostgreSQL lane NOT RUN because exact guards absent); fresh re-review in progress.
+- Task 2: fix round 2/5 addressed; no Critical/Important defects remain.
+- Task 2: complete (range `cc8a922..55158cc`, migrations 0005–0011, independent review clean after 2/5 fix rounds; guarded real-PostgreSQL contention lane remains NOT RUN/no claim).
+- Task 3: implementation in progress from clean `55158cc`; repository/read-model ownership is isolated from routes, checkout, admin, and providers.
+- Task 3: implementation complete (`b6e1704`, verification `3c13d9a`; focused PGlite 14/14, affected domain/retry 60/60, typecheck/lint/diff check pass); independent review in progress.
+- Task 3: fix round 1/5 open (3 Important: server-recomputed terms hash, durable shared-set mutation replay, revoked-code replacement; 1 Minor: bounded owner read pagination); returned to original implementer with additive immutable receipt migration.
+- Task 3: fix round 1/5 implementation complete (`1ab1ee4`, verification `16ef366`; migrations 0012–0013, repository 32/32, schema 14/14, unit 786/786, all DB/static gates pass, 25 prior artifacts immutable); fresh re-review in progress.
+- Task 3: fix round 1/5 addressed; no Critical/Important defects remain.
+- Task 3: complete (range `b6e1704..16ef366`, independent review clean after 1/5 fix rounds; PGlite only/no real-PostgreSQL contention claim).
+- Task 4: implementation in progress from clean `16ef366`; points lifecycle ownership isolated from referral, affiliate, UI, and production providers.
+- Task 4: implementation complete (`439d291`, verification `49ec860`; unit 803/803, required PGlite 27/27, type/lint/db/diff pass; guarded PostgreSQL contention NOT RUN because exact guards absent); independent review in progress.
+- Task 4: fix round 1/5 addressed (`5866468`; future-dated acceptance rejected against authoritative `input.now`, payment/delivery lifecycle fail-closed and both production composition seams wired; focused 26/26, unit 805/805, affected PGlite 85/85, type/lint/diff pass; schema checks and guarded PostgreSQL lane NOT RUN under their stated guards); fresh re-review pending.
