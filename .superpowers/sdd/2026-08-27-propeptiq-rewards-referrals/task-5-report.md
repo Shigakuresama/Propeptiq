@@ -137,3 +137,61 @@ feat(growth): add signed referral attribution
 Task 5B enrollment/binding/discount/lifecycle and Task 5C shared sets/actions/UI
 remain unstarted. Task 5A does not activate production economics, disclose a
 referral owner, bind a buyer/order, calculate a benefit, or create rewards.
+
+## 5A review fix round 1/5 — Trusted redirect origin
+
+### Outcome
+
+Addressed the independent-review finding that constructing `Location` from
+`request.url` allowed a forged request host to produce an attacker-controlled
+catalog redirect.
+
+The route now loads the existing validated server environment and constructs
+the fixed `/catalog` target exclusively from configured `APP_ORIGIN`. Request
+URL, `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `return`, and `redirect`
+values have no redirect authority. Invalid codes, inactive/nonexistent codes,
+missing runtime, malformed lookup results, and repository failures still return
+the same trusted `303` catalog redirect without a cookie.
+
+If validated configuration cannot be loaded or has no `APP_ORIGIN`, the route
+returns a cache-disabled empty `503` with neither `Location` nor `Set-Cookie`.
+It never falls back to request-controlled origin data.
+
+### Changed implementation files
+
+- `src/app/r/[code]/route.ts`
+- `src/app/r/[code]/route.test.ts`
+
+No cookie, runtime lookup, repository, schema, migration, visit, enrollment,
+binding, discount, lifecycle, shared-set, affiliate, or UI file changed.
+
+### RED evidence
+
+```text
+npm test -- --run src/app/r/[code]/route.test.ts
+```
+
+Exit 1: 1 file, 4 expected failures and 1 pass. Eligible, invalid,
+inactive/missing-runtime, and missing-config scenarios all exposed the defect:
+the first three returned `https://attacker.example/catalog`, while the
+missing-config case returned an attacker-derived `303` instead of a no-location
+`503`.
+
+### GREEN and validation evidence
+
+- Final route regression: 1 file, 5/5 tests passed.
+- Final focused attribution/runtime/route lane: 3 files, 15/15 tests passed.
+- Full unit suite: 75 files, 820/820 tests passed.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- `git diff --check` and staged diff check: exit 0; only expected Windows
+  LF/CRLF working-copy notices appeared while staging.
+- No external service, production credential, schema, migration, or database
+  mutation was used.
+
+### Implementation commit
+
+```text
+00752b7
+fix(growth): trust configured referral redirect origin
+```
