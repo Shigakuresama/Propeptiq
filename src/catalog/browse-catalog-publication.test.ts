@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   browseCatalogPublicationId,
+  browseCatalogRowsSha256,
   ownerBrowseCatalogManifest,
   browseCatalogSourceDocumentSha256,
   resolvePublishedBrowseCatalog,
@@ -9,11 +10,15 @@ import {
 } from "./browse-catalog-publication";
 
 describe("owner browse-catalog publication", () => {
-  it("pins the exact SHA-256 of the supplied owner PDF", () => {
+  it("pins the exact SHA-256 of the supplied owner PDF and normalized rows", () => {
     expect(browseCatalogSourceDocumentSha256).toBe(
       "07cd4aa023c5455444d52f360841bc126b245c3eb30f0a19fea17bdf9b92f0bf",
     );
     expect(browseCatalogSourceDocumentSha256).toMatch(/^[a-f0-9]{64}$/u);
+    expect(browseCatalogRowsSha256).toBe(
+      "172dc8d9a1b8989a80c5db124a44a84805350643ef4a4df01ba0c84caf1321f5",
+    );
+    expect(browseCatalogRowsSha256).toMatch(/^[a-f0-9]{64}$/u);
   });
 
   it("defaults closed when no publication is authorized", () => {
@@ -57,5 +62,29 @@ describe("owner browse-catalog publication", () => {
         ],
       }),
     ).toThrow("Owner browse catalog contains duplicate product slugs");
+  });
+
+  it("rejects owner-row edits even when product and variant counts still match", () => {
+    const [firstProduct, ...remainingProducts] =
+      ownerBrowseCatalogManifest.products;
+    const [firstVariant, ...remainingVariants] = firstProduct!.variants;
+
+    expect(() =>
+      validateBrowseCatalogManifest({
+        ...ownerBrowseCatalogManifest,
+        products: [
+          {
+            ...firstProduct,
+            variants: [
+              { ...firstVariant, code: `${firstVariant!.code}-ALTERED` },
+              ...remainingVariants,
+            ],
+          },
+          ...remainingProducts,
+        ],
+      }),
+    ).toThrow(
+      "Owner browse catalog rows do not match the pinned publication",
+    );
   });
 });

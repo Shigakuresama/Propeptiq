@@ -1,15 +1,24 @@
 # Preview Readiness and Controlled Handoff
 
-> **PREPARED / NOT PUBLISHED / NOT PROVISIONED / BROWSE-ONLY; CHECKOUT UNAVAILABLE**
+> **PREVIEW PROVISIONED / PRODUCTION CONFIGURED BROWSE-ONLY / CHECKOUT UNAVAILABLE**
 
-This document describes a local preparation contract. It does not claim that a
-Preview deployment, account, database, provider resource, domain, credential,
-or synthetic identity exists. It does not authorize publication, provisioning,
-migration application, push, merge, deployment, or Production activation.
+The protected Vercel Preview for `feat/propeptiq-lightweight-commerce` is
+published at
+`https://propeptiq-git-feat-propeptiq-lightweight-commerce-sergiosteam.vercel.app`.
+It uses branch-scoped, non-secret Preview settings and clearly labeled synthetic
+catalog fixtures. The Production alias is
+`https://propeptiq-ten.vercel.app`; its non-secret environment is configured for
+the owner catalog with every commerce/provider capability disabled. Production
+must still be verified against the merged `main` commit after deployment.
+
+No identity, database, payment, storage, email, tax, shipping, or fulfillment
+provider is provisioned by these settings. The current release authorization is
+limited to the browse-only catalog, branding, merge, and resulting Production
+verification. It does not authorize migration application or live commerce.
 
 ## Browse-only boundary
 
-- Preview may render the owner-supplied browse-only catalog only when its exact
+- Preview renders the owner-supplied browse-only catalog only when its exact
   publication ID is configured. The separate commerce catalog remains limited
   to explicitly labeled synthetic demo records.
 - Buyer quote and payment-session creation remain closed with no-store `503`
@@ -18,38 +27,27 @@ migration application, push, merge, deployment, or Production activation.
   commerce harness is not available in Preview.
 - This buyer-checkout boundary does not claim that staff or webhook runtimes
   are available or unavailable; neither is authorized for exposure here.
-- Production buyer checkout remains inert regardless of flags at this
-  checkpoint.
+- Production buyer checkout remains inert because all provider and live
+  capability flags are explicitly disabled.
 
-## Placeholder-only target matrix
+## Current deployment target matrix
 
-The following is the exact target configuration for a future separately
-authorized Preview. Bracketed values and `REPLACE_WITH_...` values are
-documentation placeholders, not runnable credentials or evidence that any
-resource exists.
+Vercel supplies `VERCEL_ENV` for each deployment target. The application values
+below are the current non-secret settings; neither target contains provider
+credentials.
+
+### Protected Preview
 
 ```dotenv
 APP_ENV=preview
 VERCEL_ENV=preview
-APP_ORIGIN=https://preview.propeptiq.example.invalid
+APP_ORIGIN=https://propeptiq-git-feat-propeptiq-lightweight-commerce-sergiosteam.vercel.app
 CATALOG_DEMO_MODE=enabled
 BROWSE_CATALOG_PUBLICATION=owner-pdf-2026-08-27-07cd4aa0-v1
 LOCAL_TEST_DRIVER=disabled
-LOCAL_TEST_SECRET=
-AUTH_MODE=test
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_REPLACE_WITH_SYNTHETIC_PREVIEW_VALUE
-CLERK_SECRET_KEY=sk_test_REPLACE_WITH_SYNTHETIC_PREVIEW_VALUE
-CLERK_WEBHOOK_SIGNING_SECRET=
-RATE_LIMIT_SECRET=<unique preview-only value of at least 32 characters created at authorized provisioning time>
-DATABASE_MODE=test
-TEST_DATABASE_URL=postgresql://<reserved-isolated-preview-test-database-placeholder>
-TEST_DATABASE_CONFIRMATION=isolated-test-database
-DATABASE_URL=
-DATABASE_MIGRATION_URL=
-PAYMENTS_MODE=test
-STRIPE_ACCOUNT_ID=acct_REPLACE_WITH_SYNTHETIC_TEST_ACCOUNT
-STRIPE_SECRET_KEY=sk_test_REPLACE_WITH_SYNTHETIC_PREVIEW_VALUE
-STRIPE_WEBHOOK_SECRET=whsec_REPLACE_WITH_SYNTHETIC_PREVIEW_VALUE
+AUTH_MODE=disabled
+DATABASE_MODE=disabled
+PAYMENTS_MODE=disabled
 STORAGE_MODE=disabled
 EMAIL_MODE=disabled
 TAX_MODE=disabled
@@ -59,25 +57,43 @@ COMMERCE_LIVE_CAPABILITY=disabled
 PAYMENTS_LIVE_CAPABILITY=disabled
 ```
 
-`APP_ORIGIN` uses the reserved `.invalid` namespace until publication is
-separately authorized. `CLERK_WEBHOOK_SIGNING_SECRET` stays blank unless a
-separate authorization provisions that webhook. Provisioning must create every
-secret as a unique Preview-only value; no value may be copied from Local or
-Production.
+### Production browse-only
+
+```dotenv
+APP_ENV=production
+VERCEL_ENV=production
+APP_ORIGIN=https://propeptiq-ten.vercel.app
+CATALOG_DEMO_MODE=disabled
+BROWSE_CATALOG_PUBLICATION=owner-pdf-2026-08-27-07cd4aa0-v1
+LOCAL_TEST_DRIVER=disabled
+AUTH_MODE=disabled
+DATABASE_MODE=disabled
+PAYMENTS_MODE=disabled
+STORAGE_MODE=disabled
+EMAIL_MODE=disabled
+TAX_MODE=disabled
+SHIPPING_MODE=disabled
+FULFILLMENT_MODE=disabled
+COMMERCE_LIVE_CAPABILITY=disabled
+PAYMENTS_LIVE_CAPABILITY=disabled
+```
 
 ## Identity and data restrictions
 
-Future access must be protected before Preview publication. Reviewers must use
-pre-created synthetic test identities; `AUTH_MODE=test` proves credential mode
-only and does not prove an identity is synthetic. Do not admit real customer,
-buyer, order, address, attestation, payment, refund, shipment, provider, or
-catalog data. Do not create a technical allowlist as part of this checkpoint.
+Preview access remains protected by Vercel authentication. `AUTH_MODE=disabled`
+and `DATABASE_MODE=disabled` mean the application creates no buyer identity or
+commerce records. Do not admit real customer, buyer, order, address,
+attestation, payment, refund, shipment, or provider data. Production publishes
+only the pinned owner-supplied browse catalog and never the synthetic demo
+fixtures.
 
 ## Phase evidence already collected
 
-These focused results are complete on the current frozen candidate. They prove
-the local policy and browse-only Preview contracts only; they do not publish or
-provision Preview and do not activate Production commerce.
+The evidence below is retained from the pre-publication Task 7 checkpoint.
+Statements in that historical record saying Preview was not published were true
+when captured and no longer describe the external deployment state. The current
+deployment contract is recorded above; none of the historical evidence
+activates Production commerce.
 
 | Evidence | Recorded result | Final-candidate status |
 |---|---|---|
@@ -264,8 +280,9 @@ Neither belongs in the commit.
 
 ## Separate authorizations after this checkpoint
 
-Each of the following is a distinct future action and remains unauthorized and
-unperformed: push, pull-request creation, merge, Preview publication, resource
-or identity provisioning, migration application, provider configuration,
-Production deployment, and Production capability activation. Authorization for
-one does not authorize any other action.
+The current authorization covers pushing the reviewed catalog/branding changes,
+merging pull request 2, and verifying its browse-only Production deployment.
+Resource or identity provisioning, migration application, provider
+configuration, and Production commerce-capability activation remain separate,
+unauthorized future actions. Authorization for this browse-only release does not
+authorize any of them.
