@@ -21,6 +21,8 @@
 
 A future `/research-use` route may only redirect to `/research-use-policy`. Account/order routes require authentication. Checkout preserves the anonymous cart through Clerk sign-in and then collects age 21+, structured purpose, and the current versioned attestation.
 
+The growth routes are `/rewards` (public points/referral explanation with a truthful inactive state), `/partners` (public affiliate overview and application entry), `/account/rewards` (authenticated owner-only points and immutable ledger), `/account/referrals` (active buyer referral code, conversions, rewards, and shared research sets), `/account/partner` (verified owner application or approved dashboard), `/research-sets` (active-buyer neutral set builder), `/sets/[code]` (public read-only server-resolved set), `/rewards/terms`, and `/partners/terms`. Partner Program stays in the account menu and footer.
+
 ## State ownership
 
 - **Loading:** structural skeletons contain no invented product-like facts.
@@ -38,6 +40,8 @@ A future `/research-use` route may only redirect to `/research-use-policy`. Acco
 | 768px | Keep Sheet until all labels fit without collision | One or two columns; cart summary may sit below items | 24px gutters, 58–72 character reading measure |
 | 1024px | Full navigation only when it fits at 200% zoom | Approved desktop 7/5 or 6/6 grid; horizontal ordered Proof Rail | 32px gutters, fluid display type |
 | 1440px | Full navigation in shared container | Stop at 90rem; expand whitespace rather than cards/type | 32px gutters, 80–128px section rhythm where appropriate |
+
+Growth content follows the same responsive contract: tables reflow to labeled record cards, all practical targets are at least 44×44px, text is at least 16px, and pending/available/reversed/paid states use text and icons rather than color alone. Verify 375px, 768px, 1024px, 1440px, 200% zoom, keyboard-only navigation, reduced motion, and no horizontal overflow for the new routes and homepage modules.
 
 Breakpoints are content-driven. DOM/reading/tab order never changes to imitate a visual layout.
 
@@ -61,6 +65,7 @@ Use one `<ol aria-label="Evidence relationship">` with four `<li>` elements in t
 - Product/analytical facts require active server records and corresponding evidence; promotions/urgency require active server records and real inventory/end time.
 - Meet WCAG AA essential contrast, visible focus, sequential headings, persistent form labels, inline errors plus summary, appropriate image alternatives, and no restriction hidden behind hover/collapse.
 - Verify 375px, 768px, 1024px, 1440px, keyboard-only navigation, reduced motion, 200% zoom, loading/empty/error/stale-cart states, and no horizontal overflow.
+- The homepage growth sequence follows the binding order after the Proof Rail: admin-curated catalog highlights, then the compact `Earn points / Refer a lab / Share a research set` explainer, then the quality-record callout. Inactive growth or commerce policies omit their modules.
 
 ## Supersession record
 
