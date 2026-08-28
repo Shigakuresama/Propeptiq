@@ -1,0 +1,6 @@
+ALTER TABLE "affiliate_commissions" ADD COLUMN "program" "growth_attribution_program" DEFAULT 'affiliate' NOT NULL;--> statement-breakpoint
+ALTER TABLE "referral_conversions" ADD COLUMN "program" "growth_attribution_program" DEFAULT 'customer_referral' NOT NULL;--> statement-breakpoint
+ALTER TABLE "order_growth_attributions" ADD CONSTRAINT "order_growth_attributions_referral_settlement_unique" UNIQUE("order_id","buyer_user_id","program","referral_attribution_id","referral_policy_id","referral_policy_version");--> statement-breakpoint
+ALTER TABLE "order_growth_attributions" ADD CONSTRAINT "order_growth_attributions_affiliate_settlement_unique" UNIQUE("order_id","buyer_user_id","program","affiliate_attribution_id","affiliate_policy_id","affiliate_policy_version");--> statement-breakpoint
+ALTER TABLE "affiliate_commissions" ADD CONSTRAINT "affiliate_commissions_affiliate_program" CHECK ("affiliate_commissions"."program" = 'affiliate');--> statement-breakpoint
+ALTER TABLE "referral_conversions" ADD CONSTRAINT "referral_conversions_customer_program" CHECK ("referral_conversions"."program" = 'customer_referral');

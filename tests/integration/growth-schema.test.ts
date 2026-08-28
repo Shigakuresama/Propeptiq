@@ -42,6 +42,7 @@ const ids = {
   alternateAffiliatePayout: "82000000-0000-4000-8000-000000000036",
   crossProgramReferralConversion: "82000000-0000-4000-8000-000000000037",
   crossProgramAffiliateCommission: "82000000-0000-4000-8000-000000000038",
+  alternateReferredOrder: "82000000-0000-4000-8000-000000000039",
 } as const;
 
 const hashA = "a".repeat(64);
@@ -223,6 +224,53 @@ describe("growth database schema", () => {
     expect(Number(counts.rows[0]?.total)).toBe(0);
   });
 
+  it("binds each settlement to the exact program-specific order growth key", async () => {
+    client = await createMigratedPglite();
+    const constraints = await client.query<{
+      constraint_name: string;
+      definition: string;
+    }>(`
+      SELECT conname AS constraint_name, pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conname IN (
+        'referral_conversions_order_growth_fk',
+        'affiliate_commissions_order_growth_fk'
+      )
+      ORDER BY conname
+    `);
+
+    expect(constraints.rows).toHaveLength(2);
+    expect(constraints.rows[0]?.constraint_name).toBe(
+      "affiliate_commissions_order_growth_fk",
+    );
+    expect(constraints.rows[0]?.definition.replaceAll('"', "")).toContain(
+      "FOREIGN KEY (order_id, buyer_user_id, program, affiliate_attribution_id, affiliate_policy_id, affiliate_policy_version) REFERENCES order_growth_attributions(order_id, buyer_user_id, program, affiliate_attribution_id, affiliate_policy_id, affiliate_policy_version) ON DELETE RESTRICT",
+    );
+    expect(constraints.rows[1]?.constraint_name).toBe(
+      "referral_conversions_order_growth_fk",
+    );
+    expect(constraints.rows[1]?.definition.replaceAll('"', "")).toContain(
+      "FOREIGN KEY (first_order_id, referred_user_id, program, referral_attribution_id, referral_policy_id, referral_policy_version) REFERENCES order_growth_attributions(order_id, buyer_user_id, program, referral_attribution_id, referral_policy_id, referral_policy_version) ON DELETE RESTRICT",
+    );
+
+    const programs = await client.query<{
+      table_name: string;
+      column_default: string | null;
+    }>(`
+      SELECT table_name, column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND column_name = 'program'
+        AND table_name IN ('referral_conversions', 'affiliate_commissions')
+      ORDER BY table_name
+    `);
+    expect(programs.rows).toHaveLength(2);
+    expect(programs.rows[0]?.table_name).toBe("affiliate_commissions");
+    expect(programs.rows[0]?.column_default).toContain("affiliate");
+    expect(programs.rows[1]?.table_name).toBe("referral_conversions");
+    expect(programs.rows[1]?.column_default).toContain("customer_referral");
+  });
+
   it("enforces positive immutable policy versions and one current active row per program", async () => {
     client = await createMigratedPglite();
     await insertPolicies(client);
@@ -394,6 +442,51 @@ describe("growth database schema", () => {
       UPDATE referral_policies SET status = 'active' WHERE version = 2;
       UPDATE affiliate_policies SET status = 'active' WHERE version = 2;
     `);
+  });
+
+  it("pins growth trigger search paths and schema-qualifies integrity lookups", async () => {
+    client = await createMigratedPglite();
+    const functions = await client.query<{
+      function_name: string;
+      configuration: string | null;
+      definition: string;
+    }>(`
+      SELECT p.proname AS function_name,
+             array_to_string(p.proconfig, ',') AS configuration,
+             pg_get_functiondef(p.oid) AS definition
+      FROM pg_proc AS p
+      JOIN pg_namespace AS namespace ON namespace.oid = p.pronamespace
+      WHERE namespace.nspname = 'public'
+        AND p.proname IN (
+          'reject_reward_ledger_mutation',
+          'enforce_growth_policy_history',
+          'enforce_growth_terms_history',
+          'enforce_referral_conversion_selected_growth',
+          'enforce_affiliate_commission_selected_growth',
+          'enforce_order_growth_settlement_integrity'
+        )
+      ORDER BY p.proname
+    `);
+
+    expect(functions.rows).toHaveLength(6);
+    for (const row of functions.rows) {
+      expect(row.configuration).toBe("search_path=pg_catalog, public, pg_temp");
+    }
+    const definitions = new Map(
+      functions.rows.map((row) => [row.function_name, row.definition]),
+    );
+    expect(
+      definitions.get("enforce_referral_conversion_selected_growth"),
+    ).toContain("FROM public.order_growth_attributions");
+    expect(
+      definitions.get("enforce_affiliate_commission_selected_growth"),
+    ).toContain("FROM public.order_growth_attributions");
+    expect(
+      definitions.get("enforce_order_growth_settlement_integrity"),
+    ).toContain("FROM public.referral_conversions");
+    expect(
+      definitions.get("enforce_order_growth_settlement_integrity"),
+    ).toContain("FROM public.affiliate_commissions");
   });
 
   it("uses common hash-bound terms acceptances for both programs and makes repeats idempotent", async () => {
@@ -600,6 +693,14 @@ describe("growth database schema", () => {
          '${ids.referred}', '${ids.referralPolicy}', 1,
          '2026-08-27T00:00:00Z', '2026-09-26T00:00:00Z',
          '2026-08-28T00:00:00Z');
+      INSERT INTO orders
+        (id, buyer_user_id, buyer_status_snapshot, attestation_acceptance_id,
+         destination_state_code, currency, subtotal_minor, discount_minor,
+         tax_minor, shipping_minor, total_minor, state)
+      VALUES
+        ('${ids.alternateReferredOrder}', '${ids.referred}', 'active',
+         '${ids.referredAcceptance}', 'CA', 'USD', 1000, 0, 0, 0, 1000,
+         'draft');
       INSERT INTO order_growth_attributions
         (order_id, buyer_user_id, program, referral_attribution_id,
          referral_policy_id, referral_policy_version)
@@ -615,6 +716,16 @@ describe("growth database schema", () => {
          '${ids.referred}', '${ids.referredOrder}', '${ids.referralPolicy}', 1,
          'growth-referral-conversion', 100, 50, 'pending');
     `);
+    const referralProgram = await client.query<{ program: string }>(`
+      SELECT program FROM referral_conversions
+      WHERE id = '${ids.referralConversion}'
+    `);
+    expect(referralProgram.rows).toEqual([{ program: "customer_referral" }]);
+    await expectRejected(
+      client,
+      `UPDATE referral_conversions SET program = 'affiliate'
+       WHERE id = '${ids.referralConversion}'`,
+    );
 
     await expectRejected(
       client,
@@ -662,6 +773,32 @@ describe("growth database schema", () => {
     await expectRejected(
       client,
       `DELETE FROM order_growth_attributions
+       WHERE order_id = '${ids.referredOrder}'`,
+    );
+    await client.exec(`
+      CREATE TEMP TABLE referral_conversions (first_order_id uuid);
+      SET search_path = pg_temp, public;
+    `);
+    await expectRejected(
+      client,
+      `DELETE FROM public.order_growth_attributions
+       WHERE order_id = '${ids.referredOrder}'`,
+    );
+    await client.exec(`
+      SET search_path = public;
+      DROP TABLE pg_temp.referral_conversions;
+      DROP TRIGGER order_growth_attributions_settlement_integrity
+        ON public.order_growth_attributions;
+    `);
+    await expectRejected(
+      client,
+      `UPDATE public.order_growth_attributions
+       SET order_id = '${ids.alternateReferredOrder}'
+       WHERE order_id = '${ids.referredOrder}'`,
+    );
+    await expectRejected(
+      client,
+      `DELETE FROM public.order_growth_attributions
        WHERE order_id = '${ids.referredOrder}'`,
     );
   });
@@ -713,6 +850,16 @@ describe("growth database schema", () => {
          '${ids.alternateAffiliatePolicy}', 2, 'growth-payout-two', 5000,
          'USD', 'pending');
     `);
+    const affiliateProgram = await client.query<{ program: string }>(`
+      SELECT program FROM affiliate_commissions
+      WHERE id = '${ids.affiliateCommission}'
+    `);
+    expect(affiliateProgram.rows).toEqual([{ program: "affiliate" }]);
+    await expectRejected(
+      client,
+      `UPDATE affiliate_commissions SET program = 'customer_referral'
+       WHERE id = '${ids.affiliateCommission}'`,
+    );
 
     await expectRejected(
       client,
@@ -783,6 +930,15 @@ describe("growth database schema", () => {
     await expectRejected(
       client,
       `DELETE FROM order_growth_attributions
+       WHERE order_id = '${ids.affiliateOrder}'`,
+    );
+    await client.exec(`
+      DROP TRIGGER order_growth_attributions_settlement_integrity
+        ON public.order_growth_attributions;
+    `);
+    await expectRejected(
+      client,
+      `DELETE FROM public.order_growth_attributions
        WHERE order_id = '${ids.affiliateOrder}'`,
     );
   });
@@ -862,11 +1018,29 @@ describe("growth database schema", () => {
       VALUES
         ('${ids.affiliateOrder}', '${ids.affiliateBuyer}', 'affiliate',
          '${ids.affiliateAttribution}', '${ids.affiliatePolicy}', 1);
+      CREATE TEMP TABLE order_growth_attributions (
+        order_id uuid,
+        buyer_user_id uuid,
+        program public.growth_attribution_program,
+        referral_attribution_id uuid,
+        referral_policy_id uuid,
+        referral_policy_version integer,
+        affiliate_attribution_id uuid,
+        affiliate_policy_id uuid,
+        affiliate_policy_version integer
+      );
+      INSERT INTO pg_temp.order_growth_attributions
+        (order_id, buyer_user_id, program, referral_attribution_id,
+         referral_policy_id, referral_policy_version)
+      VALUES
+        ('${ids.affiliateOrder}', '${ids.affiliateBuyer}', 'customer_referral',
+         '${ids.alternateReferralAttribution}', '${ids.referralPolicy}', 1);
+      SET search_path = pg_temp, public;
     `);
 
     await expectRejected(
       client,
-      `INSERT INTO referral_conversions
+      `INSERT INTO public.referral_conversions
         (id, referral_attribution_id, referred_user_id, first_order_id,
          referral_policy_id, referral_policy_version, idempotency_key,
          referred_discount_minor, referrer_reward_points, status)

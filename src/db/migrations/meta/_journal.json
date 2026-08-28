@@ -64,6 +64,27 @@
       "when": 1787906161494,
       "tag": "0008_growth_history_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787908209875,
+      "tag": "0009_growth_settlement_fk_targets",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787908251438,
+      "tag": "0010_growth_settlement_composite_fks",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787908274792,
+      "tag": "0011_growth_trigger_search_path",
+      "breakpoints": true
     }
   ]
 }

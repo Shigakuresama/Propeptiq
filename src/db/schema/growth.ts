@@ -527,70 +527,6 @@ export const referralAttributions = pgTable(
   ],
 );
 
-export const referralConversions = pgTable(
-  "referral_conversions",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    referralAttributionId: uuid("referral_attribution_id").notNull(),
-    referredUserId: uuid("referred_user_id").notNull(),
-    firstOrderId: uuid("first_order_id").notNull(),
-    referralPolicyId: uuid("referral_policy_id").notNull(),
-    referralPolicyVersion: integer("referral_policy_version").notNull(),
-    idempotencyKey: text("idempotency_key").notNull(),
-    referredDiscountMinor: money("referred_discount_minor"),
-    referrerRewardPoints: points("referrer_reward_points"),
-    status: referralConversionStatusEnum("status").default("pending").notNull(),
-    createdAt: createdAt(),
-    qualifiedAt: timestamp("qualified_at", { withTimezone: true }),
-    reversedAt: timestamp("reversed_at", { withTimezone: true }),
-  },
-  (table) => [
-    unique("referral_conversions_attribution_unique").on(
-      table.referralAttributionId,
-    ),
-    unique("referral_conversions_first_order_unique").on(table.firstOrderId),
-    unique("referral_conversions_idempotency_unique").on(table.idempotencyKey),
-    foreignKey({
-      columns: [
-        table.referralAttributionId,
-        table.referredUserId,
-        table.referralPolicyId,
-        table.referralPolicyVersion,
-      ],
-      foreignColumns: [
-        referralAttributions.id,
-        referralAttributions.referredUserId,
-        referralAttributions.referralPolicyId,
-        referralAttributions.referralPolicyVersion,
-      ],
-      name: "referral_conversions_attribution_policy_fk",
-    }).onDelete("restrict"),
-    foreignKey({
-      columns: [table.firstOrderId, table.referredUserId],
-      foreignColumns: [orders.id, orders.buyerUserId],
-      name: "referral_conversions_order_buyer_fk",
-    }).onDelete("restrict"),
-    check(
-      "referral_conversions_idempotency_nonblank",
-      nonblank(table.idempotencyKey),
-    ),
-    check(
-      "referral_conversions_discount_safe",
-      safeNonnegativeMoney(table.referredDiscountMinor),
-    ),
-    check(
-      "referral_conversions_reward_safe",
-      safeNonnegativeInteger(table.referrerRewardPoints),
-    ),
-    check(
-      "referral_conversions_state_coherent",
-      sql`(${table.status} = 'pending' and ${table.qualifiedAt} is null and ${table.reversedAt} is null)
-        or (${table.status} = 'qualified' and ${table.qualifiedAt} is not null and ${table.reversedAt} is null)
-        or (${table.status} = 'reversed' and ${table.reversedAt} is not null)`,
-    ),
-  ],
-);
-
 export const affiliateProfiles = pgTable(
   "affiliate_profiles",
   {
@@ -696,6 +632,182 @@ export const affiliateAttributions = pgTable(
   ],
 );
 
+export const orderGrowthAttributions = pgTable(
+  "order_growth_attributions",
+  {
+    orderId: uuid("order_id").primaryKey(),
+    buyerUserId: uuid("buyer_user_id").notNull(),
+    program: growthAttributionProgramEnum("program").notNull(),
+    referralAttributionId: uuid("referral_attribution_id"),
+    referralPolicyId: uuid("referral_policy_id"),
+    referralPolicyVersion: integer("referral_policy_version"),
+    affiliateAttributionId: uuid("affiliate_attribution_id"),
+    affiliatePolicyId: uuid("affiliate_policy_id"),
+    affiliatePolicyVersion: integer("affiliate_policy_version"),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    unique("order_growth_attributions_referral_settlement_unique").on(
+      table.orderId,
+      table.buyerUserId,
+      table.program,
+      table.referralAttributionId,
+      table.referralPolicyId,
+      table.referralPolicyVersion,
+    ),
+    unique("order_growth_attributions_affiliate_settlement_unique").on(
+      table.orderId,
+      table.buyerUserId,
+      table.program,
+      table.affiliateAttributionId,
+      table.affiliatePolicyId,
+      table.affiliatePolicyVersion,
+    ),
+    foreignKey({
+      columns: [table.orderId, table.buyerUserId],
+      foreignColumns: [orders.id, orders.buyerUserId],
+      name: "order_growth_attributions_order_buyer_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.referralAttributionId,
+        table.buyerUserId,
+        table.referralPolicyId,
+        table.referralPolicyVersion,
+      ],
+      foreignColumns: [
+        referralAttributions.id,
+        referralAttributions.referredUserId,
+        referralAttributions.referralPolicyId,
+        referralAttributions.referralPolicyVersion,
+      ],
+      name: "order_growth_attributions_referral_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.affiliateAttributionId,
+        table.buyerUserId,
+        table.affiliatePolicyId,
+        table.affiliatePolicyVersion,
+      ],
+      foreignColumns: [
+        affiliateAttributions.id,
+        affiliateAttributions.referredUserId,
+        affiliateAttributions.affiliatePolicyId,
+        affiliateAttributions.affiliatePolicyVersion,
+      ],
+      name: "order_growth_attributions_affiliate_fk",
+    }).onDelete("restrict"),
+    check(
+      "order_growth_attributions_exact_program",
+      sql`(${table.program} = 'customer_referral'
+            and ${table.referralAttributionId} is not null
+            and ${table.referralPolicyId} is not null
+            and ${table.referralPolicyVersion} is not null
+            and ${table.affiliateAttributionId} is null
+            and ${table.affiliatePolicyId} is null
+            and ${table.affiliatePolicyVersion} is null)
+        or (${table.program} = 'affiliate'
+            and ${table.affiliateAttributionId} is not null
+            and ${table.affiliatePolicyId} is not null
+            and ${table.affiliatePolicyVersion} is not null
+            and ${table.referralAttributionId} is null
+            and ${table.referralPolicyId} is null
+            and ${table.referralPolicyVersion} is null)`,
+    ),
+  ],
+);
+
+export const referralConversions = pgTable(
+  "referral_conversions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    referralAttributionId: uuid("referral_attribution_id").notNull(),
+    referredUserId: uuid("referred_user_id").notNull(),
+    firstOrderId: uuid("first_order_id").notNull(),
+    program: growthAttributionProgramEnum("program")
+      .default("customer_referral")
+      .notNull(),
+    referralPolicyId: uuid("referral_policy_id").notNull(),
+    referralPolicyVersion: integer("referral_policy_version").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    referredDiscountMinor: money("referred_discount_minor"),
+    referrerRewardPoints: points("referrer_reward_points"),
+    status: referralConversionStatusEnum("status").default("pending").notNull(),
+    createdAt: createdAt(),
+    qualifiedAt: timestamp("qualified_at", { withTimezone: true }),
+    reversedAt: timestamp("reversed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("referral_conversions_attribution_unique").on(
+      table.referralAttributionId,
+    ),
+    unique("referral_conversions_first_order_unique").on(table.firstOrderId),
+    unique("referral_conversions_idempotency_unique").on(table.idempotencyKey),
+    foreignKey({
+      columns: [
+        table.referralAttributionId,
+        table.referredUserId,
+        table.referralPolicyId,
+        table.referralPolicyVersion,
+      ],
+      foreignColumns: [
+        referralAttributions.id,
+        referralAttributions.referredUserId,
+        referralAttributions.referralPolicyId,
+        referralAttributions.referralPolicyVersion,
+      ],
+      name: "referral_conversions_attribution_policy_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.firstOrderId, table.referredUserId],
+      foreignColumns: [orders.id, orders.buyerUserId],
+      name: "referral_conversions_order_buyer_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.firstOrderId,
+        table.referredUserId,
+        table.program,
+        table.referralAttributionId,
+        table.referralPolicyId,
+        table.referralPolicyVersion,
+      ],
+      foreignColumns: [
+        orderGrowthAttributions.orderId,
+        orderGrowthAttributions.buyerUserId,
+        orderGrowthAttributions.program,
+        orderGrowthAttributions.referralAttributionId,
+        orderGrowthAttributions.referralPolicyId,
+        orderGrowthAttributions.referralPolicyVersion,
+      ],
+      name: "referral_conversions_order_growth_fk",
+    }).onDelete("restrict"),
+    check(
+      "referral_conversions_customer_program",
+      sql`${table.program} = 'customer_referral'`,
+    ),
+    check(
+      "referral_conversions_idempotency_nonblank",
+      nonblank(table.idempotencyKey),
+    ),
+    check(
+      "referral_conversions_discount_safe",
+      safeNonnegativeMoney(table.referredDiscountMinor),
+    ),
+    check(
+      "referral_conversions_reward_safe",
+      safeNonnegativeInteger(table.referrerRewardPoints),
+    ),
+    check(
+      "referral_conversions_state_coherent",
+      sql`(${table.status} = 'pending' and ${table.qualifiedAt} is null and ${table.reversedAt} is null)
+        or (${table.status} = 'qualified' and ${table.qualifiedAt} is not null and ${table.reversedAt} is null)
+        or (${table.status} = 'reversed' and ${table.reversedAt} is not null)`,
+    ),
+  ],
+);
+
 export const affiliatePayouts = pgTable(
   "affiliate_payouts",
   {
@@ -757,6 +869,9 @@ export const affiliateCommissions = pgTable(
     affiliateAttributionId: uuid("affiliate_attribution_id").notNull(),
     buyerUserId: uuid("buyer_user_id").notNull(),
     orderId: uuid("order_id").notNull(),
+    program: growthAttributionProgramEnum("program")
+      .default("affiliate")
+      .notNull(),
     affiliatePolicyId: uuid("affiliate_policy_id").notNull(),
     affiliatePolicyVersion: integer("affiliate_policy_version").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
@@ -794,6 +909,25 @@ export const affiliateCommissions = pgTable(
     }).onDelete("restrict"),
     foreignKey({
       columns: [
+        table.orderId,
+        table.buyerUserId,
+        table.program,
+        table.affiliateAttributionId,
+        table.affiliatePolicyId,
+        table.affiliatePolicyVersion,
+      ],
+      foreignColumns: [
+        orderGrowthAttributions.orderId,
+        orderGrowthAttributions.buyerUserId,
+        orderGrowthAttributions.program,
+        orderGrowthAttributions.affiliateAttributionId,
+        orderGrowthAttributions.affiliatePolicyId,
+        orderGrowthAttributions.affiliatePolicyVersion,
+      ],
+      name: "affiliate_commissions_order_growth_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
         table.payoutId,
         table.affiliateProfileId,
         table.affiliatePolicyId,
@@ -810,6 +944,10 @@ export const affiliateCommissions = pgTable(
     check(
       "affiliate_commissions_idempotency_nonblank",
       nonblank(table.idempotencyKey),
+    ),
+    check(
+      "affiliate_commissions_affiliate_program",
+      sql`${table.program} = 'affiliate'`,
     ),
     check(
       "affiliate_commissions_amounts_safe",
@@ -883,76 +1021,6 @@ export const sharedResearchSetItems = pgTable(
     check(
       "shared_research_set_items_quantity_bounds",
       sql`${table.quantity} between 1 and 25`,
-    ),
-  ],
-);
-
-export const orderGrowthAttributions = pgTable(
-  "order_growth_attributions",
-  {
-    orderId: uuid("order_id").primaryKey(),
-    buyerUserId: uuid("buyer_user_id").notNull(),
-    program: growthAttributionProgramEnum("program").notNull(),
-    referralAttributionId: uuid("referral_attribution_id"),
-    referralPolicyId: uuid("referral_policy_id"),
-    referralPolicyVersion: integer("referral_policy_version"),
-    affiliateAttributionId: uuid("affiliate_attribution_id"),
-    affiliatePolicyId: uuid("affiliate_policy_id"),
-    affiliatePolicyVersion: integer("affiliate_policy_version"),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    foreignKey({
-      columns: [table.orderId, table.buyerUserId],
-      foreignColumns: [orders.id, orders.buyerUserId],
-      name: "order_growth_attributions_order_buyer_fk",
-    }).onDelete("restrict"),
-    foreignKey({
-      columns: [
-        table.referralAttributionId,
-        table.buyerUserId,
-        table.referralPolicyId,
-        table.referralPolicyVersion,
-      ],
-      foreignColumns: [
-        referralAttributions.id,
-        referralAttributions.referredUserId,
-        referralAttributions.referralPolicyId,
-        referralAttributions.referralPolicyVersion,
-      ],
-      name: "order_growth_attributions_referral_fk",
-    }).onDelete("restrict"),
-    foreignKey({
-      columns: [
-        table.affiliateAttributionId,
-        table.buyerUserId,
-        table.affiliatePolicyId,
-        table.affiliatePolicyVersion,
-      ],
-      foreignColumns: [
-        affiliateAttributions.id,
-        affiliateAttributions.referredUserId,
-        affiliateAttributions.affiliatePolicyId,
-        affiliateAttributions.affiliatePolicyVersion,
-      ],
-      name: "order_growth_attributions_affiliate_fk",
-    }).onDelete("restrict"),
-    check(
-      "order_growth_attributions_exact_program",
-      sql`(${table.program} = 'customer_referral'
-            and ${table.referralAttributionId} is not null
-            and ${table.referralPolicyId} is not null
-            and ${table.referralPolicyVersion} is not null
-            and ${table.affiliateAttributionId} is null
-            and ${table.affiliatePolicyId} is null
-            and ${table.affiliatePolicyVersion} is null)
-        or (${table.program} = 'affiliate'
-            and ${table.affiliateAttributionId} is not null
-            and ${table.affiliatePolicyId} is not null
-            and ${table.affiliatePolicyVersion} is not null
-            and ${table.referralAttributionId} is null
-            and ${table.referralPolicyId} is null
-            and ${table.referralPolicyVersion} is null)`,
     ),
   ],
 );
