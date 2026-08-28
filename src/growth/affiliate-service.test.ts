@@ -296,6 +296,88 @@ describe("affiliate application service", () => {
     });
   });
 
+  it.each([
+    ["active", 2],
+    ["rejected", 2],
+    ["suspended", 3],
+  ] as const)(
+    "returns the current %s profile on an exact immutable application replay",
+    async (status, version) => {
+      const applyInTransaction: AffiliateApplicationTransaction = async () =>
+        Object.freeze({
+          status: "idempotent" as const,
+          profile: Object.freeze({
+            id: profileId,
+            buyerUserId,
+            publicCode,
+            status,
+            version,
+            publicChannel: "https://partner.example/research",
+            promotionMethod: "website" as const,
+            termsAcceptanceId: acceptanceId,
+            createdAt: "2026-08-28T18:30:00.000Z",
+          }),
+        });
+      const service = createAffiliateService({
+        clock: () => new Date(now),
+        createAcceptanceId: () => "6a000000-0000-4000-8000-000000000013",
+        createProfileId: () => "6a000000-0000-4000-8000-000000000014",
+        createPublicCode: () => "aff_6AFreshReplayCandidate",
+        publicationPolicy: { version: "policy-v1", activeLotEvidenceIds: [] },
+        applyInTransaction,
+      });
+
+      await expect(service.applyForAffiliate(applicationInput())).resolves.toEqual({
+        status: "idempotent",
+        application: {
+          publicCode,
+          status,
+          version,
+          publicChannel: "https://partner.example/research",
+          promotionMethod: "website",
+          createdAt: "2026-08-28T18:30:00.000Z",
+        },
+      });
+    },
+  );
+
+  it.each([
+    ["pending", 2],
+    ["active", 1],
+    ["rejected", 3],
+    ["suspended", 2],
+  ] as const)(
+    "rejects an incoherent stored %s version %i replay result",
+    async (status, version) => {
+      const applyInTransaction: AffiliateApplicationTransaction = async () =>
+        Object.freeze({
+          status: "idempotent" as const,
+          profile: Object.freeze({
+            id: profileId,
+            buyerUserId,
+            publicCode,
+            status,
+            version,
+            publicChannel: "https://partner.example/research",
+            promotionMethod: "website" as const,
+            termsAcceptanceId: acceptanceId,
+            createdAt: "2026-08-28T18:30:00.000Z",
+          }),
+        });
+
+      await expect(createAffiliateService({
+        clock: () => new Date(now),
+        createAcceptanceId: () => "6a000000-0000-4000-8000-000000000013",
+        createProfileId: () => "6a000000-0000-4000-8000-000000000014",
+        createPublicCode: () => "aff_6AFreshReplayCandidate",
+        publicationPolicy: { version: "policy-v1", activeLotEvidenceIds: [] },
+        applyInTransaction,
+      }).applyForAffiliate(applicationInput())).rejects.toMatchObject({
+        code: "persistence_conflict",
+      });
+    },
+  );
+
   it.each(["review", "blocked"] as const)(
     "rejects a %s buyer before starting the application transaction",
     async (buyerStatus) => {

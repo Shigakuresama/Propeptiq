@@ -219,6 +219,54 @@ describe("affiliate application transaction on PGlite", () => {
     );
     await expect(storedState()).resolves.toMatchObject({ acceptances: 1, profiles: 1 });
   });
+
+  it("replays the immutable stored acceptance after current terms advance but rejects it for a new application", async () => {
+    const apply = applicationTransaction();
+    const acceptedAt = new Date("2026-08-28T18:30:00.000Z");
+    await apply(input({ acceptedAt }));
+
+    const nextTermsText = "Synthetic affiliate application terms version two.";
+    const nextTermsHash = createHash("sha256").update(nextTermsText).digest("hex");
+    await client.query(
+      `UPDATE growth_terms_versions
+       SET superseded_at = '2026-08-28T18:45:00.000Z'
+       WHERE id = $1::uuid`,
+      [ids.terms],
+    );
+    await client.query(
+      `INSERT INTO growth_terms_versions
+         (id, program, version, content_hash, terms_text, effective_at)
+       VALUES ($1::uuid, 'affiliate', 2, $2, $3,
+               '2026-08-28T18:45:00.000Z')`,
+      [ids.overlappingTerms, nextTermsHash, nextTermsText],
+    );
+
+    await expect(apply(input({
+      acceptanceId: ids.replayAcceptance,
+      profileId: ids.replayProfile,
+      publicCode: "aff_6AUnusedReplayCandidate",
+    }))).resolves.toMatchObject({
+      status: "idempotent",
+      profile: {
+        id: ids.profile,
+        status: "pending",
+        version: 1,
+        termsAcceptanceId: ids.acceptance,
+      },
+    });
+    await expect(apply(input({
+      acceptanceId: ids.replayAcceptance,
+      profileId: ids.replayProfile,
+      buyerUserId: ids.otherBuyer,
+      publicCode: "aff_6ANewStaleTermsCode",
+    }))).rejects.toMatchObject({ code: "terms_mismatch" });
+    await expect(storedState()).resolves.toMatchObject({
+      acceptances: 1,
+      profiles: 1,
+      status: "pending",
+      version: 1,
+    });
+  });
 });
 
 describe("affiliate admin decision transaction on PGlite", () => {
@@ -234,15 +282,18 @@ describe("affiliate admin decision transaction on PGlite", () => {
     await client.query(
       `INSERT INTO users (id, clerk_id, email_verified_at) VALUES
          ($1::uuid, 'clerk-task6a-admin', '2026-08-28T17:00:00.000Z'),
-         ($2::uuid, 'clerk-task6a-owner', '2026-08-28T17:00:00.000Z')`,
-      [adminUserId, ownerUserId],
+         ($2::uuid, 'clerk-task6a-owner', '2026-08-28T17:00:00.000Z'),
+         ($3::uuid, 'clerk-task6a-other-owner', '2026-08-28T17:00:00.000Z')`,
+      [adminUserId, ownerUserId, ids.otherBuyer],
     );
     await client.query(
       `INSERT INTO buyer_profiles
          (user_id, status, age_confirmed_at, research_purpose, updated_at)
        VALUES ($1::uuid, 'active', '2026-08-01T00:00:00.000Z', 'analytical',
+               '2026-08-28T17:00:00.000Z'),
+              ($2::uuid, 'active', '2026-08-01T00:00:00.000Z', 'analytical',
                '2026-08-28T17:00:00.000Z')`,
-      [ownerUserId],
+      [ownerUserId, ids.otherBuyer],
     );
     await client.query(
       `INSERT INTO growth_terms_versions
@@ -291,6 +342,39 @@ describe("affiliate admin decision transaction on PGlite", () => {
     });
   }
 
+  function applicationTransaction() {
+    return createPostgresAffiliateApplicationTransaction({
+      runSerializableTransaction: <Value>(
+        work: (sqlClient: GrowthSqlClient) => Promise<Value>,
+      ) => client.transaction((transaction) =>
+        work({
+          query: async <Row extends object>(
+            sql: string,
+            params: readonly unknown[] = [],
+          ) => {
+            const result = await transaction.query<Row>(sql, [...params]);
+            return { rows: result.rows };
+          },
+        }),
+      ),
+    });
+  }
+
+  function applicationReplayInput(overrides: Record<string, unknown> = {}) {
+    return {
+      acceptanceId: ids.replayAcceptance,
+      profileId: ids.replayProfile,
+      buyerUserId: ownerUserId,
+      publicCode: "aff_6AUnusedReplayCandidate",
+      publicChannel: "https://partner.example/research",
+      promotionMethod: "website" as const,
+      termsVersionId: adminTermsId,
+      termsContentHash: termsHash,
+      acceptedAt: now,
+      ...overrides,
+    };
+  }
+
   function adminInput(
     targetStatus: "active" | "rejected" | "suspended",
     overrides: Record<string, unknown> = {},
@@ -330,6 +414,168 @@ describe("affiliate admin decision transaction on PGlite", () => {
       updatedAt: new Date(row.updatedAt).toISOString(),
     };
   }
+
+  async function immutableReplayState() {
+    const result = await client.query<{
+      acceptanceCount: number;
+      profileCount: number;
+      auditCount: number;
+      profileId: string;
+      publicCode: string;
+      status: string;
+      version: number;
+      publicChannel: string;
+      promotionMethod: string;
+      acceptanceId: string;
+      termsVersionId: string;
+      contentHash: string;
+      acceptedAt: Date | string;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM growth_terms_acceptances) AS "acceptanceCount",
+         (SELECT count(*)::int FROM affiliate_profiles) AS "profileCount",
+         (SELECT count(*)::int FROM admin_audit) AS "auditCount",
+         p.id::text AS "profileId", p.public_code AS "publicCode",
+         p.status::text AS status, p.version,
+         p.public_channel AS "publicChannel",
+         p.promotion_method::text AS "promotionMethod",
+         a.id::text AS "acceptanceId",
+         a.terms_version_id::text AS "termsVersionId",
+         a.content_hash AS "contentHash", a.accepted_at AS "acceptedAt"
+       FROM affiliate_profiles p
+       JOIN growth_terms_acceptances a ON a.id = p.terms_acceptance_id
+       WHERE p.id = $1::uuid`,
+      [adminProfileId],
+    );
+    const row = result.rows[0]!;
+    return {
+      ...row,
+      acceptedAt: new Date(row.acceptedAt).toISOString(),
+    };
+  }
+
+  it.each(["active", "rejected"] as const)(
+    "replays the exact application after pending to %s without changing profile, acceptance, or audit rows",
+    async (targetStatus) => {
+      await adminMutation()(adminInput(targetStatus));
+      const before = await immutableReplayState();
+
+      await expect(applicationTransaction()(applicationReplayInput())).resolves.toMatchObject({
+        status: "idempotent",
+        profile: {
+          id: adminProfileId,
+          publicCode: "aff_6AAdminReviewCode",
+          status: targetStatus,
+          version: 2,
+          termsAcceptanceId: adminAcceptanceId,
+        },
+      });
+
+      await expect(immutableReplayState()).resolves.toEqual(before);
+    },
+  );
+
+  it("replays the exact application after active to suspended without rerunning either admin mutation", async () => {
+    const mutate = adminMutation();
+    await mutate(adminInput("active"));
+    await mutate(adminInput("suspended", {
+      expectedVersion: 2,
+      correlationId: "task-6a-admin-suspended-replay",
+    }));
+    const before = await immutableReplayState();
+
+    await expect(applicationTransaction()(applicationReplayInput())).resolves.toMatchObject({
+      status: "idempotent",
+      profile: {
+        id: adminProfileId,
+        publicCode: "aff_6AAdminReviewCode",
+        status: "suspended",
+        version: 3,
+        termsAcceptanceId: adminAcceptanceId,
+      },
+    });
+
+    await expect(immutableReplayState()).resolves.toEqual(before);
+  });
+
+  it("rejects reviewed replay field mismatches without changing profile, acceptance, or audit rows", async () => {
+    await adminMutation()(adminInput("active"));
+    const before = await immutableReplayState();
+    const apply = applicationTransaction();
+    const mismatches = [
+      { publicChannel: "@changed_partner" },
+      { promotionMethod: "social" },
+      { termsVersionId: ids.overlappingTerms },
+      { termsContentHash: "0".repeat(64) },
+      { buyerUserId: ids.otherBuyer, profileId: adminProfileId },
+    ];
+
+    for (const mismatch of mismatches) {
+      await expect(apply(applicationReplayInput(mismatch))).rejects.toMatchObject({
+        code: "idempotency_conflict",
+      });
+      await expect(immutableReplayState()).resolves.toEqual(before);
+    }
+  });
+
+  it("rejects reviewed replay candidate ID or code collisions without changing any rows", async () => {
+    await adminMutation()(adminInput("active"));
+    await client.query(
+      `INSERT INTO growth_terms_acceptances
+         (id, user_id, program, terms_version_id, content_hash, accepted_at)
+       VALUES ($1::uuid, $2::uuid, 'affiliate', $3::uuid, $4,
+               '2026-08-28T18:15:00.000Z')`,
+      [ids.collisionAcceptance, ids.otherBuyer, adminTermsId, termsHash],
+    );
+    await client.query(
+      `INSERT INTO affiliate_profiles
+         (id, user_id, public_code, status, version, public_channel,
+          promotion_method, terms_acceptance_id, terms_program, created_at,
+          updated_at)
+       VALUES ($1::uuid, $2::uuid, 'aff_6ACollisionReviewCode', 'pending', 1,
+               '@collision_partner', 'social', $3::uuid, 'affiliate',
+               '2026-08-28T18:15:00.000Z', '2026-08-28T18:15:00.000Z')`,
+      [ids.collisionProfile, ids.otherBuyer, ids.collisionAcceptance],
+    );
+    const before = await immutableReplayState();
+    const apply = applicationTransaction();
+    const collisions = [
+      { profileId: ids.collisionProfile },
+      { publicCode: "aff_6ACollisionReviewCode" },
+      { acceptanceId: ids.collisionAcceptance },
+    ];
+
+    for (const collision of collisions) {
+      await expect(apply(applicationReplayInput(collision))).rejects.toMatchObject({
+        code: "idempotency_conflict",
+      });
+      await expect(immutableReplayState()).resolves.toEqual(before);
+    }
+  });
+
+  it("rejects incoherent stored status and version pairs without changing any rows", async () => {
+    const apply = applicationTransaction();
+    const incoherentStates = [
+      ["pending", 2],
+      ["active", 1],
+      ["rejected", 3],
+      ["suspended", 2],
+    ] as const;
+
+    for (const [status, version] of incoherentStates) {
+      await client.query(
+        `UPDATE affiliate_profiles
+         SET status = $2::affiliate_profile_status, version = $3
+         WHERE id = $1::uuid`,
+        [adminProfileId, status, version],
+      );
+      const before = await immutableReplayState();
+      await expect(apply(applicationReplayInput())).rejects.toMatchObject({
+        code: "idempotency_conflict",
+      });
+      await expect(immutableReplayState()).resolves.toEqual(before);
+    }
+  });
 
   it.each(["active", "rejected"] as const)(
     "atomically decides pending to %s with exact CAS and one redacted audit",

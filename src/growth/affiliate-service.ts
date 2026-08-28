@@ -24,6 +24,7 @@ const HANDLE_PATTERN = /^@[A-Za-z0-9_][A-Za-z0-9._-]{1,63}$/u;
 const MAXIMUM_CHANNEL_LENGTH = 200;
 
 export type AffiliatePromotionMethod = "website" | "social" | "email" | "other";
+export type AffiliateProfileStatus = "pending" | "active" | "rejected" | "suspended";
 
 export type AffiliateApplicationErrorCode =
   | "buyer_inactive"
@@ -63,7 +64,7 @@ export type AffiliateApplicationProfile = Readonly<{
   id: string;
   buyerUserId: string;
   publicCode: string;
-  status: "pending";
+  status: AffiliateProfileStatus;
   version: number;
   publicChannel: string;
   promotionMethod: AffiliatePromotionMethod;
@@ -94,7 +95,7 @@ export type AffiliateApplicationResult = Readonly<{
   status: "submitted" | "idempotent";
   application: Readonly<{
     publicCode: string;
-    status: "pending";
+    status: AffiliateProfileStatus;
     version: number;
     publicChannel: string;
     promotionMethod: AffiliatePromotionMethod;
@@ -205,7 +206,7 @@ type StoredProfileRow = {
   id: string;
   buyerUserId: string;
   publicCode: string;
-  status: "pending";
+  status: AffiliateProfileStatus;
   version: number;
   publicChannel: string;
   promotionMethod: AffiliatePromotionMethod;
@@ -230,6 +231,17 @@ function projectStoredProfile(row: StoredProfileRow): AffiliateApplicationProfil
     termsAcceptanceId: row.termsAcceptanceId,
     createdAt: iso(row.createdAt),
   });
+}
+
+function isCoherentAffiliateProfileState(
+  status: unknown,
+  version: unknown,
+): status is AffiliateProfileStatus {
+  return (
+    (status === "pending" && version === 1) ||
+    ((status === "active" || status === "rejected") && version === 2) ||
+    (status === "suspended" && version === 3)
+  );
 }
 
 function validTransactionInput(input: AffiliateApplicationTransactionInput): boolean {
@@ -279,6 +291,77 @@ async function applyWithPostgresClient(
     throw new AffiliateApplicationError("identity_unverified");
   }
 
+  const existingProfiles = await client.query<StoredProfileRow>(
+    `SELECT ${profileProjection}
+     FROM affiliate_profiles
+     WHERE id = $1::uuid OR user_id = $2::uuid OR public_code = $3
+     ORDER BY id
+     FOR UPDATE`,
+    [input.profileId, input.buyerUserId, input.publicCode],
+  );
+  if (existingProfiles.rows.length > 1) {
+    throw new AffiliateApplicationError("idempotency_conflict");
+  }
+  const existingProfile = existingProfiles.rows[0];
+  if (existingProfile) {
+    if (
+      existingProfile.buyerUserId !== input.buyerUserId ||
+      !UUID_PATTERN.test(existingProfile.id) ||
+      !PUBLIC_CODE_PATTERN.test(existingProfile.publicCode) ||
+      !isCoherentAffiliateProfileState(existingProfile.status, existingProfile.version) ||
+      existingProfile.publicChannel !== publicChannel ||
+      existingProfile.promotionMethod !== input.promotionMethod ||
+      !UUID_PATTERN.test(existingProfile.termsAcceptanceId)
+    ) {
+      throw new AffiliateApplicationError("idempotency_conflict");
+    }
+    type AcceptanceRow = {
+      id: string;
+      buyerUserId: string;
+      program: string;
+      termsVersionId: string;
+      contentHash: string;
+      acceptedAt: Date | string;
+      termsContentHash: string;
+      termsText: string;
+    };
+    const acceptances = await client.query<AcceptanceRow>(
+      `SELECT a.id::text AS id, a.user_id::text AS "buyerUserId",
+              a.program, a.terms_version_id::text AS "termsVersionId",
+              a.content_hash AS "contentHash", a.accepted_at AS "acceptedAt",
+              t.content_hash AS "termsContentHash", t.terms_text AS "termsText"
+       FROM growth_terms_acceptances a
+       JOIN growth_terms_versions t
+         ON t.id = a.terms_version_id AND t.program = a.program
+       WHERE a.id = $1::uuid OR a.id = $2::uuid
+       ORDER BY a.id
+       FOR UPDATE OF a, t`,
+      [existingProfile.termsAcceptanceId, input.acceptanceId],
+    );
+    const acceptanceRow = acceptances.rows[0];
+    const computedAcceptedHash = acceptanceRow
+      ? createHash("sha256").update(acceptanceRow.termsText).digest("hex")
+      : null;
+    if (
+      acceptances.rows.length !== 1 ||
+      !acceptanceRow ||
+      acceptanceRow.id !== existingProfile.termsAcceptanceId ||
+      acceptanceRow.buyerUserId !== input.buyerUserId ||
+      acceptanceRow.program !== "affiliate" ||
+      acceptanceRow.termsVersionId !== input.termsVersionId ||
+      acceptanceRow.contentHash !== computedAcceptedHash ||
+      acceptanceRow.termsContentHash !== computedAcceptedHash ||
+      input.termsContentHash !== computedAcceptedHash ||
+      iso(acceptanceRow.acceptedAt) > acceptedAt
+    ) {
+      throw new AffiliateApplicationError("idempotency_conflict");
+    }
+    return Object.freeze({
+      status: "idempotent",
+      profile: projectStoredProfile(existingProfile),
+    });
+  }
+
   type TermsRow = {
     id: string;
     contentHash: string;
@@ -306,58 +389,6 @@ async function applyWithPostgresClient(
     input.termsContentHash !== computedHash
   ) {
     throw new AffiliateApplicationError("terms_mismatch");
-  }
-
-  const existingProfiles = await client.query<StoredProfileRow>(
-    `SELECT ${profileProjection}
-     FROM affiliate_profiles
-     WHERE id = $1::uuid OR user_id = $2::uuid OR public_code = $3
-     ORDER BY id
-     FOR UPDATE`,
-    [input.profileId, input.buyerUserId, input.publicCode],
-  );
-  if (existingProfiles.rows.length > 1) {
-    throw new AffiliateApplicationError("idempotency_conflict");
-  }
-  const existingProfile = existingProfiles.rows[0];
-  if (existingProfile) {
-    if (
-      existingProfile.buyerUserId !== input.buyerUserId ||
-      existingProfile.status !== "pending" ||
-      existingProfile.version !== 1 ||
-      existingProfile.publicChannel !== publicChannel ||
-      existingProfile.promotionMethod !== input.promotionMethod
-    ) {
-      throw new AffiliateApplicationError("idempotency_conflict");
-    }
-    type AcceptanceRow = {
-      id: string;
-      termsVersionId: string;
-      contentHash: string;
-      acceptedAt: Date | string;
-    };
-    const acceptance = await client.query<AcceptanceRow>(
-      `SELECT id::text AS id, terms_version_id::text AS "termsVersionId",
-              content_hash AS "contentHash", accepted_at AS "acceptedAt"
-       FROM growth_terms_acceptances
-       WHERE id = $1::uuid AND user_id = $2::uuid AND program = 'affiliate'
-       FOR UPDATE`,
-      [existingProfile.termsAcceptanceId, input.buyerUserId],
-    );
-    const acceptanceRow = acceptance.rows[0];
-    if (
-      acceptance.rows.length !== 1 ||
-      !acceptanceRow ||
-      acceptanceRow.termsVersionId !== terms.id ||
-      acceptanceRow.contentHash !== computedHash ||
-      iso(acceptanceRow.acceptedAt) > acceptedAt
-    ) {
-      throw new AffiliateApplicationError("idempotency_conflict");
-    }
-    return Object.freeze({
-      status: "idempotent",
-      profile: projectStoredProfile(existingProfile),
-    });
   }
 
   const existingAcceptances = await client.query<{ id: string }>(
@@ -434,8 +465,7 @@ function validateTransactionResult(
     result.profile.buyerUserId !== input.buyerUserId ||
     !UUID_PATTERN.test(result.profile.id) ||
     !PUBLIC_CODE_PATTERN.test(result.profile.publicCode) ||
-    result.profile.status !== "pending" ||
-    result.profile.version !== 1 ||
+    !isCoherentAffiliateProfileState(result.profile.status, result.profile.version) ||
     result.profile.publicChannel !== input.publicChannel ||
     result.profile.promotionMethod !== input.promotionMethod ||
     !UUID_PATTERN.test(result.profile.termsAcceptanceId) ||
@@ -445,7 +475,9 @@ function validateTransactionResult(
   }
   if (
     result.status === "applied" &&
-    (result.profile.id !== input.profileId ||
+    (result.profile.status !== "pending" ||
+      result.profile.version !== 1 ||
+      result.profile.id !== input.profileId ||
       result.profile.publicCode !== input.publicCode ||
       result.profile.termsAcceptanceId !== input.acceptanceId)
   ) {
