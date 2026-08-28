@@ -1,0 +1,75 @@
+export type RewardLedgerReadItem = Readonly<{
+  occurredAt: string;
+  kind: string;
+  reference: string;
+  pendingPointsDelta: number;
+  availablePointsDelta: number;
+  pendingPointsBalanceAfter: number;
+  availablePointsBalanceAfter: number;
+}>;
+
+export type OwnerGrowthSnapshot = Readonly<{
+  rewards: Readonly<{
+    pendingPoints: number;
+    availablePoints: number;
+    usdEquivalentMinor: number;
+    minimumRedemptionProgress: Readonly<{
+      currentPoints: number;
+      requiredPoints: number;
+    }>;
+    ledger: readonly RewardLedgerReadItem[];
+  }> | null;
+  referrals: Readonly<{
+    code: string | null;
+    status: "active" | "revoked" | null;
+    counts: Readonly<{
+      attributed: number;
+      pending: number;
+      qualified: number;
+      reversed: number;
+    }>;
+    rewardPointsTotal: number;
+    conversions: readonly Readonly<{
+      reference: string;
+      status: "pending" | "qualified" | "reversed";
+      rewardPoints: number;
+      occurredAt: string;
+    }>[];
+  }>;
+  sharedSets: readonly Readonly<{
+    code: string;
+    label: string;
+    active: boolean;
+    itemCount: number;
+    updatedAt: string;
+  }>[];
+  affiliate: Readonly<{
+    publicCode: string;
+    status: "pending" | "active" | "rejected" | "suspended";
+    publicChannel: string;
+    promotionMethod: "website" | "social" | "email" | "other";
+    attributedCount: number;
+    commissionTotalsMinor: Readonly<{
+      pending: number;
+      approved: number;
+      paid: number;
+      reversed: number;
+    }>;
+    payoutTotalsMinor: Readonly<{ pending: number; paid: number }>;
+  }> | null;
+}>;
+
+export function deepFreezeGrowthReadModel<Value>(value: Value): Value {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      deepFreezeGrowthReadModel(nested);
+    }
+  }
+  return value;
+}
+
+export function redactGrowthReference(reference: string): string {
+  return `ref:${createHash("sha256").update(reference, "utf8").digest("hex").slice(0, 10)}`;
+}
+import { createHash } from "node:crypto";
