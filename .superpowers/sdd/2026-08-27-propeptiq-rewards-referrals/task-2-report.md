@@ -217,3 +217,114 @@ fix(db): enforce growth history integrity
 ### Remaining boundary
 
 PGlite proves migration application and the tested PostgreSQL constraints/triggers. This round did not use an external PostgreSQL database and makes no real-concurrency or deployment claim.
+
+## Fix round 2 — relational settlement and trigger search path
+
+### Outcome
+
+Resolved the two verified High findings without changing migrations `0005` through `0008` or any earlier numbered history. Settlement integrity no longer depends on trigger existence checks for concurrency safety:
+
+- `referral_conversions.program` is non-null, defaults to `customer_referral`, and is constrained to that value.
+- `affiliate_commissions.program` is non-null, defaults to `affiliate`, and is constrained to that value.
+- `order_growth_attributions` exposes separate program-specific six-column unique targets.
+- Each settlement table has a six-column composite FK matching order, buyer, fixed program, selected attribution, exact policy id, and exact policy version with `ON DELETE restrict` and normal PostgreSQL referenced-key update protection.
+
+The existing defensive triggers remain in place. All six public functions introduced by `0008` are redefined with `SET search_path = pg_catalog, public, pg_temp`; the three settlement functions use `public.`-qualified application tables. No function is `SECURITY DEFINER`, and privilege revocation remains outside this checkpoint.
+
+### Fix-round RED evidence
+
+Focused command before schema or migration changes:
+
+```text
+npm run test:integration -- --run tests/integration/growth-schema.test.ts
+```
+
+Exit 1: 1 test file failed; 4 tests failed and 10 passed. The failures proved:
+
+- both program-specific composite FK definitions were absent;
+- all six trigger functions had null `proconfig` rather than a controlled search path;
+- a temporary `referral_conversions` table could shadow the public child lookup and permit deleting a settled public parent;
+- a temporary `order_growth_attributions` table could shadow the public parent lookup and permit a cross-program public referral conversion.
+
+### Fix-round GREEN evidence
+
+Final focused command:
+
+```text
+npm run test:integration -- --run tests/integration/growth-schema.test.ts
+```
+
+Exit 0: 1 test file passed and 14 of 14 tests passed. In addition to the prior Task 2 coverage, the suite now proves exact FK metadata, fixed/defaulted child programs, rejection of arbitrary child programs, parent UPDATE/DELETE rejection even after the defensive parent trigger is removed inside an isolated PGlite test, exact child mismatch rejection, pinned function configuration, schema-qualified function DDL, and temporary-table/search-path bypass resistance.
+
+### Guarded real-PostgreSQL lane
+
+Added `tests/postgres/growth-settlement-contention.postgres.test.ts` with two guarded races:
+
+- parent DELETE starts first, concurrent settlement INSERT blocks, then fails with `23503` after the parent commits;
+- settlement INSERT starts first, concurrent parent-key UPDATE blocks, then fails with `23503` after the child commits.
+
+Each transaction uses a 4-second `lock_timeout` and 8-second `statement_timeout`, and the blocking probe is bounded. The file uses the existing `resolveTestDatabase` guard and requires both `TEST_DATABASE_URL` and exact `TEST_DATABASE_CONFIRMATION=isolated-test-database` before Pool construction.
+
+Current environment probe:
+
+```text
+TEST_DATABASE_URL_PRESENT=False
+TEST_DATABASE_CONFIRMATION_EXACT=False
+```
+
+Result: **NOT RUN**. No database connection was attempted, and this checkpoint makes no real-PostgreSQL concurrency claim.
+
+### Generated follow-up migrations
+
+Drizzle emitted consuming FKs before their required target uniqueness when attempted as one migration. The uncommitted attempt was discarded in full, without editing snapshot metadata, and the normal schema change was generated in dependency order:
+
+- `src/db/migrations/0009_growth_settlement_fk_targets.sql`
+  - Adds fixed/defaulted child program columns and checks plus both parent unique targets.
+  - SQL SHA-256: `D3444065C0B79765870093EDBDB9DB98B1BF3B876142058CFE3D2AE6C829AC47`.
+- `src/db/migrations/0010_growth_settlement_composite_fks.sql`
+  - Adds the referral and affiliate six-column composite FKs.
+  - SQL SHA-256: `4AA72850E085CF236A5C9EF446FF247536851595800365474A2A32232598E1CD`.
+- `src/db/migrations/0011_growth_trigger_search_path.sql`
+  - Generated with `drizzle-kit generate --custom`, then populated with sanctioned `CREATE OR REPLACE FUNCTION` SQL.
+  - SQL SHA-256: `4A061FB087D588843A9F87D8AC7D3D8AB9947EAC4E2BD12C5D09F77CA81EE06A`.
+
+Generated snapshot SHA-256 values:
+
+- `0009_snapshot.json`: `B96103F47DA11F0DE07E1B60FCBB026FD89472B68FBC816AFEDDFDC1BF7624A4`.
+- `0010_snapshot.json`: `D8FB34F82EF4FE6A66348BA0D5E753E9858924B24009AC0E32120BC36DB70F6B`.
+- `0011_snapshot.json`: `E25BCC40C7E01C0B17299609BE4D62304F9F31FA65C1CAF9A7BE2169BAD99487`.
+- Final generated journal: `E2D6702B74C69063FCB5D2F6F1018F8BEA196EE9DDFE3A994CFCF064B5A7F5F4`.
+
+The journal contains the expected generated appends for indices 9, 10, and 11. No generated snapshot was hand-edited.
+
+### Immutable history comparison
+
+All 19 pre-existing immutable artifacts remain byte-identical to the captured fix-round baseline:
+
+- SQL `0000` through committed `0008`: 9 of 9 SHA-256 hashes match.
+- Numbered snapshots `0000` through committed `0008`: 9 of 9 SHA-256 hashes match.
+- `src/db/migrations/README.md`: 1 of 1 SHA-256 hash matches.
+
+This explicitly includes committed migrations and snapshots `0005` through `0008`.
+
+### Fix-round validation
+
+- Focused PGlite integration — exit 0; 14 of 14 tests passed.
+- Guarded real PostgreSQL — **NOT RUN** because both required guards were absent; no connection and no real-concurrency claim.
+- `npm test` — exit 0; 71 test files and 786 of 786 tests passed.
+- `npm run typecheck` — exit 0.
+- `npm run lint` — exit 0 with zero warnings.
+- `npm run db:check` — exit 0; `Everything's fine 🐶🔥`.
+- `npm run db:generate` — exit 0 with exact no-change evidence: `No schema changes, nothing to migrate 😴`.
+- `git diff --check` — exit 0; only working-copy line-ending warnings were emitted.
+
+### Fix-round implementation commit
+
+```text
+8b5eeb0c926417b150304a06deccab3ac7d52767
+fix(db): bind settlements with relational integrity
+```
+
+### Remaining boundary
+
+The guarded contention test is checked in but was not authorized by the current environment. Its real locking behavior must be executed later against an explicitly isolated, migrated PostgreSQL target before making a real-concurrency claim.
