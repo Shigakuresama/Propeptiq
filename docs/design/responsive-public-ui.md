@@ -48,7 +48,7 @@ Breakpoints are content-driven. DOM/reading/tab order never changes to imitate a
 ## Navigation and cart
 
 - First focusable control is “Skip to main content.”
-- Wordmark returns home. Primary routes are Catalog, Quality Records, Research-Use Policy, Cart, and Account/Sign in.
+- Wordmark returns home. Primary routes are Catalog, Quality Records, Rewards, and Research-Use Policy. Cart and Account/Sign in remain header actions.
 - The mobile trigger has an accessible name and expanded state; the Sheet traps focus, closes on Escape, restores trigger focus, and uses keyboard-operable links.
 - Research-use restriction is visible in header/Sheet context, not footer-only.
 - Cart count is announced concisely after add/remove and is not color-only. Quantity controls have persistent names and validation.
