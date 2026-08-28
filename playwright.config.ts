@@ -30,6 +30,7 @@ export default defineConfig({
       APP_ENV: "local",
       APP_ORIGIN: `http://127.0.0.1:${port}`,
       CATALOG_DEMO_MODE: "enabled",
+      BROWSE_CATALOG_PUBLICATION: "owner-pdf-2026-08-27-07cd4aa0-v1",
       LOCAL_TEST_DRIVER: "enabled",
       LOCAL_TEST_SECRET: "task5-local-driver-secret-at-least-32-chars",
       RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",

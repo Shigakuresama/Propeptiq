@@ -1,40 +1,39 @@
 import type { Metadata } from "next";
 
-import { getPublicCatalog } from "@/catalog/server";
-import { ProductCard } from "@/components/commerce/product-card";
-import { CatalogEmptyState } from "@/components/site/catalog-empty-state";
-import { DemoNotice } from "@/components/site/demo-notice";
+import { getPublicBrowseCatalog } from "@/catalog/browse-catalog-server";
+import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
 import { PageIntro } from "@/components/site/page-intro";
 import { PageTransition } from "@/components/site/page-transition";
 
 export const metadata: Metadata = {
   title: "Catalog",
   description:
-    "Browse active server-projected research-use catalog records and prices.",
+    "Browse PROPEPTIQ LABS research catalog products and supplied package configurations.",
 };
 
 export default async function CatalogPage() {
-  const catalog = await getPublicCatalog();
+  const catalog = await getPublicBrowseCatalog();
 
   return (
     <PageTransition>
-      {catalog.source === "synthetic-demo" ? <DemoNotice /> : null}
       <div className="site-container pb-20">
         <PageIntro
-          eyebrow="Public catalog"
-          title="Active research-use catalog records."
-          description="Names, package forms, prices, availability, and merchandising below come from the current server projection. Tax, shipping, final discounts, destination eligibility, and payment are not represented here."
+          eyebrow="Owner-supplied catalog"
+          title="Research catalog, organized by product."
+          description={`${catalog.products.length} product families and ${catalog.variantCount} supplied package configurations. Prices and availability are intentionally excluded; imagery is an original illustrative presentation rather than product photography.`}
         />
-        {catalog.products.length === 0 ? (
-          <CatalogEmptyState headingLevel="h2" />
-        ) : (
+        {catalog.products.length > 0 ? (
           <ul className="catalog-grid">
-            {catalog.products.map((product) => (
-              <li key={product.id}>
-                <ProductCard product={product} source={catalog.source} />
+            {catalog.products.map((product, index) => (
+              <li key={product.slug}>
+                <CatalogListingCard product={product} priority={index < 3} />
               </li>
             ))}
           </ul>
+        ) : (
+          <p className="record-sheet text-sm leading-6 text-muted-ink">
+            No owner-approved browse catalog is currently published.
+          </p>
         )}
       </div>
     </PageTransition>

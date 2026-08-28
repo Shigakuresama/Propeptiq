@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 import { cn } from "@/lib/utils";
 
 export function BrandMark({ className }: { className?: string }) {
@@ -5,13 +7,31 @@ export function BrandMark({ className }: { className?: string }) {
     <span
       aria-hidden="true"
       className={cn(
-        "relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-full border border-ink/15 bg-canvas",
+        "relative block size-10 shrink-0 overflow-hidden",
         className,
       )}
     >
-      <span className="absolute h-px w-5 rotate-45 bg-moss" />
-      <span className="absolute h-px w-5 -rotate-45 bg-moss" />
-      <span className="size-1.5 rounded-full bg-ink" />
+      <Image
+        alt=""
+        className="object-cover object-[50%_30%] scale-[2.1]"
+        fill
+        sizes="40px"
+        src="/brand/propeptiq-logo.png"
+      />
+    </span>
+  );
+}
+
+export function BrandLogo({ className }: { className?: string }) {
+  return (
+    <span className={cn("relative block aspect-[3/2] w-48", className)}>
+      <Image
+        alt="PROPEPTIQ LABS"
+        className="object-contain"
+        fill
+        sizes="(min-width: 640px) 224px, 192px"
+        src="/brand/propeptiq-logo.png"
+      />
     </span>
   );
 }

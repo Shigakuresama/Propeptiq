@@ -58,6 +58,15 @@ describe("parseServerEnv", () => {
       SHIPPING_MODE: "disabled",
       FULFILLMENT_MODE: "disabled",
     });
+    expect(env.BROWSE_CATALOG_PUBLICATION).toBeUndefined();
+  });
+
+  it("accepts a non-secret owner browse-catalog publication ID", () => {
+    expect(
+      parseServerEnv({
+        BROWSE_CATALOG_PUBLICATION: "owner-pdf-2026-08-27-07cd4aa0-v1",
+      }).BROWSE_CATALOG_PUBLICATION,
+    ).toBe("owner-pdf-2026-08-27-07cd4aa0-v1");
   });
 
   it("rejects incomplete Stripe test configuration", () => {

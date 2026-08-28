@@ -28,6 +28,7 @@ const rawServerEnvSchema = z.object({
   APP_ENV: appEnvironment.default("local"),
   APP_ORIGIN: urlValue.optional(),
   CATALOG_DEMO_MODE: catalogDemoMode.default("disabled"),
+  BROWSE_CATALOG_PUBLICATION: nonBlank.optional(),
   LOCAL_TEST_DRIVER: localTestDriver.default("disabled"),
   LOCAL_TEST_SECRET: z.string().min(32).optional(),
   RATE_LIMIT_SECRET: z.string().min(32).optional(),

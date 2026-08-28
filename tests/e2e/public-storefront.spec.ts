@@ -6,6 +6,7 @@ import path from "node:path";
 const publicRoutes = [
   "/",
   "/catalog",
+  "/catalog/items/tirzepatide",
   "/catalog/synthetic-reference-alpha",
   "/cart",
   "/quality-records",
@@ -43,10 +44,10 @@ test("every public route renders the shared restriction and passes axe", async (
   }
 });
 
-test("synthetic catalog pages identify every displayed record as fictional demo data", async ({
+test("synthetic commerce pages still identify every displayed record as fictional demo data", async ({
   page,
 }) => {
-  await page.goto("/catalog");
+  await page.goto("/catalog/synthetic-reference-alpha");
 
   const notice = page.getByRole("note");
   await expect(
@@ -63,8 +64,7 @@ test("synthetic catalog pages identify every displayed record as fictional demo 
 test("anonymous catalog to cart flow survives reload and preserves only IDs and quantities", async ({
   page,
 }) => {
-  await page.goto("/catalog");
-  await page.getByRole("link", { name: "View record" }).first().click();
+  await page.goto("/catalog/synthetic-reference-alpha");
   await expect(
     page.getByRole("heading", {
       level: 1,
@@ -207,7 +207,7 @@ test("mobile explanatory copy meets the 16px body minimum", async ({ page }) => 
 
   for (const locator of [
     page.locator(".restriction-bar"),
-    page.locator(".demo-banner").getByText(/Every product/),
+    page.locator("main p.text-lg").first(),
     page.locator(".catalog-grid article p.text-sm").first(),
   ]) {
     const fontSize = await locator.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize));
@@ -298,13 +298,13 @@ test("homepage current catalog remains reachable at 200% CSS zoom without horizo
 test("reduced motion disables transition and animation durations", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/catalog");
-  const motion = await page.getByRole("button", { name: /Add .* to cart/ }).first().evaluate(
-    (element) => ({
+  const motion = await page
+    .getByRole("link", { name: "View catalog item: Tirzepatide" })
+    .evaluate((element) => ({
       animationDuration: getComputedStyle(element).animationDuration,
       transitionDuration: getComputedStyle(element).transitionDuration,
       scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
-    }),
-  );
+    }));
   expect(motion).toEqual({
     animationDuration: "0s",
     transitionDuration: "0s",
@@ -318,6 +318,93 @@ test("unknown product slugs fail closed", async ({ page }) => {
   await expect(
     page.getByRole("heading", { level: 1, name: "Catalog record unavailable." }),
   ).toBeVisible();
+});
+
+test("owner-supplied catalog is complete, price-free, and serves every illustration", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/catalog");
+  await expect(page.locator("article.catalog-listing-card")).toHaveCount(53);
+  await expect(page.getByText("103 supplied package configurations")).toBeVisible();
+  await expect(page.getByRole("button", { name: /add .* to cart/i })).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText("$");
+
+  const imagePaths = await page.locator("article.catalog-listing-card img").evaluateAll(
+    (images) =>
+      images.map((image) => {
+        const url = new URL((image as HTMLImageElement).src);
+        return url.searchParams.get("url") ?? url.pathname;
+      }),
+  );
+  expect(new Set(imagePaths).size).toBe(53);
+
+  for (const imagePath of imagePaths) {
+    const response = await request.get(imagePath);
+    expect(response.ok(), `${imagePath} illustration response`).toBe(true);
+    expect(response.headers()["content-type"]).toContain("image/webp");
+    expect((await response.body()).byteLength).toBeGreaterThan(1_000);
+  }
+
+  await page.goto("/catalog/items/pinealon");
+  await expect(page.getByRole("heading", { level: 1, name: "Pinealon" })).toBeVisible();
+  await expect(page.getByText("Source label: Pinealon10mg")).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("$");
+  await expect(page.getByRole("button", { name: /add .* to cart/i })).toHaveCount(0);
+
+  const imageLoaded = await page.getByRole("img", {
+    name: /illustrative research-catalog still life for Pinealon/i,
+  }).evaluate((image) => {
+    const element = image as HTMLImageElement;
+    return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0;
+  });
+  expect(imageLoaded).toBe(true);
+
+  const unknown = await page.goto("/catalog/items/not-a-real-item");
+  expect(unknown?.status()).toBe(404);
+});
+
+test("home and browse catalog hydrate without application console errors", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") errors.push(message.text());
+  });
+
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  await page.goto("/catalog");
+  await page.waitForLoadState("networkidle");
+
+  expect(errors).toEqual([]);
+});
+
+test("the known Scribe root attribute does not create a hydration warning", async ({ page }) => {
+  const hydrationErrors: string[] = [];
+  await page.route("**/", async (route) => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace(
+      "<html ",
+      '<html data-scribe-recorder-ready="true" ',
+    );
+    await route.fulfill({ response, body });
+  });
+  page.on("console", (message) => {
+    if (
+      message.type() === "error" &&
+      /hydration|hydrated|server rendered html.*didn.t match/iu.test(message.text())
+    ) {
+      hydrationErrors.push(message.text());
+    }
+  });
+
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-scribe-recorder-ready",
+    "true",
+  );
+  expect(hydrationErrors).toEqual([]);
 });
 
 test("captures approved desktop and mobile storefront evidence", async ({ page }) => {

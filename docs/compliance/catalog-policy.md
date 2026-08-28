@@ -6,6 +6,8 @@
 
 The production catalog starts empty. A real import manifest is the only source for products, versioned prices, packages/forms, suppliers, lots, inventory, and COAs. Competitor, reference-site, or invented values may exist only as clearly labeled test fixtures and must be impossible to enable in production.
 
+An owner-supplied browse-only manifest may separately publish product identity, supplier code, and package/form records without creating commerce facts. It must carry the recorded source-document digest, pass the public-copy policy, and match the exact non-secret `BROWSE_CATALOG_PUBLICATION` authorization configured for the deployment. Missing authorization keeps the browse catalog empty; a configured mismatch or invalid manifest fails closed. Browse-only records never imply activation, price, inventory, lot, quality evidence, availability, or checkout eligibility.
+
 ## Product activation
 
 A product may become active only when server records contain:
