@@ -47,6 +47,16 @@ export type PromotionCalculation = Readonly<{
   allocations: readonly PromotionAllocation[];
 }>;
 
+export type AcquisitionDiscountCandidate = Readonly<{
+  source: "promotion" | "referral";
+  discountMinor: number;
+}>;
+
+export type AcquisitionDiscount = Readonly<{
+  source: AcquisitionDiscountCandidate["source"];
+  discountMinor: number;
+}>;
+
 export type PromotionError = Readonly<{
   code:
     | "invalid_input"
@@ -97,6 +107,64 @@ function deepFreeze<Value>(value: Value): Value {
     }
   }
   return value;
+}
+
+function firstUnexpectedField(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): string | null {
+  const allowedKeys = new Set(allowed);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string" || !allowedKeys.has(key)) {
+      return typeof key === "string" ? key : "";
+    }
+  }
+  let prototype = Object.getPrototypeOf(value) as object | null;
+  while (prototype !== null && prototype !== Object.prototype) {
+    for (const key of Reflect.ownKeys(prototype)) {
+      if (typeof key !== "string" || !allowedKeys.has(key)) {
+        return typeof key === "string" ? key : "";
+      }
+    }
+    prototype = Object.getPrototypeOf(prototype) as object | null;
+  }
+  return null;
+}
+
+export function selectBestAcquisitionDiscount(
+  input: unknown,
+): Result<AcquisitionDiscount, PromotionError> {
+  const fail = (field: string) =>
+    Object.freeze({
+      ok: false as const,
+      error: Object.freeze({ code: "invalid_input" as const, field }),
+    });
+  if (!isRecord(input)) return fail("input");
+  const topLevelField = firstUnexpectedField(input, ["candidates"]);
+  if (topLevelField !== null) return fail(topLevelField);
+  if (!isDenseArray(input.candidates) || input.candidates.length === 0) {
+    return fail("candidates");
+  }
+  const candidates: AcquisitionDiscountCandidate[] = [];
+  for (let index = 0; index < input.candidates.length; index += 1) {
+    const candidate = input.candidates[index];
+    if (!isRecord(candidate)) return fail(`candidates[${index}]`);
+    const field = firstUnexpectedField(candidate, ["source", "discountMinor"]);
+    if (field !== null) return fail(`candidates[${index}].${field}`);
+    if (candidate.source !== "promotion" && candidate.source !== "referral") {
+      return fail(`candidates[${index}].source`);
+    }
+    const discountMinor = candidate.discountMinor;
+    if (typeof discountMinor !== "number" || !Number.isSafeInteger(discountMinor) || discountMinor < 0) {
+      return fail(`candidates[${index}].discountMinor`);
+    }
+    candidates.push({ source: candidate.source, discountMinor });
+  }
+  candidates.sort(
+    (left, right) =>
+      right.discountMinor - left.discountMinor || left.source.localeCompare(right.source),
+  );
+  return Object.freeze({ ok: true, value: deepFreeze(candidates[0]!) });
 }
 
 export function calculatePromotionDiscount(

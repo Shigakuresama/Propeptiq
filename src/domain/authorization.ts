@@ -9,7 +9,9 @@ export type Capability =
   | "payment:reconcile"
   | "refund:request"
   | "fulfillment:release:consume"
-  | "staff:manage";
+  | "staff:manage"
+  | "growth:manage"
+  | "affiliate:payout";
 
 export type Principal = Readonly<{
   actorId: string;
@@ -24,6 +26,11 @@ export type AuthorizationOperation =
   | "account.update.self"
   | "checkout.request"
   | "order.read.self"
+  | "rewards.read.self"
+  | "rewards.redeem.self"
+  | "referrals.read.self"
+  | "referrals.create.self"
+  | "affiliate.apply.self"
   | "review.decide"
   | "catalog.publish"
   | "destination.manage"
@@ -32,7 +39,9 @@ export type AuthorizationOperation =
   | "payment.reconcile"
   | "refund.request"
   | "fulfillment.release.consume"
-  | "staff.manage";
+  | "staff.manage"
+  | "growth.manage"
+  | "affiliate.payout";
 
 export type ResourceScope =
   | Readonly<{ relation: "owner"; ownerActorId: string }>
@@ -91,6 +100,11 @@ const operationPolicies: Readonly<
     relation: "owner",
     staff: false,
   }),
+  "rewards.read.self": Object.freeze({ capability: null, relation: "owner", staff: false }),
+  "rewards.redeem.self": Object.freeze({ capability: null, relation: "owner", staff: false }),
+  "referrals.read.self": Object.freeze({ capability: null, relation: "owner", staff: false }),
+  "referrals.create.self": Object.freeze({ capability: null, relation: "owner", staff: false }),
+  "affiliate.apply.self": Object.freeze({ capability: null, relation: "owner", staff: false }),
   "review.decide": Object.freeze({
     capability: "review:decide",
     relation: "capability_only",
@@ -136,6 +150,8 @@ const operationPolicies: Readonly<
     relation: "capability_only",
     staff: true,
   }),
+  "growth.manage": Object.freeze({ capability: "growth:manage", relation: "capability_only", staff: true }),
+  "affiliate.payout": Object.freeze({ capability: "affiliate:payout", relation: "capability_only", staff: true }),
 });
 
 export type AuthorizeOperationInput = Readonly<{
@@ -154,6 +170,8 @@ export const CAPABILITIES = Object.freeze([
   "refund:request",
   "fulfillment:release:consume",
   "staff:manage",
+  "growth:manage",
+  "affiliate:payout",
 ] as const satisfies readonly Capability[]);
 
 const capabilityValues = new Set<Capability>(CAPABILITIES);
@@ -226,7 +244,9 @@ export function authorizeOperation(
   if (
     input.principal.buyerStatus === "blocked" &&
     operation !== "account.read.self" &&
-    operation !== "order.read.self"
+    operation !== "order.read.self" &&
+    operation !== "rewards.read.self" &&
+    operation !== "referrals.read.self"
   ) {
     return deny("principal_blocked");
   }

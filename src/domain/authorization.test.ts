@@ -29,6 +29,8 @@ const staffCases = [
   ["refund.request", "refund:request"],
   ["fulfillment.release.consume", "fulfillment:release:consume"],
   ["staff.manage", "staff:manage"],
+  ["growth.manage", "growth:manage"],
+  ["affiliate.payout", "affiliate:payout"],
 ] as const satisfies readonly (readonly [AuthorizationOperation, Capability])[];
 
 describe("authorizeOperation", () => {
@@ -37,6 +39,9 @@ describe("authorizeOperation", () => {
     "account.update.self",
     "checkout.request",
     "order.read.self",
+    "rewards.read.self",
+    "referrals.read.self",
+    "affiliate.apply.self",
   ] as const)(
     "allows authenticated buyers to perform %s on their own resource without MFA",
     (operation) => {
@@ -213,6 +218,25 @@ describe("authorizeOperation", () => {
       operation: "catalog.publish",
       reasonCode: "principal_blocked",
     });
+  });
+
+  it("lets blocked buyers retain approved growth reads while denying redemption, links, and applications", () => {
+    const blocked = { ...buyer, buyerStatus: "blocked" as const };
+
+    for (const operation of ["rewards.read.self", "referrals.read.self"] as const) {
+      expect(
+        authorizeOperation({ principal: blocked, operation, resource: ownerResource() }),
+      ).toMatchObject({ allowed: true, operation });
+    }
+    for (const operation of [
+      "rewards.redeem.self",
+      "referrals.create.self",
+      "affiliate.apply.self",
+    ] as const) {
+      expect(
+        authorizeOperation({ principal: blocked, operation, resource: ownerResource() }),
+      ).toEqual({ allowed: false, operation, reasonCode: "principal_blocked" });
+    }
   });
 
   it("denies unauthenticated, malformed, and owner-mismatched requests", () => {

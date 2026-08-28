@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   calculatePromotionDiscount,
+  selectBestAcquisitionDiscount,
   type PromotionCalculationInput,
   type PromotionRecord,
 } from "@/domain/promotions";
@@ -50,6 +51,41 @@ function calculate(overrides: Partial<PromotionCalculationInput> = {}) {
 }
 
 describe("calculatePromotionDiscount", () => {
+  it("selects exactly one greatest customer acquisition discount without stacking", () => {
+    expect(
+      selectBestAcquisitionDiscount({
+        candidates: [
+          { source: "promotion", discountMinor: 1_000 },
+          { source: "referral", discountMinor: 2_500 },
+        ],
+      }),
+    ).toEqual({ ok: true, value: { source: "referral", discountMinor: 2_500 } });
+  });
+
+  it("rejects sparse, malformed, or unknown acquisition discount candidates", () => {
+    const sparse = [{ source: "promotion", discountMinor: 100 }];
+    sparse.length = 2;
+    expect(selectBestAcquisitionDiscount({ candidates: sparse })).toEqual({
+      ok: false,
+      error: { code: "invalid_input", field: "candidates" },
+    });
+    expect(
+      selectBestAcquisitionDiscount({
+        candidates: [{ source: "promotion", discountMinor: 100, extra: true }] as never,
+      }),
+    ).toEqual({
+      ok: false,
+      error: { code: "invalid_input", field: "candidates[0].extra" },
+    });
+    expect(
+      selectBestAcquisitionDiscount({
+        candidates: [Object.assign(Object.create({ inherited: true }), { source: "promotion", discountMinor: 100 })],
+      }),
+    ).toEqual({
+      ok: false,
+      error: { code: "invalid_input", field: "candidates[0].inherited" },
+    });
+  });
   it("returns canonical zero allocations without a promotion", () => {
     expect(calculate({ lines: [...lines].reverse(), promotions: [] })).toEqual({
       ok: true,
