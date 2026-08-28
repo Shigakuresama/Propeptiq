@@ -333,3 +333,69 @@ missing-config case returned an attacker-derived `303` instead of a no-location
 00752b7
 fix(growth): trust configured referral redirect origin
 ```
+
+## 5B review fix round 1/5 — Replay-safe referral reversals
+
+### Outcome
+
+Addressed both independent-review lifecycle defects without changing referral
+economics. A qualified zero-point conversion now still evaluates cumulative
+authoritative refunded/disputed merchandise and becomes `reversed` at 100%
+loss without creating a reward account or ledger entry. A verified payment
+replay against an already-reversed conversion now returns idempotently before
+any ledger append or state transition, preserving the terminal reversed state.
+
+Partial refunds remain qualified until cumulative loss reaches 100%. Existing
+positive-point proportional reversals, negative balances, payment/delivery
+replay guarantees, and zero-point payment qualification remain covered.
+
+### Changed implementation files
+
+- `src/growth/rewards-service.ts`
+- `tests/integration/growth-commerce-transactions.test.ts`
+
+No schema, migration, checkout, enrollment, shared-set/page, affiliate, or UI
+file changed.
+
+### RED evidence
+
+```text
+npm run test:integration -- --run tests/integration/growth-commerce-transactions.test.ts -t "binds one|zero-point"
+```
+
+Exit 1: 1 file, 2 expected failures and 11 skipped. The original verified
+payment replay raised `GrowthPersistenceConflict` while trying to qualify a
+`reversed` conversion. The full refund of a qualified zero-point conversion
+returned `idempotent` and left the conversion qualified.
+
+### GREEN, transaction, and idempotency evidence
+
+- Final focused regressions: 1 file, 2/2 passed with 11 skipped.
+- The zero-point case first applies a 50% refund and proves the conversion stays
+  `qualified` with no ledger/account, then applies the second authoritative
+  refund and proves cumulative 100% loss changes it to `reversed`, still with
+  zero ledger entries and zero invented points.
+- The positive-point lifecycle still applies cumulative proportional reversal,
+  permits the approved negative balance, and ends `reversed`; replaying the
+  original verified payment then returns `idempotent`, leaves four referral
+  lifecycle entries, and does not regress state.
+- Affected PGlite transaction lane: 2 files, 27/27 passed.
+- Focused rewards/provider/fulfillment transaction lane: 4 files, 25/25 passed.
+- Full unit suite: 77 files, 847/847 passed.
+- `npm run typecheck`: exit 0.
+- `npm run lint`: exit 0 with zero warnings.
+- Working and staged `git diff --check`: exit 0; only expected Windows LF/CRLF
+  working-copy notices appeared.
+- Database generation/check: not run because this fix made no schema or
+  migration change.
+- Guarded real PostgreSQL lane: **NOT RUN**. `TEST_DATABASE_URL` was absent and
+  `TEST_DATABASE_CONFIRMATION` was not exactly `isolated-test-database`; no real
+  PostgreSQL or concurrency claim is made.
+- External services and production credentials: not used.
+
+### Implementation commit
+
+```text
+92d2c2a6790af548812b317f690700f8f2db3321
+fix(growth): make referral reversals replay safe
+```
