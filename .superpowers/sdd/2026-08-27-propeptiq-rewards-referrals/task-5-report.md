@@ -137,4 +137,3 @@ feat(growth): add signed referral attribution
 Task 5B enrollment/binding/discount/lifecycle and Task 5C shared sets/actions/UI
 remain unstarted. Task 5A does not activate production economics, disclose a
 referral owner, bind a buyer/order, calculate a benefit, or create rewards.
-
