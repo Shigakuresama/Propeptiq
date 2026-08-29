@@ -1312,6 +1312,24 @@ function localAdminReadSnapshot(resource: AdminReadResource): AdminReadSnapshot 
           occurredAt: fixedNow,
         })),
       };
+    case "loyalty-policies":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "referral-policies":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "affiliate-policies":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
   }
 }
 

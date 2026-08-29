@@ -7,6 +7,22 @@ import { getLocalTestDriver } from "./local-driver";
 const invalidId = "arbitrary-browser-supplied-id";
 
 describe("local deterministic repository boundary", () => {
+  it.each([
+    "loyalty-policies",
+    "referral-policies",
+    "affiliate-policies",
+  ] as const)("returns an empty frozen %s read snapshot without fixture economics", (resource) => {
+    const snapshot = getLocalTestDriver().readAdminSnapshot(resource);
+
+    expect(snapshot).toEqual({
+      resource,
+      limit: 100,
+      truncated: false,
+      items: [],
+    });
+    expect(Object.isFrozen(snapshot.items)).toBe(true);
+  });
+
   it("rejects non-fixed identifiers across reads and lifecycle writes", async () => {
     const repository = getLocalTestDriver().adminRepository;
     await repository.transaction(async (transaction) => {
