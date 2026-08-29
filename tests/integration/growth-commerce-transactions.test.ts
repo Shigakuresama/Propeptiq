@@ -103,6 +103,13 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       [ids.buyer, ids.referrer],
     );
     await client.query(
+      `INSERT INTO staff_roles
+         (user_id, capability, granted_by_user_id, grant_correlation_id)
+       VALUES ($1::uuid, 'affiliate:payout', $1::uuid,
+               'task-8-growth-commerce-payout-authority')`,
+      [ids.referrer],
+    );
+    await client.query(
       `INSERT INTO attestation_versions
          (id, version, content_hash, policy_text, effective_at)
        VALUES ($1::uuid, 1, $2, 'Synthetic research-use policy.',
@@ -422,6 +429,8 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     const payout = payoutTransactions();
     await payout.create({
       actorUserId: ids.referrer,
+      actorClerkUserId: "clerk-task5b-referrer",
+      requiredCapability: "affiliate:payout",
       payoutId,
       profileId: ids.affiliateProfile,
       idempotencyKey: `task6-review-payout:${providerEventId}`,
@@ -889,6 +898,8 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     });
     await expect(payout.create({
       actorUserId: ids.referrer,
+      actorClerkUserId: "clerk-task5b-referrer",
+      requiredCapability: "affiliate:payout",
       payoutId,
       profileId: ids.affiliateProfile,
       idempotencyKey: "task6-review-payout:evt_task6_unpaid_reversal_payment",
@@ -909,6 +920,8 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     const paidAt = new Date("2026-10-01T00:00:00.000Z");
     await payout.markPaid({
       actorUserId: ids.referrer,
+      actorClerkUserId: "clerk-task5b-referrer",
+      requiredCapability: "affiliate:payout",
       payoutId,
       expectedVersion: 1,
       idempotencyKey: "task6-review-paid-reversal",

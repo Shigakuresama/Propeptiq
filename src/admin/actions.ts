@@ -10,6 +10,10 @@ import {
   suspendAffiliateApplication,
 } from "@/admin/affiliate-application-admin-service";
 import {
+  createAffiliatePayoutBatch,
+  recordAffiliatePayoutPaid,
+} from "@/admin/affiliate-payout-admin-service";
+import {
   adjustRewardBalance,
   activateProduct,
   activateGrowthPolicy,
@@ -346,6 +350,7 @@ function resultCode(error: unknown): "saved" | "stale" | "rate-limited" | "denie
   if (/stale|changed during|version_conflict/i.test(message)) return "stale";
   if (/rate limit/i.test(message)) return "rate-limited";
   if (/origin/i.test(message)) return "denied";
+  if (/threshold_not_met|profile_ineligible/i.test(message)) return "unavailable";
   if (/unavailable|does not exist|required/i.test(message)) return "unavailable";
   return "denied";
 }
@@ -965,6 +970,53 @@ export async function suspendAffiliateApplicationAction(formData: FormData): Pro
       admin.repositories.affiliateApplicationAdminRepository,
       admin.context,
       { profileId, expectedVersion },
+    );
+  });
+}
+
+export async function createAffiliatePayoutBatchAdminAction(
+  formData: FormData,
+): Promise<never> {
+  return run("payouts", async () => {
+    exactFormFields(formData, ["profileId"]);
+    const profileId = canonicalV4Uuid(formData, "profileId");
+    const admin = await trustedGrowthAdmin("payouts");
+    await createAffiliatePayoutBatch(
+      admin.repositories.affiliatePayoutAdminRepository,
+      admin.context,
+      {
+        profileId,
+        payoutId: randomUUID(),
+        idempotencyKey: `affiliate-payout-create:${randomUUID()}`,
+      },
+    );
+  });
+}
+
+export async function recordAffiliatePayoutPaidAdminAction(
+  formData: FormData,
+): Promise<never> {
+  return run("payouts", async () => {
+    exactFormFields(formData, [
+      "payoutId",
+      "expectedVersion",
+      "providerName",
+      "externalReference",
+    ]);
+    const payoutId = canonicalV4Uuid(formData, "payoutId");
+    const expectedVersion = canonicalInteger(formData, "expectedVersion");
+    if (expectedVersion < 1) throw new Error("Affiliate payout version is invalid");
+    const admin = await trustedGrowthAdmin("payouts");
+    await recordAffiliatePayoutPaid(
+      admin.repositories.affiliatePayoutAdminRepository,
+      admin.context,
+      {
+        payoutId,
+        expectedVersion,
+        idempotencyKey: `affiliate-payout-paid:${randomUUID()}`,
+        providerName: value(formData, "providerName"),
+        externalReference: value(formData, "externalReference"),
+      },
     );
   });
 }

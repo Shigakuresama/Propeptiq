@@ -85,6 +85,8 @@ export type AffiliatePayoutTransactionRecord = Readonly<{
 
 export type AffiliatePayoutCreateTransaction = (input: Readonly<{
   actorUserId: string;
+  actorClerkUserId: string;
+  requiredCapability: "affiliate:payout";
   payoutId: string;
   profileId: string;
   idempotencyKey: string;
@@ -97,6 +99,8 @@ export type AffiliatePayoutCreateTransaction = (input: Readonly<{
 
 export type AffiliatePayoutPaidTransaction = (input: Readonly<{
   actorUserId: string;
+  actorClerkUserId: string;
+  requiredCapability: "affiliate:payout";
   payoutId: string;
   expectedVersion: number;
   idempotencyKey: string;
@@ -277,6 +281,8 @@ export function createAffiliatePayoutService(dependencies: Readonly<{
       }
       const result = await dependencies.createInTransaction(Object.freeze({
         actorUserId: (value.principal as Principal).actorId,
+        actorClerkUserId: (value.principal as Principal).clerkUserId,
+        requiredCapability: "affiliate:payout" as const,
         payoutId,
         profileId: value.profileId as string,
         idempotencyKey: value.idempotencyKey as string,
@@ -313,6 +319,8 @@ export function createAffiliatePayoutService(dependencies: Readonly<{
       if (!Number.isFinite(paidAt.getTime())) throw new AffiliatePayoutError("invalid_input");
       const result = await dependencies.markPaidInTransaction(Object.freeze({
         actorUserId: (value.principal as Principal).actorId,
+        actorClerkUserId: (value.principal as Principal).clerkUserId,
+        requiredCapability: "affiliate:payout" as const,
         payoutId: value.payoutId as string,
         expectedVersion: value.expectedVersion as number,
         idempotencyKey: value.idempotencyKey as string,
@@ -426,6 +434,8 @@ function validCreatePayoutTransactionInput(
   input: Parameters<AffiliatePayoutCreateTransaction>[0],
 ): boolean {
   return UUID_PATTERN.test(input.actorUserId) && UUID_PATTERN.test(input.payoutId) &&
+    boundedPayoutText(input.actorClerkUserId, 200) &&
+    input.requiredCapability === "affiliate:payout" &&
     UUID_PATTERN.test(input.profileId) && boundedPayoutText(input.idempotencyKey, 200) &&
     boundedPayoutText(input.correlationId, 200) && input.correlationId.length >= 16 &&
     input.createdAt instanceof Date && Number.isFinite(input.createdAt.getTime());
@@ -435,14 +445,42 @@ function payoutRequestHash(values: readonly unknown[]): string {
   return createHash("sha256").update(JSON.stringify(values)).digest("hex");
 }
 
+async function assertPersistedAffiliatePayoutAuthority(
+  client: GrowthSqlClient,
+  input: Readonly<{
+    actorUserId: string;
+    actorClerkUserId: string;
+    requiredCapability: "affiliate:payout";
+  }>,
+): Promise<void> {
+  const authority = await client.query<{ authorized: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM users u
+       JOIN staff_roles sr ON sr.user_id = u.id
+         AND sr.capability = $3 AND sr.revoked_at IS NULL
+       LEFT JOIN buyer_profiles bp ON bp.user_id = u.id
+       WHERE u.id = $1::uuid AND u.clerk_id = $2
+         AND (bp.status IS NULL OR bp.status <> 'blocked')
+     ) AS authorized`,
+    [input.actorUserId, input.actorClerkUserId, input.requiredCapability],
+  );
+  if (authority.rows[0]?.authorized !== true) {
+    throw new AffiliatePayoutError("authorization_denied");
+  }
+}
+
 async function createPayoutWithPostgresClient(
   client: GrowthSqlClient,
   input: Parameters<AffiliatePayoutCreateTransaction>[0],
 ): Promise<Awaited<ReturnType<AffiliatePayoutCreateTransaction>>> {
   if (!validCreatePayoutTransactionInput(input)) throw new AffiliatePayoutError("invalid_input");
+  await assertPersistedAffiliatePayoutAuthority(client, input);
   const requestHash = payoutRequestHash([
     "affiliate-payout-create-v1",
     input.actorUserId,
+    input.actorClerkUserId,
+    input.requiredCapability,
     input.profileId,
     input.idempotencyKey,
     input.correlationId,
@@ -674,6 +712,8 @@ function validPaidPayoutTransactionInput(
   input: Parameters<AffiliatePayoutPaidTransaction>[0],
 ): boolean {
   return UUID_PATTERN.test(input.actorUserId) && UUID_PATTERN.test(input.payoutId) &&
+    boundedPayoutText(input.actorClerkUserId, 200) &&
+    input.requiredCapability === "affiliate:payout" &&
     Number.isSafeInteger(input.expectedVersion) && input.expectedVersion > 0 &&
     boundedPayoutText(input.idempotencyKey, 200) &&
     boundedPayoutText(input.providerName, 120) &&
@@ -687,9 +727,12 @@ async function markPayoutPaidWithPostgresClient(
   input: Parameters<AffiliatePayoutPaidTransaction>[0],
 ): Promise<Awaited<ReturnType<AffiliatePayoutPaidTransaction>>> {
   if (!validPaidPayoutTransactionInput(input)) throw new AffiliatePayoutError("invalid_input");
+  await assertPersistedAffiliatePayoutAuthority(client, input);
   const requestHash = payoutRequestHash([
     "affiliate-payout-paid-v1",
     input.actorUserId,
+    input.actorClerkUserId,
+    input.requiredCapability,
     input.payoutId,
     input.expectedVersion,
     input.idempotencyKey,

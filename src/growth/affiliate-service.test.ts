@@ -184,6 +184,8 @@ describe("affiliate payout service", () => {
 
     expect(createInTransaction).toHaveBeenCalledWith({
       actorUserId: payoutAdmin.actorId,
+      actorClerkUserId: payoutAdmin.clerkUserId,
+      requiredCapability: "affiliate:payout",
       payoutId: payoutDraft.id,
       profileId,
       idempotencyKey: payoutDraft.idempotencyKey,
@@ -217,12 +219,17 @@ describe("affiliate payout service", () => {
     const requestHash = createHash("sha256").update(JSON.stringify([
       "affiliate-payout-create-v1",
       payoutAdmin.actorId,
+      payoutAdmin.clerkUserId,
+      "affiliate:payout",
       profileId,
       payoutDraft.idempotencyKey,
       correlationId,
     ])).digest("hex");
     const sqlClient: GrowthSqlClient = Object.freeze({
       query: async <Row extends object>(sql: string) => {
+        if (sql.includes("AS authorized")) {
+          return { rows: [{ authorized: true }] as unknown as Row[] };
+        }
         if (sql.includes("WHERE idempotency_key = $1 FOR UPDATE")) {
           return { rows: [{
             id: payoutDraft.id,
@@ -338,6 +345,8 @@ describe("affiliate payout service", () => {
 
     expect(markPaidInTransaction).toHaveBeenCalledWith({
       actorUserId: payoutAdmin.actorId,
+      actorClerkUserId: payoutAdmin.clerkUserId,
+      requiredCapability: "affiliate:payout",
       payoutId: payoutDraft.id,
       expectedVersion: 1,
       idempotencyKey: "affiliate-payout-paid:6c:one",

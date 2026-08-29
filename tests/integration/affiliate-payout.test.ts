@@ -48,6 +48,10 @@ describe("affiliate payout transactions on PGlite", () => {
         ('${ids.affiliate}', 'task6c-affiliate', '2026-08-01T00:00:00Z'),
         ('${ids.buyerOne}', 'task6c-buyer-one', '2026-08-01T00:00:00Z'),
         ('${ids.buyerTwo}', 'task6c-buyer-two', '2026-08-01T00:00:00Z');
+      INSERT INTO staff_roles
+        (user_id, capability, granted_by_user_id, grant_correlation_id)
+      VALUES ('${ids.admin}', 'affiliate:payout', '${ids.admin}',
+              'task-8-affiliate-payout-authority');
       INSERT INTO attestation_versions
         (id, version, content_hash, policy_text, effective_at)
       VALUES ('${ids.attestation}', 1, '${"a".repeat(64)}',
@@ -145,6 +149,8 @@ describe("affiliate payout transactions on PGlite", () => {
   function createInput(overrides: Record<string, unknown> = {}) {
     return {
       actorUserId: ids.admin,
+      actorClerkUserId: "task6c-admin",
+      requiredCapability: "affiliate:payout" as const,
       payoutId: ids.payout,
       profileId: ids.profile,
       idempotencyKey: "task-6c-create-payout-one",
@@ -270,7 +276,6 @@ describe("affiliate payout transactions on PGlite", () => {
     const create = createTransaction();
     await create(createInput());
     for (const conflicting of [
-      createInput({ actorUserId: ids.affiliate }),
       createInput({ profileId: "6c100000-0000-4000-8000-000000000098" }),
       createInput({ correlationId: "task-6c-create-payout-different-correlation" }),
     ]) {
@@ -282,6 +287,29 @@ describe("affiliate payout transactions on PGlite", () => {
                WHERE action = 'affiliate.payout.created') AS audits`,
     );
     expect(state.rows[0]).toEqual({ payouts: 2, audits: 1 });
+  });
+
+  it("rechecks the current persisted payout identity and capability before replay or mutation", async () => {
+    const create = createTransaction();
+    await expect(create(createInput({ actorClerkUserId: "task6c-wrong-admin" })))
+      .rejects.toMatchObject({ code: "authorization_denied" });
+    await client.query(
+      `UPDATE staff_roles
+       SET revoked_at = $2::timestamptz, revoked_by_user_id = $1::uuid,
+           revoke_correlation_id = 'task-8-affiliate-payout-revoked'
+       WHERE user_id = $1::uuid AND capability = 'affiliate:payout'`,
+      [ids.admin, createdAt.toISOString()],
+    );
+    await expect(create(createInput())).rejects.toMatchObject({ code: "authorization_denied" });
+
+    const state = await client.query<{ payouts: number; audits: number; payoutId: string | null }>(
+      `SELECT (SELECT count(*)::int FROM affiliate_payouts) AS payouts,
+              (SELECT count(*)::int FROM admin_audit) AS audits,
+              payout_id::text AS "payoutId"
+       FROM affiliate_commissions WHERE id = $1::uuid`,
+      [ids.commissionOne],
+    );
+    expect(state.rows[0]).toEqual({ payouts: 1, audits: 0, payoutId: null });
   });
 
   it("consumes one outstanding paid-reversal adjustment against the next payout exactly once", async () => {
@@ -338,6 +366,8 @@ describe("affiliate payout transactions on PGlite", () => {
     });
     await expect(paidTransaction()({
       actorUserId: ids.admin,
+      actorClerkUserId: "task6c-admin",
+      requiredCapability: "affiliate:payout",
       payoutId: ids.payout,
       expectedVersion: 1,
       idempotencyKey: "task-6c-paid-adjusted-payout",
@@ -393,6 +423,8 @@ describe("affiliate payout transactions on PGlite", () => {
     const markPaid = paidTransaction();
     const paidInput = {
       actorUserId: ids.admin,
+      actorClerkUserId: "task6c-admin",
+      requiredCapability: "affiliate:payout" as const,
       payoutId: ids.payout,
       expectedVersion: 1,
       idempotencyKey: "task-6c-record-paid-one",
@@ -425,6 +457,8 @@ describe("affiliate payout transactions on PGlite", () => {
     const markPaid = paidTransaction();
     const paidInput = {
       actorUserId: ids.admin,
+      actorClerkUserId: "task6c-admin",
+      requiredCapability: "affiliate:payout" as const,
       payoutId: ids.payout,
       expectedVersion: 1,
       idempotencyKey: "task-6c-record-paid-fingerprint",
@@ -435,7 +469,6 @@ describe("affiliate payout transactions on PGlite", () => {
     };
     await markPaid(paidInput);
     for (const conflicting of [
-      { ...paidInput, actorUserId: ids.affiliate },
       { ...paidInput, expectedVersion: 2 },
       { ...paidInput, providerName: "Different offline operator" },
       { ...paidInput, externalReference: "different-bank-reference" },
@@ -458,6 +491,8 @@ describe("affiliate payout transactions on PGlite", () => {
 
     await expect(paidTransaction()({
       actorUserId: ids.admin,
+      actorClerkUserId: "task6c-admin",
+      requiredCapability: "affiliate:payout",
       payoutId: ids.payout,
       expectedVersion: 1,
       idempotencyKey: "task-6c-record-paid-rollback",

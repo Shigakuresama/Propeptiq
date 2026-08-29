@@ -13,6 +13,7 @@ import {
 } from "@/admin/admin-read";
 import type { AdminRepository } from "@/admin/admin-service";
 import type { AffiliateApplicationAdminRepository } from "@/admin/affiliate-application-admin-service";
+import type { AffiliatePayoutAdminRepository } from "@/admin/affiliate-payout-admin-service";
 import type { LocalTestDriver } from "@/auth/local-driver-types";
 import {
   loadCheckoutSuccess,
@@ -30,7 +31,11 @@ import {
 import { createPostgresRateLimitStore } from "@/db/repositories/rate-limit-store";
 import { withRuntimeTransaction, type RuntimeDatabaseClient } from "@/db/runtime";
 import { readServerEnv } from "@/env";
-import { createPostgresAffiliateAdminMutationTransaction } from "@/growth/affiliate-service";
+import {
+  createPostgresAffiliateAdminMutationTransaction,
+  createPostgresAffiliatePayoutCreateTransaction,
+  createPostgresAffiliatePayoutPaidTransaction,
+} from "@/growth/affiliate-service";
 import { createRuntimeStorageVerifier } from "@/security/blob-storage";
 import type { StorageVerifier } from "@/security/storage";
 
@@ -54,6 +59,7 @@ export type RequestRepositories = Readonly<{
   accountRepository: AccountRepository;
   adminRepository: AdminRepository;
   affiliateApplicationAdminRepository: AffiliateApplicationAdminRepository;
+  affiliatePayoutAdminRepository: AffiliatePayoutAdminRepository;
   storageVerifier: StorageVerifier;
   loadAccount: () => Promise<AccountSummary | null>;
   loadCurrentAttestation: () => Promise<Readonly<{ version: number; policyText: string }> | null>;
@@ -175,6 +181,19 @@ export function getRequestRepositories(
           throw new Error("Affiliate application mutation is unavailable in local mode");
         },
       }),
+      affiliatePayoutAdminRepository: Object.freeze({
+        rateLimitStore: Object.freeze({
+          async increment() {
+            throw new Error("Affiliate payout mutation is unavailable in local mode");
+          },
+        }),
+        async createInTransaction() {
+          throw new Error("Affiliate payout mutation is unavailable in local mode");
+        },
+        async markPaidInTransaction() {
+          throw new Error("Affiliate payout mutation is unavailable in local mode");
+        },
+      }),
       storageVerifier: driver.storageVerifier,
       loadAccount: async () => (ownerId ? driver.loadAccount(ownerId) : null),
       loadCurrentAttestation: async () => driver.loadCurrentAttestation(),
@@ -228,10 +247,30 @@ export function getRequestRepositories(
         ),
     }),
   });
+  const payoutTransactionRunner = {
+    runSerializableTransaction: <Value>(
+      work: (client: ReturnType<typeof databaseQueryPort>) => Promise<Value>,
+      options: Readonly<{ isolationLevel: "serializable" }>,
+    ) => withRuntimeTransaction(
+      request.environment,
+      (client) => work(databaseQueryPort(client)),
+      { isolationLevel: options.isolationLevel },
+    ),
+  };
+  const affiliatePayoutAdminRepository = Object.freeze({
+    rateLimitStore,
+    createInTransaction: createPostgresAffiliatePayoutCreateTransaction(
+      payoutTransactionRunner,
+    ),
+    markPaidInTransaction: createPostgresAffiliatePayoutPaidTransaction(
+      payoutTransactionRunner,
+    ),
+  });
   return {
     accountRepository: createPostgresAccountRepository(run),
     adminRepository: createPostgresAdminRepository(run, rateLimitStore),
     affiliateApplicationAdminRepository,
+    affiliatePayoutAdminRepository,
     storageVerifier: createRuntimeStorageVerifier(request.environment),
     loadAccount: () =>
       withRuntimeTransaction(request.environment, (client) =>

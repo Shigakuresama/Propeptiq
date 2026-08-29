@@ -57,6 +57,15 @@ function repositories(): RequestRepositories {
         throw new Error("Affiliate application mutation is not used by account updates");
       },
     },
+    affiliatePayoutAdminRepository: {
+      rateLimitStore: { increment: async () => 1 },
+      async createInTransaction() {
+        throw new Error("Affiliate payout creation is not used by account updates");
+      },
+      async markPaidInTransaction() {
+        throw new Error("Affiliate payout paid recording is not used by account updates");
+      },
+    },
     storageVerifier: { mode: "disabled", verify: async () => ({ exists: false, sha256: null }) },
     loadAccount: async () => null,
     loadCurrentAttestation: async () => ({ version: 1, policyText: "Research only." }),
