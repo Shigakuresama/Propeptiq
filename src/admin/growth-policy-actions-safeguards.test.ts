@@ -119,7 +119,13 @@ function form(values: Readonly<Record<string, unknown>>): FormData {
 }
 
 function draftForm(entry: (typeof policyCases)[number], extra = {}) {
-  return form({ effectiveAt: now.toISOString(), ...entry.values, ...extra });
+  return form({
+    effectiveAt: now.toISOString(),
+    ...Object.fromEntries(
+      Object.entries(entry.values).filter(([name]) => name !== "expiresAfterDays"),
+    ),
+    ...extra,
+  });
 }
 
 function baseRequest() {
@@ -358,6 +364,20 @@ describe("Task 8B3 real-service growth policy action safeguards", () => {
     install(harness);
     await expectResult(policyCases[0].create(draftForm(policyCases[0])), "loyalty-policies", "rate-limited");
     expect(harness).toMatchObject({ rateLimitCalls: 1, transactions: 0, commits: 0 });
+    expect(harness.policies).toEqual([]);
+  });
+
+  it("rejects browser-owned loyalty expiry before limiter, transaction, or write", async () => {
+    const harness = createHarness();
+    install(harness);
+
+    await expectResult(
+      policyCases[0].create(draftForm(policyCases[0], { expiresAfterDays: 30 })),
+      "loyalty-policies",
+      "denied",
+    );
+
+    expect(harness).toMatchObject({ rateLimitCalls: 0, transactions: 0, commits: 0 });
     expect(harness.policies).toEqual([]);
   });
 

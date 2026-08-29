@@ -93,6 +93,16 @@ function form(values: Readonly<Record<string, unknown>>): FormData {
   return data;
 }
 
+function draftForm(entry: (typeof cases)[number], extra = {}): FormData {
+  return form({
+    effectiveAt,
+    ...Object.fromEntries(
+      Object.entries(entry.values).filter(([name]) => name !== "expiresAfterDays"),
+    ),
+    ...extra,
+  });
+}
+
 describe("Task 8B3 growth policy server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -125,7 +135,7 @@ describe("Task 8B3 growth policy server actions", () => {
   });
 
   it.each(cases)("binds $resource draft and activation to server-owned $kind authority", async (entry) => {
-    await expect(entry.create(form({ effectiveAt, ...entry.values }))).rejects.toThrow(
+    await expect(entry.create(draftForm(entry))).rejects.toThrow(
       `redirect:/admin/${entry.resource}?result=saved`,
     );
     expect(mocks.createDraft).toHaveBeenLastCalledWith(
@@ -155,10 +165,19 @@ describe("Task 8B3 growth policy server actions", () => {
       { resource: entry.resource === "affiliate-policies" ? "loyalty-policies" : "affiliate-policies" },
       { actorUserId: "browser-owned-authority" },
     ]) {
-      await expect(entry.create(form({ effectiveAt, ...entry.values, ...extra }))).rejects.toThrow(
+      await expect(entry.create(draftForm(entry, extra))).rejects.toThrow(
         `redirect:/admin/${entry.resource}?result=denied`,
       );
     }
+    expect(mocks.getRequestIdentity).not.toHaveBeenCalled();
+    expect(mocks.createDraft).not.toHaveBeenCalled();
+  });
+
+  it("rejects browser-owned loyalty expiry before identity or service access", async () => {
+    await expect(cases[0].create(draftForm(cases[0], { expiresAfterDays: 30 }))).rejects.toThrow(
+      "redirect:/admin/loyalty-policies?result=denied",
+    );
+
     expect(mocks.getRequestIdentity).not.toHaveBeenCalled();
     expect(mocks.createDraft).not.toHaveBeenCalled();
   });

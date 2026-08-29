@@ -398,7 +398,6 @@ export function ResourceCommandPanel({
             <Field label="Redemption minor units per point" name="redemptionMinorPerPoint" defaultValue={latest?.redemptionMinorPerPoint} type="number" min={1} max={10_000} />
             <Field label="Minimum redemption points" name="minimumRedemptionPoints" defaultValue={latest?.minimumRedemptionPoints} type="number" min={1} max={1_000_000} />
             <Field label="Maximum redemption basis points" name="maximumRedemptionBasisPoints" defaultValue={latest?.maximumRedemptionBasisPoints} type="number" min={1} max={10_000} />
-            <Field label="Expiry days (blank means no expiry)" name="expiresAfterDays" defaultValue={latest?.expiresAfterDays} required={false} type="number" min={1} max={3_650} />
           </>}
         />
       );

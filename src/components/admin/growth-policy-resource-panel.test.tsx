@@ -63,7 +63,7 @@ const cases = [
     },
     fieldNames: [
       "effectiveAt", "pointsPerDollar", "redemptionMinorPerPoint",
-      "minimumRedemptionPoints", "maximumRedemptionBasisPoints", "expiresAfterDays",
+      "minimumRedemptionPoints", "maximumRedemptionBasisPoints",
     ],
   },
   {
@@ -136,6 +136,10 @@ describe("Task 8B4 growth policy resource panel", () => {
     const create = screen.getByRole("form", { name: `Create ${entry.title} policy draft` });
     expect(namedControls(create)).toEqual(entry.fieldNames);
     for (const [name, value] of Object.entries(entry.economics)) {
+      if (name === "expiresAfterDays") {
+        expect(create.querySelector('[name="expiresAfterDays"]')).toBeNull();
+        continue;
+      }
       const control = create.querySelector(`[name="${name}"]`) as HTMLInputElement;
       expect(control).not.toBeNull();
       expect(control.closest("label")).not.toBeNull();

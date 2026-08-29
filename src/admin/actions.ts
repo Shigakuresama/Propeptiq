@@ -144,7 +144,6 @@ const policyValueFields = {
     "redemptionMinorPerPoint",
     "minimumRedemptionPoints",
     "maximumRedemptionBasisPoints",
-    "expiresAfterDays",
   ],
   referral: [
     "attributionDays",
@@ -166,13 +165,12 @@ const policyValueFields = {
 
 function policyValues(formData: FormData, kind: GrowthPolicyKind): GrowthPolicyValues {
   if (kind === "loyalty") {
-    const expiresAfterDays = value(formData, "expiresAfterDays");
     return {
       pointsPerDollar: canonicalInteger(formData, "pointsPerDollar"),
       redemptionMinorPerPoint: canonicalInteger(formData, "redemptionMinorPerPoint"),
       minimumRedemptionPoints: canonicalInteger(formData, "minimumRedemptionPoints"),
       maximumRedemptionBasisPoints: canonicalInteger(formData, "maximumRedemptionBasisPoints"),
-      expiresAfterDays: expiresAfterDays === "" ? null : canonicalInteger(formData, "expiresAfterDays"),
+      expiresAfterDays: null,
     };
   }
   if (kind === "referral") {
