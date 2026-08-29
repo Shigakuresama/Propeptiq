@@ -1336,6 +1336,18 @@ function localAdminReadSnapshot(resource: AdminReadResource): AdminReadSnapshot 
         resource,
         items: Object.freeze([]),
       };
+    case "referral-codes":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "shared-sets":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
   }
 }
 

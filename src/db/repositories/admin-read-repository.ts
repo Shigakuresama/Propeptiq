@@ -95,7 +95,22 @@ function hasExactKeys(
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const referralCodePattern = /^ref_[A-Za-z0-9_-]{16,64}$/u;
+const sharedSetCodePattern = /^set_[A-Za-z0-9_-]{16,64}$/u;
+const controlCharacterPattern = /[\u0000-\u001f\u007f-\u009f]/u;
 const recentRewardAdjustmentLimit = 20;
+
+function safePublicLabel(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0 ||
+    [...value].length > 120 ||
+    controlCharacterPattern.test(value)
+  ) {
+    throw new Error("Invalid shared set admin projection");
+  }
+  return value;
+}
 
 function recentRewardAdjustments(raw: unknown): SnapshotItem<"reward-adjustments">["recentAdjustments"] {
   const value = normalizeJson(raw);
@@ -790,6 +805,99 @@ async function loadSnapshot(
         },
       );
       return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "reward-adjustments" }>;
+    }
+    case "referral-codes": {
+      const result = await boundedRows<{
+        referralCodeId: string;
+        code: string;
+        status: "active" | "revoked";
+        createdAt: Date | string;
+        revokedAt: Date | string | null;
+      }, SnapshotItem<"referral-codes">>(
+        client,
+        `
+          SELECT id::text AS "referralCodeId", code, status,
+                 created_at AS "createdAt", revoked_at AS "revokedAt"
+          FROM referral_codes
+          ORDER BY created_at DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const createdAt = toIso(row.createdAt);
+          const revokedAt = nullableIso(row.revokedAt);
+          if (
+            !uuidPattern.test(row.referralCodeId) ||
+            !referralCodePattern.test(row.code) ||
+            (row.status !== "active" && row.status !== "revoked") ||
+            (row.status === "active") !== (revokedAt === null) ||
+            (revokedAt !== null && new Date(revokedAt).getTime() < new Date(createdAt).getTime())
+          ) {
+            throw new Error("Invalid referral code admin projection");
+          }
+          return Object.freeze({
+            referralCodeId: row.referralCodeId,
+            code: row.code,
+            status: row.status,
+            createdAt,
+            revokedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "referral-codes" }>;
+    }
+    case "shared-sets": {
+      const result = await boundedRows<{
+        sharedSetId: string;
+        publicCode: string;
+        label: string;
+        active: boolean;
+        itemCount: number | string;
+        createdAt: Date | string;
+        updatedAt: Date | string;
+        deactivatedAt: Date | string | null;
+      }, SnapshotItem<"shared-sets">>(
+        client,
+        `
+          SELECT s.id::text AS "sharedSetId", s.public_code AS "publicCode",
+                 s.label, s.active,
+                 (SELECT count(*) FROM shared_research_set_items i
+                  WHERE i.shared_set_id = s.id) AS "itemCount",
+                 s.created_at AS "createdAt", s.updated_at AS "updatedAt",
+                 s.deactivated_at AS "deactivatedAt"
+          FROM shared_research_sets s
+          ORDER BY s.updated_at DESC, s.id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const itemCount = safeInteger(row.itemCount);
+          const createdAt = toIso(row.createdAt);
+          const updatedAt = toIso(row.updatedAt);
+          const deactivatedAt = nullableIso(row.deactivatedAt);
+          if (
+            !uuidPattern.test(row.sharedSetId) ||
+            !sharedSetCodePattern.test(row.publicCode) ||
+            typeof row.active !== "boolean" ||
+            itemCount < 2 ||
+            itemCount > 8 ||
+            new Date(updatedAt).getTime() < new Date(createdAt).getTime() ||
+            row.active !== (deactivatedAt === null) ||
+            (deactivatedAt !== null && deactivatedAt !== updatedAt)
+          ) {
+            throw new Error("Invalid shared set admin projection");
+          }
+          return Object.freeze({
+            sharedSetId: row.sharedSetId,
+            publicCode: row.publicCode,
+            label: safePublicLabel(row.label),
+            active: row.active,
+            itemCount,
+            createdAt,
+            updatedAt,
+            deactivatedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "shared-sets" }>;
     }
     case "buyers": {
       const result = await boundedRows<{

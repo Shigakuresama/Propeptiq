@@ -19,6 +19,8 @@ export const ADMIN_READ_RESOURCE_REQUIREMENTS = Object.freeze({
   "referral-policies": "growth:manage",
   "affiliate-policies": "growth:manage",
   "reward-adjustments": "growth:manage",
+  "referral-codes": "growth:manage",
+  "shared-sets": "growth:manage",
 } as const);
 
 export type AdminReadResource = keyof typeof ADMIN_READ_RESOURCE_REQUIREMENTS;
@@ -322,6 +324,25 @@ type RewardAdjustmentItem = {
   }>[];
 };
 
+type ReferralCodeItem = {
+  referralCodeId: string;
+  code: string;
+  status: "active" | "revoked";
+  createdAt: string;
+  revokedAt: string | null;
+};
+
+type SharedSetItem = {
+  sharedSetId: string;
+  publicCode: string;
+  label: string;
+  active: boolean;
+  itemCount: number;
+  createdAt: string;
+  updatedAt: string;
+  deactivatedAt: string | null;
+};
+
 export type AdminReadSnapshot =
   | Snapshot<"products", ProductItem>
   | Snapshot<"prices", PriceItem>
@@ -342,7 +363,9 @@ export type AdminReadSnapshot =
   | Snapshot<"loyalty-policies", LoyaltyPolicyItem>
   | Snapshot<"referral-policies", ReferralPolicyItem>
   | Snapshot<"affiliate-policies", AffiliatePolicyItem>
-  | Snapshot<"reward-adjustments", RewardAdjustmentItem>;
+  | Snapshot<"reward-adjustments", RewardAdjustmentItem>
+  | Snapshot<"referral-codes", ReferralCodeItem>
+  | Snapshot<"shared-sets", SharedSetItem>;
 
 export type AdminReadSnapshotFor<Resource extends AdminReadResource> = Extract<
   AdminReadSnapshot,
