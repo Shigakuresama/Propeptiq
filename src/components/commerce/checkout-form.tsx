@@ -225,6 +225,19 @@ function responseMessage(status: unknown, component?: unknown): string {
   return "Checkout is temporarily unavailable. Your browser-saved cart has not been cleared.";
 }
 
+function rewardsUnavailableCopy(reason: string | null): string | null {
+  if (reason === null || reason === "not_requested") return null;
+  if (reason === "below_minimum") return "More points are required for redemption.";
+  if (reason === "redemption_cap_exceeded") return "The requested redemption exceeds the current checkout limit.";
+  if (reason === "insufficient_balance") return "The requested points are not currently available.";
+  if (reason === "negative_balance") return "Points redemption is currently unavailable.";
+  if (reason === "terms_unavailable" || reason === "acceptance_unavailable") {
+    return "Current rewards terms are unavailable or not accepted.";
+  }
+  if (reason === "invalid_request") return "The requested points could not be applied.";
+  return "Rewards are currently unavailable.";
+}
+
 export function CheckoutForm({
   promotions,
   syntheticLocal = false,
@@ -504,6 +517,9 @@ export function CheckoutForm({
   if (!hydrated) return <div className="cart-loading" aria-label="Loading saved cart for checkout" />;
 
   const errorEntries = Object.entries(errors) as Array<[keyof Errors, string]>;
+  const rewardsWarning = quoteView === null
+    ? null
+    : rewardsUnavailableCopy(quoteView.quote.rewardsUnavailableReason);
   return (
     <section className="record-card" aria-labelledby="checkout-form-heading">
       <p className="eyebrow">Authoritative checkout</p>
@@ -682,9 +698,9 @@ export function CheckoutForm({
             {quoteView.quote.pendingBaseEarnPoints} points pending after qualifying payment
           </p>
           {quoteView.quote.rewardsBenefitAvailable === false &&
-          quoteView.quote.rewardsUnavailableReason !== null ? (
+          rewardsWarning !== null ? (
             <p className="warning-record mt-4">
-              Rewards benefit unavailable: {quoteView.quote.rewardsUnavailableReason}
+              Rewards benefit unavailable: {rewardsWarning}
             </p>
           ) : null}
           {quoteView.quote.status === "review_required" ? (

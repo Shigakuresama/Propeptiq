@@ -309,7 +309,12 @@ describe("CheckoutForm", () => {
     expect(screen.queryByRole("heading", { name: "Authoritative total" })).toBeNull();
   });
 
-  it("keeps zero-value growth rows distinct and shows the authoritative unavailable reason", async () => {
+  it.each([
+    ["not_requested", null],
+    ["rewards_policy_inactive", "Rewards benefit unavailable: Rewards are currently unavailable."],
+  ] as const)(
+    "keeps zero-value growth rows distinct and safely presents rewards reason %s",
+    async (rewardsUnavailableReason, expectedWarning) => {
     const user = userEvent.setup();
     fetchMock.mockImplementation(async (url: string) => {
       if (url === "/api/catalog/preview") return response(preview());
@@ -322,7 +327,7 @@ describe("CheckoutForm", () => {
           promotionDiscountMinor: 0, referralDiscountMinor: 0,
           rewardRedemptionPoints: 0, rewardRedemptionMinor: 0,
           pendingBaseEarnPoints: 0, rewardsBenefitAvailable: false,
-          rewardsUnavailableReason: "rewards_policy_inactive",
+          rewardsUnavailableReason,
           lines: [{
             productId, productName: "Synthetic local test only — Alpha", packageForm: "Research vial",
             quantity: 2, unitAmountMinor: 2_400, subtotalMinor: 4_800,
@@ -343,7 +348,12 @@ describe("CheckoutForm", () => {
     expect(within(summary).getByText("Referral benefit")).toBeVisible();
     expect(within(summary).getByText("Points redemption (0 points)")).toBeVisible();
     expect(within(summary).getByText("0 points pending after qualifying payment")).toBeVisible();
-    expect(within(summary).getByText("Rewards benefit unavailable: rewards_policy_inactive")).toBeVisible();
+    expect(within(summary).queryByText(rewardsUnavailableReason, { exact: false })).toBeNull();
+    if (expectedWarning === null) {
+      expect(within(summary).queryByText(/Rewards benefit unavailable:/i)).toBeNull();
+    } else {
+      expect(within(summary).getByText(expectedWarning)).toBeVisible();
+    }
   });
 
   it("invalidates the quote and rotates the key after a request edit", async () => {
