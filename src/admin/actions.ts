@@ -13,10 +13,12 @@ import {
   changeBuyerStatus,
   changeStaffCapability,
   createGrowthPolicyDraft,
+  deactivateSharedSet,
   decideReviewRequest,
   publishAttestationVersion,
   publishCoaDocument,
   requestRefundIntent,
+  revokeReferralCode,
   retireProduct,
   retirePromotion,
   saveAnalyticalClaimDraft,
@@ -148,6 +150,27 @@ function exactFormFields(formData: FormData, expected: readonly string[]): void 
   ) {
     throw new Error("Growth policy form is malformed");
   }
+}
+
+const canonicalV4UuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+function canonicalV4Uuid(formData: FormData, name: string): string {
+  const supplied = formData.get(name);
+  if (typeof supplied !== "string" || !canonicalV4UuidPattern.test(supplied)) {
+    throw new Error(`${name} is invalid`);
+  }
+  return supplied;
+}
+
+function canonicalTimestamp(formData: FormData, name: string): string {
+  const supplied = formData.get(name);
+  if (typeof supplied !== "string") throw new Error(`${name} is invalid`);
+  const parsed = new Date(supplied);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== supplied) {
+    throw new Error(`${name} is invalid`);
+  }
+  return supplied;
 }
 
 const policyValueFields = {
@@ -879,6 +902,32 @@ export async function adjustRewardBalanceAction(formData: FormData): Promise<nev
       reason,
       internalAuditReason,
       idempotencyKey: `reward-adjustment:${randomUUID()}`,
+    });
+  });
+}
+
+export async function revokeReferralCodeAction(formData: FormData): Promise<never> {
+  return run("referral-codes", async () => {
+    exactFormFields(formData, ["referralCodeId", "expectedCreatedAt"]);
+    const referralCodeId = canonicalV4Uuid(formData, "referralCodeId");
+    const expectedCreatedAt = canonicalTimestamp(formData, "expectedCreatedAt");
+    const admin = await trustedGrowthAdmin("referral-codes");
+    await revokeReferralCode(admin.repositories.adminRepository, admin.context, {
+      referralCodeId,
+      expectedCreatedAt,
+    });
+  });
+}
+
+export async function deactivateSharedSetAction(formData: FormData): Promise<never> {
+  return run("shared-sets", async () => {
+    exactFormFields(formData, ["sharedSetId", "expectedUpdatedAt"]);
+    const sharedSetId = canonicalV4Uuid(formData, "sharedSetId");
+    const expectedUpdatedAt = canonicalTimestamp(formData, "expectedUpdatedAt");
+    const admin = await trustedGrowthAdmin("shared-sets");
+    await deactivateSharedSet(admin.repositories.adminRepository, admin.context, {
+      sharedSetId,
+      expectedUpdatedAt,
     });
   });
 }
