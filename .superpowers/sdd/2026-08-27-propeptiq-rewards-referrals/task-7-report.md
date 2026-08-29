@@ -1,4 +1,4 @@
-# Task 7A Report — Public editorial growth experience
+# Task 7 Report — Public and owner growth experience
 
 ## Scope and checkpoint
 
@@ -55,4 +55,50 @@
 - Public growth values intentionally remain absent unless the runtime database exposes valid current active policy records. Zero current records are inactive; duplicate, malformed, schema-failing, or unavailable reads return one safe `read_error` result and discard partial projection values.
 - The homepage count is owner-publication evidence, not popularity, membership, inventory, or sales evidence.
 - No production rates, terms, policy activation, product prices, countdowns, urgency, savings, testimonials, or trust claims were introduced.
-- No Task 7B work was started.
+- No Task 7C shared-set/cart/checkout presentation, Task 8 admin UI, Task 9 security documentation, or Task 10 E2E work was started.
+
+## Task 7B checkpoint — Owner growth dashboards
+
+### Scope and implementation
+
+- Started from clean `8d7907a5defaa080c61a0f87051fa2a8255b9c0c` and committed implementation/tests as `9ed2f3b` (`feat(ui): add owner growth dashboards`).
+- Added only the authenticated account-shell navigation, owner growth read/access adapter, `/account/rewards`, `/account/referrals`, `/account/partner`, dashboard/action-form components, and focused tests.
+- Preserved Account Overview, Orders, Checkout, and home access. The labeled Sheet remains through 1024px; the full account rail begins only at `xl`/1280px.
+- No public catalog/home edits, shared-set UI/cart/checkout work, admin UI, security-doc work, formal E2E, production data, policy activation, provider call, or external payout operation was added.
+
+### Delivered behavior and privacy boundaries
+
+- Owner reads use the authenticated principal and owner relation before any database read. Results distinguish `data`, `empty`, `inactive`, denied, and safe `read_error`; access distinguishes active owner, read-only review/incomplete owner, and blocked-read-capable owner.
+- Cross-owner requests deny before projection/snapshot reads. Blocked and review owners keep their own history readable; enrollment/application controls remain unavailable unless the buyer is active.
+- Rewards renders server-projected available/pending balances, truthful active-policy USD equivalent, minimum-redemption progress semantics, negative balances, and immutable redacted ledger rows. Real ledger kinds map to text-plus-Lucide Pending, Available, Reversed, and Adjustment states.
+- Referrals renders one owner code/link, aggregate counts, reward totals, and redacted conversion references only. Current-terms acceptance activates the existing stable-code service; repeat activation returns the same existing code. Copy success/failure is announced politely without moving focus.
+- Partner application inherits the verified email from server identity, accepts one bounded URL/handle, one closed promotion method, and exact current terms. It has no essay, document upload, organization/identity/tax upload, or payout control.
+- Pending, active, rejected, and suspended partner states use text plus icons. Suspended/rejected history, private commission totals, and recorded payout totals remain readable without a send-money claim or control.
+- Browser forms contain only bounded public fields, acceptance, and terms identifiers. A server-only adapter loads the current terms hash and then invokes the existing same-origin, rate-limited authoritative referral/affiliate actions; no hash, role, owner ID, balance, rate, commission, or payout fact is emitted as a browser field.
+- UI components receive immutable props/results and do not query the database or any provider. Rendered owner records exclude raw Clerk IDs, cross-customer identity, order lines, addresses, payment IDs, cookies/IP/device data, provider credentials, and private provider references.
+- Mutation failures render an error summary, inline error guidance, and programmatic focus. Activation, application, and copy successes use polite status regions. Required controls have persistent labels plus `required`/`aria-required` semantics.
+
+### Task 7B RED evidence
+
+- Account navigation: 1/1 failed because Overview and the three owner growth destinations were absent.
+- Rewards components: 2/2 behavioral assertions failed against inert shells because balances/progress and the immutable ledger were absent.
+- Owner access: 2/3 failed against the deny-all shell for cross-owner reason and blocked-owner self-read; the later review-owner regression failed because review was incorrectly treated as active-owner access.
+- Owner read adapter: 1/2 failed against the deny-only shell because inactive/empty/data/read-error states were absent.
+- Rewards route: 4/4 failed against the route shell because blocked-readable, denied, inactive, and safe read-error states were absent.
+- Referral dashboard: 2/2 failed against the component shell because the bounded terms form, redacted summary, focused error, stable-code result, and polite copy status were absent.
+- Browser action adapters: 2/3 failed against inert adapters because authoritative server terms were not yet injected for referral/affiliate mutations.
+- Referrals route: 5/5 failed against the route shell; the later review-owner route regression also failed while the form was still visible.
+- Affiliate dashboard: 3/3 failed against the component shell because the bounded application, status/history summaries, and focused/polite action results were absent.
+- Partner route: 5/5 failed against the route shell; the later review-owner route regression also failed while the application remained visible.
+- Account rail: 1/1 failed because the desktop navigation still lived in the header instead of an `xl`/1280px rail.
+- Real ledger-kind regression: 1/2 failed because a positive `admin_adjustment` was incorrectly labeled Available instead of Adjustment.
+
+### Task 7B GREEN and final gates
+
+- Exact requested account/growth route gate: `npm test -- --run src/components/account src/components/growth src/app/account` — 11 files and 33 tests passed.
+- Focused auth/action gate: `npm test -- --run src/auth src/account src/growth/actions.test.ts src/growth/owner-action-forms.test.ts src/growth/owner-growth-access.test.ts src/growth/owner-growth-server.test.ts` — 10 files and 105 tests passed.
+- Full unit suite: `npm test` — 107 files and 1,120 tests passed.
+- `npm run typecheck` — passed.
+- `npm run lint` — passed with zero warnings.
+- `git diff --check` — passed; only the repository's existing Windows LF-to-CRLF advisory was printed.
+- Screenshots and formal browser/multi-viewport E2E were not run because that remains Task 10; no screenshot claim is made.
