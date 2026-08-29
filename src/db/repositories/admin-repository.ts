@@ -2,6 +2,7 @@ import {
   MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1,
   MANUAL_REWARD_ADJUSTMENT_REASONS_V1,
 } from "@/admin/admin-service";
+import { createHash } from "node:crypto";
 import type {
   AdminRepository,
   AdminTransaction,
@@ -151,6 +152,74 @@ function assertExactRewardAdjustmentReplay(
   ) {
     throw new Error("Reward adjustment idempotency fingerprint conflict");
   }
+}
+
+type ReferralCodeLifecycleRow = {
+  id: string;
+  status: "active" | "revoked";
+  createdAt: Date | string;
+  revokedAt: Date | string | null;
+};
+
+type SharedSetLifecycleRow = {
+  id: string;
+  ownerUserId: string;
+  publicCode: string;
+  label: string;
+  active: boolean;
+  updatedAt: Date | string;
+  deactivatedAt: Date | string | null;
+  itemCount: number | string;
+};
+
+type SharedSetDeactivationReceiptRow = {
+  sharedSetId: string;
+  kind: string;
+  expectedUpdatedAt: Date | string;
+  resultActive: boolean;
+  resultUpdatedAt: Date | string;
+  appliedAt: Date | string;
+};
+
+function validateReferralCodeRevocationInput(
+  input: Parameters<NonNullable<AdminTransaction["revokeReferralCode"]>>[0],
+): void {
+  if (
+    !rewardAdjustmentUuidPattern.test(input.referralCodeId) ||
+    !Number.isFinite(input.expectedCreatedAt.getTime()) ||
+    !Number.isFinite(input.revokedAt.getTime()) ||
+    input.revokedAt.getTime() <= input.expectedCreatedAt.getTime()
+  ) {
+    throw new Error("Referral code revocation persistence input is invalid");
+  }
+}
+
+function validateSharedSetDeactivationInput(
+  input: Parameters<NonNullable<AdminTransaction["deactivateSharedSet"]>>[0],
+): void {
+  if (
+    !rewardAdjustmentUuidPattern.test(input.sharedSetId) ||
+    !Number.isFinite(input.expectedUpdatedAt.getTime()) ||
+    !Number.isFinite(input.deactivatedAt.getTime()) ||
+    input.deactivatedAt.getTime() <= input.expectedUpdatedAt.getTime()
+  ) {
+    throw new Error("Shared set deactivation persistence input is invalid");
+  }
+}
+
+function sharedSetAdminDeactivationIdentity(input: Parameters<
+  NonNullable<AdminTransaction["deactivateSharedSet"]>
+>[0]): Readonly<{ idempotencyKey: string; payloadHash: string }> {
+  const payloadHash = createHash("sha256").update(JSON.stringify({
+    kind: "deactivate",
+    sharedSetId: input.sharedSetId,
+    expectedUpdatedAt: input.expectedUpdatedAt.toISOString(),
+    deactivatedAt: input.deactivatedAt.toISOString(),
+  }), "utf8").digest("hex");
+  return Object.freeze({
+    idempotencyKey: `admin_shared_set_deactivate:${payloadHash}`,
+    payloadHash,
+  });
 }
 
 type GrowthPolicyRow = {
@@ -595,6 +664,181 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
         throw new Error("Stale reward account balance conflict");
       }
       return projectRewardAdjustmentLedger(insertedRow, input.reason);
+    },
+
+    async revokeReferralCode(input) {
+      validateReferralCodeRevocationInput(input);
+      const expectedCreatedAt = input.expectedCreatedAt.toISOString();
+      const revokedAt = input.revokedAt.toISOString();
+      const loaded = await client.query<ReferralCodeLifecycleRow>(
+        `SELECT id::text AS id, status, created_at AS "createdAt",
+                revoked_at AS "revokedAt"
+         FROM referral_codes WHERE id = $1::uuid FOR UPDATE`,
+        [input.referralCodeId],
+      );
+      if (loaded.rows.length !== 1 || loaded.rows[0]?.id !== input.referralCodeId) {
+        throw new Error("Referral code is missing or unavailable");
+      }
+      const row = loaded.rows[0];
+      if (toIso(row.createdAt) !== expectedCreatedAt) {
+        throw new Error("Stale referral code revocation");
+      }
+      if (row.status === "revoked") {
+        if (row.revokedAt === null || toIso(row.revokedAt) !== revokedAt) {
+          throw new Error("Stale referral code revocation");
+        }
+        return {
+          status: "idempotent" as const,
+          referralCodeId: row.id,
+          createdAt: expectedCreatedAt,
+          revokedAt,
+        };
+      }
+      if (row.status !== "active" || row.revokedAt !== null) {
+        throw new Error("Referral code lifecycle state is invalid");
+      }
+      const updated = await client.query<ReferralCodeLifecycleRow>(
+        `UPDATE referral_codes
+         SET status = 'revoked', revoked_at = $3::timestamptz
+         WHERE id = $1::uuid AND status = 'active' AND revoked_at IS NULL
+           AND created_at = $2::timestamptz
+         RETURNING id::text AS id, status, created_at AS "createdAt",
+                   revoked_at AS "revokedAt"`,
+        [input.referralCodeId, expectedCreatedAt, revokedAt],
+      );
+      const result = updated.rows[0];
+      if (
+        updated.rows.length !== 1 ||
+        !result ||
+        result.id !== input.referralCodeId ||
+        result.status !== "revoked" ||
+        toIso(result.createdAt) !== expectedCreatedAt ||
+        result.revokedAt === null ||
+        toIso(result.revokedAt) !== revokedAt
+      ) {
+        throw new Error("Stale referral code revocation");
+      }
+      return {
+        status: "applied" as const,
+        referralCodeId: result.id,
+        createdAt: expectedCreatedAt,
+        revokedAt,
+      };
+    },
+
+    async deactivateSharedSet(input) {
+      validateSharedSetDeactivationInput(input);
+      const expectedUpdatedAt = input.expectedUpdatedAt.toISOString();
+      const deactivatedAt = input.deactivatedAt.toISOString();
+      const identity = sharedSetAdminDeactivationIdentity(input);
+      const receipt = await client.query<SharedSetDeactivationReceiptRow>(
+        `SELECT shared_set_id::text AS "sharedSetId", kind,
+                expected_updated_at AS "expectedUpdatedAt",
+                result_active AS "resultActive",
+                result_updated_at AS "resultUpdatedAt", applied_at AS "appliedAt"
+         FROM shared_research_set_mutations
+         WHERE idempotency_key = $1 FOR UPDATE`,
+        [identity.idempotencyKey],
+      );
+      if (receipt.rows.length > 1) throw new Error("Shared set deactivation receipt conflict");
+      if (receipt.rows[0]) {
+        const prior = receipt.rows[0];
+        if (
+          prior.sharedSetId !== input.sharedSetId ||
+          prior.kind !== "deactivate" ||
+          toIso(prior.expectedUpdatedAt) !== expectedUpdatedAt ||
+          prior.resultActive !== false ||
+          toIso(prior.resultUpdatedAt) !== deactivatedAt ||
+          toIso(prior.appliedAt) !== deactivatedAt
+        ) {
+          throw new Error("Shared set deactivation receipt conflict");
+        }
+        return {
+          status: "idempotent" as const,
+          sharedSetId: prior.sharedSetId,
+          active: false as const,
+          updatedAt: deactivatedAt,
+          deactivatedAt,
+        };
+      }
+
+      const loaded = await client.query<SharedSetLifecycleRow>(
+        `SELECT s.id::text AS id, s.owner_user_id::text AS "ownerUserId",
+                s.public_code AS "publicCode", s.label, s.active,
+                s.updated_at AS "updatedAt", s.deactivated_at AS "deactivatedAt",
+                (SELECT count(*) FROM shared_research_set_items i
+                 WHERE i.shared_set_id = s.id) AS "itemCount"
+         FROM shared_research_sets s WHERE s.id = $1::uuid FOR UPDATE`,
+        [input.sharedSetId],
+      );
+      if (loaded.rows.length !== 1 || loaded.rows[0]?.id !== input.sharedSetId) {
+        throw new Error("Shared set is missing or unavailable");
+      }
+      const row = loaded.rows[0];
+      const itemCount = requireSafeDatabaseInteger(row.itemCount, "shared set item count");
+      if (
+        !row.active ||
+        row.deactivatedAt !== null ||
+        toIso(row.updatedAt) !== expectedUpdatedAt
+      ) {
+        throw new Error("Stale shared set deactivation");
+      }
+      if (itemCount < 2 || itemCount > 8) {
+        throw new Error("Shared set item history is invalid");
+      }
+      const updated = await client.query<{
+        id: string;
+        active: boolean;
+        updatedAt: Date | string;
+        deactivatedAt: Date | string | null;
+      }>(
+        `UPDATE shared_research_sets
+         SET active = false, deactivated_at = $3::timestamptz,
+             updated_at = $3::timestamptz
+         WHERE id = $1::uuid AND active = true AND deactivated_at IS NULL
+           AND updated_at = $2::timestamptz
+         RETURNING id::text AS id, active, updated_at AS "updatedAt",
+                   deactivated_at AS "deactivatedAt"`,
+        [input.sharedSetId, expectedUpdatedAt, deactivatedAt],
+      );
+      const result = updated.rows[0];
+      if (
+        updated.rows.length !== 1 ||
+        !result ||
+        result.id !== input.sharedSetId ||
+        result.active !== false ||
+        toIso(result.updatedAt) !== deactivatedAt ||
+        result.deactivatedAt === null ||
+        toIso(result.deactivatedAt) !== deactivatedAt
+      ) {
+        throw new Error("Stale shared set deactivation");
+      }
+      await client.query(
+        `INSERT INTO shared_research_set_mutations
+          (idempotency_key, shared_set_id, owner_user_id, kind,
+           expected_updated_at, payload_hash, result_public_code, result_label,
+           result_active, result_item_count, result_updated_at, applied_at)
+         VALUES ($1, $2::uuid, $3::uuid, 'deactivate', $4::timestamptz,
+                 $5, $6, $7, false, $8, $9::timestamptz, $9::timestamptz)`,
+        [
+          identity.idempotencyKey,
+          input.sharedSetId,
+          row.ownerUserId,
+          expectedUpdatedAt,
+          identity.payloadHash,
+          row.publicCode,
+          row.label,
+          itemCount,
+          deactivatedAt,
+        ],
+      );
+      return {
+        status: "applied" as const,
+        sharedSetId: result.id,
+        active: false as const,
+        updatedAt: deactivatedAt,
+        deactivatedAt,
+      };
     },
 
     async createGrowthPolicyDraft(input) {

@@ -87,6 +87,21 @@ export type RewardAdjustmentResult = Readonly<{
   availablePointsBalanceAfter: number;
 }>;
 
+export type ReferralCodeRevocationResult = Readonly<{
+  status: "applied" | "idempotent";
+  referralCodeId: string;
+  createdAt: string;
+  revokedAt: string;
+}>;
+
+export type SharedSetDeactivationResult = Readonly<{
+  status: "applied" | "idempotent";
+  sharedSetId: string;
+  active: false;
+  updatedAt: string;
+  deactivatedAt: string;
+}>;
+
 export type AdminTransaction = Readonly<{
   assertActorAuthority: (input: Readonly<{
     actorUserId: string;
@@ -352,6 +367,16 @@ export type AdminTransaction = Readonly<{
   }>) => Promise<RewardAdjustmentResult & Readonly<{
     reason: ManualRewardAdjustmentReasonV1;
   }>>;
+  revokeReferralCode?: (input: Readonly<{
+    referralCodeId: string;
+    expectedCreatedAt: Date;
+    revokedAt: Date;
+  }>) => Promise<ReferralCodeRevocationResult>;
+  deactivateSharedSet?: (input: Readonly<{
+    sharedSetId: string;
+    expectedUpdatedAt: Date;
+    deactivatedAt: Date;
+  }>) => Promise<SharedSetDeactivationResult>;
   appendAudit: (event: AdminAuditEvent) => Promise<void>;
 }>;
 
@@ -619,6 +644,101 @@ const canonicalUuidPattern =
 const rewardAdjustmentRawIdempotencyPattern = /^[^\u0000-\u001f\u007f]{16,183}$/u;
 const internalAuditReasonMaxLength = 240;
 
+function requireCanonicalTimestampInput(value: unknown, label: string): Date {
+  if (typeof value !== "string") throw new Error(`${label} is invalid`);
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== value) {
+    throw new Error(`${label} is invalid`);
+  }
+  return timestamp;
+}
+
+function parseReferralCodeRevocationCommand(input: unknown): Readonly<{
+  referralCodeId: string;
+  expectedCreatedAt: Date;
+}> {
+  if (!exactRecord(input, ["referralCodeId", "expectedCreatedAt"])) {
+    throw new Error("Referral code revocation command is malformed");
+  }
+  if (
+    typeof input.referralCodeId !== "string" ||
+    !canonicalUuidPattern.test(input.referralCodeId)
+  ) {
+    throw new Error("Referral code ID is invalid");
+  }
+  return Object.freeze({
+    referralCodeId: input.referralCodeId,
+    expectedCreatedAt: requireCanonicalTimestampInput(
+      input.expectedCreatedAt,
+      "Expected referral code creation time",
+    ),
+  });
+}
+
+function parseSharedSetDeactivationCommand(input: unknown): Readonly<{
+  sharedSetId: string;
+  expectedUpdatedAt: Date;
+}> {
+  if (!exactRecord(input, ["sharedSetId", "expectedUpdatedAt"])) {
+    throw new Error("Shared set deactivation command is malformed");
+  }
+  if (
+    typeof input.sharedSetId !== "string" ||
+    !canonicalUuidPattern.test(input.sharedSetId)
+  ) {
+    throw new Error("Shared set ID is invalid");
+  }
+  return Object.freeze({
+    sharedSetId: input.sharedSetId,
+    expectedUpdatedAt: requireCanonicalTimestampInput(
+      input.expectedUpdatedAt,
+      "Expected shared set update time",
+    ),
+  });
+}
+
+function projectReferralCodeRevocationResult(
+  command: ReturnType<typeof parseReferralCodeRevocationCommand>,
+  result: ReferralCodeRevocationResult,
+  revokedAt: Date,
+): ReferralCodeRevocationResult {
+  if (
+    !exactRecord(result, ["status", "referralCodeId", "createdAt", "revokedAt"]) ||
+    (result.status !== "applied" && result.status !== "idempotent") ||
+    result.referralCodeId !== command.referralCodeId ||
+    result.createdAt !== command.expectedCreatedAt.toISOString() ||
+    result.revokedAt !== revokedAt.toISOString()
+  ) {
+    throw new Error("Referral code revocation transaction read-back is invalid");
+  }
+  return Object.freeze({ ...result });
+}
+
+function projectSharedSetDeactivationResult(
+  command: ReturnType<typeof parseSharedSetDeactivationCommand>,
+  result: SharedSetDeactivationResult,
+  deactivatedAt: Date,
+): SharedSetDeactivationResult {
+  const expectedResultAt = deactivatedAt.toISOString();
+  if (
+    !exactRecord(result, [
+      "status",
+      "sharedSetId",
+      "active",
+      "updatedAt",
+      "deactivatedAt",
+    ]) ||
+    (result.status !== "applied" && result.status !== "idempotent") ||
+    result.sharedSetId !== command.sharedSetId ||
+    result.active !== false ||
+    result.updatedAt !== expectedResultAt ||
+    result.deactivatedAt !== expectedResultAt
+  ) {
+    throw new Error("Shared set deactivation transaction read-back is invalid");
+  }
+  return Object.freeze({ ...result });
+}
+
 function parseRewardAdjustmentCommand(input: unknown): Readonly<{
   entryId: string;
   rewardAccountId: string;
@@ -766,6 +886,94 @@ export async function adjustRewardBalance(
         },
       ));
     }
+      return result;
+    },
+  );
+}
+
+export async function revokeReferralCode(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<ReferralCodeRevocationResult> {
+  const command = parseReferralCodeRevocationCommand(input);
+  if (
+    !Number.isFinite(context.now.getTime()) ||
+    context.now.getTime() <= command.expectedCreatedAt.getTime()
+  ) {
+    throw new Error("Referral code revocation clock is invalid");
+  }
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedRetryingTransaction(
+    repository,
+    context,
+    principal,
+    "growth.manage",
+    async (tx) => {
+      if (!tx.revokeReferralCode) throw new Error("Referral code revocation port is unavailable");
+      const result = projectReferralCodeRevocationResult(
+        command,
+        await tx.revokeReferralCode({
+          referralCodeId: command.referralCodeId,
+          expectedCreatedAt: command.expectedCreatedAt,
+          revokedAt: context.now,
+        }),
+        context.now,
+      );
+      if (result.status === "applied") {
+        await tx.appendAudit(audit(
+          principal,
+          context,
+          "growth.referral_code.revoked",
+          "referral_code",
+          command.referralCodeId,
+          { status: "revoked" },
+        ));
+      }
+      return result;
+    },
+  );
+}
+
+export async function deactivateSharedSet(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<SharedSetDeactivationResult> {
+  const command = parseSharedSetDeactivationCommand(input);
+  if (
+    !Number.isFinite(context.now.getTime()) ||
+    context.now.getTime() <= command.expectedUpdatedAt.getTime()
+  ) {
+    throw new Error("Shared set deactivation clock is invalid");
+  }
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedRetryingTransaction(
+    repository,
+    context,
+    principal,
+    "growth.manage",
+    async (tx) => {
+      if (!tx.deactivateSharedSet) throw new Error("Shared set deactivation port is unavailable");
+      const result = projectSharedSetDeactivationResult(
+        command,
+        await tx.deactivateSharedSet({
+          sharedSetId: command.sharedSetId,
+          expectedUpdatedAt: command.expectedUpdatedAt,
+          deactivatedAt: context.now,
+        }),
+        context.now,
+      );
+      if (result.status === "applied") {
+        await tx.appendAudit(audit(
+          principal,
+          context,
+          "growth.shared_set.deactivated",
+          "shared_research_set",
+          command.sharedSetId,
+          { active: false },
+        ));
+      }
       return result;
     },
   );
