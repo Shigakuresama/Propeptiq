@@ -1,6 +1,8 @@
 import type {
   AdminRepository,
   AdminTransaction,
+  GrowthPolicyKind,
+  GrowthPolicyValues,
   PromotionRecord,
 } from "@/admin/admin-service";
 import type { ProductPublicationFacts } from "@/admin/admin-policy";
@@ -12,6 +14,9 @@ import {
   hasExactProviderEventEnvelopeIdentity,
 } from "@/commerce/payment-authority";
 import { runSerializableWithRetry } from "@/db/serializable-retry";
+import { parseAffiliatePolicy } from "@/domain/affiliates";
+import { parseReferralPolicy } from "@/domain/referrals";
+import { parseLoyaltyPolicy } from "@/domain/rewards";
 
 export type AdminSqlClient = Readonly<{
   query: <T extends object>(
@@ -36,6 +41,164 @@ function asSafeInteger(value: number | string | null): number | null {
   const numeric = Number(value);
   if (!Number.isSafeInteger(numeric)) throw new Error("Database integer is unsafe");
   return numeric;
+}
+
+function requireSafeDatabaseInteger(value: number | string | null, field: string): number {
+  const integer = asSafeInteger(value);
+  if (integer === null) throw new Error(`Database ${field} is missing`);
+  return integer;
+}
+
+type GrowthPolicyRow = {
+  id: string;
+  version: number | string;
+  status: "draft" | "active" | "superseded";
+  effectiveAt: Date | string;
+  supersededAt: Date | string | null;
+  pointsPerDollar?: number | string;
+  redemptionMinorPerPoint?: number | string;
+  minimumRedemptionPoints?: number | string;
+  maximumRedemptionBasisPoints?: number | string;
+  expiresAfterDays?: number | string | null;
+  attributionDays?: number | string;
+  referredDiscountBasisPoints?: number | string;
+  referredDiscountCapMinor?: number | string;
+  referrerPointsPerDollar?: number | string;
+  referrerRewardCapPoints?: number | string;
+  firstOrderCommissionBasisPoints?: number | string;
+  reorderCommissionBasisPoints?: number | string;
+  reorderWindowDays?: number | string;
+  approvalDelayDays?: number | string;
+  payoutThresholdMinor?: number | string;
+  currency?: string;
+};
+
+function growthPolicyTable(kind: GrowthPolicyKind): string {
+  if (kind === "loyalty") return "loyalty_policies";
+  if (kind === "referral") return "referral_policies";
+  return "affiliate_policies";
+}
+
+function growthPolicyProjection(kind: GrowthPolicyKind): string {
+  const common = `id::text AS id, version, status,
+    effective_at AS "effectiveAt", superseded_at AS "supersededAt"`;
+  if (kind === "loyalty") {
+    return `${common}, points_per_dollar AS "pointsPerDollar",
+      redemption_minor_per_point AS "redemptionMinorPerPoint",
+      minimum_redemption_points AS "minimumRedemptionPoints",
+      maximum_redemption_basis_points AS "maximumRedemptionBasisPoints",
+      expires_after_days AS "expiresAfterDays"`;
+  }
+  if (kind === "referral") {
+    return `${common}, attribution_days AS "attributionDays",
+      referred_discount_basis_points AS "referredDiscountBasisPoints",
+      referred_discount_cap_minor AS "referredDiscountCapMinor",
+      referrer_points_per_dollar AS "referrerPointsPerDollar",
+      referrer_reward_cap_points AS "referrerRewardCapPoints"`;
+  }
+  return `${common}, attribution_days AS "attributionDays",
+    first_order_commission_basis_points AS "firstOrderCommissionBasisPoints",
+    reorder_commission_basis_points AS "reorderCommissionBasisPoints",
+    reorder_window_days AS "reorderWindowDays",
+    approval_delay_days AS "approvalDelayDays",
+    payout_threshold_minor AS "payoutThresholdMinor", currency`;
+}
+
+function assertPersistedGrowthPolicy(kind: GrowthPolicyKind, row: GrowthPolicyRow): void {
+  const common = {
+    id: row.id,
+    version: requireSafeDatabaseInteger(row.version, "growth policy version"),
+    status: row.status === "superseded" ? "retired" : row.status,
+    effectiveAt: toIso(row.effectiveAt),
+    supersededAt: row.supersededAt === null ? null : toIso(row.supersededAt),
+  };
+  const candidate = kind === "loyalty"
+    ? {
+        ...common,
+        pointsPerDollar: requireSafeDatabaseInteger(row.pointsPerDollar ?? null, "pointsPerDollar"),
+        redemptionMinorPerPoint: requireSafeDatabaseInteger(row.redemptionMinorPerPoint ?? null, "redemptionMinorPerPoint"),
+        minimumRedemptionPoints: requireSafeDatabaseInteger(row.minimumRedemptionPoints ?? null, "minimumRedemptionPoints"),
+        maximumRedemptionBasisPoints: requireSafeDatabaseInteger(row.maximumRedemptionBasisPoints ?? null, "maximumRedemptionBasisPoints"),
+        expiresAfterDays: row.expiresAfterDays ?? null,
+      }
+    : kind === "referral"
+      ? {
+          ...common,
+          attributionDays: requireSafeDatabaseInteger(row.attributionDays ?? null, "attributionDays"),
+          referredDiscountBasisPoints: requireSafeDatabaseInteger(row.referredDiscountBasisPoints ?? null, "referredDiscountBasisPoints"),
+          referredDiscountCapMinor: requireSafeDatabaseInteger(row.referredDiscountCapMinor ?? null, "referredDiscountCapMinor"),
+          referrerPointsPerDollar: requireSafeDatabaseInteger(row.referrerPointsPerDollar ?? null, "referrerPointsPerDollar"),
+          referrerRewardCapPoints: requireSafeDatabaseInteger(row.referrerRewardCapPoints ?? null, "referrerRewardCapPoints"),
+        }
+      : {
+          ...common,
+          attributionDays: requireSafeDatabaseInteger(row.attributionDays ?? null, "attributionDays"),
+          firstOrderCommissionBasisPoints: requireSafeDatabaseInteger(row.firstOrderCommissionBasisPoints ?? null, "firstOrderCommissionBasisPoints"),
+          reorderCommissionBasisPoints: requireSafeDatabaseInteger(row.reorderCommissionBasisPoints ?? null, "reorderCommissionBasisPoints"),
+          reorderWindowDays: requireSafeDatabaseInteger(row.reorderWindowDays ?? null, "reorderWindowDays"),
+          approvalDelayDays: requireSafeDatabaseInteger(row.approvalDelayDays ?? null, "approvalDelayDays"),
+          payoutThresholdMinor: requireSafeDatabaseInteger(row.payoutThresholdMinor ?? null, "payoutThresholdMinor"),
+          currency: row.currency,
+        };
+  const parsed = kind === "loyalty"
+    ? parseLoyaltyPolicy(candidate)
+    : kind === "referral"
+      ? parseReferralPolicy(candidate)
+      : parseAffiliatePolicy(candidate);
+  if (!parsed.ok) {
+    throw new Error(`Persisted growth policy domain shape is invalid: ${parsed.error.field}`);
+  }
+}
+
+async function insertGrowthPolicyDraft(
+  client: AdminSqlClient,
+  input: Readonly<{
+    id: string;
+    kind: GrowthPolicyKind;
+    effectiveAt: Date;
+    values: GrowthPolicyValues;
+  }>,
+  version: number,
+): Promise<void> {
+  const values = input.values as Readonly<Record<string, unknown>>;
+  const effectiveAt = input.effectiveAt.toISOString();
+  if (input.kind === "loyalty") {
+    await client.query(
+      `INSERT INTO loyalty_policies
+        (id, version, status, points_per_dollar, redemption_minor_per_point,
+         minimum_redemption_points, maximum_redemption_basis_points,
+         expires_after_days, effective_at)
+       VALUES ($1::uuid, $2, 'draft', $3, $4, $5, $6, $7, $8::timestamptz)`,
+      [input.id, version, values.pointsPerDollar, values.redemptionMinorPerPoint,
+        values.minimumRedemptionPoints, values.maximumRedemptionBasisPoints,
+        values.expiresAfterDays, effectiveAt],
+    );
+    return;
+  }
+  if (input.kind === "referral") {
+    await client.query(
+      `INSERT INTO referral_policies
+        (id, version, status, attribution_days, referred_discount_basis_points,
+         referred_discount_cap_minor, referrer_points_per_dollar,
+         referrer_reward_cap_points, effective_at)
+       VALUES ($1::uuid, $2, 'draft', $3, $4, $5, $6, $7, $8::timestamptz)`,
+      [input.id, version, values.attributionDays, values.referredDiscountBasisPoints,
+        values.referredDiscountCapMinor, values.referrerPointsPerDollar,
+        values.referrerRewardCapPoints, effectiveAt],
+    );
+    return;
+  }
+  await client.query(
+    `INSERT INTO affiliate_policies
+      (id, version, status, attribution_days, first_order_commission_basis_points,
+       reorder_commission_basis_points, reorder_window_days, approval_delay_days,
+       payout_threshold_minor, currency, effective_at)
+     VALUES ($1::uuid, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10::timestamptz)`,
+    [input.id, version, values.attributionDays,
+      values.firstOrderCommissionBasisPoints, values.reorderCommissionBasisPoints,
+      values.reorderWindowDays, values.approvalDelayDays,
+      values.payoutThresholdMinor, values.currency, effectiveAt],
+  );
 }
 
 type ProductRow = {
@@ -216,6 +379,86 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
       if (result.rows[0]?.authorized !== true) {
         throw new Error(`Persisted ${input.capability} capability is required`);
       }
+    },
+
+    async createGrowthPolicyDraft(input) {
+      const table = growthPolicyTable(input.kind);
+      const latest = await client.query<{ version: number | string }>(
+        `SELECT version FROM ${table} ORDER BY version DESC LIMIT 1 FOR UPDATE`,
+      );
+      const priorVersion = latest.rows[0]
+        ? requireSafeDatabaseInteger(latest.rows[0].version, "growth policy version")
+        : 0;
+      const version = priorVersion + 1;
+      if (!Number.isSafeInteger(version)) throw new Error("Growth policy version is unsafe");
+      await insertGrowthPolicyDraft(client, input, version);
+      return { id: input.id, kind: input.kind, version, status: "draft" };
+    },
+
+    async activateGrowthPolicy(input) {
+      const table = growthPolicyTable(input.kind);
+      const candidateResult = await client.query<GrowthPolicyRow>(
+        `SELECT ${growthPolicyProjection(input.kind)} FROM ${table}
+         WHERE id = $1::uuid AND version = $2 AND status = 'draft'
+           AND superseded_at IS NULL
+         FOR UPDATE`,
+        [input.id, input.expectedVersion],
+      );
+      const candidate = candidateResult.rows[0];
+      if (!candidate) throw new Error("Stale growth policy activation rejected");
+      assertPersistedGrowthPolicy(input.kind, candidate);
+
+      const effectiveAt = toIso(candidate.effectiveAt);
+      if (new Date(effectiveAt).getTime() < input.now.getTime()) {
+        throw new Error("Growth policy effective window overlaps elapsed time");
+      }
+      const priorOverlap = await client.query<{ id: string }>(
+        `SELECT id::text AS id FROM ${table}
+         WHERE status = 'superseded' AND superseded_at > $1::timestamptz
+         LIMIT 1 FOR UPDATE`,
+        [effectiveAt],
+      );
+      if (priorOverlap.rows.length > 0) {
+        throw new Error("Growth policy effective window overlaps a prior policy");
+      }
+      const active = await client.query<{ id: string; effectiveAt: Date | string }>(
+        `SELECT id::text AS id, effective_at AS "effectiveAt" FROM ${table}
+         WHERE status = 'active' AND superseded_at IS NULL
+         FOR UPDATE`,
+      );
+      if (active.rows.length > 1) throw new Error("Multiple active growth policies are invalid");
+      const prior = active.rows[0];
+      if (prior) {
+        if (new Date(toIso(prior.effectiveAt)).getTime() >= new Date(effectiveAt).getTime()) {
+          throw new Error("Growth policy effective windows overlap");
+        }
+        const retired = await client.query<{ id: string }>(
+          `UPDATE ${table} SET status = 'superseded', superseded_at = $2::timestamptz
+           WHERE id = $1::uuid AND status = 'active' AND superseded_at IS NULL
+           RETURNING id::text AS id`,
+          [prior.id, effectiveAt],
+        );
+        if (retired.rows.length !== 1) {
+          throw new Error("Stale active growth policy retirement rejected");
+        }
+      }
+      const activated = await client.query<{ id: string; version: number | string }>(
+        `UPDATE ${table} SET status = 'active'
+         WHERE id = $1::uuid AND version = $2 AND status = 'draft'
+           AND superseded_at IS NULL
+         RETURNING id::text AS id, version`,
+        [input.id, input.expectedVersion],
+      );
+      const row = activated.rows[0];
+      if (!row || activated.rows.length !== 1) {
+        throw new Error("Stale growth policy activation rejected");
+      }
+      return {
+        id: row.id,
+        kind: input.kind,
+        version: requireSafeDatabaseInteger(row.version, "growth policy version"),
+        status: "active",
+      };
     },
 
     async savePolicyGroup(input) {
