@@ -27,7 +27,9 @@ describe("growth terms public-copy boundary", () => {
   it("loads one hash-valid neutral current terms record", async () => {
     await expect(
       loadCurrentGrowthTerms(
-        termsClient("Rewards apply only to eligible laboratory merchandise."),
+        termsClient(
+          "Rewards are administered by PROPEPTIQ and may be revoked to prevent fraud.",
+        ),
         "customer_rewards_referrals",
         now,
       ),

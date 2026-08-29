@@ -11,7 +11,10 @@ import type {
   AttributionEnvironment,
   AttributionProgram,
 } from "@/growth/attribution-cookie";
-import { createRateLimitedAttributionLandingLookup } from "@/growth/landing-rate-limit";
+import {
+  createRateLimitedAttributionLandingLookup,
+  type AttributionLandingLookupInput,
+} from "@/growth/landing-rate-limit";
 
 const boundedOpaqueCodePattern = /^ref_[A-Za-z0-9_-]{16,64}$/u;
 
@@ -28,7 +31,7 @@ export type ReferralLandingLookup = (
 export type ReferralLandingRuntime = Readonly<{
   attributionSecret: string;
   environment: AttributionEnvironment;
-  lookup: ReferralLandingLookup;
+  lookup: (input: AttributionLandingLookupInput) => Promise<EligibleReferralLanding | null>;
 }>;
 
 type EligibleLandingRow = {

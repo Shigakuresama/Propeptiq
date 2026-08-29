@@ -2,20 +2,24 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RateLimitStore } from "@/security/rate-limit";
 
-import { createRateLimitedAttributionLandingLookup } from "./landing-rate-limit";
+import {
+  createRateLimitedAttributionLandingLookup,
+  readAttributionCallerAddress,
+} from "./landing-rate-limit";
 
 const now = new Date("2026-08-28T12:00:00.000Z");
 const code = "ref_AbCdEf0123456789";
 const secret = "task-9-attribution-lookup-secret-at-least-32-characters";
 
 describe("privacy-minimal attribution landing rate limit", () => {
-  it("limits repeated lookup of one opaque code without retaining the raw code", async () => {
-    let count = 0;
+  it("limits one caller without letting it consume another caller's code budget", async () => {
+    const counts = new Map<string, number>();
     const windows: Parameters<RateLimitStore["increment"]>[0][] = [];
     const rateLimitStore: RateLimitStore = {
       async increment(window) {
         windows.push(window);
-        count += 1;
+        const count = (counts.get(window.scopeHash) ?? 0) + 1;
+        counts.set(window.scopeHash, count);
         return count;
       },
     };
@@ -28,14 +32,16 @@ describe("privacy-minimal attribution landing rate limit", () => {
       limit: 2,
     });
 
-    await expect(guarded({ code, now })).resolves.toEqual({ code });
-    await expect(guarded({ code, now })).resolves.toEqual({ code });
-    await expect(guarded({ code, now })).resolves.toBeNull();
+    await expect(guarded({ code, now, callerAddress: "203.0.113.8" })).resolves.toEqual({ code });
+    await expect(guarded({ code, now, callerAddress: "203.0.113.8" })).resolves.toEqual({ code });
+    await expect(guarded({ code, now, callerAddress: "203.0.113.8" })).resolves.toBeNull();
+    await expect(guarded({ code, now, callerAddress: "198.51.100.19" })).resolves.toEqual({ code });
 
-    expect(lookup).toHaveBeenCalledTimes(2);
-    expect(windows).toHaveLength(3);
+    expect(lookup).toHaveBeenCalledTimes(3);
+    expect(windows).toHaveLength(4);
     expect(windows[0]?.scopeHash).toMatch(/^[0-9a-f]{64}$/u);
-    expect(JSON.stringify(windows)).not.toContain(code);
+    expect(windows[0]?.scopeHash).not.toBe(windows[3]?.scopeHash);
+    expect(JSON.stringify(windows)).not.toMatch(/ref_AbCdEf|203\.0\.113\.8|198\.51\.100\.19/u);
   });
 
   it("fails closed without looking up code status when the limiter is unavailable", async () => {
@@ -52,8 +58,30 @@ describe("privacy-minimal attribution landing rate limit", () => {
     });
 
     await expect(
-      guarded({ code: "aff_AbCdEf0123456789", now }),
+      guarded({
+        code: "aff_AbCdEf0123456789",
+        now,
+        callerAddress: "203.0.113.8",
+      }),
     ).resolves.toBeNull();
     expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("uses only the Vercel-owned caller header outside local development", () => {
+    const request = new Request("https://research.example/r/code", {
+      headers: {
+        "x-forwarded-for": "198.51.100.200",
+        "x-vercel-forwarded-for": "203.0.113.8",
+      },
+    });
+
+    expect(readAttributionCallerAddress(request, "production")).toBe("203.0.113.8");
+    expect(readAttributionCallerAddress(request, "preview")).toBe("203.0.113.8");
+    expect(readAttributionCallerAddress(request, "local")).toBe("198.51.100.200");
+    expect(readAttributionCallerAddress(new Request(request.url), "production")).toBeNull();
+    expect(readAttributionCallerAddress(new Request(request.url), "local")).toBe("127.0.0.1");
+    expect(readAttributionCallerAddress(new Request(request.url, {
+      headers: { "x-vercel-forwarded-for": "203.0.113.8, 198.51.100.1" },
+    }), "production")).toBeNull();
   });
 });

@@ -265,6 +265,7 @@ export async function loadCurrentGrowthTerms(
   const publicCopy = scanPublicCopy(
     { text: row.termsText, claims: [] },
     { version: "growth-terms-publication-v1", activeLotEvidenceIds: [] },
+    { surface: "program_terms" },
   );
   if (!publicCopy.publishable) {
     throw new Error("Growth terms violate public content policy");

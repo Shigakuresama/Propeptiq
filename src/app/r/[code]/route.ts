@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { readServerEnv } from "@/env";
 import { createAttributionCookie } from "@/growth/attribution-cookie";
+import { readAttributionCallerAddress } from "@/growth/landing-rate-limit";
 import { createReferralLandingRuntime } from "@/growth/referral-landing-runtime";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +37,7 @@ function unavailableResponse(): Response {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: ReferralRouteContext,
 ): Promise<Response> {
   const response = trustedCatalogRedirect();
@@ -47,9 +48,11 @@ export async function GET(
 
     const runtime = await createReferralLandingRuntime();
     if (!runtime) return response;
+    const callerAddress = readAttributionCallerAddress(request, runtime.environment);
+    if (!callerAddress) return response;
 
     const now = new Date();
-    const eligible = await runtime.lookup({ code, now });
+    const eligible = await runtime.lookup({ code, now, callerAddress });
     if (!eligible || eligible.code !== code) return response;
 
     const expiresAt = new Date(

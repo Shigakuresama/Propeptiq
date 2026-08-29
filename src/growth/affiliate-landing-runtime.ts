@@ -12,7 +12,10 @@ import {
   type AffiliateAttributionCandidate,
 } from "@/growth/affiliate-service";
 import type { AttributionEnvironment } from "@/growth/attribution-cookie";
-import { createRateLimitedAttributionLandingLookup } from "@/growth/landing-rate-limit";
+import {
+  createRateLimitedAttributionLandingLookup,
+  type AttributionLandingLookupInput,
+} from "@/growth/landing-rate-limit";
 
 const boundedOpaqueCodePattern = /^aff_[A-Za-z0-9_-]{16,64}$/u;
 
@@ -23,7 +26,7 @@ export type AffiliateLandingLookup = (
 export type AffiliateLandingRuntime = Readonly<{
   attributionSecret: string;
   environment: AttributionEnvironment;
-  lookup: AffiliateLandingLookup;
+  lookup: (input: AttributionLandingLookupInput) => Promise<AffiliateAttributionCandidate | null>;
 }>;
 
 type EligibleLandingRow = {

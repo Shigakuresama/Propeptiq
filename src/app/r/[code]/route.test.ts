@@ -26,6 +26,7 @@ function request(path = `/r/${code}`) {
     headers: {
       "user-agent": "privacy-sensitive-user-agent",
       "x-forwarded-for": "203.0.113.8",
+      "x-vercel-forwarded-for": "203.0.113.8",
     },
   });
 }
@@ -36,6 +37,7 @@ function hostileRequest(path = `/r/${code}`) {
       host: "attacker.example",
       "x-forwarded-host": "attacker.example",
       "x-forwarded-proto": "https",
+      "x-vercel-forwarded-for": "203.0.113.8",
     },
   });
 }
@@ -95,7 +97,7 @@ describe("GET /r/[code]", () => {
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(`${origin}/catalog`);
     expect(lookup).toHaveBeenCalledTimes(1);
-    expect(lookup).toHaveBeenCalledWith({ code, now });
+    expect(lookup).toHaveBeenCalledWith({ code, now, callerAddress: "203.0.113.8" });
 
     const setCookie = response.headers.get("set-cookie");
     expect(setCookie).toMatch(/HttpOnly/u);
@@ -166,6 +168,15 @@ describe("GET /r/[code]", () => {
       expect(response.headers.get("location")).toBe(`${origin}/catalog`);
       expect(response.headers.has("set-cookie")).toBe(false);
     }
+  });
+
+  it("fails closed before lookup when the platform caller address is unavailable", async () => {
+    const response = await GET(new Request(`${origin}/r/${code}`), context());
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(`${origin}/catalog`);
+    expect(response.headers.has("set-cookie")).toBe(false);
+    expect(lookup).not.toHaveBeenCalled();
   });
 
   it("fails closed without a configured trusted origin and never reflects the request host", async () => {

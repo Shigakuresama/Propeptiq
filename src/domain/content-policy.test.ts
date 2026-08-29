@@ -63,6 +63,48 @@ describe("scanPublicCopy", () => {
     });
   });
 
+  it("allows ordinary administrative legal language only on the program-terms surface", () => {
+    const text = "Points are administered by PROPEPTIQ and may be revoked to prevent fraud.";
+
+    expect(scanPublicCopy(candidate({ text }), policy)).toMatchObject({
+      publishable: false,
+      status: "blocked",
+    });
+    expect(
+      scanPublicCopy(candidate({ text }), policy, { surface: "program_terms" }),
+    ).toMatchObject({ publishable: true, status: "pass" });
+  });
+
+  it("allows an explicit negated research-use restriction only on the program-terms surface", () => {
+    const text = "Products are not intended for human or veterinary use.";
+
+    expect(scanPublicCopy(candidate({ text }), policy)).toMatchObject({
+      publishable: false,
+      status: "blocked",
+    });
+    expect(
+      scanPublicCopy(candidate({ text }), policy, { surface: "program_terms" }),
+    ).toMatchObject({ publishable: true, status: "pass" });
+    expect(
+      scanPublicCopy(
+        candidate({ text: "Products are intended for human use." }),
+        policy,
+        { surface: "program_terms" },
+      ),
+    ).toMatchObject({ publishable: false, status: "blocked" });
+  });
+
+  it.each([
+    "Administer the peptide orally.",
+    "This program rewards researchers when the product treats pain.",
+    "Use one dose after reconstitution.",
+    "Customer testimonial: this product improves human health.",
+  ])("keeps unsafe positioning blocked on the program-terms surface: %s", (text) => {
+    expect(
+      scanPublicCopy(candidate({ text }), policy, { surface: "program_terms" }),
+    ).toMatchObject({ publishable: false, status: "blocked" });
+  });
+
   it.each([
     "Hurry — only 2 left.",
     "Join 10,000 researchers who already chose us.",
