@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 
 import { resourceBySlug, adminGate } from "@/admin/access";
 import {
+  adjustRewardBalance,
   activateProduct,
   activateGrowthPolicy,
   activatePromotion,
@@ -31,9 +32,12 @@ import {
   setPolicyGroupLifecycle,
   supersedeDestinationPolicy,
   supersedeProductPrice,
+  MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1,
+  MANUAL_REWARD_ADJUSTMENT_REASONS_V1,
   type AdminCommandContext,
   type GrowthPolicyKind,
   type GrowthPolicyValues,
+  type ManualRewardAdjustmentReasonV1,
   type PromotionTargetInput,
 } from "@/admin/admin-service";
 import {
@@ -122,6 +126,14 @@ function integer(formData: FormData, name: string): number {
 function canonicalInteger(formData: FormData, name: string): number {
   const supplied = value(formData, name);
   if (!/^(?:0|[1-9]\d*)$/u.test(supplied)) throw new Error(`${name} is invalid`);
+  const parsed = Number(supplied);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} is invalid`);
+  return parsed;
+}
+
+function signedCanonicalInteger(formData: FormData, name: string): number {
+  const supplied = value(formData, name);
+  if (!/^-?(?:0|[1-9]\d*)$/u.test(supplied)) throw new Error(`${name} is invalid`);
   const parsed = Number(supplied);
   if (!Number.isSafeInteger(parsed)) throw new Error(`${name} is invalid`);
   return parsed;
@@ -825,4 +837,48 @@ export async function createAffiliatePolicyDraftAction(formData: FormData): Prom
 
 export async function activateAffiliatePolicyAction(formData: FormData): Promise<never> {
   return activatePolicyAction("affiliate", "affiliate-policies", formData);
+}
+
+export async function adjustRewardBalanceAction(formData: FormData): Promise<never> {
+  return run("reward-adjustments", async () => {
+    exactFormFields(formData, [
+      "rewardAccountId",
+      "delta",
+      "reason",
+      "internalAuditReason",
+    ]);
+    const rewardAccountId = value(formData, "rewardAccountId");
+    const delta = signedCanonicalInteger(formData, "delta");
+    const reason = value(formData, "reason");
+    const internalAuditReason = value(formData, "internalAuditReason");
+    if (!isCanonicalUuid(rewardAccountId)) throw new Error("Reward account ID is invalid");
+    if (
+      delta === 0 ||
+      Math.abs(delta) > MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1
+    ) {
+      throw new Error("Reward adjustment delta is invalid");
+    }
+    if (!MANUAL_REWARD_ADJUSTMENT_REASONS_V1.includes(
+      reason as ManualRewardAdjustmentReasonV1,
+    )) {
+      throw new Error("Reward adjustment reason is invalid");
+    }
+    if (
+      internalAuditReason.trim() !== internalAuditReason ||
+      internalAuditReason.length < 1 ||
+      internalAuditReason.length > 240 ||
+      /[\u0000-\u001f\u007f]/u.test(internalAuditReason)
+    ) {
+      throw new Error("Reward adjustment internal audit reason is invalid");
+    }
+    const admin = await trustedGrowthAdmin("reward-adjustments");
+    await adjustRewardBalance(admin.repositories.adminRepository, admin.context, {
+      entryId: randomUUID(),
+      rewardAccountId,
+      delta,
+      reason,
+      internalAuditReason,
+      idempotencyKey: `reward-adjustment:${randomUUID()}`,
+    });
+  });
 }
