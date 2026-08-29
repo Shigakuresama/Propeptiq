@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 const actions = vi.hoisted(() => ({
   activateProductAction: vi.fn(),
   activatePromotionAction: vi.fn(),
+  adjustRewardBalanceAction: vi.fn(),
   changeBuyerStatusAction: vi.fn(),
   changeStaffCapabilityAction: vi.fn(),
   clearFulfillmentHoldAction: vi.fn(),

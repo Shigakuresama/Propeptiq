@@ -7,6 +7,7 @@ const actions = vi.hoisted(() => ({
   activateProductAction: vi.fn(),
   activatePromotionAction: vi.fn(),
   activateReferralPolicyAction: vi.fn(),
+  adjustRewardBalanceAction: vi.fn(),
   changeBuyerStatusAction: vi.fn(),
   changeStaffCapabilityAction: vi.fn(),
   clearFulfillmentHoldAction: vi.fn(),

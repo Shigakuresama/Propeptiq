@@ -6,6 +6,7 @@ import {
   activateProductAction,
   activatePromotionAction,
   activateReferralPolicyAction,
+  adjustRewardBalanceAction,
   changeBuyerStatusAction,
   changeStaffCapabilityAction,
   clearFulfillmentHoldAction,
@@ -129,6 +130,7 @@ function Field({
   maxLength,
   min,
   max,
+  step,
   readOnly = false,
   list,
 }: {
@@ -140,6 +142,7 @@ function Field({
   maxLength?: number;
   min?: number;
   max?: number;
+  step?: number;
   readOnly?: boolean;
   list?: string;
 }) {
@@ -155,6 +158,7 @@ function Field({
         maxLength={maxLength}
         min={min}
         max={max}
+        step={step}
         readOnly={readOnly}
         list={list}
       />
@@ -171,12 +175,14 @@ function TextArea({
   name,
   defaultValue = "",
   maxLength,
+  minLength,
   required = true,
 }: {
   label: string;
   name: string;
   defaultValue?: string | undefined;
   maxLength: number;
+  minLength?: number;
   required?: boolean;
 }) {
   return (
@@ -187,6 +193,7 @@ function TextArea({
         className="form-input min-h-32"
         required={required}
         maxLength={maxLength}
+        minLength={minLength}
         defaultValue={defaultValue}
       />
     </label>
@@ -440,6 +447,60 @@ export function ResourceCommandPanel({
             <Field label="Currency" name="currency" defaultValue={latest?.currency} maxLength={3} />
           </>}
         />
+      );
+    }
+    case "reward-adjustments": {
+      if (snapshot.items.length === 0) {
+        return (
+          <section className="record-card">
+            <h2 className="font-heading text-2xl">Reward adjustments unavailable</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              No reward accounts are available in the authoritative database view. An adjustment
+              cannot be submitted until a real reward account exists.
+            </p>
+          </section>
+        );
+      }
+      const accountOptions = snapshot.items.map((item) => ({
+        value: item.rewardAccountId,
+        label: `${item.rewardAccountId} · Available ${item.availablePoints.toLocaleString("en-US")} · Pending ${item.pendingPoints.toLocaleString("en-US")}`,
+      }));
+      return (
+        <CommandForm action={adjustRewardBalanceAction} title="Adjust reward balance">
+          <p className="info-record text-base leading-7">
+            Select an authoritative reward account. The server rechecks administrator authority,
+            MFA, rate limit, account state, duplicate protection, balance safety, and atomic audit storage.
+          </p>
+          <SelectField label="Reward account" name="rewardAccountId" options={accountOptions} />
+          <Field
+            label="Points adjustment"
+            name="delta"
+            type="number"
+            min={-10_000}
+            max={10_000}
+            step={1}
+          />
+          <p className="text-base leading-7 text-muted-ink">
+            Enter a signed nonzero integer from -10,000 to +10,000 points. Zero and fractional
+            values are rejected.
+          </p>
+          <SelectField
+            label="Adjustment reason"
+            name="reason"
+            options={[{ value: "account_correction", label: "Account correction" }]}
+            defaultValue="account_correction"
+          />
+          <TextArea
+            label="Private internal reason"
+            name="internalAuditReason"
+            minLength={1}
+            maxLength={240}
+          />
+          <p className="text-base leading-7 text-muted-ink">
+            Required, 1–240 characters. This private explanation is written only to the redacted
+            administrator audit record and is never copied into public reward ledger references.
+          </p>
+        </CommandForm>
       );
     }
     case "products": {

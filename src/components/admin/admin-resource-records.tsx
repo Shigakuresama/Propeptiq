@@ -175,6 +175,30 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
         ]} />
       ));
       break;
+    case "reward-adjustments":
+      records = snapshot.items.map((item) => (
+        <RecordCard key={item.rewardAccountId} title="Reward account" facts={[
+          ["Reward account ID", item.rewardAccountId],
+          ["Available points", item.availablePoints.toLocaleString("en-US")],
+          ["Pending points", item.pendingPoints.toLocaleString("en-US")],
+          ["Recent administrator adjustments", item.recentAdjustments.length === 0
+            ? "No administrator adjustments recorded"
+            : (
+              <ul className="grid gap-3 p-0">
+                {item.recentAdjustments.map((adjustment) => (
+                  <li className="min-w-0 border-t border-line pt-3 first:border-0 first:pt-0" key={adjustment.adjustmentId}>
+                    <span className="block break-words">{adjustment.adjustmentId}</span>
+                    <span className="mt-1 block">
+                      {adjustment.delta > 0 ? "+" : ""}{adjustment.delta.toLocaleString("en-US")} points
+                      {" · "}{formatInstant(adjustment.occurredAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )],
+        ]} />
+      ));
+      break;
     case "buyers":
       records = snapshot.items.map((item) => (
         <RecordCard key={item.userId} title={`Buyer · ${item.userId}`} status={item.status} facts={[
