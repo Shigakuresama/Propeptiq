@@ -16,10 +16,12 @@ import {
   deactivateSharedSetAction,
   decideAffiliateApplicationAction,
   decideReviewAction,
+  createAffiliatePayoutBatchAdminAction,
   handoffFulfillmentAction,
   markShipmentDeliveredAction,
   publishAttestationAction,
   publishCoaAction,
+  recordAffiliatePayoutPaidAdminAction,
   recordShipmentExceptionAction,
   requestRefundAction,
   revokeReferralCodeAction,
@@ -690,6 +692,73 @@ export function ResourceCommandPanel({
               </p>
             </CommandForm>
           ))}
+        </div>
+      );
+    }
+    case "referral-conversions":
+      return (
+        <ReadOnlyBoundary>
+          Referral conversion records are immutable, redacted settlement history. Qualification
+          and reversal are driven only by authoritative payment lifecycle events; no administrator
+          edit or manual value command is exposed.
+        </ReadOnlyBoundary>
+      );
+    case "commissions":
+      return (
+        <ReadOnlyBoundary>
+          Affiliate commissions are immutable, redacted earned-value history. Approval eligibility,
+          reversals, and payout membership are derived by server-side lifecycle transactions; no
+          administrator amount or status edit is exposed.
+        </ReadOnlyBoundary>
+      );
+    case "payouts": {
+      const pending = snapshot.items.filter((item) => item.state === "pending");
+      const knownProfileIds = snapshot.items.map((item) => item.affiliateProfileId);
+      return (
+        <div className="grid min-w-0 gap-6">
+          <CommandForm
+            action={createAffiliatePayoutBatchAdminAction}
+            title="Create affiliate payout batch"
+          >
+            <p className="info-record text-base leading-7">
+              Enter an active affiliate profile ID from the applications view. The server selects
+              only currently eligible, approved, unpaid commissions and calculates the exact USD
+              amount. Browser-supplied amounts and commission membership are not accepted.
+            </p>
+            <Field
+              label="Affiliate profile ID"
+              name="profileId"
+              list="known-affiliate-payout-profiles"
+            />
+            <IdDatalist id="known-affiliate-payout-profiles" values={knownProfileIds} />
+          </CommandForm>
+          <p className="warning-record text-base leading-7">
+            These commands create a settlement record or record evidence of an externally completed
+            payment. This application does not transmit funds.
+          </p>
+          {pending.map((item) => (
+            <CommandForm
+              key={item.payoutId}
+              action={recordAffiliatePayoutPaidAdminAction}
+              title={`Record payout paid · ${item.payoutId}`}
+            >
+              <Hidden name="payoutId" value={item.payoutId} />
+              <Hidden name="expectedVersion" value={String(item.version)} />
+              <Field label="Provider name" name="providerName" maxLength={120} />
+              <Field label="External reference" name="externalReference" maxLength={200} />
+              <p className="info-record text-base leading-7">
+                Submit only after an authorized operator has independently completed the payment.
+                This records bounded evidence with version checking and one atomic audit event; it
+                does not contact a bank or payment provider.
+              </p>
+            </CommandForm>
+          ))}
+          {snapshot.items.length > 0 && pending.length === 0 ? (
+            <p className="info-record text-base leading-7">
+              Existing payout records are terminal history. No paid or cancelled payout can be
+              changed from this view.
+            </p>
+          ) : null}
         </div>
       );
     }
