@@ -66,6 +66,10 @@ describe("owner referrals route", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Referrals" })).toBeVisible();
     expect(screen.getByText("/r/ref_StableOwnerRoute1234")).toBeVisible();
     expect(screen.getByText("ref:7777777777")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Manage research sets" })).toHaveAttribute(
+      "href",
+      "/research-sets",
+    );
     expect(document.body).not.toHaveTextContent(/owner@example\.test|customer|address|payment/iu);
   });
 

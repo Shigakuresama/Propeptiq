@@ -28,6 +28,13 @@ describe("owner research sets page", () => {
         itemCount: 2,
         updatedAt: "2026-08-28T20:00:00.000Z",
         items: [{ productId: "product-a", quantity: 1 }, { productId: "product-b", quantity: 2 }],
+      }, {
+        code: "set_Task7C2Inactive01",
+        label: "Archived neutral set",
+        active: false,
+        itemCount: 2,
+        updatedAt: "2026-08-27T20:00:00.000Z",
+        items: [{ productId: "product-a", quantity: 1 }, { productId: "product-b", quantity: 1 }],
       }],
     });
 
@@ -37,6 +44,12 @@ describe("owner research sets page", () => {
     expect(markup).toContain("Update Owner neutral set");
     expect(markup).toContain("Deactivate Owner neutral set");
     expect(markup).toContain("/sets/set_Task5COwnerCode01");
+    expect(markup).toContain("Copy public link");
+    expect(markup).toContain("Archived neutral set");
+    expect(markup).toContain("Inactive");
+    expect(markup).not.toContain("/sets/set_Task7C2Inactive01");
+    expect(markup.match(/<svg/gu)?.length).toBeGreaterThanOrEqual(2);
+    expect(markup).not.toContain("<main");
     expect(markup).not.toMatch(/price|discount|inventory|ownerUserId|email/iu);
   });
 

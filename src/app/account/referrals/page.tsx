@@ -35,6 +35,9 @@ export default async function ReferralsPage() {
       <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">
         This private dashboard shows only your code, aggregate counts, reward points, and redacted conversion references.
       </p>
+      <Link className="record-link mt-5 inline-flex min-h-11 items-center" href="/research-sets">
+        Manage research sets
+      </Link>
       {result.status === "inactive" ? (
         <div className="empty-record mt-8">Referrals are not currently active for this account.</div>
       ) : (

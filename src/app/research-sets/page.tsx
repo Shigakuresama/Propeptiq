@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 
 import type { Metadata } from "next";
-import Link from "next/link";
 
 import {
   DeactivateSharedSetForm,
   SharedSetBuilder,
 } from "@/components/growth/shared-set-builder";
+import { SharedSetCard } from "@/components/growth/shared-set-card";
 import {
   createSharedResearchSetAction,
   deactivateSharedResearchSetAction,
@@ -30,7 +30,7 @@ export default async function ResearchSetsPage() {
   }
 
   return (
-    <main className="site-container py-16">
+    <div className="max-w-5xl">
       <p className="eyebrow">Private set workspace</p>
       <h1 className="mt-4 font-heading text-page">Neutral research sets</h1>
       <p className="mt-4 max-w-2xl text-base leading-7 text-muted-ink">
@@ -56,20 +56,16 @@ export default async function ResearchSetsPage() {
         ) : (
           <ul className="mt-6 grid gap-6 p-0">
             {workspace.sets.map((set) => (
-              <li className="record-card" key={set.code}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="font-heading text-2xl">{set.label}</h3>
-                    <p className="mt-2 text-sm text-muted-ink">
-                      {set.itemCount} saved products · {set.active ? "Active" : "Inactive"}
-                    </p>
-                  </div>
+              <li key={set.code}>
+                <SharedSetCard
+                  variant="owner"
+                  code={set.code}
+                  label={set.label}
+                  itemCount={set.itemCount}
+                  active={set.active}
+                >
                   {set.active ? (
-                    <Link className="record-link" href={{ pathname: `/sets/${set.code}` }}>Open public link</Link>
-                  ) : null}
-                </div>
-                {set.active ? (
-                  <div className="mt-7 grid gap-6 lg:grid-cols-2">
+                    <div className="grid gap-6 lg:grid-cols-2">
                     <SharedSetBuilder
                       mode="update"
                       products={workspace.products}
@@ -84,13 +80,14 @@ export default async function ResearchSetsPage() {
                       idempotencyKey={`deactivate:${randomUUID()}`}
                       action={deactivateSharedResearchSetAction}
                     />
-                  </div>
-                ) : null}
+                    </div>
+                  ) : null}
+                </SharedSetCard>
               </li>
             ))}
           </ul>
         )}
       </section>
-    </main>
+    </div>
   );
 }
