@@ -1,4 +1,6 @@
 import { isVerifiedIdentityAt, type VerifiedIdentity } from "@/auth/identity";
+import { createHash } from "node:crypto";
+
 import type { PromotionActivationCandidate, ProductPublicationFacts } from "@/admin/admin-policy";
 import {
   assertStaffCommandAccess,
@@ -69,6 +71,21 @@ export type GrowthPolicyLifecycleResult = Readonly<{
   status: "draft" | "active";
 }>;
 export type GrowthPolicyValues = Readonly<Record<string, number | string | null>>;
+
+export const MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1 = 10_000 as const;
+export const MANUAL_REWARD_ADJUSTMENT_REASONS_V1 = Object.freeze([
+  "account_correction",
+] as const);
+export type ManualRewardAdjustmentReasonV1 =
+  (typeof MANUAL_REWARD_ADJUSTMENT_REASONS_V1)[number];
+
+export type RewardAdjustmentResult = Readonly<{
+  status: "applied" | "idempotent";
+  entryId: string;
+  rewardAccountId: string;
+  delta: number;
+  availablePointsBalanceAfter: number;
+}>;
 
 export type AdminTransaction = Readonly<{
   assertActorAuthority: (input: Readonly<{
@@ -324,6 +341,17 @@ export type AdminTransaction = Readonly<{
     expectedVersion: number;
     now: Date;
   }>) => Promise<GrowthPolicyLifecycleResult & Readonly<{ status: "active" }>>;
+  adjustRewardBalance?: (input: Readonly<{
+    entryId: string;
+    rewardAccountId: string;
+    delta: number;
+    reason: ManualRewardAdjustmentReasonV1;
+    idempotencyKey: string;
+    fingerprint: string;
+    occurredAt: Date;
+  }>) => Promise<RewardAdjustmentResult & Readonly<{
+    reason: ManualRewardAdjustmentReasonV1;
+  }>>;
   appendAudit: (event: AdminAuditEvent) => Promise<void>;
 }>;
 
@@ -583,6 +611,157 @@ function parseGrowthPolicyActivationCommand(input: unknown): Readonly<{
       input.expectedVersion,
       "Expected growth policy version",
     ),
+  });
+}
+
+const canonicalUuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const boundedIdempotencyPattern = /^[^\u0000-\u001f\u007f]{16,200}$/u;
+const internalAuditReasonMaxLength = 240;
+
+function parseRewardAdjustmentCommand(input: unknown): Readonly<{
+  entryId: string;
+  rewardAccountId: string;
+  delta: number;
+  reason: ManualRewardAdjustmentReasonV1;
+  internalAuditReason: string;
+  idempotencyKey: string;
+  fingerprint: string;
+}> {
+  if (!exactRecord(input, [
+    "entryId",
+    "rewardAccountId",
+    "delta",
+    "reason",
+    "internalAuditReason",
+    "idempotencyKey",
+  ])) {
+    throw new Error("Reward adjustment command is malformed");
+  }
+  if (typeof input.entryId !== "string" || !canonicalUuidPattern.test(input.entryId)) {
+    throw new Error("Reward adjustment ledger ID is invalid");
+  }
+  if (
+    typeof input.rewardAccountId !== "string" ||
+    !canonicalUuidPattern.test(input.rewardAccountId)
+  ) {
+    throw new Error("Reward account ID is invalid");
+  }
+  if (
+    typeof input.delta !== "number" ||
+    !Number.isSafeInteger(input.delta) ||
+    input.delta === 0 ||
+    Math.abs(input.delta) > MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1
+  ) {
+    throw new Error("Reward adjustment delta is invalid or out of bounds");
+  }
+  if (
+    typeof input.reason !== "string" ||
+    !MANUAL_REWARD_ADJUSTMENT_REASONS_V1.includes(
+      input.reason as ManualRewardAdjustmentReasonV1,
+    )
+  ) {
+    throw new Error("Reward adjustment reason is invalid");
+  }
+  if (
+    typeof input.internalAuditReason !== "string" ||
+    input.internalAuditReason.trim() !== input.internalAuditReason ||
+    input.internalAuditReason.length < 1 ||
+    input.internalAuditReason.length > internalAuditReasonMaxLength ||
+    /[\u0000-\u001f\u007f]/u.test(input.internalAuditReason)
+  ) {
+    throw new Error("Reward adjustment internal audit reason is invalid");
+  }
+  if (
+    typeof input.idempotencyKey !== "string" ||
+    input.idempotencyKey.trim() !== input.idempotencyKey ||
+    !boundedIdempotencyPattern.test(input.idempotencyKey)
+  ) {
+    throw new Error("Reward adjustment idempotency key is invalid");
+  }
+  const reason = input.reason as ManualRewardAdjustmentReasonV1;
+  const fingerprint = createHash("sha256").update(JSON.stringify({
+    entryId: input.entryId,
+    rewardAccountId: input.rewardAccountId,
+    delta: input.delta,
+    reason,
+    internalAuditReason: input.internalAuditReason,
+  }), "utf8").digest("hex");
+  return Object.freeze({
+    entryId: input.entryId,
+    rewardAccountId: input.rewardAccountId,
+    delta: input.delta,
+    reason,
+    internalAuditReason: input.internalAuditReason,
+    idempotencyKey: input.idempotencyKey,
+    fingerprint,
+  });
+}
+
+function projectRewardAdjustmentResult(
+  command: ReturnType<typeof parseRewardAdjustmentCommand>,
+  result: RewardAdjustmentResult & Readonly<{ reason: ManualRewardAdjustmentReasonV1 }>,
+): RewardAdjustmentResult {
+  if (
+    !exactRecord(result, [
+      "status",
+      "entryId",
+      "rewardAccountId",
+      "delta",
+      "reason",
+      "availablePointsBalanceAfter",
+    ]) ||
+    (result.status !== "applied" && result.status !== "idempotent") ||
+    result.entryId !== command.entryId ||
+    result.rewardAccountId !== command.rewardAccountId ||
+    result.delta !== command.delta ||
+    result.reason !== command.reason ||
+    !Number.isSafeInteger(result.availablePointsBalanceAfter)
+  ) {
+    throw new Error("Reward adjustment transaction read-back is invalid");
+  }
+  return Object.freeze({
+    status: result.status,
+    entryId: result.entryId,
+    rewardAccountId: result.rewardAccountId,
+    delta: result.delta,
+    availablePointsBalanceAfter: result.availablePointsBalanceAfter,
+  });
+}
+
+export async function adjustRewardBalance(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<RewardAdjustmentResult> {
+  const command = parseRewardAdjustmentCommand(input);
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedTransaction(repository, context, principal, "growth.manage", async (tx) => {
+    if (!tx.adjustRewardBalance) throw new Error("Reward adjustment port is unavailable");
+    const result = projectRewardAdjustmentResult(command, await tx.adjustRewardBalance({
+      entryId: command.entryId,
+      rewardAccountId: command.rewardAccountId,
+      delta: command.delta,
+      reason: command.reason,
+      idempotencyKey: command.idempotencyKey,
+      fingerprint: command.fingerprint,
+      occurredAt: context.now,
+    }));
+    if (result.status === "applied") {
+      await tx.appendAudit(audit(
+        principal,
+        context,
+        "growth.reward.adjusted",
+        "reward_account",
+        command.rewardAccountId,
+        {
+          delta: command.delta,
+          reason: command.reason,
+          internalAuditReason: command.internalAuditReason,
+        },
+      ));
+    }
+    return result;
   });
 }
 
