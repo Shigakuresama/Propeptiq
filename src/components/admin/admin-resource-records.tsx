@@ -232,6 +232,24 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
         />
       ));
       break;
+    case "affiliate-applications":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.affiliateProfileId}
+          title={`Affiliate application · ${item.publicCode}`}
+          status={item.status}
+          facts={[
+            ["Affiliate profile ID", item.affiliateProfileId],
+            ["Public code", item.publicCode],
+            ["Public channel", item.publicChannel],
+            ["Promotion method", item.promotionMethod.replaceAll("_", " ")],
+            ["Version", item.version],
+            ["Created", formatInstant(item.createdAt)],
+            ["Updated", formatInstant(item.updatedAt)],
+          ]}
+        />
+      ));
+      break;
     case "buyers":
       records = snapshot.items.map((item) => (
         <RecordCard key={item.userId} title={`Buyer · ${item.userId}`} status={item.status} facts={[

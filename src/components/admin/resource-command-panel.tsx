@@ -14,6 +14,7 @@ import {
   createLoyaltyPolicyDraftAction,
   createReferralPolicyDraftAction,
   deactivateSharedSetAction,
+  decideAffiliateApplicationAction,
   decideReviewAction,
   handoffFulfillmentAction,
   markShipmentDeliveredAction,
@@ -38,6 +39,7 @@ import {
   submitOrRecoverRefundAction,
   supersedeDestinationAction,
   supersedeProductPriceAction,
+  suspendAffiliateApplicationAction,
 } from "@/admin/actions";
 import type { AdminResource } from "@/admin/access";
 import type { AdminReadSnapshot, SafePromotionConfiguration } from "@/admin/admin-read";
@@ -598,6 +600,93 @@ export function ResourceCommandPanel({
                 Deactivation is a soft active-to-inactive transition that preserves the set,
                 its public facts, and item history. The server rechecks the current version,
                 state, administrator authority, MFA, rate limit, and atomic audit before committing.
+              </p>
+            </CommandForm>
+          ))}
+        </div>
+      );
+    }
+    case "affiliate-applications": {
+      const pending = snapshot.items.filter((item) => item.status === "pending");
+      const active = snapshot.items.filter((item) => item.status === "active");
+      if (snapshot.items.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">Affiliate application decisions unavailable</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              No affiliate application records are available in the authoritative database view.
+              A decision cannot be submitted until an application exists.
+            </p>
+          </section>
+        );
+      }
+      if (pending.length === 0 && active.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">No pending or active affiliate applications are available</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              The records shown below are terminal decision history. Rejected and suspended
+              applications cannot be changed from this view.
+            </p>
+          </section>
+        );
+      }
+      return (
+        <div className="grid min-w-0 gap-6">
+          {pending.flatMap((item) => [
+            <CommandForm
+              key={`approve:${item.affiliateProfileId}`}
+              action={decideAffiliateApplicationAction}
+              title={`Approve affiliate application · ${item.publicCode}`}
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.publicCode}</strong>
+                <span className="mt-2 block">Public channel: {item.publicChannel}</span>
+                <span className="mt-1 block">Promotion method: {item.promotionMethod}</span>
+              </p>
+              <Hidden name="profileId" value={item.affiliateProfileId} />
+              <Hidden name="expectedVersion" value={String(item.version)} />
+              <Hidden name="decision" value="active" />
+              <p className="text-base leading-7 text-muted-ink">
+                Approval activates this public affiliate profile only after the server rechecks
+                current state, version, administrator authority, MFA, rate limit, and atomic audit.
+              </p>
+            </CommandForm>,
+            <CommandForm
+              key={`reject:${item.affiliateProfileId}`}
+              action={decideAffiliateApplicationAction}
+              title={`Reject affiliate application · ${item.publicCode}`}
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.publicCode}</strong>
+                <span className="mt-2 block">Public channel: {item.publicChannel}</span>
+                <span className="mt-1 block">Promotion method: {item.promotionMethod}</span>
+              </p>
+              <Hidden name="profileId" value={item.affiliateProfileId} />
+              <Hidden name="expectedVersion" value={String(item.version)} />
+              <Hidden name="decision" value="rejected" />
+              <p className="text-base leading-7 text-muted-ink">
+                Rejection is a terminal pending-to-rejected decision. The server rechecks the
+                exact application version and stores one redacted audit record atomically.
+              </p>
+            </CommandForm>,
+          ])}
+          {active.map((item) => (
+            <CommandForm
+              key={`suspend:${item.affiliateProfileId}`}
+              action={suspendAffiliateApplicationAction}
+              title={`Suspend affiliate · ${item.publicCode}`}
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.publicCode}</strong>
+                <span className="mt-2 block">Public channel: {item.publicChannel}</span>
+                <span className="mt-1 block">Promotion method: {item.promotionMethod}</span>
+              </p>
+              <Hidden name="profileId" value={item.affiliateProfileId} />
+              <Hidden name="expectedVersion" value={String(item.version)} />
+              <p className="text-base leading-7 text-muted-ink">
+                Suspension preserves prior commissions and history while preventing future active
+                affiliate use. The server rechecks current state, version, authority, and audit.
               </p>
             </CommandForm>
           ))}

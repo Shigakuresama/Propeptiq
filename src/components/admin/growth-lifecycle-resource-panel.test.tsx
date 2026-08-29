@@ -15,6 +15,7 @@ const actions = vi.hoisted(() => ({
   createLoyaltyPolicyDraftAction: vi.fn(),
   createReferralPolicyDraftAction: vi.fn(),
   deactivateSharedSetAction: vi.fn(),
+  decideAffiliateApplicationAction: vi.fn(),
   decideReviewAction: vi.fn(),
   handoffFulfillmentAction: vi.fn(),
   markShipmentDeliveredAction: vi.fn(),
@@ -39,6 +40,7 @@ const actions = vi.hoisted(() => ({
   submitOrRecoverRefundAction: vi.fn(),
   supersedeDestinationAction: vi.fn(),
   supersedeProductPriceAction: vi.fn(),
+  suspendAffiliateApplicationAction: vi.fn(),
 }));
 
 vi.mock("@/admin/actions", () => actions);
