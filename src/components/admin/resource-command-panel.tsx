@@ -288,9 +288,27 @@ export function ResourceCommandPanel({
   outcome,
 }: {
   resource: AdminResource;
-  snapshot: AdminReadSnapshot;
+  snapshot: AdminReadSnapshot | null;
   outcome?: CommerceCommandOutcome | undefined;
 }) {
+  if (snapshot === null) {
+    const actions = resource.actions ?? [];
+    const actionSummary = actions.length === 0
+      ? "Read only"
+      : actions
+          .map((action) => action.replaceAll("-", " ").replace(/^./u, (value) => value.toUpperCase()))
+          .join(" · ");
+    return (
+      <section className="record-card">
+        <h2 className="font-heading text-2xl">Growth administration boundary</h2>
+        <p className="mt-4 text-base font-semibold text-ink">{actionSummary}</p>
+        <p className="mt-3 text-base leading-7 text-muted-ink">
+          Database-backed records and commands are not available for this resource.
+        </p>
+      </section>
+    );
+  }
+
   if (resource.slug !== snapshot.resource) {
     return <EmptyCommand>The authoritative resource read-back did not match this route. Commands fail closed.</EmptyCommand>;
   }

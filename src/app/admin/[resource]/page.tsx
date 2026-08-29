@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { adminGate, resourceBySlug } from "@/admin/access";
+import { isAdminReadResource } from "@/admin/admin-read";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
 import { AdminGateState } from "@/components/admin/admin-gate-state";
 import { AdminResourceRecords } from "@/components/admin/admin-resource-records";
@@ -44,6 +45,16 @@ export default async function AdminResourcePage({
   const request = await getRequestIdentity();
   const gate = adminGate(request, resource);
   if (!gate.allowed) return <AdminGateState gate={gate} inline />;
+  if (!isAdminReadResource(resource.slug)) {
+    return (
+      <section>
+        <p className="eyebrow">Capability · {resource.capability}</p>
+        <h1 className="mt-4 font-heading text-page leading-[0.95]">{resource.label}</h1>
+        <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">{resource.description}</p>
+        <div className="mt-8"><ResourceCommandPanel resource={resource} snapshot={null} /></div>
+      </section>
+    );
+  }
   const repositories = getRequestRepositories(request);
   if (!repositories) {
     return (

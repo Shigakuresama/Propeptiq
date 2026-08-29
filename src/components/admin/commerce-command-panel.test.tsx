@@ -269,3 +269,18 @@ describe("Slice 6G staff commerce commands", () => {
     await waitFor(() => expect(alert).toHaveFocus());
   });
 });
+
+describe("Task 8A growth resource shell", () => {
+  it("shows the exact closed action boundary without exposing mutation forms", () => {
+    const selected = resourceBySlug("loyalty-policies");
+    expect(selected).not.toBeNull();
+    if (!selected) return;
+
+    render(<ResourceCommandPanel resource={selected} snapshot={null} />);
+
+    expect(screen.getByRole("heading", { name: "Growth administration boundary" })).toBeVisible();
+    expect(screen.getByText("Create draft · Activate · Retire")).toBeVisible();
+    expect(screen.getByText(/database-backed records and commands are not available/i)).toBeVisible();
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
+  });
+});

@@ -4,12 +4,37 @@ import type { AdminReadResource } from "@/admin/admin-read";
 import type { Capability } from "@/domain/authorization";
 import { authorizeOperation, type AuthorizationOperation } from "@/domain/authorization";
 
+export type GrowthAdminResourceSlug =
+  | "loyalty-policies"
+  | "referral-policies"
+  | "affiliate-policies"
+  | "referral-codes"
+  | "referral-conversions"
+  | "affiliate-applications"
+  | "commissions"
+  | "payouts"
+  | "reward-adjustments"
+  | "shared-sets";
+
+export type AdminResourceAction =
+  | "create-draft"
+  | "activate"
+  | "retire"
+  | "revoke"
+  | "decide"
+  | "suspend"
+  | "create-batch"
+  | "record-paid"
+  | "adjust"
+  | "deactivate";
+
 export type AdminResource = Readonly<{
-  slug: AdminReadResource;
+  slug: AdminReadResource | GrowthAdminResourceSlug;
   label: string;
   description: string;
   capability: Capability;
   operation: AuthorizationOperation;
+  actions?: readonly AdminResourceAction[];
 }>;
 
 export const adminResources: readonly AdminResource[] = Object.freeze([
@@ -29,6 +54,16 @@ export const adminResources: readonly AdminResource[] = Object.freeze([
   { slug: "shipments", label: "Shipments", description: "Preparation remains separate from guarded handoff, delivery, and exception transitions.", capability: "fulfillment:release:consume", operation: "fulfillment.release.consume" },
   { slug: "staff", label: "Staff capabilities", description: "Known capability grants and revocations.", capability: "staff:manage", operation: "staff.manage" },
   { slug: "audit", label: "Audit history", description: "Append-only redacted mutation records.", capability: "staff:manage", operation: "staff.manage" },
+  { slug: "loyalty-policies", label: "Loyalty policies", description: "Versioned loyalty policy drafts and explicit lifecycle commands.", capability: "growth:manage", operation: "growth.manage", actions: ["create-draft", "activate", "retire"] },
+  { slug: "referral-policies", label: "Referral policies", description: "Versioned customer referral policy drafts and explicit lifecycle commands.", capability: "growth:manage", operation: "growth.manage", actions: ["create-draft", "activate", "retire"] },
+  { slug: "affiliate-policies", label: "Affiliate policies", description: "Versioned cash affiliate policy drafts and explicit lifecycle commands.", capability: "growth:manage", operation: "growth.manage", actions: ["create-draft", "activate", "retire"] },
+  { slug: "referral-codes", label: "Referral codes", description: "Capability-scoped referral code lifecycle with revocation only.", capability: "growth:manage", operation: "growth.manage", actions: ["revoke"] },
+  { slug: "referral-conversions", label: "Referral conversions", description: "Read-only redacted referral conversion records.", capability: "growth:manage", operation: "growth.manage", actions: [] },
+  { slug: "affiliate-applications", label: "Affiliate applications", description: "Reviewed application decisions and active-affiliate suspension.", capability: "growth:manage", operation: "growth.manage", actions: ["decide", "suspend"] },
+  { slug: "commissions", label: "Affiliate commissions", description: "Read-only redacted commission records.", capability: "growth:manage", operation: "growth.manage", actions: [] },
+  { slug: "payouts", label: "Affiliate payouts", description: "Payout batch creation and external paid-state recording only.", capability: "affiliate:payout", operation: "affiliate.payout", actions: ["create-batch", "record-paid"] },
+  { slug: "reward-adjustments", label: "Reward adjustments", description: "Bounded idempotent reward account adjustments.", capability: "growth:manage", operation: "growth.manage", actions: ["adjust"] },
+  { slug: "shared-sets", label: "Shared sets", description: "Read-only shared-set records with soft deactivation.", capability: "growth:manage", operation: "growth.manage", actions: ["deactivate"] },
 ]);
 
 export type AdminGate =
