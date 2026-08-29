@@ -102,3 +102,47 @@
 - `npm run lint` — passed with zero warnings.
 - `git diff --check` — passed; only the repository's existing Windows LF-to-CRLF advisory was printed.
 - Screenshots and formal browser/multi-viewport E2E were not run because that remains Task 10; no screenshot claim is made.
+
+## Task 7C1 checkpoint — Authoritative cart and checkout presentation
+
+- Accepted range `7000703..454ae19` completed requested-points browser allowlisting, complete authoritative promotion/referral/redemption quote groups, distinct cart/checkout rows, and customer-safe rewards status copy.
+- The accepted checkpoint recorded 1,160/1,160 full unit tests, 18/18 final checkout-form tests, typecheck, lint, and diff check passing after two Important review-fix rounds and one Low copy cleanup.
+- Shared-set presentation remained explicitly deferred to Task 7C2; no Task 8+, migration, provider, production activation, or formal Task 10 browser work was included.
+
+## Task 7C2 and whole Task 7 checkpoint — Shared research sets
+
+### Scope and implementation
+
+- Started from the actual clean worktree HEAD `3cc21cf`; the user-provided stale expectation was checked rather than used. No reset, clean, checkout, rewrite, migration, provider activation, or production operation was performed.
+- Implementation/tests committed as `f30072a` with the exact required subject `feat(ui): add editorial rewards referrals and partner experience`.
+- Added the shared `SharedSetCard` for public and private projections. Public items link to current catalog facts; owner cards show label, item count, text-plus-Lucide active/inactive state, active-only open/copy actions, and child slots for edit/deactivate controls.
+- Copy success and failure use a polite status region without moving focus. The public card render test prohibits owner/email and commerce/policy authority strings; the private card accepts only code, label, item count, active state, and control children.
+- `/sets/[code]` now renders the shared card while preserving the same non-enumerating unavailable view, omission notice, current-product omission behavior, and the existing product-ID/quantity-only `AddSetToCartButton` boundary.
+- `/research-sets` now renders shared owner cards and no longer owns a nested main landmark. Its new layout uses the existing `getRequestIdentity` plus `AccountShell` pattern, preserving the skip link, one main landmark, mobile Sheet through the existing `xl` boundary, and desktop rail at 1280px.
+- `/account/referrals` adds one internal `next/link` entry to `/research-sets`; referral reads, actions, privacy, and dashboard ownership were not changed.
+- Shared-set create/update forms now expose persistent labels, required and `aria-required` label semantics, bounded quantity controls, an associated selection/count error summary, focused customer-safe server errors, and polite success status. Deactivation has the same focused error and polite success behavior.
+- Browser mutation fields remain exactly label, current product IDs/quantities, code, expected version, and idempotency as applicable. No owner, email, price, money, rate, discount, inventory, policy, or hash field was added.
+
+### Witnessed RED evidence
+
+- Component slice: `npm test -- --run src/components/growth/shared-set-card.test.tsx src/components/growth/shared-set-builder.test.tsx` — 2 files failed. The card suite could not resolve the intentionally missing component; builder tests failed on missing `aria-required`, focused server-error handling, and explicit polite success semantics. Two pre-existing builder tests passed.
+- Route/layout/form slice: `npm test -- --run src/components/growth/shared-set-builder.test.tsx src/app/research-sets/page.test.tsx src/app/research-sets/layout.test.tsx 'src/app/(public)/sets/[code]/page.test.tsx' src/app/account/referrals/page.test.tsx` — 5 files failed with 5 targeted failures and 11 tests passed. Failures proved the missing account-shell layout, absent owner copy/status affordance, nested page main, absent referrals entry link, missing public-card label relationship, incomplete selection summary, and unfocused deactivation error behavior.
+
+### GREEN and final gates
+
+- Initial component GREEN: 2 files and 6 tests passed.
+- Integrated component/route GREEN: 6 files and 19 tests passed.
+- Focused shared-set component/route/server/action gate: 10 files and 136 tests passed, including add-to-cart ID/quantity transfer, shared-set service, server composition, and action boundary tests.
+- Required component gate: `npm test -- --run src/components/site src/components/commerce src/components/growth` — 17 files and 58 tests passed on the final implementation.
+- Full unit gate: `npm test` — 110 files and 1,173 tests passed on the final implementation.
+- `npm run typecheck` — passed after correcting one typed dynamic-route link found by the first run.
+- Affected typed-route regression: 2 files and 4 tests passed after that correction.
+- `npm run lint` — passed with zero warnings.
+- `git diff --check` and staged diff check — passed; Git printed only the repository's existing Windows LF-to-CRLF advisory.
+- E2E, build, preview, and formal screenshots were not run because Task 10 owns those gates and the Task 7C2 brief explicitly did not require them for a focused failure.
+
+### Whole Task 7 status and remaining concern
+
+- Task 7A public editorial growth, Task 7B private owner dashboards, Task 7C1 authoritative cart/checkout presentation, and Task 7C2 shared-set UX are complete at their recorded checkpoints and final unit/static gates. The earlier independent review outcomes for 7A–7C1 remain recorded above; no new independent-review claim is made for 7C2.
+- No production growth policy, referral rate, affiliate payout, catalog price, provider capability, or external operation was activated or invented.
+- Formal browser multi-viewport, 200% zoom, keyboard, reduced-motion, overflow, screenshot, Preview, and E2E evidence remains Task 10. No claim is made for those unrun gates.
