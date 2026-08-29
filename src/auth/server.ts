@@ -12,6 +12,7 @@ import {
   type AdminReadSnapshotFor,
 } from "@/admin/admin-read";
 import type { AdminRepository } from "@/admin/admin-service";
+import type { AffiliateApplicationAdminRepository } from "@/admin/affiliate-application-admin-service";
 import type { LocalTestDriver } from "@/auth/local-driver-types";
 import {
   loadCheckoutSuccess,
@@ -29,6 +30,7 @@ import {
 import { createPostgresRateLimitStore } from "@/db/repositories/rate-limit-store";
 import { withRuntimeTransaction, type RuntimeDatabaseClient } from "@/db/runtime";
 import { readServerEnv } from "@/env";
+import { createPostgresAffiliateAdminMutationTransaction } from "@/growth/affiliate-service";
 import { createRuntimeStorageVerifier } from "@/security/blob-storage";
 import type { StorageVerifier } from "@/security/storage";
 
@@ -51,6 +53,7 @@ export type RequestIdentity = Readonly<{
 export type RequestRepositories = Readonly<{
   accountRepository: AccountRepository;
   adminRepository: AdminRepository;
+  affiliateApplicationAdminRepository: AffiliateApplicationAdminRepository;
   storageVerifier: StorageVerifier;
   loadAccount: () => Promise<AccountSummary | null>;
   loadCurrentAttestation: () => Promise<Readonly<{ version: number; policyText: string }> | null>;
@@ -162,6 +165,16 @@ export function getRequestRepositories(
     return {
       accountRepository: driver.accountRepository,
       adminRepository: driver.adminRepository,
+      affiliateApplicationAdminRepository: Object.freeze({
+        rateLimitStore: Object.freeze({
+          async increment() {
+            throw new Error("Affiliate application mutation is unavailable in local mode");
+          },
+        }),
+        async mutateInTransaction() {
+          throw new Error("Affiliate application mutation is unavailable in local mode");
+        },
+      }),
       storageVerifier: driver.storageVerifier,
       loadAccount: async () => (ownerId ? driver.loadAccount(ownerId) : null),
       loadCurrentAttestation: async () => driver.loadCurrentAttestation(),
@@ -204,9 +217,21 @@ export function getRequestRepositories(
         { isolationLevel: options.isolationLevel },
       ),
   );
+  const affiliateApplicationAdminRepository = Object.freeze({
+    rateLimitStore,
+    mutateInTransaction: createPostgresAffiliateAdminMutationTransaction({
+      runSerializableTransaction: (work, options) =>
+        withRuntimeTransaction(
+          request.environment,
+          (client) => work(databaseQueryPort(client)),
+          { isolationLevel: options.isolationLevel },
+        ),
+    }),
+  });
   return {
     accountRepository: createPostgresAccountRepository(run),
     adminRepository: createPostgresAdminRepository(run, rateLimitStore),
+    affiliateApplicationAdminRepository,
     storageVerifier: createRuntimeStorageVerifier(request.environment),
     loadAccount: () =>
       withRuntimeTransaction(request.environment, (client) =>

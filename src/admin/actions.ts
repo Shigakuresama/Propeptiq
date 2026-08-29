@@ -6,6 +6,10 @@ import { redirect } from "next/navigation";
 
 import { resourceBySlug, adminGate } from "@/admin/access";
 import {
+  decideAffiliateApplication,
+  suspendAffiliateApplication,
+} from "@/admin/affiliate-application-admin-service";
+import {
   adjustRewardBalance,
   activateProduct,
   activateGrowthPolicy,
@@ -339,7 +343,7 @@ function promotionReference(
 
 function resultCode(error: unknown): "saved" | "stale" | "rate-limited" | "denied" | "unavailable" {
   const message = error instanceof Error ? error.message : "";
-  if (/stale|changed during/i.test(message)) return "stale";
+  if (/stale|changed during|version_conflict/i.test(message)) return "stale";
   if (/rate limit/i.test(message)) return "rate-limited";
   if (/origin/i.test(message)) return "denied";
   if (/unavailable|does not exist|required/i.test(message)) return "unavailable";
@@ -929,5 +933,38 @@ export async function deactivateSharedSetAction(formData: FormData): Promise<nev
       sharedSetId,
       expectedUpdatedAt,
     });
+  });
+}
+
+export async function decideAffiliateApplicationAction(formData: FormData): Promise<never> {
+  return run("affiliate-applications", async () => {
+    exactFormFields(formData, ["profileId", "expectedVersion", "decision"]);
+    const profileId = canonicalV4Uuid(formData, "profileId");
+    const expectedVersion = canonicalInteger(formData, "expectedVersion");
+    const decision = value(formData, "decision");
+    if (expectedVersion < 1 || (decision !== "active" && decision !== "rejected")) {
+      throw new Error("Affiliate application decision is invalid");
+    }
+    const admin = await trustedGrowthAdmin("affiliate-applications");
+    await decideAffiliateApplication(
+      admin.repositories.affiliateApplicationAdminRepository,
+      admin.context,
+      { profileId, expectedVersion, decision },
+    );
+  });
+}
+
+export async function suspendAffiliateApplicationAction(formData: FormData): Promise<never> {
+  return run("affiliate-applications", async () => {
+    exactFormFields(formData, ["profileId", "expectedVersion"]);
+    const profileId = canonicalV4Uuid(formData, "profileId");
+    const expectedVersion = canonicalInteger(formData, "expectedVersion");
+    if (expectedVersion < 1) throw new Error("Affiliate application version is invalid");
+    const admin = await trustedGrowthAdmin("affiliate-applications");
+    await suspendAffiliateApplication(
+      admin.repositories.affiliateApplicationAdminRepository,
+      admin.context,
+      { profileId, expectedVersion },
+    );
   });
 }

@@ -51,6 +51,12 @@ function repositories(): RequestRepositories {
         throw new Error("Admin transaction is not used by account updates");
       },
     },
+    affiliateApplicationAdminRepository: {
+      rateLimitStore: { increment: async () => 1 },
+      async mutateInTransaction() {
+        throw new Error("Affiliate application mutation is not used by account updates");
+      },
+    },
     storageVerifier: { mode: "disabled", verify: async () => ({ exists: false, sha256: null }) },
     loadAccount: async () => null,
     loadCurrentAttestation: async () => ({ version: 1, policyText: "Research only." }),
