@@ -51,9 +51,11 @@ function context(): AdminCommandContext {
 function repository() {
   let policy: { id: string; kind: "loyalty"; version: number; status: "draft" | "active" } | null = null;
   let audits: AdminAuditEvent[] = [];
+  let transactionCount = 0;
   const adminRepository = {
     rateLimitStore: { increment: async () => 1 },
     async transaction<Result>(work: (transaction: AdminTransaction) => Promise<Result>) {
+      transactionCount += 1;
       const stagedPolicy = policy === null ? null : { ...policy };
       let nextPolicy = stagedPolicy;
       const stagedAudits = [...audits];
@@ -95,6 +97,23 @@ function repository() {
     adminRepository,
     readPolicy: () => policy,
     readAudits: () => audits,
+    readTransactionCount: () => transactionCount,
+  };
+}
+
+function loyaltyDraft(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: "loyalty",
+    policyId,
+    effectiveAt: now.toISOString(),
+    values: {
+      pointsPerDollar: 2,
+      redemptionMinorPerPoint: 1,
+      minimumRedemptionPoints: 500,
+      maximumRedemptionBasisPoints: 2_500,
+      expiresAfterDays: null,
+    },
+    ...overrides,
   };
 }
 
@@ -104,18 +123,11 @@ describe("Task 8B1 versioned growth policy service", () => {
     expect(typeof policyService.activateGrowthPolicy).toBe("function");
     const store = repository();
 
-    const draft = await policyService.createGrowthPolicyDraft!(store.adminRepository, context(), {
-      kind: "loyalty",
-      policyId,
-      effectiveAt: now.toISOString(),
-      values: {
-        pointsPerDollar: 2,
-        redemptionMinorPerPoint: 1,
-        minimumRedemptionPoints: 500,
-        maximumRedemptionBasisPoints: 2_500,
-        expiresAfterDays: null,
-      },
-    });
+    const draft = await policyService.createGrowthPolicyDraft!(
+      store.adminRepository,
+      context(),
+      loyaltyDraft(),
+    );
     expect(draft).toEqual({ id: policyId, kind: "loyalty", version: 1, status: "draft" });
 
     await expect(policyService.activateGrowthPolicy!(store.adminRepository, context(), {
@@ -139,5 +151,39 @@ describe("Task 8B1 versioned growth policy service", () => {
       correlationId: "task-8b1-policy-correlation",
       metadata: { kind: "loyalty", version: 1, status: "active" },
     }]);
+  });
+
+  it.each([
+    ["numeric draft ID", "draft", loyaltyDraft({ policyId: 1 })],
+    ["boxed draft ID", "draft", loyaltyDraft({ policyId: new String(policyId) })],
+    ["coercible draft ID", "draft", loyaltyDraft({ policyId: { toString: () => policyId } })],
+    ["extra draft key", "draft", { ...loyaltyDraft(), unexpected: true }],
+    ["unsafe policy integer", "draft", loyaltyDraft({ values: {
+      pointsPerDollar: Number.MAX_SAFE_INTEGER + 1,
+      redemptionMinorPerPoint: 1,
+      minimumRedemptionPoints: 500,
+      maximumRedemptionBasisPoints: 2_500,
+      expiresAfterDays: null,
+    } })],
+    ["numeric activation ID", "activation", { kind: "loyalty", policyId: 1, expectedVersion: 1 }],
+    ["boxed activation ID", "activation", { kind: "loyalty", policyId: new String(policyId), expectedVersion: 1 }],
+    ["boolean version", "activation", { kind: "loyalty", policyId, expectedVersion: true }],
+    ["numeric-string version", "activation", { kind: "loyalty", policyId, expectedVersion: "1" }],
+    ["boxed version", "activation", { kind: "loyalty", policyId, expectedVersion: new Number(1) }],
+    ["coercible version", "activation", { kind: "loyalty", policyId, expectedVersion: { valueOf: (): number => 1 } }],
+    ["unsafe version", "activation", { kind: "loyalty", policyId, expectedVersion: Number.MAX_SAFE_INTEGER + 1 }],
+    ["extra activation key", "activation", { kind: "loyalty", policyId, expectedVersion: 1, unexpected: true }],
+  ] as const)("rejects %s before any transaction or audit", async (_label, command, input) => {
+    const store = repository();
+    const execute = command === "draft"
+      ? policyService.createGrowthPolicyDraft!
+      : policyService.activateGrowthPolicy!;
+
+    await expect(execute(store.adminRepository, context(), input)).rejects.toThrow(
+      /invalid|malformed|domain/i,
+    );
+    expect(store.readTransactionCount()).toBe(0);
+    expect(store.readPolicy()).toBeNull();
+    expect(store.readAudits()).toEqual([]);
   });
 });

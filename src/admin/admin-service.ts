@@ -524,7 +524,10 @@ function parseGrowthPolicyDraftCommand(input: unknown): Readonly<{
   if (!exactRecord(input.values, growthPolicyValueFields(kind))) {
     throw new Error("Growth policy values are malformed");
   }
-  const policyId = requireId(String(input.policyId), "Growth policy ID");
+  if (typeof input.policyId !== "string") {
+    throw new Error("Growth policy ID is invalid");
+  }
+  const policyId = requireId(input.policyId, "Growth policy ID");
   if (typeof input.effectiveAt !== "string") {
     throw new Error("Growth policy effective time is invalid");
   }
@@ -567,11 +570,17 @@ function parseGrowthPolicyActivationCommand(input: unknown): Readonly<{
   if (input.kind !== "loyalty" && input.kind !== "referral" && input.kind !== "affiliate") {
     throw new Error("Growth policy kind is invalid");
   }
+  if (typeof input.policyId !== "string") {
+    throw new Error("Growth policy ID is invalid");
+  }
+  if (typeof input.expectedVersion !== "number") {
+    throw new Error("Expected growth policy version is invalid");
+  }
   return Object.freeze({
     kind: input.kind,
-    policyId: requireId(String(input.policyId), "Growth policy ID"),
+    policyId: requireId(input.policyId, "Growth policy ID"),
     expectedVersion: requirePositiveVersion(
-      Number(input.expectedVersion),
+      input.expectedVersion,
       "Expected growth policy version",
     ),
   });
