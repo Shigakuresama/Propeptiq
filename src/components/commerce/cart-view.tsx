@@ -240,17 +240,28 @@ export function CartView({
       <aside className="cart-summary" aria-labelledby="cart-summary-heading">
         <p className="eyebrow">Server preview</p>
         <h2 id="cart-summary-heading" className="mt-3 font-heading text-3xl text-ink">
-          Merchandise subtotal
+          Order summary
         </h2>
-        <p className="mt-6 text-4xl font-semibold tabular-nums text-ink">
-          {preview?.currency
-            ? formatMoney(preview.subtotalMinor, preview.currency)
-            : "Unavailable"}
-        </p>
         <dl className="mt-7 space-y-3 border-y border-border py-5 text-sm">
           <div className="flex justify-between gap-5">
-            <dt>Final discount</dt>
+            <dt>Merchandise subtotal</dt>
+            <dd className="tabular-nums">
+              {preview?.currency
+                ? formatMoney(preview.subtotalMinor, preview.currency)
+                : "Unavailable"}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-5">
+            <dt>Promotion</dt>
             <dd>Calculated at checkout</dd>
+          </div>
+          <div className="flex justify-between gap-5">
+            <dt>Referral benefit</dt>
+            <dd>Available after checkout quote</dd>
+          </div>
+          <div className="flex justify-between gap-5">
+            <dt>Points redemption</dt>
+            <dd>Available after checkout quote</dd>
           </div>
           <div className="flex justify-between gap-5">
             <dt>Tax</dt>
@@ -259,6 +270,10 @@ export function CartView({
           <div className="flex justify-between gap-5">
             <dt>Shipping</dt>
             <dd>Not yet calculated</dd>
+          </div>
+          <div className="flex justify-between gap-5 border-t border-border pt-3 font-semibold">
+            <dt>Total</dt>
+            <dd>Available after checkout quote</dd>
           </div>
         </dl>
 
@@ -301,7 +316,7 @@ export function CartView({
           Continue to sign in
         </Button>
         <p className="mt-4 text-xs leading-5 text-muted-ink">
-          Account verification continues at checkout. Destination, tax, shipping, final discount, and payment remain unavailable until the next commerce step.
+          Account verification continues at checkout. Destination, promotion, referral benefit, points redemption, tax, shipping, total, and payment remain unavailable until the next commerce step.
         </p>
         <Link className="record-link mt-6 inline-block" href="/catalog">
           Continue shopping

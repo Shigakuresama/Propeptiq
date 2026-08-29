@@ -150,6 +150,191 @@ describe("CheckoutForm", () => {
     );
   });
 
+  it("sends only valid requested points with the existing origin and idempotency paths", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/catalog/preview") return response(preview());
+      if (url === "/api/checkout/quote") {
+        return response({ status: "quote_unavailable", component: "commerce" }, 503);
+      }
+      throw new Error(`Unexpected test request: ${url}`);
+    });
+
+    render(<CheckoutForm promotions={[]} navigate={navigate} />);
+    const points = screen.getByLabelText("Points to redeem (optional)");
+    expect(points).not.toBeRequired();
+    expect(points).toHaveAttribute("type", "number");
+    expect(points).toHaveAttribute("min", "1");
+    expect(points).toHaveAttribute("max", String(Number.MAX_SAFE_INTEGER));
+    expect(points).toHaveAttribute("step", "1");
+    expect(screen.queryByText(/points pending after qualifying payment/i)).toBeNull();
+
+    await user.type(points, "500");
+    await completeDestinationWithoutPromotion(user);
+    const quoteButton = screen.getByRole("button", { name: "Get authoritative quote" });
+    await waitFor(() => expect(quoteButton).toBeEnabled());
+    await user.click(quoteButton);
+
+    const quoteCall = fetchMock.mock.calls.find(([url]) => url === "/api/checkout/quote")!;
+    const init = quoteCall[1] as RequestInit;
+    expect(new Headers(init.headers).get("idempotency-key")).toBe(firstKey);
+    const requestBody = JSON.parse(String(init.body));
+    expect(Object.keys(requestBody).sort()).toEqual([
+      "destination", "items", "promotionIds", "rewardRedemptionPoints",
+    ]);
+    expect(requestBody.rewardRedemptionPoints).toBe(500);
+    expect(requestBody).not.toEqual(expect.objectContaining({
+      rewardBalancePoints: expect.anything(),
+      rewardRedemptionRate: expect.anything(),
+      rewardRedemptionMinor: expect.anything(),
+      rewardPolicyHash: expect.anything(),
+    }));
+  });
+
+  it.each(["0", "1.5", "9007199254740992"])(
+    "does not send invalid requested points %s",
+    async (requestedPoints) => {
+      const user = userEvent.setup();
+      render(<CheckoutForm promotions={[]} navigate={navigate} />);
+      await completeDestinationWithoutPromotion(user);
+      await user.type(screen.getByLabelText("Points to redeem (optional)"), requestedPoints);
+      const quoteButton = screen.getByRole("button", { name: "Get authoritative quote" });
+      await waitFor(() => expect(quoteButton).toBeEnabled());
+      await user.click(quoteButton);
+
+      expect(await screen.findAllByText("Enter a positive whole number of points")).toHaveLength(2);
+      expect(fetchMock.mock.calls.filter(([url]) => url === "/api/checkout/quote")).toHaveLength(0);
+    },
+  );
+
+  it("renders the complete authoritative growth breakdown as distinct rows", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/catalog/preview") return response(preview());
+      if (url !== "/api/checkout/quote") throw new Error(`Unexpected test request: ${url}`);
+      return response({
+        status: "quoted",
+        quote: {
+          status: "ready", reviewRequired: false, reasons: [], currency: "USD",
+          subtotalMinor: 4_800, discountMinor: 1_080, shippingMinor: 500, taxMinor: 321, totalMinor: 4_541,
+          promotionDiscountMinor: 300, referralDiscountMinor: 180,
+          rewardRedemptionPoints: 600, rewardRedemptionMinor: 600,
+          pendingBaseEarnPoints: 74, rewardsBenefitAvailable: true, rewardsUnavailableReason: null,
+          lines: [{
+            productId, productName: "Synthetic local test only — Alpha", packageForm: "Research vial",
+            quantity: 2, unitAmountMinor: 2_400, subtotalMinor: 4_800,
+            discountMinor: 1_080, totalMinor: 3_720,
+          }],
+        },
+      });
+    });
+
+    render(<CheckoutForm promotions={[]} navigate={navigate} />);
+    await completeDestinationWithoutPromotion(user);
+    const quoteButton = screen.getByRole("button", { name: "Get authoritative quote" });
+    await waitFor(() => expect(quoteButton).toBeEnabled());
+    await user.click(quoteButton);
+
+    const summary = await screen.findByRole("heading", { name: "Authoritative total" });
+    const rows = summary.parentElement!;
+    expect(within(rows).getByText("Merchandise subtotal")).toBeVisible();
+    expect(within(rows).getByText("Promotion discount")).toBeVisible();
+    expect(within(rows).getByText("Referral benefit")).toBeVisible();
+    expect(within(rows).getByText("Points redemption (600 points)")).toBeVisible();
+    expect(within(rows).getByText("Shipping")).toBeVisible();
+    expect(within(rows).getByText("Tax")).toBeVisible();
+    expect(within(rows).getByText("Total")).toBeVisible();
+    expect(within(rows).getByText("74 points pending after qualifying payment")).toBeVisible();
+  });
+
+  it.each([
+    ["partial acquisition", {
+      promotionDiscountMinor: 300,
+    }],
+    ["partial rewards", {
+      promotionDiscountMinor: 480,
+      referralDiscountMinor: 600,
+      rewardRedemptionPoints: 600,
+      rewardRedemptionMinor: 600,
+      pendingBaseEarnPoints: 74,
+      rewardsBenefitAvailable: true,
+    }],
+    ["arithmetic mismatch", {
+      promotionDiscountMinor: 300,
+      referralDiscountMinor: 180,
+      rewardRedemptionPoints: 600,
+      rewardRedemptionMinor: 599,
+      pendingBaseEarnPoints: 74,
+      rewardsBenefitAvailable: true,
+      rewardsUnavailableReason: null,
+    }],
+  ])("rejects a %s authoritative growth response group", async (_label, growth) => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/catalog/preview") return response(preview());
+      if (url !== "/api/checkout/quote") throw new Error(`Unexpected test request: ${url}`);
+      return response({
+        status: "quoted",
+        quote: {
+          status: "ready", reviewRequired: false, reasons: [], currency: "USD",
+          subtotalMinor: 4_800, discountMinor: 1_080, shippingMinor: 500, taxMinor: 321, totalMinor: 4_541,
+          ...growth,
+          lines: [{
+            productId, productName: "Synthetic local test only — Alpha", packageForm: "Research vial",
+            quantity: 2, unitAmountMinor: 2_400, subtotalMinor: 4_800,
+            discountMinor: 1_080, totalMinor: 3_720,
+          }],
+        },
+      });
+    });
+
+    render(<CheckoutForm promotions={[]} navigate={navigate} />);
+    await completeDestinationWithoutPromotion(user);
+    const quoteButton = screen.getByRole("button", { name: "Get authoritative quote" });
+    await waitFor(() => expect(quoteButton).toBeEnabled());
+    await user.click(quoteButton);
+
+    expect(await screen.findByText(/checkout is temporarily unavailable/i)).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Authoritative total" })).toBeNull();
+  });
+
+  it("keeps zero-value growth rows distinct and shows the authoritative unavailable reason", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === "/api/catalog/preview") return response(preview());
+      if (url !== "/api/checkout/quote") throw new Error(`Unexpected test request: ${url}`);
+      return response({
+        status: "quoted",
+        quote: {
+          status: "ready", reviewRequired: false, reasons: [], currency: "USD",
+          subtotalMinor: 4_800, discountMinor: 0, shippingMinor: 500, taxMinor: 321, totalMinor: 5_621,
+          promotionDiscountMinor: 0, referralDiscountMinor: 0,
+          rewardRedemptionPoints: 0, rewardRedemptionMinor: 0,
+          pendingBaseEarnPoints: 0, rewardsBenefitAvailable: false,
+          rewardsUnavailableReason: "rewards_policy_inactive",
+          lines: [{
+            productId, productName: "Synthetic local test only — Alpha", packageForm: "Research vial",
+            quantity: 2, unitAmountMinor: 2_400, subtotalMinor: 4_800,
+            discountMinor: 0, totalMinor: 4_800,
+          }],
+        },
+      });
+    });
+
+    render(<CheckoutForm promotions={[]} navigate={navigate} />);
+    await completeDestinationWithoutPromotion(user);
+    const quoteButton = screen.getByRole("button", { name: "Get authoritative quote" });
+    await waitFor(() => expect(quoteButton).toBeEnabled());
+    await user.click(quoteButton);
+
+    const summary = (await screen.findByRole("heading", { name: "Authoritative total" })).parentElement!;
+    expect(within(summary).getByText("Promotion discount")).toBeVisible();
+    expect(within(summary).getByText("Referral benefit")).toBeVisible();
+    expect(within(summary).getByText("Points redemption (0 points)")).toBeVisible();
+    expect(within(summary).getByText("0 points pending after qualifying payment")).toBeVisible();
+    expect(within(summary).getByText("Rewards benefit unavailable: rewards_policy_inactive")).toBeVisible();
+  });
+
   it("invalidates the quote and rotates the key after a request edit", async () => {
     const user = userEvent.setup();
     fetchMock.mockImplementation(async (url: string) => {

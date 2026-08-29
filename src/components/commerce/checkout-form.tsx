@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 
 type PromotionOption = Readonly<{ id: string; name: string }>;
 type DestinationField = "recipientName" | "line1" | "city" | "stateCode" | "postalCode";
-type Errors = Partial<Record<DestinationField | "items", string>>;
+type Errors = Partial<Record<DestinationField | "items" | "rewardRedemptionPoints", string>>;
 
 type SafeQuote = Readonly<{
   status: "ready" | "review_required";
@@ -26,6 +26,13 @@ type SafeQuote = Readonly<{
   shippingMinor: number;
   taxMinor: number;
   totalMinor: number;
+  promotionDiscountMinor?: number;
+  referralDiscountMinor?: number;
+  rewardRedemptionPoints?: number;
+  rewardRedemptionMinor?: number;
+  pendingBaseEarnPoints?: number;
+  rewardsBenefitAvailable?: boolean;
+  rewardsUnavailableReason?: string | null;
   lines: readonly Readonly<{
     productId: string;
     productName: string;
@@ -69,6 +76,16 @@ function exactRecord(value: unknown, keys: readonly string[]): value is Record<s
   return own.length === keys.length && own.every((key) => typeof key === "string" && keys.includes(key));
 }
 
+function recordWithRequiredAndAllowedKeys(
+  value: unknown,
+  requiredKeys: readonly string[],
+  allowedKeys: ReadonlySet<string>,
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return requiredKeys.every((key) => Object.hasOwn(value, key)) &&
+    Reflect.ownKeys(value).every((key) => typeof key === "string" && allowedKeys.has(key));
+}
+
 function safeMoney(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
@@ -79,10 +96,23 @@ function boundedText(value: unknown, maximum = 240): value is string {
 }
 
 function parseSafeQuote(value: unknown): SafeQuote | null {
-  if (!exactRecord(value, [
+  const baseKeys = [
     "status", "reviewRequired", "reasons", "currency", "subtotalMinor", "discountMinor",
     "shippingMinor", "taxMinor", "totalMinor", "lines",
-  ])) return null;
+  ] as const;
+  const acquisitionKeys = ["promotionDiscountMinor", "referralDiscountMinor"] as const;
+  const rewardKeys = [
+    "rewardRedemptionPoints", "rewardRedemptionMinor", "pendingBaseEarnPoints",
+    "rewardsBenefitAvailable", "rewardsUnavailableReason",
+  ] as const;
+  const allowedKeys = new Set<string>([...baseKeys, ...acquisitionKeys, ...rewardKeys]);
+  if (!recordWithRequiredAndAllowedKeys(value, baseKeys, allowedKeys)) {
+    return null;
+  }
+  const hasAcquisition = acquisitionKeys.map((key) => Object.hasOwn(value, key));
+  const hasRewards = rewardKeys.map((key) => Object.hasOwn(value, key));
+  if (hasAcquisition.some(Boolean) && !hasAcquisition.every(Boolean)) return null;
+  if (hasRewards.some(Boolean) && !hasRewards.every(Boolean)) return null;
   if (
     (value.status !== "ready" && value.status !== "review_required") ||
     typeof value.reviewRequired !== "boolean" ||
@@ -100,6 +130,25 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     (value.status === "ready" ? value.reasons.length !== 0 : value.reasons.length < 1) ||
     !Array.isArray(value.lines) || value.lines.length < 1 || value.lines.length > 50
   ) return null;
+  if (hasAcquisition.every(Boolean) &&
+    (!safeMoney(value.promotionDiscountMinor) || !safeMoney(value.referralDiscountMinor))) {
+    return null;
+  }
+  if (hasRewards.every(Boolean) &&
+    (!safeMoney(value.rewardRedemptionPoints) ||
+      !safeMoney(value.rewardRedemptionMinor) ||
+      !safeMoney(value.pendingBaseEarnPoints) ||
+      typeof value.rewardsBenefitAvailable !== "boolean" ||
+      (value.rewardsUnavailableReason !== null && !boundedText(value.rewardsUnavailableReason, 80)))) {
+    return null;
+  }
+  if ((hasAcquisition.every(Boolean) || hasRewards.every(Boolean)) &&
+    (hasAcquisition.every(Boolean) ? value.promotionDiscountMinor as number : 0) +
+      (hasAcquisition.every(Boolean) ? value.referralDiscountMinor as number : 0) +
+      (hasRewards.every(Boolean) ? value.rewardRedemptionMinor as number : 0) !==
+      value.discountMinor) {
+    return null;
+  }
   const lines: Array<SafeQuote["lines"][number]> = [];
   const productIds = new Set<string>();
   let lineSubtotal = 0;
@@ -132,6 +181,19 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     });
   }
   if (lineSubtotal !== value.subtotalMinor || lineDiscount !== value.discountMinor) return null;
+  const growthProjection = {
+    ...(hasAcquisition.every(Boolean) ? {
+      promotionDiscountMinor: value.promotionDiscountMinor as number,
+      referralDiscountMinor: value.referralDiscountMinor as number,
+    } : {}),
+    ...(hasRewards.every(Boolean) ? {
+      rewardRedemptionPoints: value.rewardRedemptionPoints as number,
+      rewardRedemptionMinor: value.rewardRedemptionMinor as number,
+      pendingBaseEarnPoints: value.pendingBaseEarnPoints as number,
+      rewardsBenefitAvailable: value.rewardsBenefitAvailable as boolean,
+      rewardsUnavailableReason: value.rewardsUnavailableReason as string | null,
+    } : {}),
+  };
   return {
     status: value.status,
     reviewRequired: value.reviewRequired,
@@ -142,6 +204,7 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     shippingMinor: value.shippingMinor,
     taxMinor: value.taxMinor,
     totalMinor: value.totalMinor,
+    ...growthProjection,
     lines,
   };
 }
@@ -186,6 +249,7 @@ export function CheckoutForm({
   const { items, hydrated } = useCart();
   const [destination, setDestination] = useState(initialDestination);
   const [promotionId, setPromotionId] = useState("");
+  const [rewardRedemptionPoints, setRewardRedemptionPoints] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [quoteView, setQuoteView] = useState<QuoteView | null>(null);
   const [feedback, setFeedback] = useState<Readonly<{
@@ -214,6 +278,9 @@ export function CheckoutForm({
     () => items.map((item) => ({ productId: item.productId.toLowerCase(), quantity: item.quantity })),
     [items],
   );
+  const requestedRewardPoints = Number(rewardRedemptionPoints);
+  const hasValidRequestedRewardPoints = rewardRedemptionPoints !== "" &&
+    Number.isSafeInteger(requestedRewardPoints) && requestedRewardPoints > 0;
   const normalizedRequest = useMemo(() => ({
     items: checkoutItems,
     destination: {
@@ -226,7 +293,10 @@ export function CheckoutForm({
       countryCode: "US" as const,
     },
     promotionIds: promotionId ? [promotionId.toLowerCase()] : [],
-  }), [checkoutItems, destination, promotionId]);
+    ...(hasValidRequestedRewardPoints
+      ? { rewardRedemptionPoints: requestedRewardPoints }
+      : {}),
+  }), [checkoutItems, destination, hasValidRequestedRewardPoints, promotionId, requestedRewardPoints]);
   const fingerprint = useMemo(() => JSON.stringify(normalizedRequest), [normalizedRequest]);
   const cartKey = useMemo(() => JSON.stringify(checkoutItems), [checkoutItems]);
   const currentFeedback = feedback?.fingerprint === fingerprint ? feedback : null;
@@ -318,6 +388,17 @@ export function CheckoutForm({
     }
   }
 
+  function updateRewardRedemptionPoints(value: string) {
+    setRewardRedemptionPoints(value);
+    setQuoteView(null);
+    setFeedback(null);
+    setErrors((current) => {
+      const next = { ...current };
+      delete next.rewardRedemptionPoints;
+      return next;
+    });
+  }
+
   function validate(): boolean {
     const next: Errors = {};
     if (items.length < 1) next.items = "Add at least one available catalog record";
@@ -326,6 +407,9 @@ export function CheckoutForm({
     if (!normalizedRequest.destination.city || normalizedRequest.destination.city.length > 100) next.city = "Enter a city";
     if (!stateCodes.includes(normalizedRequest.destination.stateCode)) next.stateCode = "Select a state or district";
     if (!/^\d{5}(?:-\d{4})?$/u.test(normalizedRequest.destination.postalCode)) next.postalCode = "Enter a valid U.S. postal code";
+    if (rewardRedemptionPoints !== "" && !hasValidRequestedRewardPoints) {
+      next.rewardRedemptionPoints = "Enter a positive whole number of points";
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -538,6 +622,26 @@ export function CheckoutForm({
             {promotions.map((promotion) => <option key={promotion.id} value={promotion.id}>{promotion.name}</option>)}
           </select>
         </Field>
+        <Field
+          id="rewardRedemptionPoints"
+          label="Points to redeem (optional)"
+          error={errors.rewardRedemptionPoints}
+        >
+          <input
+            id="rewardRedemptionPoints"
+            name="rewardRedemptionPoints"
+            className="form-input"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={Number.MAX_SAFE_INTEGER}
+            step={1}
+            value={rewardRedemptionPoints}
+            aria-invalid={Boolean(errors.rewardRedemptionPoints)}
+            aria-describedby={errors.rewardRedemptionPoints ? "rewardRedemptionPoints-error" : undefined}
+            onChange={(event) => updateRewardRedemptionPoints(event.currentTarget.value)}
+          />
+        </Field>
         {errors.items ? <p id="items-error" className="error-record" role="alert">{errors.items}</p> : null}
         <Button type="submit" className="action-primary min-h-12 w-full sm:w-auto" disabled={busy !== null || items.length === 0 || !previewCanContinue}>
           {busy === "quote" ? "Getting authoritative quote…" : "Get authoritative quote"}
@@ -570,11 +674,41 @@ export function CheckoutForm({
           </ul>
           <dl className="mt-6 grid gap-3 text-base">
             <MoneyRow label="Merchandise subtotal" amount={money(quoteView.quote.subtotalMinor)} />
-            <MoneyRow label="Promotion discount" amount={`−${money(quoteView.quote.discountMinor)}`} />
+            <MoneyRow
+              label="Promotion discount"
+              amount={`−${money(
+                quoteView.quote.promotionDiscountMinor ?? quoteView.quote.discountMinor,
+              )}`}
+            />
+            {quoteView.quote.referralDiscountMinor !== undefined ? (
+              <MoneyRow
+                label="Referral benefit"
+                amount={`−${money(quoteView.quote.referralDiscountMinor)}`}
+              />
+            ) : null}
+            {quoteView.quote.rewardRedemptionPoints !== undefined &&
+            quoteView.quote.rewardRedemptionMinor !== undefined ? (
+              <MoneyRow
+                label={`Points redemption (${quoteView.quote.rewardRedemptionPoints} points)`}
+                amount={`−${money(quoteView.quote.rewardRedemptionMinor)}`}
+              />
+            ) : null}
             <MoneyRow label={syntheticLocal ? "Synthetic local test only shipping" : "Shipping"} amount={money(quoteView.quote.shippingMinor)} />
             <MoneyRow label={syntheticLocal ? "Synthetic local test only tax" : "Tax"} amount={money(quoteView.quote.taxMinor)} />
             <MoneyRow label="Total" amount={money(quoteView.quote.totalMinor)} strong />
           </dl>
+          {quoteView.quote.pendingBaseEarnPoints !== undefined ? (
+            <p className="info-record mt-6 tabular-nums">
+              {quoteView.quote.pendingBaseEarnPoints} points pending after qualifying payment
+            </p>
+          ) : null}
+          {quoteView.quote.rewardsBenefitAvailable === false &&
+          quoteView.quote.rewardsUnavailableReason !== null &&
+          quoteView.quote.rewardsUnavailableReason !== undefined ? (
+            <p className="warning-record mt-4">
+              Rewards benefit unavailable: {quoteView.quote.rewardsUnavailableReason}
+            </p>
+          ) : null}
           {quoteView.quote.status === "review_required" ? (
             <div className="warning-record mt-6" role="status">
               <strong>Manual review is required</strong>
