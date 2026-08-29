@@ -31,6 +31,13 @@ const quote: BrowserCheckoutQuote = Object.freeze({
   shippingMinor: 500,
   taxMinor: 321,
   totalMinor: 5_141,
+  promotionDiscountMinor: 300,
+  referralDiscountMinor: 80,
+  rewardRedemptionPoints: 100,
+  rewardRedemptionMinor: 100,
+  pendingBaseEarnPoints: 86,
+  rewardsBenefitAvailable: true,
+  rewardsUnavailableReason: null,
   lines: Object.freeze([Object.freeze({
     productId: requestBody.items[0].productId,
     productName: "Synthetic Alpha Reference",
@@ -42,6 +49,30 @@ const quote: BrowserCheckoutQuote = Object.freeze({
     totalMinor: 4_320,
   })]),
 });
+
+const allZeroQuote: BrowserCheckoutQuote = Object.freeze({
+  ...quote,
+  discountMinor: 0,
+  totalMinor: 5_621,
+  promotionDiscountMinor: 0,
+  referralDiscountMinor: 0,
+  rewardRedemptionPoints: 0,
+  rewardRedemptionMinor: 0,
+  pendingBaseEarnPoints: 0,
+  rewardsBenefitAvailable: false,
+  rewardsUnavailableReason: "loyalty_policy_unavailable",
+  lines: Object.freeze([Object.freeze({
+    ...quote.lines[0]!,
+    discountMinor: 0,
+    totalMinor: 4_800,
+  })]),
+});
+
+function withoutQuoteFields(...fields: readonly string[]): Record<string, unknown> {
+  const candidate: Record<string, unknown> = { ...quote };
+  for (const field of fields) delete candidate[field];
+  return candidate;
+}
 
 function request(
   path: string,
@@ -104,6 +135,45 @@ describe("checkout HTTP controllers", () => {
       idempotencyKey: key,
       request: requestBody,
       attributionCookie: "signed-task5b-cookie",
+    });
+  });
+
+  it("projects an inactive complete-zero growth envelope without omitting authority fields", async () => {
+    const { handlers } = fixture({
+      quoteCheckout: async () =>
+        ({ status: "quoted", quote: allZeroQuote }) as CheckoutQuoteResult,
+    });
+
+    const response = await handlers.quote(request("/api/checkout/quote"));
+
+    expect(response.status).toBe(200);
+    expect(await json(response)).toEqual({ status: "quoted", quote: allZeroQuote });
+  });
+
+  it.each([
+    ["missing acquisition field", withoutQuoteFields("referralDiscountMinor")],
+    ["missing rewards field", withoutQuoteFields("rewardsUnavailableReason")],
+    ["rewards-only", withoutQuoteFields("promotionDiscountMinor", "referralDiscountMinor")],
+    ["base-only", withoutQuoteFields(
+      "promotionDiscountMinor",
+      "referralDiscountMinor",
+      "rewardRedemptionPoints",
+      "rewardRedemptionMinor",
+      "pendingBaseEarnPoints",
+      "rewardsBenefitAvailable",
+      "rewardsUnavailableReason",
+    )],
+  ])("fails closed for a %s quote envelope", async (_label, unsafeQuote) => {
+    const { handlers } = fixture({
+      quoteCheckout: async () => ({ status: "quoted", quote: unsafeQuote } as never),
+    });
+
+    const response = await handlers.quote(request("/api/checkout/quote"));
+
+    expect(response.status).toBe(503);
+    expect(await json(response)).toEqual({
+      status: "quote_unavailable",
+      component: "commerce",
     });
   });
 

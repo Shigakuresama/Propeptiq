@@ -541,6 +541,11 @@ describe("authoritative checkout service", () => {
     expect(result.quote).toMatchObject({
       promotionDiscountMinor: 0,
       referralDiscountMinor: 1_000,
+      rewardRedemptionPoints: 0,
+      rewardRedemptionMinor: 0,
+      pendingBaseEarnPoints: 0,
+      rewardsBenefitAvailable: false,
+      rewardsUnavailableReason: "not_requested",
       discountMinor: 1_000,
     });
   });
@@ -636,6 +641,11 @@ describe("authoritative checkout service", () => {
       discountMinor: 0,
       promotionDiscountMinor: 0,
       referralDiscountMinor: 0,
+      rewardRedemptionPoints: 0,
+      rewardRedemptionMinor: 0,
+      pendingBaseEarnPoints: 0,
+      rewardsBenefitAvailable: false,
+      rewardsUnavailableReason: "not_requested",
       shippingMinor: 700,
       taxMinor: 325,
       totalMinor: 11_025,
@@ -850,6 +860,13 @@ describe("authoritative checkout service", () => {
         shippingMinor: 700,
         taxMinor: 325,
         totalMinor: 11_025,
+        promotionDiscountMinor: 0,
+        referralDiscountMinor: 0,
+        rewardRedemptionPoints: 0,
+        rewardRedemptionMinor: 0,
+        pendingBaseEarnPoints: 0,
+        rewardsBenefitAvailable: false,
+        rewardsUnavailableReason: "not_requested",
         lines: [] as const,
       };
       vi.mocked(repository.findAttempt).mockResolvedValueOnce({

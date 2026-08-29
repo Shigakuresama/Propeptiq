@@ -720,7 +720,9 @@ async function storedAttemptFromClient(
     [row.orderId],
   );
   const quoteSnapshot: BrowserCheckoutQuote | null =
-    row.currency === "USD" && items.rows.length > 0
+    row.currency === "USD" &&
+    items.rows.length > 0 &&
+    safeInteger(row.discountMinor) === 0
       ? Object.freeze({
           status: row.reviewRequired ? "review_required" : "ready",
           reviewRequired: row.reviewRequired,
@@ -731,6 +733,13 @@ async function storedAttemptFromClient(
           shippingMinor: safeInteger(row.shippingMinor),
           taxMinor: safeInteger(row.taxMinor),
           totalMinor: safeInteger(row.totalMinor),
+          promotionDiscountMinor: 0,
+          referralDiscountMinor: 0,
+          rewardRedemptionPoints: 0,
+          rewardRedemptionMinor: 0,
+          pendingBaseEarnPoints: 0,
+          rewardsBenefitAvailable: false,
+          rewardsUnavailableReason: null,
           lines: Object.freeze(
             items.rows.map((item) =>
               Object.freeze({

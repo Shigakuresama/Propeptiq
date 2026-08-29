@@ -104,13 +104,13 @@ export type BrowserCheckoutQuote = Readonly<{
   shippingMinor: number;
   taxMinor: number;
   totalMinor: number;
-  promotionDiscountMinor?: number;
-  referralDiscountMinor?: number;
-  rewardRedemptionPoints?: number;
-  rewardRedemptionMinor?: number;
-  pendingBaseEarnPoints?: number;
-  rewardsBenefitAvailable?: boolean;
-  rewardsUnavailableReason?: string | null;
+  promotionDiscountMinor: number;
+  referralDiscountMinor: number;
+  rewardRedemptionPoints: number;
+  rewardRedemptionMinor: number;
+  pendingBaseEarnPoints: number;
+  rewardsBenefitAvailable: boolean;
+  rewardsUnavailableReason: string | null;
   lines: readonly Readonly<{
     productId: string;
     productName: string;
@@ -445,6 +445,11 @@ function browserQuote(
       ? {
           promotionDiscountMinor,
           referralDiscountMinor,
+          rewardRedemptionPoints: 0,
+          rewardRedemptionMinor: 0,
+          pendingBaseEarnPoints: 0,
+          rewardsBenefitAvailable: false,
+          rewardsUnavailableReason: "not_requested",
         }
       : rewardsQuote.status === "applied"
         ? {
@@ -744,6 +749,13 @@ export function createCheckoutService(dependencies: Readonly<{
             shippingMinor: 0,
             taxMinor: 0,
             totalMinor: 0,
+            promotionDiscountMinor: 0,
+            referralDiscountMinor: 0,
+            rewardRedemptionPoints: 0,
+            rewardRedemptionMinor: 0,
+            pendingBaseEarnPoints: 0,
+            rewardsBenefitAvailable: false,
+            rewardsUnavailableReason: "checkout_not_permitted",
             lines: Object.freeze([]),
           });
           const factsHash = await hashCanonicalEnvelope(

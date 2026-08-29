@@ -136,8 +136,7 @@ function safeQuote(value: unknown): BrowserCheckoutQuote | null {
     }
     const hasAcquisition = acquisitionKeys.map((key) => Object.hasOwn(value, key));
     const hasRewards = rewardKeys.map((key) => Object.hasOwn(value, key));
-    if (hasAcquisition.some(Boolean) && !hasAcquisition.every(Boolean)) return null;
-    if (hasRewards.some(Boolean) && !hasRewards.every(Boolean)) return null;
+    if (!hasAcquisition.every(Boolean) || !hasRewards.every(Boolean)) return null;
     if (
       (value.status !== "ready" && value.status !== "review_required") ||
       typeof value.reviewRequired !== "boolean" ||
@@ -151,21 +150,17 @@ function safeQuote(value: unknown): BrowserCheckoutQuote | null {
       value.reasons.some((reason) => !boundedText(reason, 80)) ||
       !Array.isArray(value.lines) || value.lines.length < 1 || value.lines.length > 50
     ) return null;
-    if (hasAcquisition.every(Boolean) &&
-      (!safeMoney(value.promotionDiscountMinor) ||
-       !safeMoney(value.referralDiscountMinor))) return null;
-    if (hasRewards.every(Boolean) &&
-      (!safeMoney(value.rewardRedemptionPoints) ||
-       !safeMoney(value.rewardRedemptionMinor) ||
-       !safeMoney(value.pendingBaseEarnPoints) ||
-       typeof value.rewardsBenefitAvailable !== "boolean" ||
-       (value.rewardsUnavailableReason !== null &&
-        !boundedText(value.rewardsUnavailableReason, 80)))) return null;
-    if (hasAcquisition.every(Boolean) &&
-      (value.promotionDiscountMinor as number) +
-        (value.referralDiscountMinor as number) +
-        (hasRewards.every(Boolean) ? value.rewardRedemptionMinor as number : 0) !==
-        value.discountMinor) return null;
+    if (!safeMoney(value.promotionDiscountMinor) ||
+      !safeMoney(value.referralDiscountMinor)) return null;
+    if (!safeMoney(value.rewardRedemptionPoints) ||
+      !safeMoney(value.rewardRedemptionMinor) ||
+      !safeMoney(value.pendingBaseEarnPoints) ||
+      typeof value.rewardsBenefitAvailable !== "boolean" ||
+      (value.rewardsUnavailableReason !== null &&
+       !boundedText(value.rewardsUnavailableReason, 80))) return null;
+    if ((value.promotionDiscountMinor as number) +
+      (value.referralDiscountMinor as number) +
+      (value.rewardRedemptionMinor as number) !== value.discountMinor) return null;
     let lineSubtotal = 0;
     let lineDiscount = 0;
     const seen = new Set<string>();
@@ -197,19 +192,6 @@ function safeQuote(value: unknown): BrowserCheckoutQuote | null {
       });
     });
     if (lineSubtotal !== value.subtotalMinor || lineDiscount !== value.discountMinor) return null;
-    const growthProjection = {
-      ...(hasAcquisition.every(Boolean) ? {
-        promotionDiscountMinor: value.promotionDiscountMinor as number,
-        referralDiscountMinor: value.referralDiscountMinor as number,
-      } : {}),
-      ...(hasRewards.every(Boolean) ? {
-        rewardRedemptionPoints: value.rewardRedemptionPoints as number,
-        rewardRedemptionMinor: value.rewardRedemptionMinor as number,
-        pendingBaseEarnPoints: value.pendingBaseEarnPoints as number,
-        rewardsBenefitAvailable: value.rewardsBenefitAvailable as boolean,
-        rewardsUnavailableReason: value.rewardsUnavailableReason as string | null,
-      } : {}),
-    };
     return Object.freeze({
       status: value.status,
       reviewRequired: value.reviewRequired,
@@ -220,7 +202,13 @@ function safeQuote(value: unknown): BrowserCheckoutQuote | null {
       shippingMinor: value.shippingMinor,
       taxMinor: value.taxMinor,
       totalMinor: value.totalMinor,
-      ...growthProjection,
+      promotionDiscountMinor: value.promotionDiscountMinor,
+      referralDiscountMinor: value.referralDiscountMinor,
+      rewardRedemptionPoints: value.rewardRedemptionPoints,
+      rewardRedemptionMinor: value.rewardRedemptionMinor,
+      pendingBaseEarnPoints: value.pendingBaseEarnPoints,
+      rewardsBenefitAvailable: value.rewardsBenefitAvailable,
+      rewardsUnavailableReason: value.rewardsUnavailableReason,
       lines: Object.freeze(lines),
     });
   } catch {

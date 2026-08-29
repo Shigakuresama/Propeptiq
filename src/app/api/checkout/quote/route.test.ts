@@ -106,10 +106,17 @@ describe("POST /api/checkout/quote", () => {
         reasons: [],
         currency: "USD",
         subtotalMinor: 4_800,
-        discountMinor: 480,
+        discountMinor: 0,
         shippingMinor: 500,
         taxMinor: 321,
-        totalMinor: 5_141,
+        totalMinor: 5_621,
+        promotionDiscountMinor: 0,
+        referralDiscountMinor: 0,
+        rewardRedemptionPoints: 0,
+        rewardRedemptionMinor: 0,
+        pendingBaseEarnPoints: 0,
+        rewardsBenefitAvailable: false,
+        rewardsUnavailableReason: "loyalty_policy_unavailable",
         lines: [{
           productId: "61000000-0000-4000-8000-000000000001",
           productName: "Synthetic local test only — Alpha",
@@ -117,8 +124,8 @@ describe("POST /api/checkout/quote", () => {
           quantity: 2,
           unitAmountMinor: 2_400,
           subtotalMinor: 4_800,
-          discountMinor: 480,
-          totalMinor: 4_320,
+          discountMinor: 0,
+          totalMinor: 4_800,
         }],
       },
     });
@@ -137,7 +144,7 @@ describe("POST /api/checkout/quote", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       status: "quoted",
-      quote: { totalMinor: 5_141 },
+      quote: { totalMinor: 5_621 },
     });
     expect(quoteCheckout).toHaveBeenCalledWith({
       buyerUserId,
