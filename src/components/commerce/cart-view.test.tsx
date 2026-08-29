@@ -132,4 +132,85 @@ describe("CartView", () => {
     expect(clearCart).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeEnabled();
   });
+
+  it("hides a prior preview when changed cart facts fail and retries the exact current cart", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockReset()
+      .mockResolvedValueOnce(response({
+        items: [{
+          productId,
+          quantity: 2,
+          available: true,
+          name: "Synthetic local test only — Prior preview",
+          packageForm: "Research vial",
+          unitAmountMinor: 2_400,
+          lineSubtotalMinor: 4_800,
+          currency: "USD",
+        }],
+        subtotalMinor: 4_800,
+        currency: "USD",
+        taxMinor: null,
+        shippingMinor: null,
+        finalDiscountMinor: null,
+        previewToken: "e".repeat(64),
+        requiresAcknowledgement: false,
+        reasons: [],
+      }))
+      .mockRejectedValueOnce(new Error("changed-cart preview failure"))
+      .mockResolvedValueOnce(response({
+        items: [{
+          productId,
+          quantity: 3,
+          available: true,
+          name: "Synthetic local test only — Current preview",
+          packageForm: "Research vial",
+          unitAmountMinor: 2_400,
+          lineSubtotalMinor: 7_200,
+          currency: "USD",
+        }],
+        subtotalMinor: 7_200,
+        currency: "USD",
+        taxMinor: null,
+        shippingMinor: null,
+        finalDiscountMinor: null,
+        previewToken: "f".repeat(64),
+        requiresAcknowledgement: false,
+        reasons: [],
+      }));
+
+    const { rerender } = render(<CartView checkoutIntent={null} />);
+    expect(await screen.findByText("Synthetic local test only — Prior preview")).toBeVisible();
+    expect(screen.getByText("$48.00")).toBeVisible();
+
+    useCart.mockReturnValue({
+      hydrated: true,
+      items: [{ productId, quantity: 3 }],
+      setQuantity,
+      removeItem,
+      clearCart,
+    });
+    rerender(<CartView checkoutIntent={null} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The authoritative cart preview is unavailable.",
+    );
+    expect(screen.queryByText("Synthetic local test only — Prior preview")).toBeNull();
+    expect(screen.queryByText("$24.00 each")).toBeNull();
+    expect(screen.queryByText("$48.00")).toBeNull();
+    expect(screen.getByRole("spinbutton")).toHaveValue(3);
+    expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeDisabled();
+
+    const failedRequest = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body));
+    expect(failedRequest.items).toEqual([{ productId, quantity: 3 }]);
+    await user.click(screen.getByRole("button", { name: "Retry current cart facts" }));
+
+    expect(await screen.findByText("Synthetic local test only — Current preview")).toBeVisible();
+    expect(screen.getByText("$72.00")).toBeVisible();
+    expect(screen.getByRole("spinbutton")).toHaveValue(3);
+    const retryRequest = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body));
+    expect(retryRequest).toEqual(failedRequest);
+    expect(setQuantity).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(clearCart).not.toHaveBeenCalled();
+  });
 });

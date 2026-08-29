@@ -78,7 +78,7 @@ export function PublicHome({
             <p className="mt-4 font-heading text-4xl text-ink tabular-nums">
               {products.length.toString().padStart(2, "0")}
             </p>
-            <p className="mt-3 max-w-[34ch] text-sm leading-6 text-muted-ink">
+            <p className="mt-3 max-w-[34ch] text-base leading-7 text-muted-ink">
               Product families spanning {variantCount} supplied package configurations.
               Prices are intentionally excluded.
             </p>

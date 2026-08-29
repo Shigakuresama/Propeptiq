@@ -22,7 +22,7 @@ export function SiteFooter() {
           <p className="mt-6 font-heading text-3xl leading-tight text-canvas sm:text-4xl">
             Research materials, governed by evidence.
           </p>
-          <p className="mt-5 max-w-[62ch] text-sm leading-6 text-canvas/70">
+          <p className="mt-5 max-w-[62ch] text-base leading-7 text-canvas/70">
             {researchRestrictions[0]} {researchRestrictions[1]} Catalog names and package
             configurations come from owner-supplied records; cart and checkout facts remain server-authoritative.
           </p>

@@ -39,6 +39,9 @@ describe("public shell growth navigation", () => {
     );
 
     const footer = screen.getByRole("navigation", { name: "Footer" });
+    const footerRestriction = screen.getByText(/Catalog names and package configurations come from owner-supplied records/iu);
+    expect(footerRestriction).toHaveClass("text-base");
+    expect(footerRestriction).not.toHaveClass("text-sm");
     expect(within(footer).getByRole("link", { name: "Partner Program" })).toHaveAttribute(
       "href",
       "/partners",

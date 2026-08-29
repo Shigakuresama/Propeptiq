@@ -43,6 +43,9 @@ describe("public storefront semantics", () => {
       "/cart",
     );
     expect(screen.getByText("56")).toBeVisible();
+    const catalogExplanation = screen.getByText(/Product families spanning 103 supplied package configurations/iu);
+    expect(catalogExplanation).toHaveClass("text-base");
+    expect(catalogExplanation).not.toHaveClass("text-sm");
     expect(screen.getByText("Tirzepatide")).toBeVisible();
     expect(
       screen.getByRole("link", { name: /view catalog item: tirzepatide/i }),

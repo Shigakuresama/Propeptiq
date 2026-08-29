@@ -327,17 +327,21 @@ test("homepage current catalog remains reachable at 200% CSS zoom without horizo
 test("reduced motion disables transition and animation durations", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/catalog");
+  const card = page.locator("article.catalog-listing-card").first();
+  await card.hover();
   const motion = await page
     .getByRole("link", { name: "View catalog item: Tirzepatide" })
     .evaluate((element) => ({
       animationDuration: getComputedStyle(element).animationDuration,
       transitionDuration: getComputedStyle(element).transitionDuration,
       scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
+      cardTransform: getComputedStyle(element.closest("article")!).transform,
     }));
   expect(motion).toEqual({
     animationDuration: "0s",
     transitionDuration: "0s",
     scrollBehavior: "auto",
+    cardTransform: "none",
   });
 });
 

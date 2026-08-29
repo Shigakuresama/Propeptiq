@@ -36,7 +36,11 @@ export function CartView({
     removeItem,
     clearCart,
   } = useCart();
-  const [preview, setPreview] = useState<CartPreview | null>(null);
+  const cartKey = JSON.stringify(items);
+  const [previewState, setPreviewState] = useState<{
+    cartKey: string;
+    preview: CartPreview;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [previewReload, setPreviewReload] = useState(0);
@@ -60,6 +64,7 @@ export function CartView({
       if (!controller.signal.aborted) {
         setLoading(true);
         setError(false);
+        setPreviewState((current) => current?.cartKey === cartKey ? current : null);
       }
     });
     void fetch("/api/catalog/preview", {
@@ -81,7 +86,7 @@ export function CartView({
         setAcknowledgedToken((current) =>
           current === nextPreview.previewToken ? current : null,
         );
-        setPreview(nextPreview);
+        setPreviewState({ cartKey, preview: nextPreview });
       })
       .catch((caught: unknown) => {
         if (caught instanceof DOMException && caught.name === "AbortError") return;
@@ -92,7 +97,11 @@ export function CartView({
       });
 
     return () => controller.abort();
-  }, [hydrated, items, previewReload]);
+  }, [cartKey, hydrated, items, previewReload]);
+
+  const preview = previewState?.cartKey === cartKey
+    ? previewState.preview
+    : null;
 
   const canContinue = !loading && !error && preview
     ? canContinueFromPreview(preview, acknowledgedToken)
