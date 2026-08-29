@@ -13,6 +13,7 @@ export default async function HomePage() {
     <PageTransition>
       <PublicHome
         loyaltyPolicy={growth.status === "active" ? growth.projection.loyalty : null}
+        referralPolicy={growth.status === "active" ? growth.projection.referral : null}
         products={catalog.products}
         variantCount={catalog.variantCount}
       />

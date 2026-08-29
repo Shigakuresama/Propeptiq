@@ -1,4 +1,5 @@
-import { ArrowRight, FileCheck2, LibraryBig } from "lucide-react";
+import { ArrowRight, Coins, FileCheck2, FlaskConical, LibraryBig, Share2 } from "lucide-react";
+import type { Route } from "next";
 import Link from "next/link";
 
 import type { BrowseCatalogProduct } from "@/catalog/browse-catalog";
@@ -7,17 +8,40 @@ import { ProgramStrip } from "@/components/growth/program-strip";
 import { ProofRail } from "@/components/site/proof-rail";
 import { Button } from "@/components/ui/button";
 import type { LoyaltyPolicy } from "@/domain/rewards";
+import type { ReferralPolicy } from "@/domain/referrals";
 import { researchRestrictions } from "@/lib/site-content";
 
 export function PublicHome({
   loyaltyPolicy = null,
+  referralPolicy = null,
   products,
   variantCount,
 }: {
   loyaltyPolicy?: LoyaltyPolicy | null;
+  referralPolicy?: ReferralPolicy | null;
   products: readonly BrowseCatalogProduct[];
   variantCount: number;
 }) {
+  const growthPrograms = [
+    ...(loyaltyPolicy?.status === "active" ? [{
+      title: "Earn points",
+      description: "Review the current rewards program and its eligibility rules.",
+      href: "/rewards" as const,
+      Icon: Coins,
+    }] : []),
+    ...(referralPolicy?.status === "active" ? [{
+      title: "Refer a lab",
+      description: "Open the private referral dashboard from an eligible account.",
+      href: "/account/referrals" as const,
+      Icon: FlaskConical,
+    }, {
+      title: "Share a research set",
+      description: "Build a neutral set from current public product records.",
+      href: "/research-sets" as const,
+      Icon: Share2,
+    }] : []),
+  ];
+
   return (
     <div>
       <ProgramStrip loyaltyPolicy={loyaltyPolicy} />
@@ -89,6 +113,31 @@ export function PublicHome({
           </ul>
         </div>
       </section>
+
+      {growthPrograms.length > 0 ? (
+        <section
+          aria-label="Growth programs"
+          className="border-t border-border bg-moss-soft/25 py-12 lg:py-14"
+        >
+          <div className="site-container">
+            <p className="eyebrow">Current active programs</p>
+            <ul className="mt-6 grid gap-4 p-0 md:grid-cols-3">
+              {growthPrograms.map(({ title, description, href, Icon }) => (
+                <li className="record-sheet min-w-0 p-5" key={title}>
+                  <Icon aria-hidden="true" className="size-5 text-moss" />
+                  <Link
+                    className="record-link mt-4 inline-flex min-h-11 items-center text-lg font-semibold"
+                    href={href as Route}
+                  >
+                    {title}
+                  </Link>
+                  <p className="mt-2 text-base leading-7 text-muted-ink">{description}</p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+      ) : null}
 
       <section className="border-t border-border py-14 lg:py-16" aria-labelledby="quality-callout-heading">
         <div className="site-container grid gap-6 md:grid-cols-[auto_1fr_auto] md:items-center">

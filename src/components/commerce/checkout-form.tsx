@@ -535,7 +535,7 @@ export function CheckoutForm({
         <div className="cart-loading mt-6" aria-label="Refreshing current server preview" />
       ) : null}
       {previewState.key === cartKey && previewState.error ? (
-        <div className="error-record mt-6" role="alert">
+        <div className="error-record mt-6 text-base leading-7" role="alert">
           <p>The current server preview is unavailable. No quote can be requested.</p>
           <div className="mt-4 flex flex-wrap gap-3">
             <Button type="button" variant="outline" className="min-h-11" onClick={() => setPreviewReload((current) => current + 1)}>Try server preview again</Button>
@@ -544,14 +544,14 @@ export function CheckoutForm({
         </div>
       ) : null}
       {currentPreview && !currentPreview.requiresAcknowledgement ? (
-        <div className="info-record mt-6" role="status">
+        <div className="info-record mt-6 text-base leading-7" role="status">
           {previewState.retained
             ? "The retained server preview still matches the current authoritative baseline."
             : "This is the current authoritative baseline; no earlier same-tab server preview was available."}
         </div>
       ) : null}
       {currentPreview?.requiresAcknowledgement ? (
-        <section className="warning-record mt-6" aria-labelledby="preview-change-heading">
+        <section className="warning-record mt-6 text-base leading-7" aria-labelledby="preview-change-heading">
           <h3 id="preview-change-heading" className="font-semibold">Server preview changed or became unavailable.</h3>
           <p className="mt-2">Your requested product IDs and quantities were not replaced. Review the current server facts before checkout.</p>
           {previewState.changes.length ? (
@@ -577,7 +577,7 @@ export function CheckoutForm({
       ) : null}
 
       {errorEntries.length > 0 ? (
-        <div ref={summaryRef} className="error-record mt-6" role="alert" tabIndex={-1}>
+        <div ref={summaryRef} className="error-record mt-6 text-base leading-7" role="alert" tabIndex={-1}>
           <h3 className="font-semibold">Review the highlighted fields</h3>
           <ul className="mt-3 list-disc space-y-2 pl-5">
             {errorEntries.map(([field, error]) => (
@@ -646,13 +646,13 @@ export function CheckoutForm({
             onChange={(event) => updateRewardRedemptionPoints(event.currentTarget.value)}
           />
         </Field>
-        {errors.items ? <p id="items-error" className="error-record" role="alert">{errors.items}</p> : null}
+        {errors.items ? <p id="items-error" className="error-record text-base" role="alert">{errors.items}</p> : null}
         <Button type="submit" className="action-primary min-h-12 w-full sm:w-auto" disabled={busy !== null || items.length === 0 || !previewCanContinue}>
           {busy === "quote" ? "Getting authoritative quote…" : "Get authoritative quote"}
         </Button>
       </form>
 
-      <p className="mt-6 min-h-6 text-sm leading-6 text-muted-ink" role="status" aria-live="polite">{message}</p>
+      <p className="mt-6 min-h-6 text-base leading-7 text-muted-ink" role="status" aria-live="polite">{message}</p>
       {lastFailed === "quote" ? (
         <Button type="button" variant="outline" className="mt-3 min-h-11" onClick={() => formRef.current?.requestSubmit()}>
           Try authoritative quote again
@@ -671,7 +671,7 @@ export function CheckoutForm({
           <ul className="mt-5 grid gap-3 p-0">
             {quoteView.quote.lines.map((line) => (
               <li key={line.productId} className="flex flex-wrap justify-between gap-3 border-b border-border pb-3">
-                <span><strong>{line.productName}</strong><span className="block text-sm text-muted-ink">{line.packageForm} · {line.quantity} × {money(line.unitAmountMinor)}</span></span>
+                <span><strong>{line.productName}</strong><span className="block text-base text-muted-ink">{line.packageForm} · {line.quantity} × {money(line.unitAmountMinor)}</span></span>
                 <span className="tabular-nums">{money(line.totalMinor)}</span>
               </li>
             ))}
@@ -694,17 +694,17 @@ export function CheckoutForm({
             <MoneyRow label={syntheticLocal ? "Synthetic local test only tax" : "Tax"} amount={money(quoteView.quote.taxMinor)} />
             <MoneyRow label="Total" amount={money(quoteView.quote.totalMinor)} strong />
           </dl>
-          <p className="info-record mt-6 tabular-nums">
+          <p className="info-record mt-6 text-base tabular-nums">
             {quoteView.quote.pendingBaseEarnPoints} points pending after qualifying payment
           </p>
           {quoteView.quote.rewardsBenefitAvailable === false &&
           rewardsWarning !== null ? (
-            <p className="warning-record mt-4">
+            <p className="warning-record mt-4 text-base">
               Rewards benefit unavailable: {rewardsWarning}
             </p>
           ) : null}
           {quoteView.quote.status === "review_required" ? (
-            <div className="warning-record mt-6" role="status">
+            <div className="warning-record mt-6 text-base leading-7" role="status">
               <strong>Manual review is required</strong>
               <p className="mt-2">No hosted-payment action is available until the exact review facts are approved.</p>
             </div>
@@ -734,7 +734,7 @@ function Field({
     <div>
       <label className="form-label" htmlFor={id}>{label}</label>
       {children}
-      {error ? <p id={`${id}-error`} className="mt-2 text-sm font-semibold text-danger">{error}</p> : null}
+      {error ? <p id={`${id}-error`} className="mt-2 text-base font-semibold text-danger">{error}</p> : null}
     </div>
   );
 }

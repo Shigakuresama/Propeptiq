@@ -1,9 +1,13 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { useCart, fetchMock } = vi.hoisted(() => ({
+const { useCart, fetchMock, setQuantity, removeItem, clearCart } = vi.hoisted(() => ({
   useCart: vi.fn(),
   fetchMock: vi.fn(),
+  setQuantity: vi.fn(),
+  removeItem: vi.fn(),
+  clearCart: vi.fn(),
 }));
 
 vi.mock("@/cart/cart-provider", () => ({ useCart }));
@@ -26,9 +30,9 @@ describe("CartView", () => {
     useCart.mockReturnValue({
       hydrated: true,
       items: [{ productId, quantity: 2 }],
-      setQuantity: vi.fn(),
-      removeItem: vi.fn(),
-      clearCart: vi.fn(),
+      setQuantity,
+      removeItem,
+      clearCart,
     });
     fetchMock.mockResolvedValue(response({
       items: [{
@@ -75,5 +79,57 @@ describe("CartView", () => {
     expect(within(summary).getAllByText("Not yet calculated")).toHaveLength(2);
     expect(within(summary).getAllByText("Available after checkout quote")).toHaveLength(3);
     expect(within(summary).queryByText(/\$0\.00/)).toBeNull();
+    expect(within(summary).getByText("Merchandise subtotal").closest("dl")).toHaveClass("text-base");
+    expect(screen.getByText("Research vial")).toHaveClass("text-base");
+    expect(screen.getByText("$24.00 each")).toHaveClass("text-base");
+    expect(screen.getByText(/Account verification continues at checkout/iu)).toHaveClass("text-base");
+  });
+
+  it("retries the same failed preview request without mutating or clearing the retained cart", async () => {
+    const user = userEvent.setup();
+    fetchMock
+      .mockRejectedValueOnce(new Error("temporary preview failure"))
+      .mockResolvedValueOnce(response({
+        items: [{
+          productId,
+          quantity: 2,
+          available: true,
+          name: "Synthetic local test only — Alpha",
+          packageForm: "Research vial",
+          unitAmountMinor: 2_400,
+          lineSubtotalMinor: 4_800,
+          currency: "USD",
+        }],
+        subtotalMinor: 4_800,
+        currency: "USD",
+        taxMinor: null,
+        shippingMinor: null,
+        finalDiscountMinor: null,
+        previewToken: "d".repeat(64),
+        requiresAcknowledgement: false,
+        reasons: [],
+      }));
+
+    render(<CartView checkoutIntent={null} />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The authoritative cart preview is unavailable.");
+    expect(alert).toHaveClass("text-base");
+    const retry = screen.getByRole("button", { name: "Retry current cart facts" });
+    expect(retry).toHaveClass("min-h-11");
+    expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeDisabled();
+    expect(screen.getByLabelText(`Quantity for ${productId}`)).toHaveValue(2);
+
+    const firstBody = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+    await user.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("$48.00")).toBeVisible();
+    const secondBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body));
+    expect(secondBody).toEqual(firstBody);
+    expect(firstBody.items).toEqual([{ productId, quantity: 2 }]);
+    expect(setQuantity).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(clearCart).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeEnabled();
   });
 });

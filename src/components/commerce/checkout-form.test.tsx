@@ -247,7 +247,10 @@ describe("CheckoutForm", () => {
     expect(within(rows).getByText("Shipping")).toBeVisible();
     expect(within(rows).getByText("Tax")).toBeVisible();
     expect(within(rows).getByText("Total")).toBeVisible();
-    expect(within(rows).getByText("74 points pending after qualifying payment")).toBeVisible();
+    expect(within(rows).getByText("Research vial · 2 × $24.00")).toHaveClass("text-base");
+    expect(within(rows).getByText("74 points pending after qualifying payment")).toHaveClass("text-base");
+    expect(screen.getByText("Authoritative total ready. Review it before continuing to hosted payment."))
+      .toHaveClass("text-base");
   });
 
   it.each([
@@ -352,7 +355,7 @@ describe("CheckoutForm", () => {
     if (expectedWarning === null) {
       expect(within(summary).queryByText(/Rewards benefit unavailable:/i)).toBeNull();
     } else {
-      expect(within(summary).getByText(expectedWarning)).toBeVisible();
+      expect(within(summary).getByText(expectedWarning)).toHaveClass("text-base");
     }
   });
 
@@ -406,6 +409,7 @@ describe("CheckoutForm", () => {
     expect(summary).toHaveFocus();
     expect(within(summary).getByRole("link", { name: "Enter a recipient name" })).toHaveAttribute("href", "#recipientName");
     expect(screen.getByLabelText("Recipient name")).toHaveAttribute("aria-invalid", "true");
+    expect(document.getElementById("recipientName-error")).toHaveClass("text-base");
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/checkout/quote")).toHaveLength(0);
   });
 
