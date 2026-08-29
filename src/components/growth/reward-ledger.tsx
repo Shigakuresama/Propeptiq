@@ -1,17 +1,39 @@
-import { CircleCheck, Clock3, SlidersHorizontal, Undo2 } from "lucide-react";
+import {
+  BadgeCheck,
+  CircleCheck,
+  Clock3,
+  LockKeyhole,
+  LockOpen,
+  ReceiptText,
+  RotateCcw,
+  ShieldAlert,
+  SlidersHorizontal,
+  UserRoundPlus,
+  type LucideIcon,
+} from "lucide-react";
 
+import type { RewardLedgerKind } from "@/db/repositories/growth-repository";
 import type { OwnerGrowthSnapshot } from "@/growth/read-model";
 
 type LedgerItem = NonNullable<OwnerGrowthSnapshot["rewards"]>["ledger"]["items"][number];
 
-function entryState(item: LedgerItem) {
-  if (item.kind.includes("reversal") || item.kind.includes("refund") || item.kind.includes("chargeback")) {
-    return { label: "Reversed", Icon: Undo2 };
-  }
-  if (item.kind.includes("adjustment")) return { label: "Adjustment", Icon: SlidersHorizontal };
-  if (item.availablePointsDelta > 0) return { label: "Available", Icon: CircleCheck };
-  if (item.pendingPointsDelta > 0) return { label: "Pending", Icon: Clock3 };
-  return { label: "Adjustment", Icon: SlidersHorizontal };
+type LedgerState = Readonly<{ label: string; Icon: LucideIcon }>;
+
+const entryStates = Object.freeze({
+  order_earned_pending: Object.freeze({ label: "Order points pending", Icon: Clock3 }),
+  order_earned_available: Object.freeze({ label: "Order points available", Icon: CircleCheck }),
+  referral_earned_pending: Object.freeze({ label: "Referral points pending", Icon: UserRoundPlus }),
+  referral_earned_available: Object.freeze({ label: "Referral points available", Icon: BadgeCheck }),
+  redemption_reserved: Object.freeze({ label: "Redemption reserved", Icon: LockKeyhole }),
+  redemption_consumed: Object.freeze({ label: "Redemption consumed", Icon: ReceiptText }),
+  redemption_released: Object.freeze({ label: "Redemption released", Icon: LockOpen }),
+  refund_reversal: Object.freeze({ label: "Refund reversal", Icon: RotateCcw }),
+  chargeback_reversal: Object.freeze({ label: "Chargeback reversal", Icon: ShieldAlert }),
+  admin_adjustment: Object.freeze({ label: "Administrative adjustment", Icon: SlidersHorizontal }),
+}) satisfies Readonly<Record<RewardLedgerKind, LedgerState>>;
+
+function entryState(item: LedgerItem): LedgerState {
+  return entryStates[item.kind];
 }
 
 export function RewardLedger({

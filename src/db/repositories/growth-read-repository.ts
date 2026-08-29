@@ -1,4 +1,7 @@
-import { loadCurrentLoyaltyPolicy } from "@/growth/policies";
+import {
+  REWARD_LEDGER_KINDS,
+  type RewardLedgerKind,
+} from "@/db/repositories/growth-repository";
 import {
   deepFreezeGrowthReadModel,
   redactGrowthReference,
@@ -38,6 +41,12 @@ type NormalizedGrowthReadPage = Readonly<{ limit: number; offset: number }>;
 
 const defaultPageLimit = 50;
 const maximumPageLimit = 100;
+const rewardLedgerKinds = new Set<string>(REWARD_LEDGER_KINDS);
+
+function rewardLedgerKind(value: string): RewardLedgerKind {
+  if (!rewardLedgerKinds.has(value)) throw new Error("Invalid owner reward ledger kind");
+  return value as RewardLedgerKind;
+}
 
 function normalizePage(input: GrowthReadPageInput | undefined): NormalizedGrowthReadPage {
   if (input !== undefined && (input === null || typeof input !== "object" || Array.isArray(input))) {
@@ -83,10 +92,8 @@ function toIso(value: Date | string): string {
 async function loadRewards(
   client: GrowthReadSqlClient,
   ownerUserId: string,
-  now: Date,
   page: NormalizedGrowthReadPage,
 ): Promise<OwnerGrowthSnapshot["rewards"]> {
-  const policy = await loadCurrentLoyaltyPolicy(client, now);
   const account = await client.query<{
     pendingPoints: number | string;
     availablePoints: number | string;
@@ -128,18 +135,12 @@ async function loadRewards(
   return {
     pendingPoints,
     availablePoints,
-    usdEquivalentMinor: availablePoints * policy.redemptionMinorPerPoint,
-    minimumRedemptionProgress: {
-      currentPoints: Math.min(
-        policy.minimumRedemptionPoints,
-        Math.max(0, availablePoints),
-      ),
-      requiredPoints: policy.minimumRedemptionPoints,
-    },
+    usdEquivalentMinor: null,
+    minimumRedemptionProgress: null,
     ledger: pageResult(
       ledger.rows.map((row) => ({
         occurredAt: toIso(row.occurredAt),
-        kind: row.kind,
+        kind: rewardLedgerKind(row.kind),
         reference: redactGrowthReference(row.sourceId),
         pendingPointsDelta: safeInteger(row.pendingPointsDelta),
         availablePointsDelta: safeInteger(row.availablePointsDelta),
@@ -348,7 +349,7 @@ export function createPostgresGrowthReadRepository(
       return await runReadTransaction(
         async (client) => {
           await client.query("SET TRANSACTION READ ONLY");
-          const rewards = await loadRewards(client, input.ownerUserId, input.now, ledgerPage);
+          const rewards = await loadRewards(client, input.ownerUserId, ledgerPage);
           const referrals = await loadReferrals(client, input.ownerUserId, referralConversionsPage);
           const sharedSets = await loadSharedSets(client, input.ownerUserId, sharedSetsPage);
           const affiliate = await loadAffiliate(client, input.ownerUserId);

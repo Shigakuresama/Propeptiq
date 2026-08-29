@@ -67,6 +67,7 @@ export function AffiliateDashboard(_props: Readonly<{
           ? "Too many application attempts were made. Please wait and try again."
           : "The partner application could not be submitted safely. Please try again."
     : "";
+  const hasFieldErrors = state.state === "error" && state.code === "invalid";
   const money = (amountMinor: number) => new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: policy?.currency ?? "USD",
@@ -142,26 +143,48 @@ export function AffiliateDashboard(_props: Readonly<{
               maxLength={200}
               required
               aria-required="true"
-              aria-invalid={state.state === "error" ? "true" : undefined}
-              aria-describedby={state.state === "error" ? "partner-channel-error" : "partner-channel-help"}
+              aria-invalid={hasFieldErrors ? "true" : undefined}
+              aria-describedby={hasFieldErrors ? "partner-channel-help partner-channel-error" : "partner-channel-help"}
             />
             <p id="partner-channel-help" className="mt-2 text-base leading-7 text-muted-ink">Enter one public URL or handle used for neutral research promotion.</p>
-            {state.state === "error" ? <p id="partner-channel-error" className="mt-2 text-base text-danger">Review this bounded public channel.</p> : null}
+            {hasFieldErrors ? <p id="partner-channel-error" className="mt-2 text-base text-danger">Review this bounded public channel.</p> : null}
           </div>
           <div>
             <label className="form-label" htmlFor="partner-promotion-method">Promotion method</label>
-            <select id="partner-promotion-method" name="promotionMethod" className="form-input" required aria-required="true" defaultValue="">
+            <select
+              id="partner-promotion-method"
+              name="promotionMethod"
+              className="form-input"
+              required
+              aria-required="true"
+              aria-invalid={hasFieldErrors ? "true" : undefined}
+              aria-describedby={hasFieldErrors ? "partner-method-error" : undefined}
+              defaultValue=""
+            >
               <option value="" disabled>Select one method</option>
               <option value="website">Website</option>
               <option value="social">Social channel</option>
               <option value="email">Email publication</option>
               <option value="other">Other public channel</option>
             </select>
+            {hasFieldErrors ? <p id="partner-method-error" className="mt-2 text-base text-danger">Select the applicable promotion method.</p> : null}
           </div>
-          <label className="check-row">
-            <input type="checkbox" name="acceptCurrentTerms" value="yes" required aria-required="true" />
-            <span>I accept current partner terms version {terms.version}.</span>
-          </label>
+          <div>
+            <label className="check-row" htmlFor="partner-terms-acceptance">
+              <input
+                id="partner-terms-acceptance"
+                type="checkbox"
+                name="acceptCurrentTerms"
+                value="yes"
+                required
+                aria-required="true"
+                aria-invalid={hasFieldErrors ? "true" : undefined}
+                aria-describedby={hasFieldErrors ? "partner-terms-error" : undefined}
+              />
+              <span>I accept current partner terms version {terms.version}.</span>
+            </label>
+            {hasFieldErrors ? <p id="partner-terms-error" className="mt-2 text-base text-danger">Accept the exact current partner terms.</p> : null}
+          </div>
           <Button type="submit" className="action-primary min-h-11" disabled={pending}>{pending ? "Submitting…" : "Submit partner application"}</Button>
         </form>
       ) : blocked ? (
@@ -176,6 +199,13 @@ export function AffiliateDashboard(_props: Readonly<{
         <div ref={errorRef} className="error-record" role="alert" tabIndex={-1}>
           <strong>Partner application was not submitted</strong>
           <p className="mt-2 text-base leading-7">{failureMessage}</p>
+          {hasFieldErrors ? (
+            <ul className="mt-3 grid gap-1 text-base">
+              <li><a className="record-link inline-flex min-h-11 items-center" href="#partner-public-channel">Public channel</a></li>
+              <li><a className="record-link inline-flex min-h-11 items-center" href="#partner-promotion-method">Promotion method</a></li>
+              <li><a className="record-link inline-flex min-h-11 items-center" href="#partner-terms-acceptance">Current terms</a></li>
+            </ul>
+          ) : null}
         </div>
       ) : state.state === "success" ? (
         <p className="info-record" role="status" aria-live="polite">

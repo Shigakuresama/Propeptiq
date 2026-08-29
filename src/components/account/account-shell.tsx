@@ -23,6 +23,8 @@ const links = [
   { href: "/account/rewards" as const, label: "Rewards" },
   { href: "/account/referrals" as const, label: "Referrals" },
   { href: "/account/partner" as const, label: "Partner" },
+  { href: "/research-sets" as const, label: "Research sets" },
+  { href: "/cart" as const, label: "Cart" },
   { href: "/checkout" as const, label: "Checkout" },
 ];
 
@@ -57,7 +59,7 @@ export function AccountShell({
             <SheetContent className="w-[min(24rem,calc(100vw-1rem))] border-border bg-canvas p-0">
               <SheetHeader className="border-b border-border p-6 text-left">
                 <SheetTitle>Account navigation</SheetTitle>
-                <SheetDescription>Overview, orders, growth programs, and checkout.</SheetDescription>
+                <SheetDescription>Overview, orders, growth programs, research sets, cart, and checkout.</SheetDescription>
               </SheetHeader>
               <nav aria-label="Mobile account" className="grid gap-2 p-4">
                 {links.map((link) => <SheetClose asChild key={link.href}><ShellNavLink href={link.href}>{link.label}</ShellNavLink></SheetClose>)}

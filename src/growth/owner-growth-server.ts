@@ -5,6 +5,7 @@ import { getRequestIdentity } from "@/auth/server";
 import { createPostgresGrowthReadRepository } from "@/db/repositories/growth-read-repository";
 import { withRuntimeTransaction } from "@/db/runtime";
 import type { Principal } from "@/domain/authorization";
+import type { LoyaltyPolicy } from "@/domain/rewards";
 import { ownerGrowthReadAccess, type OwnerGrowthReadAccess } from "@/growth/owner-growth-access";
 import {
   getPublicGrowthProjection,
@@ -72,6 +73,41 @@ function redactPolicyProjection(projection: PublicGrowthProjection): OwnerGrowth
   });
 }
 
+function unavailablePolicyProjection(): OwnerGrowthPolicyProjection {
+  return Object.freeze({
+    loyalty: null,
+    referral: null,
+    affiliate: null,
+    terms: Object.freeze({ rewards: null, partner: null }),
+  });
+}
+
+function projectRewardPolicyFacts(
+  snapshot: OwnerGrowthSnapshot,
+  loyalty: LoyaltyPolicy | null,
+): OwnerGrowthSnapshot {
+  if (snapshot.rewards === null) return snapshot;
+  const usdEquivalentMinor = loyalty === null
+    ? null
+    : snapshot.rewards.availablePoints * loyalty.redemptionMinorPerPoint;
+  return Object.freeze({
+    ...snapshot,
+    rewards: Object.freeze({
+      ...snapshot.rewards,
+      usdEquivalentMinor,
+      minimumRedemptionProgress: loyalty === null
+        ? null
+        : Object.freeze({
+            currentPoints: Math.min(
+              loyalty.minimumRedemptionPoints,
+              Math.max(0, snapshot.rewards.availablePoints),
+            ),
+            requiredPoints: loyalty.minimumRedemptionPoints,
+          }),
+    }),
+  });
+}
+
 export function createOwnerGrowthReader(dependencies: Dependencies) {
   return async function readOwnerGrowth(
     request: RequestOwner,
@@ -86,29 +122,40 @@ export function createOwnerGrowthReader(dependencies: Dependencies) {
     if (!access.allowed || !verifiedEmail) {
       return Object.freeze({ status: "denied" });
     }
-    try {
-      const projection = await dependencies.loadProjection();
-      if (projection.status === "read_error") {
-        return Object.freeze({ status: "read_error" });
-      }
-      if (projection.status === "inactive") {
-        return Object.freeze({
-          status: "inactive",
-          access: access.access,
-          verifiedEmail,
-        });
-      }
-      const snapshot = await dependencies.loadSnapshot(requestedOwnerUserId);
+    const [projectionRead, snapshotRead] = await Promise.allSettled([
+      dependencies.loadProjection(),
+      dependencies.loadSnapshot(requestedOwnerUserId),
+    ]);
+    if (snapshotRead.status === "rejected") {
+      return Object.freeze({ status: "read_error" });
+    }
+    const snapshot = snapshotRead.value;
+    if (projectionRead.status === "fulfilled" && projectionRead.value.status === "active") {
       return Object.freeze({
         status: hasOwnerData(snapshot) ? "data" : "empty",
         access: access.access,
         verifiedEmail,
-        snapshot,
-        projection: redactPolicyProjection(projection.projection),
+        snapshot: projectRewardPolicyFacts(snapshot, projectionRead.value.projection.loyalty),
+        projection: redactPolicyProjection(projectionRead.value.projection),
       });
-    } catch {
-      return Object.freeze({ status: "read_error" });
     }
+    if (hasOwnerData(snapshot)) {
+      return Object.freeze({
+        status: "data",
+        access: access.access,
+        verifiedEmail,
+        snapshot: projectRewardPolicyFacts(snapshot, null),
+        projection: unavailablePolicyProjection(),
+      });
+    }
+    if (projectionRead.status === "fulfilled" && projectionRead.value.status === "inactive") {
+      return Object.freeze({
+        status: "inactive",
+        access: access.access,
+        verifiedEmail,
+      });
+    }
+    return Object.freeze({ status: "read_error" });
   };
 }
 

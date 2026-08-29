@@ -43,6 +43,40 @@ const emptySnapshot = Object.freeze({
   affiliate: null,
 }) satisfies OwnerGrowthSnapshot;
 
+const historicalSnapshotWithPolicy = Object.freeze({
+  ...emptySnapshot,
+  rewards: Object.freeze({
+    pendingPoints: 25,
+    availablePoints: -10,
+    usdEquivalentMinor: -10,
+    minimumRedemptionProgress: Object.freeze({ currentPoints: 0, requiredPoints: 500 }),
+    ledger: Object.freeze({
+      items: Object.freeze([
+        Object.freeze({
+          occurredAt: "2026-08-28T15:00:00.000Z",
+          kind: "refund_reversal",
+          reference: "ref:1111111111",
+          pendingPointsDelta: 0,
+          availablePointsDelta: -10,
+          pendingPointsBalanceAfter: 25,
+          availablePointsBalanceAfter: -10,
+        }),
+      ]),
+      totalCount: 1,
+      page: Object.freeze({ limit: 50, offset: 0, hasMore: false }),
+    }),
+  }),
+}) satisfies OwnerGrowthSnapshot;
+
+const historicalSnapshotWithoutPolicy = Object.freeze({
+  ...historicalSnapshotWithPolicy,
+  rewards: Object.freeze({
+    ...historicalSnapshotWithPolicy.rewards,
+    usdEquivalentMinor: null,
+    minimumRedemptionProgress: null,
+  }),
+}) satisfies OwnerGrowthSnapshot;
+
 describe("owner growth server read adapter", () => {
   const loadProjection = vi.fn();
   const loadSnapshot = vi.fn();
@@ -52,7 +86,18 @@ describe("owner growth server read adapter", () => {
     loadProjection.mockResolvedValue({
       status: "active",
       projection: Object.freeze({
-        loyalty: Object.freeze({ status: "active" }),
+        loyalty: Object.freeze({
+          id: "loyalty-policy",
+          version: 1,
+          status: "active",
+          pointsPerDollar: 2,
+          redemptionMinorPerPoint: 1,
+          minimumRedemptionPoints: 500,
+          maximumRedemptionBasisPoints: 2_500,
+          expiresAfterDays: null,
+          effectiveAt: "2026-08-27T00:00:00.000Z",
+          supersededAt: null,
+        }),
         referral: Object.freeze({ status: "active" }),
         affiliate: Object.freeze({ status: "active" }),
         terms: Object.freeze({
@@ -90,8 +135,8 @@ describe("owner growth server read adapter", () => {
       rewards: Object.freeze({
         pendingPoints: 5,
         availablePoints: -10,
-        usdEquivalentMinor: -10,
-        minimumRedemptionProgress: Object.freeze({ currentPoints: 0, requiredPoints: 500 }),
+        usdEquivalentMinor: null,
+        minimumRedemptionProgress: null,
         ledger: Object.freeze({
           items: Object.freeze([]),
           totalCount: 1,
@@ -102,6 +147,12 @@ describe("owner growth server read adapter", () => {
     await expect(reader({ identity, principal: principal("blocked") }, ownerId)).resolves.toMatchObject({
       status: "data",
       access: "blocked_read_capable",
+      snapshot: {
+        rewards: {
+          usdEquivalentMinor: -10,
+          minimumRedemptionProgress: { currentPoints: 0, requiredPoints: 500 },
+        },
+      },
     });
 
     loadProjection.mockRejectedValueOnce(new Error("private database detail"));
@@ -120,5 +171,47 @@ describe("owner growth server read adapter", () => {
     )).resolves.toEqual({ status: "denied" });
     expect(loadProjection).not.toHaveBeenCalled();
     expect(loadSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("keeps blocked-owner history readable when the current growth projection is inactive", async () => {
+    const { createOwnerGrowthReader } = await import("./owner-growth-server");
+    const reader = createOwnerGrowthReader({ loadProjection, loadSnapshot });
+    loadProjection.mockResolvedValueOnce({ status: "inactive" });
+    loadSnapshot.mockResolvedValueOnce(historicalSnapshotWithPolicy);
+
+    await expect(reader({ identity, principal: principal("blocked") }, ownerId)).resolves.toEqual({
+      status: "data",
+      access: "blocked_read_capable",
+      verifiedEmail: identity.primaryEmail,
+      snapshot: historicalSnapshotWithoutPolicy,
+      projection: {
+        loyalty: null,
+        referral: null,
+        affiliate: null,
+        terms: { rewards: null, partner: null },
+      },
+    });
+    expect(loadSnapshot).toHaveBeenCalledWith(ownerId);
+  });
+
+  it("keeps blocked-owner history readable when current policy reads fail", async () => {
+    const { createOwnerGrowthReader } = await import("./owner-growth-server");
+    const reader = createOwnerGrowthReader({ loadProjection, loadSnapshot });
+    loadProjection.mockResolvedValueOnce({ status: "read_error" });
+    loadSnapshot.mockResolvedValueOnce(historicalSnapshotWithPolicy);
+
+    await expect(reader({ identity, principal: principal("blocked") }, ownerId)).resolves.toEqual({
+      status: "data",
+      access: "blocked_read_capable",
+      verifiedEmail: identity.primaryEmail,
+      snapshot: historicalSnapshotWithoutPolicy,
+      projection: {
+        loyalty: null,
+        referral: null,
+        affiliate: null,
+        terms: { rewards: null, partner: null },
+      },
+    });
+    expect(loadSnapshot).toHaveBeenCalledWith(ownerId);
   });
 });

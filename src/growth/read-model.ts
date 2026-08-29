@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto";
+
+import type { RewardLedgerKind } from "@/db/repositories/growth-repository";
+
 export type RewardLedgerReadItem = Readonly<{
   occurredAt: string;
-  kind: string;
+  kind: RewardLedgerKind;
   reference: string;
   pendingPointsDelta: number;
   availablePointsDelta: number;
@@ -24,11 +28,11 @@ export type OwnerGrowthSnapshot = Readonly<{
   rewards: Readonly<{
     pendingPoints: number;
     availablePoints: number;
-    usdEquivalentMinor: number;
+    usdEquivalentMinor: number | null;
     minimumRedemptionProgress: Readonly<{
       currentPoints: number;
       requiredPoints: number;
-    }>;
+    }> | null;
     ledger: PagedGrowthReadItems<RewardLedgerReadItem>;
   }> | null;
   referrals: Readonly<{
@@ -84,4 +88,3 @@ export function deepFreezeGrowthReadModel<Value>(value: Value): Value {
 export function redactGrowthReference(reference: string): string {
   return `ref:${createHash("sha256").update(reference, "utf8").digest("hex").slice(0, 10)}`;
 }
-import { createHash } from "node:crypto";

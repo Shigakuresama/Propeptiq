@@ -83,6 +83,21 @@ describe("AffiliateDashboard", () => {
     await user.click(screen.getByRole("button", { name: "Submit partner application" }));
     const alert = await screen.findByRole("alert");
     await waitFor(() => expect(alert).toHaveFocus());
+    expect(within(alert).getByRole("link", { name: "Public channel" })).toHaveAttribute("href", "#partner-public-channel");
+    expect(within(alert).getByRole("link", { name: "Promotion method" })).toHaveAttribute("href", "#partner-promotion-method");
+    expect(within(alert).getByRole("link", { name: "Current terms" })).toHaveAttribute("href", "#partner-terms-acceptance");
+    expect(screen.getByLabelText("Public channel URL or handle")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Public channel URL or handle")).toHaveAttribute(
+      "aria-describedby",
+      "partner-channel-help partner-channel-error",
+    );
+    expect(screen.getByLabelText("Promotion method")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Promotion method")).toHaveAttribute("aria-describedby", "partner-method-error");
+    expect(screen.getByRole("checkbox", { name: /accept current partner terms/iu })).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("checkbox", { name: /accept current partner terms/iu })).toHaveAttribute("aria-describedby", "partner-terms-error");
+    expect(screen.getByText("Review this bounded public channel.")).toBeVisible();
+    expect(screen.getByText("Select the applicable promotion method.")).toBeVisible();
+    expect(screen.getByText("Accept the exact current partner terms.")).toBeVisible();
     unmount();
 
     const successAction = vi.fn().mockResolvedValue({

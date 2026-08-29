@@ -365,8 +365,8 @@ describe("growth policy and repository boundary", () => {
       rewards: expect.objectContaining({
         pendingPoints: 250,
         availablePoints: -50,
-        usdEquivalentMinor: -50,
-        minimumRedemptionProgress: { currentPoints: 0, requiredPoints: 500 },
+        usdEquivalentMinor: null,
+        minimumRedemptionProgress: null,
         ledger: {
           items: [expect.objectContaining({ kind: "order_earned_pending" })],
           totalCount: 1,
@@ -419,6 +419,42 @@ describe("growth policy and repository boundary", () => {
     }
     expect(serialized).not.toMatch(/email|clerk|address|productId|orderId|payment|provider|rawIp|cookie|envelope|referredUser/i);
     expect(serialized).not.toMatch(/idempotency|payloadHash|expectedUpdatedAt|appliedAt/i);
+  });
+
+  it("keeps historical reward balances and ledger rows readable without an active loyalty policy", async () => {
+    await seedCurrentPoliciesAndTerms(client);
+    await seedOwnerPrivacyFixture(client);
+    await client.exec(`
+      UPDATE loyalty_policies
+      SET status = 'superseded', superseded_at = '2026-08-28T11:00:00.000Z'
+      WHERE id = '${ids.loyaltyPolicy}';
+    `);
+    const repository = createPostgresGrowthReadRepository((work) =>
+      client.transaction((transaction) => work({
+        query: async <Row extends object>(sql: string, params: readonly unknown[] = []) => {
+          const result = await transaction.query<Row>(sql, [...params]);
+          return { rows: result.rows };
+        },
+      })),
+    );
+
+    const snapshot = await repository.readOwnerSnapshot({ ownerUserId: ids.owner, now });
+
+    expect(snapshot.rewards).toMatchObject({
+      pendingPoints: 250,
+      availablePoints: -50,
+      usdEquivalentMinor: null,
+      minimumRedemptionProgress: null,
+      ledger: {
+        items: [expect.objectContaining({
+          kind: "order_earned_pending",
+          pendingPointsDelta: 250,
+          availablePointsBalanceAfter: -50,
+        })],
+        totalCount: 1,
+      },
+    });
+    expectDeeplyFrozen(snapshot);
   });
 
   it("bounds each owner-history page in SQL while keeping aggregates independent", async () => {

@@ -14,17 +14,20 @@ export type GrowthTransactionRunner = <Value>(
   options: Readonly<{ isolationLevel: "serializable" }>,
 ) => Promise<Value>;
 
-export type RewardLedgerKind =
-  | "order_earned_pending"
-  | "order_earned_available"
-  | "referral_earned_pending"
-  | "referral_earned_available"
-  | "redemption_reserved"
-  | "redemption_consumed"
-  | "redemption_released"
-  | "refund_reversal"
-  | "chargeback_reversal"
-  | "admin_adjustment";
+export const REWARD_LEDGER_KINDS = Object.freeze([
+  "order_earned_pending",
+  "order_earned_available",
+  "referral_earned_pending",
+  "referral_earned_available",
+  "redemption_reserved",
+  "redemption_consumed",
+  "redemption_released",
+  "refund_reversal",
+  "chargeback_reversal",
+  "admin_adjustment",
+] as const);
+
+export type RewardLedgerKind = (typeof REWARD_LEDGER_KINDS)[number];
 
 export type RewardLedgerAppendInput = Readonly<{
   entryId: string;
@@ -299,18 +302,7 @@ type CommissionRow = {
 };
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const ledgerKinds = new Set<RewardLedgerKind>([
-  "order_earned_pending",
-  "order_earned_available",
-  "referral_earned_pending",
-  "referral_earned_available",
-  "redemption_reserved",
-  "redemption_consumed",
-  "redemption_released",
-  "refund_reversal",
-  "chargeback_reversal",
-  "admin_adjustment",
-]);
+const ledgerKinds = new Set<RewardLedgerKind>(REWARD_LEDGER_KINDS);
 
 function nonblank(value: string): boolean {
   return value.trim() === value && value.length > 0 && !/[\u0000-\u001f\u007f]/u.test(value);

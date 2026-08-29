@@ -14,9 +14,9 @@ export function RewardsSummary({
 }: {
   rewards: NonNullable<OwnerGrowthSnapshot["rewards"]>;
 }) {
-  const { currentPoints, requiredPoints } = rewards.minimumRedemptionProgress;
-  const progressPercent = requiredPoints > 0
-    ? Math.min(100, Math.max(0, (currentPoints / requiredPoints) * 100))
+  const progress = rewards.minimumRedemptionProgress;
+  const progressPercent = progress !== null && progress.requiredPoints > 0
+    ? Math.min(100, Math.max(0, (progress.currentPoints / progress.requiredPoints) * 100))
     : 0;
 
   return (
@@ -33,7 +33,11 @@ export function RewardsSummary({
           </dt>
           <dd className="mt-3 text-3xl font-semibold tabular-nums">{rewards.availablePoints}</dd>
           <p className="mt-2 text-base leading-7 text-muted-ink">
-            Server-projected order credit: <span className="font-semibold text-ink">{usd(rewards.usdEquivalentMinor)}</span>
+            {rewards.usdEquivalentMinor === null ? (
+              "No current USD equivalent is shown because no active loyalty policy is available."
+            ) : (
+              <>Server-projected order credit: <span className="font-semibold text-ink">{usd(rewards.usdEquivalentMinor)}</span></>
+            )}
           </p>
         </div>
         <div className="record-card">
@@ -47,28 +51,34 @@ export function RewardsSummary({
           </p>
         </div>
       </dl>
-      <div className="record-card mt-4">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-base font-semibold">Minimum redemption progress</p>
-          <p className="text-base tabular-nums text-muted-ink">
-            {currentPoints} / {requiredPoints}
+      {progress === null ? (
+        <div className="empty-record mt-4 text-base leading-7">
+          Minimum redemption progress is unavailable without an active loyalty policy.
+        </div>
+      ) : (
+        <div className="record-card mt-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-base font-semibold">Minimum redemption progress</p>
+            <p className="text-base tabular-nums text-muted-ink">
+              {progress.currentPoints} / {progress.requiredPoints}
+            </p>
+          </div>
+          <div
+            className="mt-3 h-2 overflow-hidden rounded-full bg-border"
+            role="progressbar"
+            aria-label="Minimum redemption progress"
+            aria-valuemin={0}
+            aria-valuemax={progress.requiredPoints}
+            aria-valuenow={progress.currentPoints}
+            aria-valuetext={`${progress.currentPoints} of ${progress.requiredPoints} points toward the minimum redemption`}
+          >
+            <div className="h-full rounded-full bg-moss" style={{ width: `${progressPercent}%` }} />
+          </div>
+          <p className="mt-3 text-base leading-7 text-muted-ink">
+            {progress.currentPoints} of {progress.requiredPoints} points toward the minimum redemption.
           </p>
         </div>
-        <div
-          className="mt-3 h-2 overflow-hidden rounded-full bg-border"
-          role="progressbar"
-          aria-label="Minimum redemption progress"
-          aria-valuemin={0}
-          aria-valuemax={requiredPoints}
-          aria-valuenow={currentPoints}
-          aria-valuetext={`${currentPoints} of ${requiredPoints} points toward the minimum redemption`}
-        >
-          <div className="h-full rounded-full bg-moss" style={{ width: `${progressPercent}%` }} />
-        </div>
-        <p className="mt-3 text-base leading-7 text-muted-ink">
-          {currentPoints} of {requiredPoints} points toward the minimum redemption.
-        </p>
-      </div>
+      )}
     </section>
   );
 }
