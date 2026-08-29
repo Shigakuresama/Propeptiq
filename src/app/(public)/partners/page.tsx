@@ -25,6 +25,9 @@ export default async function PartnersPage() {
           title="Partner Program"
           description="Program details appear only when an active server record is available."
         />
+        {result.syntheticLocal === true ? (
+          <p className="warning-record mb-6 text-base font-semibold">Synthetic local test only</p>
+        ) : null}
         {result.status === "read_error" ? (
           <p className="record-sheet text-base leading-7 text-muted-ink" role="status">
             The Partner Program is temporarily unavailable. Please try again.

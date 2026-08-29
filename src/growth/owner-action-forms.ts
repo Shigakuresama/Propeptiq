@@ -110,6 +110,10 @@ export function createOwnerAffiliateApplicationAction(dependencies: Readonly<{
 
 async function currentTerms(program: GrowthTermsProgram): Promise<CurrentTermsAuthority> {
   const request = await getRequestIdentity();
+  if (request.localDriver !== null) {
+    const terms = request.localDriver.growth.currentTerms(program);
+    return Object.freeze({ id: terms.id, contentHash: terms.contentHash });
+  }
   if (request.environment.DATABASE_MODE === "disabled") {
     throw new Error("Growth terms unavailable");
   }

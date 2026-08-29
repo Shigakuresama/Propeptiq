@@ -15,6 +15,18 @@ import type { RefundCommandRepository } from "@/commerce/refund-service";
 import type { ProviderSessionRepository } from "@/db/repositories/provider-session-repository";
 import type { Principal } from "@/domain/authorization";
 import type { AffiliateCheckoutQuote } from "@/growth/affiliate-service";
+import type {
+  AffiliateApplicationInput,
+  AffiliateApplicationResult,
+} from "@/growth/affiliate-service";
+import type { CurrentGrowthTerms, GrowthTermsProgram } from "@/growth/policies";
+import type { PublicGrowthReadResult } from "@/growth/public-growth-server";
+import type { OwnerGrowthSnapshot } from "@/growth/read-model";
+import type {
+  CustomerReferralEnrollmentInput,
+  CustomerReferralEnrollmentResult,
+} from "@/growth/referral-service";
+import type { RewardsCheckoutAtomicPort } from "@/growth/rewards-service";
 import type { ReferralCandidateLookup } from "@/growth/referral-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 import type { StorageVerifier } from "@/security/storage";
@@ -105,6 +117,60 @@ export type LocalCommerceDriverV1 = Readonly<{
   ) => readonly Readonly<Record<string, unknown>>[];
 }>;
 
+export type LocalGrowthInspectionV1 = Readonly<{
+  schemaVersion: 1;
+  revision: number;
+  scenario: "active" | "inactive";
+  rewardReservationCount: number;
+  rewardLedgerCount: number;
+  referralCodeCount: number;
+  affiliateProfileCount: number;
+  payoutCount: number;
+}>;
+
+export type LocalGrowthDriverV1 = Readonly<{
+  publicProjection: () => PublicGrowthReadResult;
+  ownerSnapshot: (ownerUserId: string) => OwnerGrowthSnapshot;
+  currentTerms: (program: GrowthTermsProgram) => CurrentGrowthTerms;
+  rewardsAtomicPort: RewardsCheckoutAtomicPort;
+  rateLimitStore: RateLimitStore;
+  enrollCustomerReferral: (
+    input: CustomerReferralEnrollmentInput,
+  ) => Promise<CustomerReferralEnrollmentResult>;
+  applyForAffiliate: (
+    input: AffiliateApplicationInput,
+  ) => Promise<AffiliateApplicationResult>;
+  referralLandingLookup: (input: Readonly<{ code: string; now: Date }>) => Promise<Readonly<{
+    program: "customer_referral";
+    code: string;
+    attributionDays: 30;
+  }> | null>;
+  affiliateLandingLookup: (input: Readonly<{ code: string; now: Date }>) => Promise<Readonly<{
+    program: "affiliate";
+    code: string;
+    attributionDays: 30;
+  }> | null>;
+  resolvePublicSharedSet: (code: string) => Readonly<Record<string, unknown>>;
+  ownerSharedSetWorkspace: (ownerUserId: string) => Readonly<Record<string, unknown>>;
+  readAdminSnapshot: <Resource extends AdminReadResource>(
+    resource: Resource,
+  ) => AdminReadSnapshotFor<Resource> | null;
+  adminTransactionMethods: Pick<
+    import("@/admin/admin-service").AdminTransaction,
+    | "createGrowthPolicyDraft"
+    | "activateGrowthPolicy"
+    | "adjustRewardBalance"
+    | "revokeReferralCode"
+    | "deactivateSharedSet"
+  >;
+  affiliateApplicationAdminRepository: import("@/admin/affiliate-application-admin-service").AffiliateApplicationAdminRepository;
+  affiliatePayoutAdminRepository: import("@/admin/affiliate-payout-admin-service").AffiliatePayoutAdminRepository;
+  reset: (scenario?: "active" | "inactive") => LocalGrowthInspectionV1;
+  inspect: () => LocalGrowthInspectionV1;
+  captureState: () => unknown;
+  restoreState: (snapshot: unknown) => void;
+}>;
+
 export type LocalTestDriver = Readonly<{
   actorOptions: readonly LocalActorOption[];
   signActor: (actorKey: string, secret: string) => string | null;
@@ -123,4 +189,5 @@ export type LocalTestDriver = Readonly<{
     resource: Resource,
   ) => AdminReadSnapshotFor<Resource>;
   commerce: LocalCommerceDriverV1;
+  growth: LocalGrowthDriverV1;
 }>;

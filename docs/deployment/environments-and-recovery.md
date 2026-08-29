@@ -2,13 +2,15 @@
 
 ## Target environment separation
 
-This table is the required target topology, not a statement that Preview or
-Production accounts, resources, secrets, or deployments currently exist.
+This table records both the required target topology and the current safe
+publication boundary. A protected browse-only Preview and a browse-only
+Production alias exist, but neither provisions identity, database, payment,
+storage, email, tax, shipping, fulfillment, or payout providers.
 
 | Environment | Target data and providers | Current allowed use |
 |---|---|---|
 | Local/test | isolated database and clearly labeled test fixtures; provider fakes/test modes | automated and manual development only |
-| Preview | separately provisioned test-only identity/database/provider resources and pre-created synthetic identities; authorized owner browse manifest plus synthetic commerce demo records | **not published or provisioned**; browse-only preparation, with buyer checkout unavailable |
+| Preview | protected Vercel deployment; authorized owner browse manifest plus clearly labeled synthetic demo records; identity/database/provider modes disabled | browse and synthetic acceptance only; buyer checkout and external effects unavailable; each feature branch must be verified separately |
 | Production | separately scoped production resources, an explicitly authorized owner browse manifest, and real imported commerce records | buyer checkout is inert at this checkpoint, regardless of environment flags; later activation requires separate authorization and every external/application prerequisite |
 
 Never share production credentials or customer data with Local/Preview. Production demo/test catalog mode must hard-fail.
@@ -22,6 +24,12 @@ Production commerce remains unavailable until accountable owners provide and ver
 - tax configuration and shipping-service availability;
 - an operating fulfillment process; and
 - payment-provider acceptance and production enablement.
+
+Growth activation additionally requires owner-approved unit economics, reviewed
+customer rewards/referral and affiliate terms, active database policy versions,
+a defined payout/tax onboarding process, and an accountable external payout
+method. Code defaults and local fixtures are not active policy records and must
+never be promoted into Production data.
 
 These are deployment inputs and owner evidence, not database approval workflows. Missing catalog/destination inputs keep affected products unavailable; missing tax/shipping/provider inputs deny checkout; missing fulfillment readiness prevents release.
 
@@ -38,6 +46,12 @@ Use reviewed commits, protected production deployment, environment-specific secr
 - Destination defaults unavailable when no active rule resolves.
 - Tax/shipping absence denies hosted checkout.
 - Fulfillment release remains disabled when the operating process or application prerequisites are unavailable.
+- Public growth projections remain inactive when no active database policy is
+  available. Production builds reject local growth drivers, fixed identities,
+  synthetic economics, and test referral codes.
+- Affiliate payouts are recorded only after an external operator supplies the
+  bounded provider/reference evidence; this application has no provider-send
+  effect.
 
 ## Recovery
 
@@ -47,6 +61,12 @@ Use reviewed commits, protected production deployment, environment-specific secr
 4. Restore or branch the database from an identified point, then reconcile provider/payment/inventory/refund/shipment events idempotently.
 5. Validate integrity and replay safety in isolation before resuming.
 6. Resume only the affected capability after owner approval and record the incident/recovery evidence.
+
+For a growth-program incident, revoke the affected referral code or suspend the
+affiliate, freeze new earning/redemption/commission mutations, preserve owner
+history reads, and append reversals only from verified order/payment/refund or
+chargeback facts. Never rewrite a reward, conversion, commission, payout, or
+audit ledger to hide an error.
 
 Do not delete journals or fabricate records to force systems to agree. Restore tests must verify order/payment/inventory/refund/review/shipment invariants and access denial.
 

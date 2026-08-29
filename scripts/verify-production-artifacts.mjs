@@ -21,8 +21,8 @@ const markerGroups = Object.freeze([
   {
     label: "fixed local actor identity",
     patterns: [
-      /50000000-0000-4000-8000-00000000000[1-6]/gu,
-      /fixed-(?:customer|blocked|admin|non-admin|no-mfa|limited-admin)@local\.test/gu,
+      /50000000-0000-4000-8000-00000000000[1-8]/gu,
+      /fixed-(?:customer|blocked|admin|non-admin|no-mfa|limited-admin|growth-owner|growth-buyer)@local\.test/gu,
     ],
   },
   {
@@ -37,6 +37,16 @@ const markerGroups = Object.freeze([
     patterns: [
       /LOCAL_GROWTH_POLICY_BUNDLE_TEST_ONLY_PROPEPTIQ_2PPD_1MPP_500MIN_2500MAX_30D_1000BP_2500CAP_5PPD_2500PTS_1000BP_500BP_180D_30D_5000USD_4F8C21/gu,
     ],
+  },
+  {
+    label: "local growth experience sentinel",
+    patterns: [
+      /LOCAL_GROWTH_EXPERIENCE_TEST_ONLY_PROPEPTIQ_7A91D2/gu,
+    ],
+  },
+  {
+    label: "local growth experience identity",
+    patterns: [/6c000000-0000-4000-8000-0000000000(?:0[1-9]|1[0-3]|20|21)/gu],
   },
   {
     label: "local growth identity",
@@ -56,7 +66,7 @@ const markerGroups = Object.freeze([
   },
 ]);
 
-const localModulePattern = /(?:src[\\/]+auth[\\/]+local-driver\.ts|src_auth_local-driver_ts|src[\\/]+auth[\\/]+local-commerce-driver\.ts|src_auth_local-commerce-driver_ts|src[\\/]+catalog[\\/]+demo-fixtures\.ts|src_catalog_demo-fixtures_ts|src[\\/]+commerce[\\/]+local-payment-provider\.ts|src_commerce_local-payment-provider_ts|src[\\/]+commerce[\\/]+local-commerce-harness-routes\.ts|src_commerce_local-commerce-harness-routes_ts)/gu;
+const localModulePattern = /(?:src[\\/]+auth[\\/]+local-driver\.ts|src_auth_local-driver_ts|src[\\/]+auth[\\/]+local-commerce-driver\.ts|src_auth_local-commerce-driver_ts|src[\\/]+auth[\\/]+local-growth-driver\.ts|src_auth_local-growth-driver_ts|src[\\/]+catalog[\\/]+demo-fixtures\.ts|src_catalog_demo-fixtures_ts|src[\\/]+commerce[\\/]+local-payment-provider\.ts|src_commerce_local-payment-provider_ts|src[\\/]+commerce[\\/]+local-commerce-harness-routes\.ts|src_commerce_local-commerce-harness-routes_ts)/gu;
 const deployableDirectoryNames = new Set(["server", "standalone", "static"]);
 const deployableRootFilePattern = /\.(?:json|[cm]?js|map)$/iu;
 

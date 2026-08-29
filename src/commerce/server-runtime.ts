@@ -25,7 +25,7 @@ import { readServerEnv } from "@/env";
 import { createAffiliateCheckoutService } from "@/growth/affiliate-service";
 import { verifyAttributionCookie } from "@/growth/attribution-cookie";
 import { createReferralCheckoutService } from "@/growth/referral-service";
-import { createPostgresRewardsLifecycleService } from "@/growth/rewards-service";
+import { createPostgresRewardsLifecycleService, createRewardsService } from "@/growth/rewards-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 
 export type CheckoutServerRuntimeV1 = Readonly<{
@@ -160,6 +160,7 @@ export async function createCheckoutServerRuntime(
     },
     referralService,
     affiliateService,
+    rewardsService: createRewardsService({ atomicPort: driver.growth.rewardsAtomicPort }),
   });
   const orchestrator = createProviderCheckoutOrchestrator({
     checkoutService,

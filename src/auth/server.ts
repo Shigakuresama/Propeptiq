@@ -171,29 +171,8 @@ export function getRequestRepositories(
     return {
       accountRepository: driver.accountRepository,
       adminRepository: driver.adminRepository,
-      affiliateApplicationAdminRepository: Object.freeze({
-        rateLimitStore: Object.freeze({
-          async increment() {
-            throw new Error("Affiliate application mutation is unavailable in local mode");
-          },
-        }),
-        async mutateInTransaction() {
-          throw new Error("Affiliate application mutation is unavailable in local mode");
-        },
-      }),
-      affiliatePayoutAdminRepository: Object.freeze({
-        rateLimitStore: Object.freeze({
-          async increment() {
-            throw new Error("Affiliate payout mutation is unavailable in local mode");
-          },
-        }),
-        async createInTransaction() {
-          throw new Error("Affiliate payout mutation is unavailable in local mode");
-        },
-        async markPaidInTransaction() {
-          throw new Error("Affiliate payout mutation is unavailable in local mode");
-        },
-      }),
+      affiliateApplicationAdminRepository: driver.growth.affiliateApplicationAdminRepository,
+      affiliatePayoutAdminRepository: driver.growth.affiliatePayoutAdminRepository,
       storageVerifier: driver.storageVerifier,
       loadAccount: async () => (ownerId ? driver.loadAccount(ownerId) : null),
       loadCurrentAttestation: async () => driver.loadCurrentAttestation(),

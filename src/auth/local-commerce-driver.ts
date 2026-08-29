@@ -15,6 +15,10 @@ import type { RefundClaimDescriptorV1, RefundCommandRepository } from "@/commerc
 import { createRepositoryDurableCheckoutRequestV1, projectDurableCheckoutRequestV1, type DurableCheckoutRequestV1, type ProviderSessionRepository } from "@/db/repositories/provider-session-repository";
 import type { BuyerStatus } from "@/domain/eligibility";
 import type { PromotionRecord } from "@/domain/promotions";
+import type {
+  AppliedCheckoutRewards,
+  RewardsCheckoutReservationResult,
+} from "@/growth/rewards-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 import { loadSyntheticDemoCatalogRecords } from "catalog-demo-fixtures";
 
@@ -46,6 +50,14 @@ type SharedFacts = Readonly<{
   loadProfile: (userId: string) => BuyerProfileRecord | null;
   hasCurrentAttestation: (userId: string) => boolean;
   loadEmail: (userId: string) => string | null;
+  reserveCheckoutRewards: (input: Readonly<{
+    buyerUserId: string;
+    orderId: string;
+    checkoutAttemptId: string;
+    idempotencyKey: string;
+    quote: AppliedCheckoutRewards;
+    reservedAt: Date;
+  }>) => Promise<RewardsCheckoutReservationResult>;
 }>;
 
 type AttemptRecord = {
@@ -421,6 +433,19 @@ export function createLocalCommerceDriverV1(
         return Object.freeze({ status: "review_required" as const, orderId: plan.identity.orderId, attemptId: plan.identity.attemptId, reviewRequestId, quote: cloneQuote(plan.browserQuote) });
       }
       if (providerPreparation === null || plan.totals === null) return Object.freeze({ status: "facts_changed_retry" as const });
+      if (plan.rewardsQuote?.status === "applied") {
+        const rewardsReservation = await shared.reserveCheckoutRewards({
+          buyerUserId: plan.buyerUserId,
+          orderId: plan.identity.orderId,
+          checkoutAttemptId: plan.identity.attemptId,
+          idempotencyKey: plan.idempotencyKey,
+          quote: plan.rewardsQuote,
+          reservedAt: plan.authoritativeAt,
+        });
+        if (rewardsReservation.status === "conflict" || rewardsReservation.status === "unavailable") {
+          return Object.freeze({ status: "facts_changed_retry" as const });
+        }
+      }
       const success = successFromPlan(plan);
       const stored: StoredCheckoutAttempt = Object.freeze({
         orderId: plan.identity.orderId,

@@ -33,6 +33,9 @@ export default async function SharedSetPage({
 
   return (
     <div className="site-container py-16">
+      {"syntheticLocal" in result && result.syntheticLocal === true ? (
+        <p className="warning-record mb-6 text-base font-semibold">Synthetic local test only</p>
+      ) : null}
       <SharedSetCard
         variant="public"
         label={result.set.label}

@@ -26,9 +26,9 @@ export type PublicGrowthProjection = Readonly<{
 }>;
 
 export type PublicGrowthReadResult =
-  | Readonly<{ status: "active"; projection: PublicGrowthProjection }>
-  | Readonly<{ status: "inactive" }>
-  | Readonly<{ status: "read_error" }>;
+  | Readonly<{ status: "active"; projection: PublicGrowthProjection; syntheticLocal?: true }>
+  | Readonly<{ status: "inactive"; syntheticLocal?: true }>
+  | Readonly<{ status: "read_error"; syntheticLocal?: true }>;
 
 type CurrentRecordRead<Value> =
   | Readonly<{ status: "active"; value: Value }>
@@ -74,6 +74,15 @@ export async function getPublicGrowthProjection(): Promise<PublicGrowthReadResul
     return Object.freeze({ status: "read_error" });
   }
   if (environment.DATABASE_MODE === "disabled") {
+    if (environment.LOCAL_TEST_DRIVER === "enabled") {
+      try {
+        const { getRequestIdentity } = await import("@/auth/server");
+        const request = await getRequestIdentity();
+        if (request.localDriver !== null) return request.localDriver.growth.publicProjection();
+      } catch {
+        return Object.freeze({ status: "read_error", syntheticLocal: true });
+      }
+    }
     return Object.freeze({ status: "inactive" });
   }
 

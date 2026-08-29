@@ -98,6 +98,30 @@ export async function createAffiliateLandingRuntime(): Promise<
   } catch {
     return null;
   }
+  if (
+    environment.APP_ENV === "local" &&
+    environment.LOCAL_TEST_DRIVER === "enabled" &&
+    environment.DATABASE_MODE === "disabled" &&
+    typeof environment.RATE_LIMIT_SECRET === "string" &&
+    environment.RATE_LIMIT_SECRET.length >= 32
+  ) {
+    try {
+      const { getLocalTestDriver } = await import("local-auth-driver");
+      const driver = getLocalTestDriver();
+      return Object.freeze({
+        attributionSecret: environment.RATE_LIMIT_SECRET,
+        environment: environment.APP_ENV,
+        lookup: createRateLimitedAttributionLandingLookup({
+          program: "affiliate",
+          lookup: ({ code, now }) => driver.growth.affiliateLandingLookup({ code, now }),
+          rateLimitStore: driver.growth.rateLimitStore,
+          secret: environment.RATE_LIMIT_SECRET,
+        }),
+      });
+    } catch {
+      return null;
+    }
+  }
   if (!hasLandingConfiguration(environment)) return null;
 
   return Object.freeze({

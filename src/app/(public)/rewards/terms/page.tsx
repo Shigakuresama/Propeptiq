@@ -11,17 +11,22 @@ export default async function RewardsTermsPage() {
   const projection = result.status === "active" ? result.projection : null;
   return (
     <PageTransition>
-      <PublicTermsRecord
-        backHref="/rewards"
-        backLabel="Back to Rewards"
-        terms={projection?.terms.rewards ?? null}
-        title="Rewards terms"
-        unavailableMessage={
-          result.status === "read_error"
-            ? "Current rewards terms are temporarily unavailable. Please try again."
-            : "Current rewards terms are unavailable."
-        }
-      />
+      <div>
+        {result.syntheticLocal === true ? (
+          <div className="site-container pt-5"><p className="warning-record text-base font-semibold">Synthetic local test only</p></div>
+        ) : null}
+        <PublicTermsRecord
+          backHref="/rewards"
+          backLabel="Back to Rewards"
+          terms={projection?.terms.rewards ?? null}
+          title="Rewards terms"
+          unavailableMessage={
+            result.status === "read_error"
+              ? "Current rewards terms are temporarily unavailable. Please try again."
+              : "Current rewards terms are unavailable."
+          }
+        />
+      </div>
     </PageTransition>
   );
 }

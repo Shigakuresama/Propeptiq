@@ -35,6 +35,7 @@ export default async function PartnerPage() {
       <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">
         Apply with one bounded public channel or review your private partner, commission, and payout history.
       </p>
+      {result.syntheticLocal === true ? <p className="warning-record mt-6 text-base font-semibold">Synthetic local test only</p> : null}
       {result.status === "inactive" ? (
         <div className="empty-record mt-8">The partner program is not currently active for this account.</div>
       ) : (

@@ -16,6 +16,47 @@ provider is provisioned by these settings. The current release authorization is
 limited to the browse-only catalog, branding, merge, and resulting Production
 verification. It does not authorize migration application or live commerce.
 
+## Task 10 growth release candidate
+
+The growth release candidate adds editorial rewards presentation, private
+customer referrals, neutral shared research sets, a reviewed affiliate ledger,
+and one-MFA-admin management. It does not activate a Production policy, create
+provider resources, send an affiliate payout, or enable buyer checkout.
+
+Fresh local release evidence is complete on the isolated
+`feat/propeptiq-growth-release` candidate:
+
+- unit **132 files / 1,396 tests**;
+- PGlite **30 files / 440 tests**;
+- Chromium **46/46**, zero skips, across the required responsive, keyboard,
+  reduced-motion, zoom-proxy, target-size, and overflow contracts;
+- focused privacy/security **12 files / 144 tests** and artifact scanner
+  **11/11**;
+- lint, workspace boundary, fresh type generation, strict typecheck, two
+  no-drift database generations, and database check all passed;
+- all 48 migration/history files remained byte-identical with canonical
+  manifest SHA-256
+  `8174eb00c3e9831a0daff255bbf904cfd5adf21cf7b198d1ffa7797c9180e98e`;
+- closed-Production Turbopack and Webpack builds passed and scanned zero
+  forbidden local-growth artifacts; and
+- a production-built browser pass refreshed and visually inspected all 16
+  required screenshots at 375 and 1440, including the uncropped header logo and
+  exact `Synthetic local test only` labels.
+
+The guarded real-PostgreSQL contention lane was **NOT RUN** because the two
+exact isolation guards were absent. No connection was attempted and no real
+PostgreSQL concurrency claim is made. The offline production dependency audit
+used only the local advisory cache and reported zero vulnerabilities; no
+networked audit was run.
+
+The protected Preview URL documented below currently identifies the earlier
+lightweight-commerce branch. It is not evidence that this growth candidate has
+been deployed. The growth branch must receive its own protected Preview status,
+build-log, and browser verification after its reviewed commit is pushed. Until
+that happens, the growth Preview lane is **PENDING**, while the existing
+Production alias remains browse-only with every live/provider capability
+disabled.
+
 ## Browse-only boundary
 
 - Preview renders the owner-supplied browse-only catalog only when its exact

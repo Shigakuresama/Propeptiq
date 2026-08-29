@@ -185,7 +185,7 @@ export async function enrollCustomerReferralAction(
       principal === null ||
       principal.clerkUserId !== identity.clerkUserId ||
       principal.buyerStatus === null ||
-      environment.DATABASE_MODE === "disabled" ||
+      (environment.DATABASE_MODE === "disabled" && requestIdentity.localDriver === null) ||
       environment.RATE_LIMIT_SECRET === undefined
     ) {
       return failure("identity");
@@ -208,18 +208,22 @@ export async function enrollCustomerReferralAction(
       },
     });
     const now = new Date();
-    const runSerializableTransaction: GrowthTransactionRunner = (work, options) =>
-      withRuntimeTransaction(environment, work, options);
-    const enrollment = createPostgresReferralEnrollmentTransaction({
-      runSerializableTransaction,
-    });
-    const service = createReferralService({
-      clock: () => new Date(now),
-      createAcceptanceId: randomUUID,
-      createReferralCodeId: randomUUID,
-      createReferralCode: () => `ref_${randomBytes(24).toString("base64url")}`,
-      enrollInTransaction: enrollment,
-    });
+    const localGrowth = requestIdentity.localDriver?.growth ?? null;
+    const service = localGrowth === null
+      ? (() => {
+          const runSerializableTransaction: GrowthTransactionRunner = (work, options) =>
+            withRuntimeTransaction(environment, work, options);
+          return createReferralService({
+            clock: () => new Date(now),
+            createAcceptanceId: randomUUID,
+            createReferralCodeId: randomUUID,
+            createReferralCode: () => `ref_${randomBytes(24).toString("base64url")}`,
+            enrollInTransaction: createPostgresReferralEnrollmentTransaction({
+              runSerializableTransaction,
+            }),
+          });
+        })()
+      : Object.freeze({ enrollCustomerReferral: localGrowth.enrollCustomerReferral });
     const action = createCustomerReferralEnrollmentAction({
       environment: environment.APP_ORIGIN === undefined
         ? {
@@ -232,7 +236,7 @@ export async function enrollCustomerReferralAction(
             RATE_LIMIT_SECRET: environment.RATE_LIMIT_SECRET,
           },
       clock: () => new Date(now),
-      rateLimitStore: {
+      rateLimitStore: localGrowth?.rateLimitStore ?? {
         increment: (window) => withRuntimeTransaction(
           environment,
           (client) => createPostgresRateLimitStore(client).increment(window),
@@ -451,7 +455,7 @@ export async function submitAffiliateApplicationAction(
       principal === null ||
       principal.clerkUserId !== identity.clerkUserId ||
       principal.buyerStatus !== "active" ||
-      environment.DATABASE_MODE === "disabled" ||
+      (environment.DATABASE_MODE === "disabled" && requestIdentity.localDriver === null) ||
       environment.RATE_LIMIT_SECRET === undefined
     ) {
       return affiliateFailure("identity");
@@ -474,21 +478,26 @@ export async function submitAffiliateApplicationAction(
       },
     });
     const now = new Date();
-    const runSerializableTransaction: GrowthTransactionRunner = (work, options) =>
-      withRuntimeTransaction(environment, work, options);
-    const service = createAffiliateService({
-      clock: () => new Date(now),
-      createAcceptanceId: randomUUID,
-      createProfileId: randomUUID,
-      createPublicCode: () => `aff_${randomBytes(24).toString("base64url")}`,
-      publicationPolicy: Object.freeze({
-        version: "affiliate-public-channel-v1",
-        activeLotEvidenceIds: Object.freeze([]),
-      }),
-      applyInTransaction: createPostgresAffiliateApplicationTransaction({
-        runSerializableTransaction,
-      }),
-    });
+    const localGrowth = requestIdentity.localDriver?.growth ?? null;
+    const service = localGrowth === null
+      ? (() => {
+          const runSerializableTransaction: GrowthTransactionRunner = (work, options) =>
+            withRuntimeTransaction(environment, work, options);
+          return createAffiliateService({
+            clock: () => new Date(now),
+            createAcceptanceId: randomUUID,
+            createProfileId: randomUUID,
+            createPublicCode: () => `aff_${randomBytes(24).toString("base64url")}`,
+            publicationPolicy: Object.freeze({
+              version: "affiliate-public-channel-v1",
+              activeLotEvidenceIds: Object.freeze([]),
+            }),
+            applyInTransaction: createPostgresAffiliateApplicationTransaction({
+              runSerializableTransaction,
+            }),
+          });
+        })()
+      : Object.freeze({ applyForAffiliate: localGrowth.applyForAffiliate });
     const action = createAffiliateApplicationAction({
       environment: environment.APP_ORIGIN === undefined
         ? {
@@ -501,7 +510,7 @@ export async function submitAffiliateApplicationAction(
             RATE_LIMIT_SECRET: environment.RATE_LIMIT_SECRET,
           },
       clock: () => new Date(now),
-      rateLimitStore: {
+      rateLimitStore: localGrowth?.rateLimitStore ?? {
         increment: (window) => withRuntimeTransaction(
           environment,
           (client) => createPostgresRateLimitStore(client).increment(window),

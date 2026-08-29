@@ -36,6 +36,9 @@ export default async function ResearchSetsPage() {
       <p className="mt-4 max-w-2xl text-base leading-7 text-muted-ink">
         Save 2 to 8 current products with quantities only. Public links never disclose account identity.
       </p>
+      {"syntheticLocal" in workspace && workspace.syntheticLocal === true ? (
+        <p className="warning-record mt-6 text-base font-semibold">Synthetic local test only</p>
+      ) : null}
 
       <section className="record-card mt-8" aria-labelledby="create-set-heading">
         <h2 id="create-set-heading" className="font-heading text-3xl">Create research set</h2>

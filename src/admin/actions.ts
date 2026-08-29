@@ -150,7 +150,9 @@ function signedCanonicalInteger(formData: FormData, name: string): number {
 }
 
 function exactFormFields(formData: FormData, expected: readonly string[]): void {
-  const actual = [...formData.keys()].toSorted();
+  const actual = [...formData.keys()]
+    .filter((name) => !name.startsWith("$ACTION_"))
+    .toSorted();
   const allowed = [...expected].toSorted();
   if (
     actual.length !== allowed.length ||

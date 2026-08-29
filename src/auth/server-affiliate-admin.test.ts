@@ -117,7 +117,11 @@ describe("affiliate application request repository composition", () => {
     expect(queries).toHaveLength(4);
   });
 
-  it("exposes a typed fail-closed mutation repository in local deterministic mode", async () => {
+  it("delegates local deterministic affiliate mutations only to the explicit growth driver", async () => {
+    const increment = vi.fn().mockResolvedValue(1);
+    const mutateInTransaction = vi.fn().mockResolvedValue({
+      profile: { id: profileId, status: "active", version: 2, updatedAt: mutatedAt.toISOString() },
+    });
     const localDriver = {
       accountRepository: {},
       adminRepository: {},
@@ -129,6 +133,13 @@ describe("affiliate application request repository composition", () => {
       loadOrder: () => null,
       readAdminSnapshot: () => ({ resource: "affiliate-applications", items: [], truncated: false }),
       commerce: { loadSuccess: () => null },
+      growth: {
+        affiliateApplicationAdminRepository: {
+          rateLimitStore: { increment },
+          mutateInTransaction,
+        },
+        affiliatePayoutAdminRepository: {},
+      },
     } as unknown as NonNullable<RequestIdentity["localDriver"]>;
     const repositories = getRequestRepositories(request({ localDriver }));
 
@@ -136,7 +147,7 @@ describe("affiliate application request repository composition", () => {
       scopeHash: "a".repeat(64),
       windowStart: mutatedAt,
       expiresAt: new Date(mutatedAt.getTime() + 60_000),
-    })).rejects.toThrow(/unavailable.*local/i);
+    })).resolves.toBe(1);
     await expect(repositories?.affiliateApplicationAdminRepository.mutateInTransaction({
       actorUserId,
       actorClerkUserId: "clerk-task8-affiliate-admin",
@@ -146,7 +157,11 @@ describe("affiliate application request repository composition", () => {
       targetStatus: "active",
       correlationId: "task-8-local-unavailable-correlation",
       mutatedAt,
-    })).rejects.toThrow(/unavailable.*local/i);
+    })).resolves.toEqual({
+      profile: { id: profileId, status: "active", version: 2, updatedAt: mutatedAt.toISOString() },
+    });
+    expect(increment).toHaveBeenCalledOnce();
+    expect(mutateInTransaction).toHaveBeenCalledOnce();
     expect(mocks.withRuntimeTransaction).not.toHaveBeenCalled();
   });
 });
