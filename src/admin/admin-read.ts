@@ -18,6 +18,7 @@ export const ADMIN_READ_RESOURCE_REQUIREMENTS = Object.freeze({
   "loyalty-policies": "growth:manage",
   "referral-policies": "growth:manage",
   "affiliate-policies": "growth:manage",
+  "reward-adjustments": "growth:manage",
 } as const);
 
 export type AdminReadResource = keyof typeof ADMIN_READ_RESOURCE_REQUIREMENTS;
@@ -310,6 +311,17 @@ type AffiliatePolicyItem = GrowthPolicyLifecycleItem & {
   currency: "USD";
 };
 
+type RewardAdjustmentItem = {
+  rewardAccountId: string;
+  pendingPoints: number;
+  availablePoints: number;
+  recentAdjustments: readonly Readonly<{
+    adjustmentId: string;
+    delta: number;
+    occurredAt: string;
+  }>[];
+};
+
 export type AdminReadSnapshot =
   | Snapshot<"products", ProductItem>
   | Snapshot<"prices", PriceItem>
@@ -329,7 +341,8 @@ export type AdminReadSnapshot =
   | Snapshot<"audit", AuditItem>
   | Snapshot<"loyalty-policies", LoyaltyPolicyItem>
   | Snapshot<"referral-policies", ReferralPolicyItem>
-  | Snapshot<"affiliate-policies", AffiliatePolicyItem>;
+  | Snapshot<"affiliate-policies", AffiliatePolicyItem>
+  | Snapshot<"reward-adjustments", RewardAdjustmentItem>;
 
 export type AdminReadSnapshotFor<Resource extends AdminReadResource> = Extract<
   AdminReadSnapshot,

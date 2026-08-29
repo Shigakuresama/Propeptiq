@@ -28,6 +28,7 @@ describe("Task 5 admin read boundary", () => {
       "loyalty-policies": "growth:manage",
       "referral-policies": "growth:manage",
       "affiliate-policies": "growth:manage",
+      "reward-adjustments": "growth:manage",
     });
   });
 
@@ -37,5 +38,6 @@ describe("Task 5 admin read boundary", () => {
     expect(isAdminReadResource("__proto__")).toBe(false);
     expect(requiredAdminReadCapability("refunds")).toBe("refund:request");
     expect(requiredAdminReadCapability("affiliate-policies")).toBe("growth:manage");
+    expect(requiredAdminReadCapability("reward-adjustments")).toBe("growth:manage");
   });
 });

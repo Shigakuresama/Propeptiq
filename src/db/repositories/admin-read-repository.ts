@@ -1,4 +1,7 @@
 import {
+  MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1,
+} from "@/admin/admin-service";
+import {
   ADMIN_READ_LIMIT,
   requiredAdminReadCapability,
   type AdminReadResource,
@@ -92,6 +95,35 @@ function hasExactKeys(
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const recentRewardAdjustmentLimit = 20;
+
+function recentRewardAdjustments(raw: unknown): SnapshotItem<"reward-adjustments">["recentAdjustments"] {
+  const value = normalizeJson(raw);
+  if (!Array.isArray(value) || value.length > recentRewardAdjustmentLimit) {
+    throw new Error("Invalid reward adjustment admin projection");
+  }
+  return Object.freeze(value.map((candidate) => {
+    if (
+      !isRecord(candidate) ||
+      !hasExactKeys(candidate, ["adjustmentId", "delta", "occurredAt"]) ||
+      typeof candidate.adjustmentId !== "string" ||
+      !uuidPattern.test(candidate.adjustmentId) ||
+      (typeof candidate.delta !== "number" && typeof candidate.delta !== "string") ||
+      (typeof candidate.occurredAt !== "string" && !(candidate.occurredAt instanceof Date))
+    ) {
+      throw new Error("Invalid reward adjustment admin projection");
+    }
+    const delta = safeInteger(candidate.delta);
+    if (delta === 0 || Math.abs(delta) > MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1) {
+      throw new Error("Invalid reward adjustment admin projection");
+    }
+    return Object.freeze({
+      adjustmentId: candidate.adjustmentId,
+      delta,
+      occurredAt: toIso(candidate.occurredAt),
+    });
+  }));
+}
 
 function safeProductIds(value: unknown, minimum: number): readonly string[] | null {
   if (
@@ -710,6 +742,54 @@ async function loadSnapshot(
         },
       );
       return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "affiliate-policies" }>;
+    }
+    case "reward-adjustments": {
+      const result = await boundedRows<{
+        rewardAccountId: string;
+        pendingPoints: number | string;
+        availablePoints: number | string;
+        recentAdjustments: unknown;
+      }, SnapshotItem<"reward-adjustments">>(
+        client,
+        `
+          SELECT ra.id::text AS "rewardAccountId",
+                 ra.pending_points AS "pendingPoints",
+                 ra.available_points AS "availablePoints",
+                 COALESCE((
+                   SELECT jsonb_agg(
+                     jsonb_build_object(
+                       'adjustmentId', recent.id::text,
+                       'delta', recent.available_points_delta,
+                       'occurredAt', recent.occurred_at
+                     ) ORDER BY recent.occurred_at DESC, recent.id DESC
+                   )
+                   FROM (
+                     SELECT id, available_points_delta, occurred_at
+                     FROM reward_ledger_entries
+                     WHERE reward_account_id = ra.id
+                       AND kind = 'admin_adjustment'
+                       AND source_type = 'admin_adjustment'
+                     ORDER BY occurred_at DESC, id DESC
+                     LIMIT ${recentRewardAdjustmentLimit}
+                   ) recent
+                 ), '[]'::jsonb) AS "recentAdjustments"
+          FROM reward_accounts ra
+          ORDER BY ra.updated_at DESC, ra.id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          if (!uuidPattern.test(row.rewardAccountId)) {
+            throw new Error("Invalid reward adjustment admin projection");
+          }
+          return Object.freeze({
+            rewardAccountId: row.rewardAccountId,
+            pendingPoints: safeInteger(row.pendingPoints),
+            availablePoints: safeInteger(row.availablePoints),
+            recentAdjustments: recentRewardAdjustments(row.recentAdjustments),
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "reward-adjustments" }>;
     }
     case "buyers": {
       const result = await boundedRows<{
