@@ -325,6 +325,31 @@ describe("growth policy and repository boundary", () => {
     expect(counts.rows).toEqual([{ accounts: 1, ledger: 1 }]);
   });
 
+  it("allows distinct reward flows to reuse an idempotency key without losing same-flow replay", async () => {
+    const repository = growthRepository(client);
+    await repository.appendRewardLedger(ledgerInput());
+    const delivered = ledgerInput({
+      entryId: "83000000-0000-4000-8000-000000000049",
+      kind: "order_earned_available",
+      sourceType: "shipment",
+      sourceId: "shipment-flow-0001",
+      pendingPointsDelta: -250,
+      availablePointsDelta: 250,
+    });
+
+    const applied = await repository.appendRewardLedger(delivered);
+    await expect(repository.appendRewardLedger(delivered)).resolves.toEqual({
+      ...applied,
+      status: "idempotent",
+    });
+    const state = await client.query<{ pending: number; available: number; ledger: number }>(`
+      SELECT pending_points AS pending, available_points AS available,
+             (SELECT count(*)::int FROM reward_ledger_entries) AS ledger
+      FROM reward_accounts WHERE id = '${ids.ownerRewardAccount}'
+    `);
+    expect(state.rows).toEqual([{ pending: 0, available: 250, ledger: 2 }]);
+  });
+
   it.each([
     ["ledger append", /INSERT INTO reward_ledger_entries/i],
     ["balance projection", /UPDATE reward_accounts/i],

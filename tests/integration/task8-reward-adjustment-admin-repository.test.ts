@@ -187,6 +187,7 @@ describe("Task 8C1A1 reward adjustment admin persistence", () => {
 
   it("isolates adjustment idempotency from an unrelated ledger flow using the same raw key", async () => {
     const rawKey = "task-8c1a1-pglite-adjustment-0001";
+    const persistedAdjustmentKey = `admin_adjustment:${rawKey}`;
     await client.query(
       `UPDATE reward_accounts SET pending_points = 5 WHERE id = $1::uuid`,
       [accountId],
@@ -200,7 +201,7 @@ describe("Task 8C1A1 reward adjustment admin persistence", () => {
         $1::uuid, $2::uuid, $3::uuid, 'order_earned_pending', 'order',
         'unrelated-order-source', $4, 5, 0, 5, 1000, $5::timestamptz
       )
-    `, [unrelatedEntryId, accountId, userId, rawKey, now.toISOString()]);
+    `, [unrelatedEntryId, accountId, userId, persistedAdjustmentKey, now.toISOString()]);
     const adminRepository = repository();
 
     await expect(adjustRewardBalance(
@@ -221,18 +222,23 @@ describe("Task 8C1A1 reward adjustment admin persistence", () => {
 
     const persisted = await client.query<{
       idempotencyKey: string;
+      sourceType: string;
       audits: number;
       metadata: Record<string, unknown>;
     }>(`
       SELECT idempotency_key AS "idempotencyKey",
+             source_type AS "sourceType",
              (SELECT count(*)::int FROM admin_audit) AS audits,
              (SELECT metadata FROM admin_audit LIMIT 1) AS metadata
       FROM reward_ledger_entries
-      ORDER BY idempotency_key
+      ORDER BY source_type
     `);
-    expect(persisted.rows.map((row) => row.idempotencyKey)).toEqual([
-      "admin_adjustment:task-8c1a1-pglite-adjustment-0001",
-      rawKey,
+    expect(persisted.rows.map(({ idempotencyKey, sourceType }) => ({
+      idempotencyKey,
+      sourceType,
+    }))).toEqual([
+      { idempotencyKey: persistedAdjustmentKey, sourceType: "admin_adjustment" },
+      { idempotencyKey: persistedAdjustmentKey, sourceType: "order" },
     ]);
     expect(persisted.rows).toHaveLength(2);
     expect(persisted.rows[0]!.audits).toBe(1);

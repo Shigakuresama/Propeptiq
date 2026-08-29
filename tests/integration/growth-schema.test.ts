@@ -530,6 +530,49 @@ describe("growth database schema", () => {
     await expectRejected(client, `DELETE FROM users WHERE id = '${ids.referrer}'`);
   });
 
+  it("scopes reward ledger idempotency to immutable source flow authority", async () => {
+    client = await createMigratedPglite();
+    await insertCoreFixture(client);
+    await client.exec(`
+      INSERT INTO reward_accounts
+        (id, buyer_user_id, pending_points, available_points)
+      VALUES ('${ids.rewardAccount}', '${ids.referred}', 0, 0);
+      INSERT INTO reward_ledger_entries
+        (id, reward_account_id, buyer_user_id, kind, source_type, source_id,
+         idempotency_key, pending_points_delta, available_points_delta,
+         pending_points_balance_after, available_points_balance_after)
+      VALUES
+        ('10000000-0000-4000-8000-000000000001', '${ids.rewardAccount}', '${ids.referred}',
+         'refund_reversal', 'order', 'order-flow-one',
+         'exact-cross-flow-key', 0, -1, 0, -1),
+        ('10000000-0000-4000-8000-000000000002', '${ids.rewardAccount}', '${ids.referred}',
+         'admin_adjustment', 'admin_adjustment', 'admin-fingerprint-one',
+         'exact-cross-flow-key', 0, 1, 0, 0);
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO reward_ledger_entries
+        (id, reward_account_id, buyer_user_id, kind, source_type, source_id,
+         idempotency_key, pending_points_delta, available_points_delta,
+         pending_points_balance_after, available_points_balance_after)
+       VALUES
+        ('10000000-0000-4000-8000-000000000003', '${ids.rewardAccount}', '${ids.referred}',
+         'refund_reversal', 'admin_adjustment', 'admin-fingerprint-two',
+         'exact-cross-flow-key', 0, -1, 0, -1)`,
+    );
+    const rows = await client.query<{ sourceType: string }>(`
+      SELECT source_type AS "sourceType"
+      FROM reward_ledger_entries
+      WHERE idempotency_key = 'exact-cross-flow-key'
+      ORDER BY source_type
+    `);
+    expect(rows.rows).toEqual([
+      { sourceType: "admin_adjustment" },
+      { sourceType: "order" },
+    ]);
+  });
+
   it("allows verified reversal deficits while bounding pending balances and nonzero signed ledger deltas", async () => {
     client = await createMigratedPglite();
     await insertCoreFixture(client);
@@ -593,7 +636,7 @@ describe("growth database schema", () => {
          idempotency_key, pending_points_delta, available_points_delta,
          pending_points_balance_after, available_points_balance_after)
        VALUES ('${ids.rewardAccount}', '${ids.referred}', 'admin_adjustment',
-         'admin_audit', 'different', 'growth-ledger-reversal', 0, 1, 0, -24)`,
+         'order', 'different', 'growth-ledger-reversal', 0, 1, 0, -24)`,
     );
     await expectRejected(
       client,

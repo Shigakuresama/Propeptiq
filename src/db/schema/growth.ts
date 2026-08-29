@@ -347,7 +347,8 @@ export const rewardLedgerEntries = pgTable(
       .notNull(),
   },
   (table) => [
-    unique("reward_ledger_entries_idempotency_unique").on(
+    unique("reward_ledger_entries_flow_idempotency_unique").on(
+      table.sourceType,
       table.idempotencyKey,
     ),
     unique("reward_ledger_entries_source_unique").on(

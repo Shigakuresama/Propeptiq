@@ -380,6 +380,7 @@ function exactPayload(entry: RewardLedgerEntry, input: RewardLedgerAppendInput):
 
 async function findLedgerByKey(
   client: GrowthSqlClient,
+  sourceType: string,
   idempotencyKey: string,
 ): Promise<RewardLedgerEntry | null> {
   const result = await client.query<LedgerRow>(
@@ -393,9 +394,9 @@ async function findLedgerByKey(
             available_points_balance_after AS "availablePointsBalanceAfter",
             occurred_at AS "occurredAt"
      FROM reward_ledger_entries
-     WHERE idempotency_key = $1
+     WHERE source_type = $1 AND idempotency_key = $2
      FOR UPDATE`,
-    [idempotencyKey],
+    [sourceType, idempotencyKey],
   );
   if (result.rows.length > 1) throw new GrowthPersistenceConflict("Duplicate reward ledger key");
   return result.rows[0] ? projectLedger(result.rows[0]) : null;
@@ -426,7 +427,7 @@ async function appendInTransaction(
     throw new GrowthPersistenceConflict("Reward account identity conflict");
   }
 
-  const prior = await findLedgerByKey(client, input.idempotencyKey);
+  const prior = await findLedgerByKey(client, input.sourceType, input.idempotencyKey);
   if (prior !== null) {
     if (!exactPayload(prior, input)) throw new GrowthPersistenceConflict();
     return Object.freeze({ status: "idempotent", entry: prior });
@@ -478,7 +479,7 @@ async function appendInTransaction(
     ],
   );
   if (inserted.rows.length !== 1) {
-    const collision = await findLedgerByKey(client, input.idempotencyKey);
+    const collision = await findLedgerByKey(client, input.sourceType, input.idempotencyKey);
     if (collision !== null && exactPayload(collision, input)) {
       return Object.freeze({ status: "idempotent", entry: collision });
     }

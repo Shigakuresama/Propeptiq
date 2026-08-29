@@ -501,7 +501,9 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
       const account = accounts.rows[0];
       const prior = await client.query<RewardAdjustmentLedgerRow>(
         `SELECT ${rewardAdjustmentLedgerProjection}
-         FROM reward_ledger_entries WHERE idempotency_key = $1 FOR UPDATE`,
+         FROM reward_ledger_entries
+         WHERE source_type = 'admin_adjustment' AND idempotency_key = $1
+         FOR UPDATE`,
         [persistedIdempotencyKey],
       );
       if (prior.rows.length > 1) throw new Error("Reward adjustment idempotency conflict");
@@ -555,7 +557,9 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
       if (inserted.rows.length !== 1 || !insertedRow) {
         const collision = await client.query<RewardAdjustmentLedgerRow>(
           `SELECT ${rewardAdjustmentLedgerProjection}
-           FROM reward_ledger_entries WHERE idempotency_key = $1 FOR UPDATE`,
+           FROM reward_ledger_entries
+           WHERE source_type = 'admin_adjustment' AND idempotency_key = $1
+           FOR UPDATE`,
           [persistedIdempotencyKey],
         );
         if (collision.rows.length === 1 && collision.rows[0]) {
