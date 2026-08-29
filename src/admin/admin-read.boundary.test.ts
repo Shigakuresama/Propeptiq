@@ -30,8 +30,11 @@ describe("Task 5 admin read boundary", () => {
       "affiliate-policies": "growth:manage",
       "reward-adjustments": "growth:manage",
       "referral-codes": "growth:manage",
+      "referral-conversions": "growth:manage",
       "shared-sets": "growth:manage",
       "affiliate-applications": "growth:manage",
+      commissions: "growth:manage",
+      payouts: "affiliate:payout",
     });
   });
 
@@ -43,7 +46,10 @@ describe("Task 5 admin read boundary", () => {
     expect(requiredAdminReadCapability("affiliate-policies")).toBe("growth:manage");
     expect(requiredAdminReadCapability("reward-adjustments")).toBe("growth:manage");
     expect(requiredAdminReadCapability("referral-codes")).toBe("growth:manage");
+    expect(requiredAdminReadCapability("referral-conversions")).toBe("growth:manage");
     expect(requiredAdminReadCapability("shared-sets")).toBe("growth:manage");
     expect(requiredAdminReadCapability("affiliate-applications")).toBe("growth:manage");
+    expect(requiredAdminReadCapability("commissions")).toBe("growth:manage");
+    expect(requiredAdminReadCapability("payouts")).toBe("affiliate:payout");
   });
 });

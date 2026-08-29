@@ -1004,6 +1004,213 @@ async function loadSnapshot(
       );
       return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "affiliate-applications" }>;
     }
+    case "referral-conversions": {
+      const result = await boundedRows<{
+        conversionId: string;
+        referralPolicyVersion: number | string;
+        referredDiscountMinor: number | string;
+        referrerRewardPoints: number | string;
+        status: "pending" | "qualified" | "reversed";
+        createdAt: Date | string;
+        qualifiedAt: Date | string | null;
+        reversedAt: Date | string | null;
+      }, SnapshotItem<"referral-conversions">>(
+        client,
+        `
+          SELECT id::text AS "conversionId",
+                 referral_policy_version AS "referralPolicyVersion",
+                 referred_discount_minor AS "referredDiscountMinor",
+                 referrer_reward_points AS "referrerRewardPoints",
+                 status, created_at AS "createdAt",
+                 qualified_at AS "qualifiedAt", reversed_at AS "reversedAt"
+          FROM referral_conversions
+          ORDER BY created_at DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const referralPolicyVersion = safeInteger(row.referralPolicyVersion);
+          const referredDiscountMinor = safeInteger(row.referredDiscountMinor);
+          const referrerRewardPoints = safeInteger(row.referrerRewardPoints);
+          const createdAt = toIso(row.createdAt);
+          const qualifiedAt = nullableIso(row.qualifiedAt);
+          const reversedAt = nullableIso(row.reversedAt);
+          const createdTime = new Date(createdAt).getTime();
+          const qualifiedTime = qualifiedAt === null ? null : new Date(qualifiedAt).getTime();
+          const reversedTime = reversedAt === null ? null : new Date(reversedAt).getTime();
+          const coherentState =
+            (row.status === "pending" && qualifiedAt === null && reversedAt === null) ||
+            (row.status === "qualified" && qualifiedAt !== null && reversedAt === null) ||
+            (row.status === "reversed" && reversedAt !== null);
+          if (
+            !uuidPattern.test(row.conversionId) ||
+            referralPolicyVersion < 1 ||
+            referredDiscountMinor < 0 ||
+            referrerRewardPoints < 0 ||
+            !coherentState ||
+            (qualifiedTime !== null && qualifiedTime < createdTime) ||
+            (reversedTime !== null && reversedTime < createdTime) ||
+            (qualifiedTime !== null && reversedTime !== null && reversedTime < qualifiedTime)
+          ) {
+            throw new Error("Invalid referral conversion admin projection");
+          }
+          return Object.freeze({
+            conversionId: row.conversionId,
+            referralPolicyVersion,
+            referredDiscountMinor,
+            referrerRewardPoints,
+            status: row.status,
+            createdAt,
+            qualifiedAt,
+            reversedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "referral-conversions" }>;
+    }
+    case "commissions": {
+      const result = await boundedRows<{
+        commissionId: string;
+        affiliateProfileId: string;
+        affiliatePolicyVersion: number | string;
+        grossCommissionMinor: number | string;
+        reversedCommissionMinor: number | string;
+        status: "pending" | "approved" | "paid" | "reversed";
+        approvalEligibleAt: Date | string | null;
+        payoutId: string | null;
+        createdAt: Date | string;
+        updatedAt: Date | string;
+      }, SnapshotItem<"commissions">>(
+        client,
+        `
+          SELECT id::text AS "commissionId",
+                 affiliate_profile_id::text AS "affiliateProfileId",
+                 affiliate_policy_version AS "affiliatePolicyVersion",
+                 gross_commission_minor AS "grossCommissionMinor",
+                 reversed_commission_minor AS "reversedCommissionMinor",
+                 status, approval_eligible_at AS "approvalEligibleAt",
+                 payout_id::text AS "payoutId", created_at AS "createdAt",
+                 updated_at AS "updatedAt"
+          FROM affiliate_commissions
+          ORDER BY updated_at DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const affiliatePolicyVersion = safeInteger(row.affiliatePolicyVersion);
+          const grossCommissionMinor = safeInteger(row.grossCommissionMinor);
+          const reversedCommissionMinor = safeInteger(row.reversedCommissionMinor);
+          const netCommissionMinor = grossCommissionMinor - reversedCommissionMinor;
+          const createdAt = toIso(row.createdAt);
+          const updatedAt = toIso(row.updatedAt);
+          const approvalEligibleAt = nullableIso(row.approvalEligibleAt);
+          const payoutCoherent =
+            ((row.status === "pending" || row.status === "reversed") && row.payoutId === null) ||
+            row.status === "approved" ||
+            (row.status === "paid" && row.payoutId !== null);
+          if (
+            !uuidPattern.test(row.commissionId) ||
+            !uuidPattern.test(row.affiliateProfileId) ||
+            affiliatePolicyVersion < 1 ||
+            grossCommissionMinor < 1 ||
+            reversedCommissionMinor < 0 ||
+            reversedCommissionMinor > grossCommissionMinor ||
+            !Number.isSafeInteger(netCommissionMinor) ||
+            (row.status !== "pending" && row.status !== "approved" &&
+              row.status !== "paid" && row.status !== "reversed") ||
+            !payoutCoherent ||
+            (row.payoutId !== null && !uuidPattern.test(row.payoutId)) ||
+            new Date(updatedAt).getTime() < new Date(createdAt).getTime() ||
+            (approvalEligibleAt !== null &&
+              new Date(approvalEligibleAt).getTime() <= new Date(createdAt).getTime())
+          ) {
+            throw new Error("Invalid affiliate commission admin projection");
+          }
+          return Object.freeze({
+            commissionId: row.commissionId,
+            affiliateProfileId: row.affiliateProfileId,
+            affiliatePolicyVersion,
+            grossCommissionMinor,
+            reversedCommissionMinor,
+            netCommissionMinor,
+            status: row.status,
+            approvalEligibleAt,
+            payoutId: row.payoutId,
+            createdAt,
+            updatedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "commissions" }>;
+    }
+    case "payouts": {
+      const result = await boundedRows<{
+        payoutId: string;
+        affiliateProfileId: string;
+        affiliatePolicyVersion: number | string;
+        amountMinor: number | string;
+        currency: string;
+        state: "pending" | "paid" | "cancelled";
+        version: number | string;
+        commissionCount: number | string;
+        externalEvidenceRecorded: boolean;
+        createdAt: Date | string;
+        paidAt: Date | string | null;
+      }, SnapshotItem<"payouts">>(
+        client,
+        `
+          SELECT p.id::text AS "payoutId",
+                 p.affiliate_profile_id::text AS "affiliateProfileId",
+                 p.affiliate_policy_version AS "affiliatePolicyVersion",
+                 p.amount_minor AS "amountMinor", p.currency, p.state, p.version,
+                 (SELECT count(*) FROM affiliate_payout_commissions pc
+                  WHERE pc.payout_id = p.id) AS "commissionCount",
+                 (p.external_provider IS NOT NULL AND p.external_reference IS NOT NULL)
+                   AS "externalEvidenceRecorded",
+                 p.created_at AS "createdAt", p.paid_at AS "paidAt"
+          FROM affiliate_payouts p
+          ORDER BY p.created_at DESC, p.id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const affiliatePolicyVersion = safeInteger(row.affiliatePolicyVersion);
+          const amountMinor = safeInteger(row.amountMinor);
+          const version = safeInteger(row.version);
+          const commissionCount = safeInteger(row.commissionCount);
+          const createdAt = toIso(row.createdAt);
+          const paidAt = nullableIso(row.paidAt);
+          const paid = row.state === "paid";
+          if (
+            !uuidPattern.test(row.payoutId) ||
+            !uuidPattern.test(row.affiliateProfileId) ||
+            affiliatePolicyVersion < 1 ||
+            amountMinor < 1 ||
+            row.currency !== "USD" ||
+            (row.state !== "pending" && row.state !== "paid" && row.state !== "cancelled") ||
+            version < 1 ||
+            commissionCount < 1 ||
+            typeof row.externalEvidenceRecorded !== "boolean" ||
+            paid !== (paidAt !== null) ||
+            paid !== row.externalEvidenceRecorded ||
+            (paidAt !== null && new Date(paidAt).getTime() < new Date(createdAt).getTime())
+          ) {
+            throw new Error("Invalid affiliate payout admin projection");
+          }
+          return Object.freeze({
+            payoutId: row.payoutId,
+            affiliateProfileId: row.affiliateProfileId,
+            affiliatePolicyVersion,
+            amountMinor,
+            currency: "USD" as const,
+            state: row.state,
+            version,
+            commissionCount,
+            externalEvidenceRecorded: row.externalEvidenceRecorded,
+            createdAt,
+            paidAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "payouts" }>;
+    }
     case "buyers": {
       const result = await boundedRows<{
         userId: string;

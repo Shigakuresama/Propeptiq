@@ -20,8 +20,11 @@ export const ADMIN_READ_RESOURCE_REQUIREMENTS = Object.freeze({
   "affiliate-policies": "growth:manage",
   "reward-adjustments": "growth:manage",
   "referral-codes": "growth:manage",
+  "referral-conversions": "growth:manage",
   "shared-sets": "growth:manage",
   "affiliate-applications": "growth:manage",
+  commissions: "growth:manage",
+  payouts: "affiliate:payout",
 } as const);
 
 export type AdminReadResource = keyof typeof ADMIN_READ_RESOURCE_REQUIREMENTS;
@@ -355,6 +358,45 @@ type AffiliateApplicationItem = {
   updatedAt: string;
 };
 
+type ReferralConversionItem = {
+  conversionId: string;
+  referralPolicyVersion: number;
+  referredDiscountMinor: number;
+  referrerRewardPoints: number;
+  status: "pending" | "qualified" | "reversed";
+  createdAt: string;
+  qualifiedAt: string | null;
+  reversedAt: string | null;
+};
+
+type AffiliateCommissionItem = {
+  commissionId: string;
+  affiliateProfileId: string;
+  affiliatePolicyVersion: number;
+  grossCommissionMinor: number;
+  reversedCommissionMinor: number;
+  netCommissionMinor: number;
+  status: "pending" | "approved" | "paid" | "reversed";
+  approvalEligibleAt: string | null;
+  payoutId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AffiliatePayoutItem = {
+  payoutId: string;
+  affiliateProfileId: string;
+  affiliatePolicyVersion: number;
+  amountMinor: number;
+  currency: "USD";
+  state: "pending" | "paid" | "cancelled";
+  version: number;
+  commissionCount: number;
+  externalEvidenceRecorded: boolean;
+  createdAt: string;
+  paidAt: string | null;
+};
+
 export type AdminReadSnapshot =
   | Snapshot<"products", ProductItem>
   | Snapshot<"prices", PriceItem>
@@ -377,8 +419,11 @@ export type AdminReadSnapshot =
   | Snapshot<"affiliate-policies", AffiliatePolicyItem>
   | Snapshot<"reward-adjustments", RewardAdjustmentItem>
   | Snapshot<"referral-codes", ReferralCodeItem>
+  | Snapshot<"referral-conversions", ReferralConversionItem>
   | Snapshot<"shared-sets", SharedSetItem>
-  | Snapshot<"affiliate-applications", AffiliateApplicationItem>;
+  | Snapshot<"affiliate-applications", AffiliateApplicationItem>
+  | Snapshot<"commissions", AffiliateCommissionItem>
+  | Snapshot<"payouts", AffiliatePayoutItem>;
 
 export type AdminReadSnapshotFor<Resource extends AdminReadResource> = Extract<
   AdminReadSnapshot,

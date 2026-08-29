@@ -13,8 +13,11 @@ describe("local deterministic repository boundary", () => {
     "affiliate-policies",
     "reward-adjustments",
     "referral-codes",
+    "referral-conversions",
     "shared-sets",
     "affiliate-applications",
+    "commissions",
+    "payouts",
   ] as const)("returns an empty frozen %s read snapshot without fixture economics", (resource) => {
     const snapshot = getLocalTestDriver().readAdminSnapshot(resource);
 
