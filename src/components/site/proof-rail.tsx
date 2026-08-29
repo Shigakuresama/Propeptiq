@@ -13,12 +13,12 @@ export function ProofRail({ nodes = emptyProof }: { nodes?: readonly PublicProof
   return (
     <ol
       aria-label="Evidence relationship"
-      className="proof-rail relative grid gap-4 lg:grid-cols-4 lg:gap-0"
+      className="proof-rail relative grid gap-4 xl:grid-cols-4 xl:gap-0"
     >
       {nodes.map((node, index) => (
         <li
           key={node.label}
-          className="relative grid min-h-44 grid-cols-[2.5rem_1fr] gap-4 rounded-[0.875rem] border border-border bg-surface p-5 lg:min-h-52 lg:grid-cols-1 lg:content-between lg:rounded-none lg:border-y lg:border-l lg:last:border-r"
+          className="relative grid min-h-44 grid-cols-[2.5rem_1fr] gap-4 rounded-[0.875rem] border border-border bg-surface p-5 xl:min-h-52 xl:grid-cols-1 xl:content-between xl:rounded-none xl:border-y xl:border-l xl:last:border-r"
         >
           <span
             aria-hidden="true"
@@ -26,7 +26,7 @@ export function ProofRail({ nodes = emptyProof }: { nodes?: readonly PublicProof
           >
             {String(index + 1).padStart(2, "0")}
           </span>
-          <div className="self-center lg:self-end">
+          <div className="self-center xl:self-end">
             <h3 className="text-lg font-semibold text-ink">{node.label}</h3>
             {node.href ? (
               <Link className="record-link mt-2 inline-block text-sm leading-6" href={node.href as Route}>

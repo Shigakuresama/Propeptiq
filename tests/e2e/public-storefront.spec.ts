@@ -215,7 +215,36 @@ test("mobile explanatory copy meets the 16px body minimum", async ({ page }) => 
   }
 });
 
-test("mobile header brand and footer navigation targets are at least 44px", async ({ page }) => {
+test("header logo remains uncropped while brand and footer targets stay accessible", async ({ page }) => {
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
+    await page.goto("/");
+
+    const logoStyles = await page
+      .getByRole("banner")
+      .getByRole("link", { name: "PROPEPTIQ LABS home" })
+      .locator("img")
+      .evaluate((image) => {
+        const imageStyles = getComputedStyle(image);
+        const wrapperStyles = getComputedStyle(image.parentElement!);
+        return {
+          backgroundColor: wrapperStyles.backgroundColor,
+          borderRadius: wrapperStyles.borderRadius,
+          objectFit: imageStyles.objectFit,
+          overflow: wrapperStyles.overflow,
+          transform: imageStyles.transform,
+        };
+      });
+
+    expect(logoStyles, `${width}px header logo styles`).toEqual({
+      backgroundColor: "rgba(0, 0, 0, 0)",
+      borderRadius: "0px",
+      objectFit: "contain",
+      overflow: "visible",
+      transform: "none",
+    });
+  }
+
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
 
@@ -298,17 +327,21 @@ test("homepage current catalog remains reachable at 200% CSS zoom without horizo
 test("reduced motion disables transition and animation durations", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/catalog");
+  const card = page.locator("article.catalog-listing-card").first();
+  await card.hover();
   const motion = await page
     .getByRole("link", { name: "View catalog item: Tirzepatide" })
     .evaluate((element) => ({
       animationDuration: getComputedStyle(element).animationDuration,
       transitionDuration: getComputedStyle(element).transitionDuration,
       scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
+      cardTransform: getComputedStyle(element.closest("article")!).transform,
     }));
   expect(motion).toEqual({
     animationDuration: "0s",
     transitionDuration: "0s",
     scrollBehavior: "auto",
+    cardTransform: "none",
   });
 });
 
@@ -325,7 +358,7 @@ test("owner-supplied catalog is complete, price-free, and serves every illustrat
   request,
 }) => {
   await page.goto("/catalog");
-  await expect(page.locator("article.catalog-listing-card")).toHaveCount(53);
+  await expect(page.locator("article.catalog-listing-card")).toHaveCount(56);
   await expect(page.getByText("103 supplied package configurations")).toBeVisible();
   await expect(page.getByRole("button", { name: /add .* to cart/i })).toHaveCount(0);
   await expect(page.locator("main")).not.toContainText("$");
@@ -337,7 +370,7 @@ test("owner-supplied catalog is complete, price-free, and serves every illustrat
         return url.searchParams.get("url") ?? url.pathname;
       }),
   );
-  expect(new Set(imagePaths).size).toBe(53);
+  expect(new Set(imagePaths).size).toBe(56);
 
   for (const imagePath of imagePaths) {
     const response = await request.get(imagePath);

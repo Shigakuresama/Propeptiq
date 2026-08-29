@@ -3,7 +3,8 @@ export const siteName = "PROPEPTIQ LABS";
 export const publicNavigation = [
   { label: "Catalog", href: "/catalog" },
   { label: "Quality Records", href: "/quality-records" },
-  { label: "Research-Use Policy", href: "/research-use-policy" },
+  { label: "Research Use", href: "/research-use-policy" },
+  { label: "Rewards", href: "/rewards" },
 ] as const;
 
 export const researchRestrictions = [

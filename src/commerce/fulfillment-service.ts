@@ -46,6 +46,13 @@ export type FulfillmentCommandRepository = Readonly<{
   ) => Promise<FulfillmentCommandResultV1>;
 }>;
 
+export type FulfillmentRewardsLifecycleV1 = Readonly<{
+  reconcileDeliveredOrder: (input: Readonly<{
+    orderId: string;
+    now: Date;
+  }>) => Promise<Readonly<{ status: "applied" | "idempotent" }>>;
+}>;
+
 type CommandInput = Readonly<{
   executionContext: unknown;
   repository: FulfillmentCommandRepository;
@@ -54,6 +61,7 @@ type CommandInput = Readonly<{
   now: Date;
   correlationId: string;
   authorize: () => Promise<FulfillmentCommandActorV1>;
+  rewardsLifecycle?: FulfillmentRewardsLifecycleV1;
 }>;
 
 function boundedText(value: unknown): value is string {
@@ -98,10 +106,27 @@ async function execute(
   });
   if (action === "clear") return input.repository.clearHold(common);
   if (action === "handoff") return input.repository.handoff(common);
-  return input.repository.transitionShipment({
+  const result = await input.repository.transitionShipment({
     ...common,
     action,
   });
+  if (
+    action === "deliver" &&
+    (result.status === "delivered" || result.status === "already_delivered")
+  ) {
+    if (input.rewardsLifecycle === undefined) {
+      return Object.freeze({ status: "conflict" as const });
+    }
+    try {
+      await input.rewardsLifecycle.reconcileDeliveredOrder({
+        orderId: input.orderId,
+        now: input.now,
+      });
+    } catch {
+      return Object.freeze({ status: "conflict" as const });
+    }
+  }
+  return result;
 }
 
 export function clearFulfillmentHold(

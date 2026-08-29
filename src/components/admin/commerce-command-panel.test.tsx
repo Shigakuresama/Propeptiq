@@ -4,16 +4,22 @@ import { describe, expect, it, vi } from "vitest";
 const actions = vi.hoisted(() => ({
   activateProductAction: vi.fn(),
   activatePromotionAction: vi.fn(),
+  adjustRewardBalanceAction: vi.fn(),
   changeBuyerStatusAction: vi.fn(),
   changeStaffCapabilityAction: vi.fn(),
   clearFulfillmentHoldAction: vi.fn(),
+  createAffiliatePayoutBatchAdminAction: vi.fn(),
   decideReviewAction: vi.fn(),
+  deactivateSharedSetAction: vi.fn(),
+  decideAffiliateApplicationAction: vi.fn(),
   handoffFulfillmentAction: vi.fn(),
   markShipmentDeliveredAction: vi.fn(),
   recordShipmentExceptionAction: vi.fn(),
+  recordAffiliatePayoutPaidAdminAction: vi.fn(),
   publishAttestationAction: vi.fn(),
   publishCoaAction: vi.fn(),
   requestRefundAction: vi.fn(),
+  revokeReferralCodeAction: vi.fn(),
   retireProductAction: vi.fn(),
   retirePromotionAction: vi.fn(),
   saveAnalyticalClaimDraftAction: vi.fn(),
@@ -30,6 +36,7 @@ const actions = vi.hoisted(() => ({
   submitOrRecoverRefundAction: vi.fn(),
   supersedeDestinationAction: vi.fn(),
   supersedeProductPriceAction: vi.fn(),
+  suspendAffiliateApplicationAction: vi.fn(),
 }));
 
 vi.mock("@/admin/actions", () => actions);
@@ -267,5 +274,20 @@ describe("Slice 6G staff commerce commands", () => {
     expect(within(alert).getByText("Command not completed")).toBeVisible();
     expect(alert).not.toHaveTextContent("Completed command read-back");
     await waitFor(() => expect(alert).toHaveFocus());
+  });
+});
+
+describe("Task 8A growth resource shell", () => {
+  it("shows the exact closed action boundary without exposing mutation forms", () => {
+    const selected = resourceBySlug("loyalty-policies");
+    expect(selected).not.toBeNull();
+    if (!selected) return;
+
+    render(<ResourceCommandPanel resource={selected} snapshot={null} />);
+
+    expect(screen.getByRole("heading", { name: "Growth administration boundary" })).toBeVisible();
+    expect(screen.getByText("Create draft · Activate · Retire")).toBeVisible();
+    expect(screen.getByText(/database-backed records and commands are not available/i)).toBeVisible();
+    expect(screen.queryByRole("form")).not.toBeInTheDocument();
   });
 });

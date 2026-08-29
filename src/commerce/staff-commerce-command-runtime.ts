@@ -16,6 +16,7 @@ import {
   recordShipmentException,
   type FulfillmentCommandRepository,
   type FulfillmentCommandResultV1,
+  type FulfillmentRewardsLifecycleV1,
 } from "@/commerce/fulfillment-service";
 import type { PaymentProvider } from "@/commerce/payment-provider";
 import { createProviderExecutionContextV1 } from "@/commerce/provider-context";
@@ -44,6 +45,7 @@ export async function createStaffCommerceCommandRuntimeV1(input: Readonly<{
   adminRepository: AdminRepository;
   refundRepository: RefundCommandRepository;
   fulfillmentRepository: FulfillmentCommandRepository;
+  rewardsLifecycle: FulfillmentRewardsLifecycleV1;
   resolveDatabaseUsersByClerkId: (
     clerkUserId: string,
   ) => Promise<readonly string[]>;
@@ -91,6 +93,7 @@ export async function createStaffCommerceCommandRuntimeV1(input: Readonly<{
     now: input.now,
     correlationId: input.correlationId,
     authorize: () => authorize("fulfillment.release.consume"),
+    rewardsLifecycle: input.rewardsLifecycle,
   });
 
   return Object.freeze({

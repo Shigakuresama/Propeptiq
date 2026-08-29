@@ -1,4 +1,7 @@
 import {
+  MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1,
+} from "@/admin/admin-service";
+import {
   ADMIN_READ_LIMIT,
   requiredAdminReadCapability,
   type AdminReadResource,
@@ -7,6 +10,10 @@ import {
   type SafePromotionConfiguration,
 } from "@/admin/admin-read";
 import { isVerifiedIdentityAt, type VerifiedIdentity } from "@/auth/identity";
+import { parseAffiliatePolicy } from "@/domain/affiliates";
+import { parseReferralPolicy } from "@/domain/referrals";
+import { parseLoyaltyPolicy } from "@/domain/rewards";
+import { scanPublicCopy } from "@/domain/content-policy";
 
 export type AdminReadSqlClient = Readonly<{
   query: <Row extends object>(
@@ -89,6 +96,103 @@ function hasExactKeys(
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const referralCodePattern = /^ref_[A-Za-z0-9_-]{16,64}$/u;
+const sharedSetCodePattern = /^set_[A-Za-z0-9_-]{16,64}$/u;
+const affiliateCodePattern = /^aff_[A-Za-z0-9_-]{16,64}$/u;
+const affiliateHandlePattern = /^@[A-Za-z0-9_][A-Za-z0-9._-]{1,63}$/u;
+const controlCharacterPattern = /[\u0000-\u001f\u007f-\u009f]/u;
+const recentRewardAdjustmentLimit = 20;
+const affiliatePublicChannelMaxLength = 200;
+const affiliateChannelReadPolicy = Object.freeze({
+  version: "affiliate-channel-read-validation",
+  activeLotEvidenceIds: Object.freeze([]) as readonly string[],
+});
+
+function safeAffiliatePublicChannel(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > affiliatePublicChannelMaxLength ||
+    value.trim() !== value ||
+    controlCharacterPattern.test(value)
+  ) {
+    throw new Error("Invalid affiliate application admin projection");
+  }
+  let canonical = affiliateHandlePattern.test(value);
+  if (!canonical) {
+    try {
+      const parsed = new URL(value);
+      canonical =
+        parsed.protocol === "https:" &&
+        parsed.username.length === 0 &&
+        parsed.password.length === 0 &&
+        parsed.hostname.length > 0 &&
+        parsed.search.length === 0 &&
+        parsed.hash.length === 0 &&
+        parsed.toString() === value;
+    } catch {
+      canonical = false;
+    }
+  }
+  if (
+    !canonical ||
+    !scanPublicCopy(
+      { text: value, claims: [] },
+      affiliateChannelReadPolicy,
+    ).publishable
+  ) {
+    throw new Error("Invalid affiliate application admin projection");
+  }
+  return value;
+}
+
+function coherentAffiliateApplicationState(status: unknown, version: number): boolean {
+  return (
+    (status === "pending" && version === 1) ||
+    ((status === "active" || status === "rejected") && version === 2) ||
+    (status === "suspended" && version === 3)
+  );
+}
+
+function safePublicLabel(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.trim().length === 0 ||
+    [...value].length > 120 ||
+    controlCharacterPattern.test(value)
+  ) {
+    throw new Error("Invalid shared set admin projection");
+  }
+  return value;
+}
+
+function recentRewardAdjustments(raw: unknown): SnapshotItem<"reward-adjustments">["recentAdjustments"] {
+  const value = normalizeJson(raw);
+  if (!Array.isArray(value) || value.length > recentRewardAdjustmentLimit) {
+    throw new Error("Invalid reward adjustment admin projection");
+  }
+  return Object.freeze(value.map((candidate) => {
+    if (
+      !isRecord(candidate) ||
+      !hasExactKeys(candidate, ["adjustmentId", "delta", "occurredAt"]) ||
+      typeof candidate.adjustmentId !== "string" ||
+      !uuidPattern.test(candidate.adjustmentId) ||
+      (typeof candidate.delta !== "number" && typeof candidate.delta !== "string") ||
+      (typeof candidate.occurredAt !== "string" && !(candidate.occurredAt instanceof Date))
+    ) {
+      throw new Error("Invalid reward adjustment admin projection");
+    }
+    const delta = safeInteger(candidate.delta);
+    if (delta === 0 || Math.abs(delta) > MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1) {
+      throw new Error("Invalid reward adjustment admin projection");
+    }
+    return Object.freeze({
+      adjustmentId: candidate.adjustmentId,
+      delta,
+      occurredAt: toIso(candidate.occurredAt),
+    });
+  }));
+}
 
 function safeProductIds(value: unknown, minimum: number): readonly string[] | null {
   if (
@@ -166,6 +270,24 @@ function promotionTargets(raw: unknown): readonly Readonly<{
       return Object.freeze({ kind: candidate.kind, id: candidate.id });
     }),
   );
+}
+
+type GrowthLifecycleRow = {
+  id: string;
+  version: number | string;
+  status: "draft" | "active" | "superseded";
+  effectiveAt: Date | string;
+  retiredAt: Date | string | null;
+};
+
+function growthLifecycle(row: GrowthLifecycleRow) {
+  return {
+    id: row.id,
+    version: safeInteger(row.version),
+    status: row.status === "superseded" ? "retired" as const : row.status,
+    effectiveAt: toIso(row.effectiveAt),
+    retiredAt: nullableIso(row.retiredAt),
+  };
 }
 
 async function assertPersistedAuthority(
@@ -552,6 +674,542 @@ async function loadSnapshot(
         }),
       );
       return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "promotions" }>;
+    }
+    case "loyalty-policies": {
+      const result = await boundedRows<GrowthLifecycleRow & {
+        pointsPerDollar: number | string;
+        redemptionMinorPerPoint: number | string;
+        minimumRedemptionPoints: number | string;
+        maximumRedemptionBasisPoints: number | string;
+        expiresAfterDays: number | string | null;
+      }, SnapshotItem<"loyalty-policies">>(
+        client,
+        `
+          SELECT id::text AS id, version, status,
+                 effective_at AS "effectiveAt", superseded_at AS "retiredAt",
+                 points_per_dollar AS "pointsPerDollar",
+                 redemption_minor_per_point AS "redemptionMinorPerPoint",
+                 minimum_redemption_points AS "minimumRedemptionPoints",
+                 maximum_redemption_basis_points AS "maximumRedemptionBasisPoints",
+                 expires_after_days AS "expiresAfterDays"
+          FROM loyalty_policies
+          ORDER BY version DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const lifecycle = growthLifecycle(row);
+          const economics = {
+            pointsPerDollar: safeInteger(row.pointsPerDollar),
+            redemptionMinorPerPoint: safeInteger(row.redemptionMinorPerPoint),
+            minimumRedemptionPoints: safeInteger(row.minimumRedemptionPoints),
+            maximumRedemptionBasisPoints: safeInteger(row.maximumRedemptionBasisPoints),
+            expiresAfterDays: row.expiresAfterDays,
+          };
+          const parsed = parseLoyaltyPolicy({
+            id: lifecycle.id,
+            version: lifecycle.version,
+            status: lifecycle.status,
+            effectiveAt: lifecycle.effectiveAt,
+            ...economics,
+            supersededAt: lifecycle.retiredAt,
+          });
+          if (!parsed.ok) throw new Error("Invalid loyalty policy admin projection");
+          return { ...lifecycle, ...economics, expiresAfterDays: null };
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "loyalty-policies" }>;
+    }
+    case "referral-policies": {
+      const result = await boundedRows<GrowthLifecycleRow & {
+        attributionDays: number | string;
+        referredDiscountBasisPoints: number | string;
+        referredDiscountCapMinor: number | string;
+        referrerPointsPerDollar: number | string;
+        referrerRewardCapPoints: number | string;
+      }, SnapshotItem<"referral-policies">>(
+        client,
+        `
+          SELECT id::text AS id, version, status,
+                 effective_at AS "effectiveAt", superseded_at AS "retiredAt",
+                 attribution_days AS "attributionDays",
+                 referred_discount_basis_points AS "referredDiscountBasisPoints",
+                 referred_discount_cap_minor AS "referredDiscountCapMinor",
+                 referrer_points_per_dollar AS "referrerPointsPerDollar",
+                 referrer_reward_cap_points AS "referrerRewardCapPoints"
+          FROM referral_policies
+          ORDER BY version DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const lifecycle = growthLifecycle(row);
+          const economics = {
+            attributionDays: safeInteger(row.attributionDays),
+            referredDiscountBasisPoints: safeInteger(row.referredDiscountBasisPoints),
+            referredDiscountCapMinor: safeInteger(row.referredDiscountCapMinor),
+            referrerPointsPerDollar: safeInteger(row.referrerPointsPerDollar),
+            referrerRewardCapPoints: safeInteger(row.referrerRewardCapPoints),
+          };
+          const parsed = parseReferralPolicy({
+            id: lifecycle.id,
+            version: lifecycle.version,
+            status: lifecycle.status,
+            effectiveAt: lifecycle.effectiveAt,
+            ...economics,
+            supersededAt: lifecycle.retiredAt,
+          });
+          if (!parsed.ok) throw new Error("Invalid referral policy admin projection");
+          return { ...lifecycle, ...economics };
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "referral-policies" }>;
+    }
+    case "affiliate-policies": {
+      const result = await boundedRows<GrowthLifecycleRow & {
+        attributionDays: number | string;
+        firstOrderCommissionBasisPoints: number | string;
+        reorderCommissionBasisPoints: number | string;
+        reorderWindowDays: number | string;
+        approvalDelayDays: number | string;
+        payoutThresholdMinor: number | string;
+        currency: string;
+      }, SnapshotItem<"affiliate-policies">>(
+        client,
+        `
+          SELECT id::text AS id, version, status,
+                 effective_at AS "effectiveAt", superseded_at AS "retiredAt",
+                 attribution_days AS "attributionDays",
+                 first_order_commission_basis_points AS "firstOrderCommissionBasisPoints",
+                 reorder_commission_basis_points AS "reorderCommissionBasisPoints",
+                 reorder_window_days AS "reorderWindowDays",
+                 approval_delay_days AS "approvalDelayDays",
+                 payout_threshold_minor AS "payoutThresholdMinor", currency
+          FROM affiliate_policies
+          ORDER BY version DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const lifecycle = growthLifecycle(row);
+          const economics = {
+            attributionDays: safeInteger(row.attributionDays),
+            firstOrderCommissionBasisPoints: safeInteger(row.firstOrderCommissionBasisPoints),
+            reorderCommissionBasisPoints: safeInteger(row.reorderCommissionBasisPoints),
+            reorderWindowDays: safeInteger(row.reorderWindowDays),
+            approvalDelayDays: safeInteger(row.approvalDelayDays),
+            payoutThresholdMinor: safeInteger(row.payoutThresholdMinor),
+            currency: row.currency,
+          };
+          const parsed = parseAffiliatePolicy({
+            id: lifecycle.id,
+            version: lifecycle.version,
+            status: lifecycle.status,
+            effectiveAt: lifecycle.effectiveAt,
+            ...economics,
+            supersededAt: lifecycle.retiredAt,
+          });
+          if (!parsed.ok) throw new Error("Invalid affiliate policy admin projection");
+          return { ...lifecycle, ...economics, currency: "USD" };
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "affiliate-policies" }>;
+    }
+    case "reward-adjustments": {
+      const result = await boundedRows<{
+        rewardAccountId: string;
+        pendingPoints: number | string;
+        availablePoints: number | string;
+        recentAdjustments: unknown;
+      }, SnapshotItem<"reward-adjustments">>(
+        client,
+        `
+          SELECT ra.id::text AS "rewardAccountId",
+                 ra.pending_points AS "pendingPoints",
+                 ra.available_points AS "availablePoints",
+                 COALESCE((
+                   SELECT jsonb_agg(
+                     jsonb_build_object(
+                       'adjustmentId', recent.id::text,
+                       'delta', recent.available_points_delta,
+                       'occurredAt', recent.occurred_at
+                     ) ORDER BY recent.occurred_at DESC, recent.id DESC
+                   )
+                   FROM (
+                     SELECT id, available_points_delta, occurred_at
+                     FROM reward_ledger_entries
+                     WHERE reward_account_id = ra.id
+                       AND kind = 'admin_adjustment'
+                       AND source_type = 'admin_adjustment'
+                     ORDER BY occurred_at DESC, id DESC
+                     LIMIT ${recentRewardAdjustmentLimit}
+                   ) recent
+                 ), '[]'::jsonb) AS "recentAdjustments"
+          FROM reward_accounts ra
+          ORDER BY ra.updated_at DESC, ra.id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          if (!uuidPattern.test(row.rewardAccountId)) {
+            throw new Error("Invalid reward adjustment admin projection");
+          }
+          return Object.freeze({
+            rewardAccountId: row.rewardAccountId,
+            pendingPoints: safeInteger(row.pendingPoints),
+            availablePoints: safeInteger(row.availablePoints),
+            recentAdjustments: recentRewardAdjustments(row.recentAdjustments),
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "reward-adjustments" }>;
+    }
+    case "referral-codes": {
+      const result = await boundedRows<{
+        referralCodeId: string;
+        code: string;
+        status: "active" | "revoked";
+        createdAt: Date | string;
+        revokedAt: Date | string | null;
+      }, SnapshotItem<"referral-codes">>(
+        client,
+        `
+          SELECT id::text AS "referralCodeId", code, status,
+                 created_at AS "createdAt", revoked_at AS "revokedAt"
+          FROM referral_codes
+          ORDER BY created_at DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const createdAt = toIso(row.createdAt);
+          const revokedAt = nullableIso(row.revokedAt);
+          if (
+            !uuidPattern.test(row.referralCodeId) ||
+            !referralCodePattern.test(row.code) ||
+            (row.status !== "active" && row.status !== "revoked") ||
+            (row.status === "active") !== (revokedAt === null) ||
+            (revokedAt !== null && new Date(revokedAt).getTime() < new Date(createdAt).getTime())
+          ) {
+            throw new Error("Invalid referral code admin projection");
+          }
+          return Object.freeze({
+            referralCodeId: row.referralCodeId,
+            code: row.code,
+            status: row.status,
+            createdAt,
+            revokedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "referral-codes" }>;
+    }
+    case "shared-sets": {
+      const result = await boundedRows<{
+        sharedSetId: string;
+        publicCode: string;
+        label: string;
+        active: boolean;
+        itemCount: number | string;
+        createdAt: Date | string;
+        updatedAt: Date | string;
+        deactivatedAt: Date | string | null;
+      }, SnapshotItem<"shared-sets">>(
+        client,
+        `
+          SELECT s.id::text AS "sharedSetId", s.public_code AS "publicCode",
+                 s.label, s.active,
+                 (SELECT count(*) FROM shared_research_set_items i
+                  WHERE i.shared_set_id = s.id) AS "itemCount",
+                 s.created_at AS "createdAt", s.updated_at AS "updatedAt",
+                 s.deactivated_at AS "deactivatedAt"
+          FROM shared_research_sets s
+          ORDER BY s.updated_at DESC, s.id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const itemCount = safeInteger(row.itemCount);
+          const createdAt = toIso(row.createdAt);
+          const updatedAt = toIso(row.updatedAt);
+          const deactivatedAt = nullableIso(row.deactivatedAt);
+          if (
+            !uuidPattern.test(row.sharedSetId) ||
+            !sharedSetCodePattern.test(row.publicCode) ||
+            typeof row.active !== "boolean" ||
+            itemCount < 2 ||
+            itemCount > 8 ||
+            new Date(updatedAt).getTime() < new Date(createdAt).getTime() ||
+            row.active !== (deactivatedAt === null) ||
+            (deactivatedAt !== null && deactivatedAt !== updatedAt)
+          ) {
+            throw new Error("Invalid shared set admin projection");
+          }
+          return Object.freeze({
+            sharedSetId: row.sharedSetId,
+            publicCode: row.publicCode,
+            label: safePublicLabel(row.label),
+            active: row.active,
+            itemCount,
+            createdAt,
+            updatedAt,
+            deactivatedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "shared-sets" }>;
+    }
+    case "affiliate-applications": {
+      const result = await boundedRows<{
+        affiliateProfileId: string;
+        publicCode: string;
+        status: "pending" | "active" | "rejected" | "suspended";
+        version: number | string;
+        publicChannel: string;
+        promotionMethod: "website" | "social" | "email" | "other";
+        createdAt: Date | string;
+        updatedAt: Date | string;
+      }, SnapshotItem<"affiliate-applications">>(
+        client,
+        `
+          SELECT id::text AS "affiliateProfileId", public_code AS "publicCode",
+                 status, version, public_channel AS "publicChannel",
+                 promotion_method AS "promotionMethod",
+                 created_at AS "createdAt", updated_at AS "updatedAt"
+          FROM affiliate_profiles
+          ORDER BY updated_at DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const version = safeInteger(row.version);
+          const createdAt = toIso(row.createdAt);
+          const updatedAt = toIso(row.updatedAt);
+          if (
+            !uuidPattern.test(row.affiliateProfileId) ||
+            !affiliateCodePattern.test(row.publicCode) ||
+            !coherentAffiliateApplicationState(row.status, version) ||
+            (row.promotionMethod !== "website" &&
+              row.promotionMethod !== "social" &&
+              row.promotionMethod !== "email" &&
+              row.promotionMethod !== "other") ||
+            new Date(updatedAt).getTime() < new Date(createdAt).getTime()
+          ) {
+            throw new Error("Invalid affiliate application admin projection");
+          }
+          return Object.freeze({
+            affiliateProfileId: row.affiliateProfileId,
+            publicCode: row.publicCode,
+            status: row.status,
+            version,
+            publicChannel: safeAffiliatePublicChannel(row.publicChannel),
+            promotionMethod: row.promotionMethod,
+            createdAt,
+            updatedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "affiliate-applications" }>;
+    }
+    case "referral-conversions": {
+      const result = await boundedRows<{
+        conversionId: string;
+        referralPolicyVersion: number | string;
+        referredDiscountMinor: number | string;
+        referrerRewardPoints: number | string;
+        status: "pending" | "qualified" | "reversed";
+        createdAt: Date | string;
+        qualifiedAt: Date | string | null;
+        reversedAt: Date | string | null;
+      }, SnapshotItem<"referral-conversions">>(
+        client,
+        `
+          SELECT id::text AS "conversionId",
+                 referral_policy_version AS "referralPolicyVersion",
+                 referred_discount_minor AS "referredDiscountMinor",
+                 referrer_reward_points AS "referrerRewardPoints",
+                 status, created_at AS "createdAt",
+                 qualified_at AS "qualifiedAt", reversed_at AS "reversedAt"
+          FROM referral_conversions
+          ORDER BY created_at DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const referralPolicyVersion = safeInteger(row.referralPolicyVersion);
+          const referredDiscountMinor = safeInteger(row.referredDiscountMinor);
+          const referrerRewardPoints = safeInteger(row.referrerRewardPoints);
+          const createdAt = toIso(row.createdAt);
+          const qualifiedAt = nullableIso(row.qualifiedAt);
+          const reversedAt = nullableIso(row.reversedAt);
+          const createdTime = new Date(createdAt).getTime();
+          const qualifiedTime = qualifiedAt === null ? null : new Date(qualifiedAt).getTime();
+          const reversedTime = reversedAt === null ? null : new Date(reversedAt).getTime();
+          const coherentState =
+            (row.status === "pending" && qualifiedAt === null && reversedAt === null) ||
+            (row.status === "qualified" && qualifiedAt !== null && reversedAt === null) ||
+            (row.status === "reversed" && reversedAt !== null);
+          if (
+            !uuidPattern.test(row.conversionId) ||
+            referralPolicyVersion < 1 ||
+            referredDiscountMinor < 0 ||
+            referrerRewardPoints < 0 ||
+            !coherentState ||
+            (qualifiedTime !== null && qualifiedTime < createdTime) ||
+            (reversedTime !== null && reversedTime < createdTime) ||
+            (qualifiedTime !== null && reversedTime !== null && reversedTime < qualifiedTime)
+          ) {
+            throw new Error("Invalid referral conversion admin projection");
+          }
+          return Object.freeze({
+            conversionId: row.conversionId,
+            referralPolicyVersion,
+            referredDiscountMinor,
+            referrerRewardPoints,
+            status: row.status,
+            createdAt,
+            qualifiedAt,
+            reversedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "referral-conversions" }>;
+    }
+    case "commissions": {
+      const result = await boundedRows<{
+        commissionId: string;
+        affiliateProfileId: string;
+        affiliatePolicyVersion: number | string;
+        grossCommissionMinor: number | string;
+        reversedCommissionMinor: number | string;
+        status: "pending" | "approved" | "paid" | "reversed";
+        approvalEligibleAt: Date | string | null;
+        payoutId: string | null;
+        createdAt: Date | string;
+        updatedAt: Date | string;
+      }, SnapshotItem<"commissions">>(
+        client,
+        `
+          SELECT id::text AS "commissionId",
+                 affiliate_profile_id::text AS "affiliateProfileId",
+                 affiliate_policy_version AS "affiliatePolicyVersion",
+                 gross_commission_minor AS "grossCommissionMinor",
+                 reversed_commission_minor AS "reversedCommissionMinor",
+                 status, approval_eligible_at AS "approvalEligibleAt",
+                 payout_id::text AS "payoutId", created_at AS "createdAt",
+                 updated_at AS "updatedAt"
+          FROM affiliate_commissions
+          ORDER BY updated_at DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const affiliatePolicyVersion = safeInteger(row.affiliatePolicyVersion);
+          const grossCommissionMinor = safeInteger(row.grossCommissionMinor);
+          const reversedCommissionMinor = safeInteger(row.reversedCommissionMinor);
+          const netCommissionMinor = grossCommissionMinor - reversedCommissionMinor;
+          const createdAt = toIso(row.createdAt);
+          const updatedAt = toIso(row.updatedAt);
+          const approvalEligibleAt = nullableIso(row.approvalEligibleAt);
+          const payoutCoherent =
+            ((row.status === "pending" || row.status === "reversed") && row.payoutId === null) ||
+            row.status === "approved" ||
+            (row.status === "paid" && row.payoutId !== null);
+          if (
+            !uuidPattern.test(row.commissionId) ||
+            !uuidPattern.test(row.affiliateProfileId) ||
+            affiliatePolicyVersion < 1 ||
+            grossCommissionMinor < 1 ||
+            reversedCommissionMinor < 0 ||
+            reversedCommissionMinor > grossCommissionMinor ||
+            !Number.isSafeInteger(netCommissionMinor) ||
+            (row.status !== "pending" && row.status !== "approved" &&
+              row.status !== "paid" && row.status !== "reversed") ||
+            !payoutCoherent ||
+            (row.payoutId !== null && !uuidPattern.test(row.payoutId)) ||
+            new Date(updatedAt).getTime() < new Date(createdAt).getTime() ||
+            (approvalEligibleAt !== null &&
+              new Date(approvalEligibleAt).getTime() <= new Date(createdAt).getTime())
+          ) {
+            throw new Error("Invalid affiliate commission admin projection");
+          }
+          return Object.freeze({
+            commissionId: row.commissionId,
+            affiliateProfileId: row.affiliateProfileId,
+            affiliatePolicyVersion,
+            grossCommissionMinor,
+            reversedCommissionMinor,
+            netCommissionMinor,
+            status: row.status,
+            approvalEligibleAt,
+            payoutId: row.payoutId,
+            createdAt,
+            updatedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "commissions" }>;
+    }
+    case "payouts": {
+      const result = await boundedRows<{
+        payoutId: string;
+        affiliateProfileId: string;
+        affiliatePolicyVersion: number | string;
+        amountMinor: number | string;
+        currency: string;
+        state: "pending" | "paid" | "cancelled";
+        version: number | string;
+        commissionCount: number | string;
+        externalEvidenceRecorded: boolean;
+        createdAt: Date | string;
+        paidAt: Date | string | null;
+      }, SnapshotItem<"payouts">>(
+        client,
+        `
+          SELECT p.id::text AS "payoutId",
+                 p.affiliate_profile_id::text AS "affiliateProfileId",
+                 p.affiliate_policy_version AS "affiliatePolicyVersion",
+                 p.amount_minor AS "amountMinor", p.currency, p.state, p.version,
+                 (SELECT count(*) FROM affiliate_payout_commissions pc
+                  WHERE pc.payout_id = p.id) AS "commissionCount",
+                 (p.external_provider IS NOT NULL AND p.external_reference IS NOT NULL)
+                   AS "externalEvidenceRecorded",
+                 p.created_at AS "createdAt", p.paid_at AS "paidAt"
+          FROM affiliate_payouts p
+          ORDER BY p.created_at DESC, p.id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const affiliatePolicyVersion = safeInteger(row.affiliatePolicyVersion);
+          const amountMinor = safeInteger(row.amountMinor);
+          const version = safeInteger(row.version);
+          const commissionCount = safeInteger(row.commissionCount);
+          const createdAt = toIso(row.createdAt);
+          const paidAt = nullableIso(row.paidAt);
+          const paid = row.state === "paid";
+          if (
+            !uuidPattern.test(row.payoutId) ||
+            !uuidPattern.test(row.affiliateProfileId) ||
+            affiliatePolicyVersion < 1 ||
+            amountMinor < 1 ||
+            row.currency !== "USD" ||
+            (row.state !== "pending" && row.state !== "paid" && row.state !== "cancelled") ||
+            version < 1 ||
+            commissionCount < 1 ||
+            typeof row.externalEvidenceRecorded !== "boolean" ||
+            paid !== (paidAt !== null) ||
+            paid !== row.externalEvidenceRecorded ||
+            (paidAt !== null && new Date(paidAt).getTime() < new Date(createdAt).getTime())
+          ) {
+            throw new Error("Invalid affiliate payout admin projection");
+          }
+          return Object.freeze({
+            payoutId: row.payoutId,
+            affiliateProfileId: row.affiliateProfileId,
+            affiliatePolicyVersion,
+            amountMinor,
+            currency: "USD" as const,
+            state: row.state,
+            version,
+            commissionCount,
+            externalEvidenceRecorded: row.externalEvidenceRecorded,
+            createdAt,
+            paidAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "payouts" }>;
     }
     case "buyers": {
       const result = await boundedRows<{

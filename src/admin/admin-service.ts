@@ -1,4 +1,6 @@
 import { isVerifiedIdentityAt, type VerifiedIdentity } from "@/auth/identity";
+import { createHash } from "node:crypto";
+
 import type { PromotionActivationCandidate, ProductPublicationFacts } from "@/admin/admin-policy";
 import {
   assertStaffCommandAccess,
@@ -10,6 +12,9 @@ import type { AuthorizationOperation, Capability, Principal } from "@/domain/aut
 import { isCapability } from "@/domain/authorization";
 import { scanPublicCopy } from "@/domain/content-policy";
 import { evaluateBuyerActivation, type BuyerStatus, type ResearchPurpose } from "@/domain/eligibility";
+import { parseAffiliatePolicy } from "@/domain/affiliates";
+import { parseReferralPolicy } from "@/domain/referrals";
+import { parseLoyaltyPolicy } from "@/domain/rewards";
 import {
   consumeFixedWindowLimit,
   createRateLimitScope,
@@ -56,6 +61,45 @@ export type PromotionDraftSaveResult = Readonly<{
 export type PromotionTargetInput = Readonly<{
   targetKind: "product" | "policy_group";
   targetId: string;
+}>;
+
+export type GrowthPolicyKind = "loyalty" | "referral" | "affiliate";
+export type GrowthPolicyLifecycleResult = Readonly<{
+  id: string;
+  kind: GrowthPolicyKind;
+  version: number;
+  status: "draft" | "active";
+}>;
+export type GrowthPolicyValues = Readonly<Record<string, number | string | null>>;
+
+export const MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1 = 10_000 as const;
+export const MANUAL_REWARD_ADJUSTMENT_REASONS_V1 = Object.freeze([
+  "account_correction",
+] as const);
+export type ManualRewardAdjustmentReasonV1 =
+  (typeof MANUAL_REWARD_ADJUSTMENT_REASONS_V1)[number];
+
+export type RewardAdjustmentResult = Readonly<{
+  status: "applied" | "idempotent";
+  entryId: string;
+  rewardAccountId: string;
+  delta: number;
+  availablePointsBalanceAfter: number;
+}>;
+
+export type ReferralCodeRevocationResult = Readonly<{
+  status: "applied" | "idempotent";
+  referralCodeId: string;
+  createdAt: string;
+  revokedAt: string;
+}>;
+
+export type SharedSetDeactivationResult = Readonly<{
+  status: "applied" | "idempotent";
+  sharedSetId: string;
+  active: false;
+  updatedAt: string;
+  deactivatedAt: string;
 }>;
 
 export type AdminTransaction = Readonly<{
@@ -300,6 +344,39 @@ export type AdminTransaction = Readonly<{
     correlationId: string;
     now: Date;
   }>) => Promise<Readonly<{ changed: boolean }>>;
+  createGrowthPolicyDraft?: (input: Readonly<{
+    id: string;
+    kind: GrowthPolicyKind;
+    effectiveAt: Date;
+    values: GrowthPolicyValues;
+  }>) => Promise<GrowthPolicyLifecycleResult & Readonly<{ status: "draft" }>>;
+  activateGrowthPolicy?: (input: Readonly<{
+    id: string;
+    kind: GrowthPolicyKind;
+    expectedVersion: number;
+    now: Date;
+  }>) => Promise<GrowthPolicyLifecycleResult & Readonly<{ status: "active" }>>;
+  adjustRewardBalance?: (input: Readonly<{
+    entryId: string;
+    rewardAccountId: string;
+    delta: number;
+    reason: ManualRewardAdjustmentReasonV1;
+    idempotencyKey: string;
+    fingerprint: string;
+    occurredAt: Date;
+  }>) => Promise<RewardAdjustmentResult & Readonly<{
+    reason: ManualRewardAdjustmentReasonV1;
+  }>>;
+  revokeReferralCode?: (input: Readonly<{
+    referralCodeId: string;
+    expectedCreatedAt: Date;
+    revokedAt: Date;
+  }>) => Promise<ReferralCodeRevocationResult>;
+  deactivateSharedSet?: (input: Readonly<{
+    sharedSetId: string;
+    expectedUpdatedAt: Date;
+    deactivatedAt: Date;
+  }>) => Promise<SharedSetDeactivationResult>;
   appendAudit: (event: AdminAuditEvent) => Promise<void>;
 }>;
 
@@ -324,6 +401,7 @@ const operationCapability: Readonly<
   "refund.request": "refund:request",
   "fulfillment.release.consume": "fulfillment:release:consume",
   "staff.manage": "staff:manage",
+  "growth.manage": "growth:manage",
 });
 
 function authorizedTransaction<T>(
@@ -437,6 +515,531 @@ function requirePositiveVersion(value: number, label: string): number {
     throw new Error(`${label} is invalid`);
   }
   return value;
+}
+
+function exactRecord(
+  value: unknown,
+  fields: readonly string[],
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const keys = Reflect.ownKeys(value);
+  return keys.length === fields.length &&
+    keys.every((key) => typeof key === "string" && fields.includes(key)) &&
+    fields.every((field) => Object.hasOwn(value, field));
+}
+
+function growthPolicyValueFields(kind: GrowthPolicyKind): readonly string[] {
+  switch (kind) {
+    case "loyalty":
+      return [
+        "pointsPerDollar",
+        "redemptionMinorPerPoint",
+        "minimumRedemptionPoints",
+        "maximumRedemptionBasisPoints",
+        "expiresAfterDays",
+      ];
+    case "referral":
+      return [
+        "attributionDays",
+        "referredDiscountBasisPoints",
+        "referredDiscountCapMinor",
+        "referrerPointsPerDollar",
+        "referrerRewardCapPoints",
+      ];
+    case "affiliate":
+      return [
+        "attributionDays",
+        "firstOrderCommissionBasisPoints",
+        "reorderCommissionBasisPoints",
+        "reorderWindowDays",
+        "approvalDelayDays",
+        "payoutThresholdMinor",
+        "currency",
+      ];
+  }
+}
+
+function parseGrowthPolicyDraftCommand(input: unknown): Readonly<{
+  kind: GrowthPolicyKind;
+  policyId: string;
+  effectiveAt: Date;
+  values: GrowthPolicyValues;
+}> {
+  if (!exactRecord(input, ["kind", "policyId", "effectiveAt", "values"])) {
+    throw new Error("Growth policy draft command is malformed");
+  }
+  if (input.kind !== "loyalty" && input.kind !== "referral" && input.kind !== "affiliate") {
+    throw new Error("Growth policy kind is invalid");
+  }
+  const kind = input.kind;
+  if (!exactRecord(input.values, growthPolicyValueFields(kind))) {
+    throw new Error("Growth policy values are malformed");
+  }
+  if (typeof input.policyId !== "string") {
+    throw new Error("Growth policy ID is invalid");
+  }
+  const policyId = requireId(input.policyId, "Growth policy ID");
+  if (typeof input.effectiveAt !== "string") {
+    throw new Error("Growth policy effective time is invalid");
+  }
+  const effectiveAt = new Date(input.effectiveAt);
+  if (!Number.isFinite(effectiveAt.getTime()) || effectiveAt.toISOString() !== input.effectiveAt) {
+    throw new Error("Growth policy effective time is invalid");
+  }
+  const candidate = {
+    ...input.values,
+    id: policyId,
+    version: 1,
+    status: "draft",
+    effectiveAt: effectiveAt.toISOString(),
+    supersededAt: null,
+  };
+  const parsed = kind === "loyalty"
+    ? parseLoyaltyPolicy(candidate)
+    : kind === "referral"
+      ? parseReferralPolicy(candidate)
+      : parseAffiliatePolicy(candidate);
+  if (!parsed.ok) {
+    throw new Error(`Growth policy domain shape is invalid: ${parsed.error.field}`);
+  }
+  return Object.freeze({
+    kind,
+    policyId,
+    effectiveAt,
+    values: Object.freeze({ ...input.values }) as GrowthPolicyValues,
+  });
+}
+
+function parseGrowthPolicyActivationCommand(input: unknown): Readonly<{
+  kind: GrowthPolicyKind;
+  policyId: string;
+  expectedVersion: number;
+}> {
+  if (!exactRecord(input, ["kind", "policyId", "expectedVersion"])) {
+    throw new Error("Growth policy activation command is malformed");
+  }
+  if (input.kind !== "loyalty" && input.kind !== "referral" && input.kind !== "affiliate") {
+    throw new Error("Growth policy kind is invalid");
+  }
+  if (typeof input.policyId !== "string") {
+    throw new Error("Growth policy ID is invalid");
+  }
+  if (typeof input.expectedVersion !== "number") {
+    throw new Error("Expected growth policy version is invalid");
+  }
+  return Object.freeze({
+    kind: input.kind,
+    policyId: requireId(input.policyId, "Growth policy ID"),
+    expectedVersion: requirePositiveVersion(
+      input.expectedVersion,
+      "Expected growth policy version",
+    ),
+  });
+}
+
+const canonicalUuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const rewardAdjustmentRawIdempotencyPattern = /^[^\u0000-\u001f\u007f]{16,183}$/u;
+const internalAuditReasonMaxLength = 240;
+
+function requireCanonicalTimestampInput(value: unknown, label: string): Date {
+  if (typeof value !== "string") throw new Error(`${label} is invalid`);
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== value) {
+    throw new Error(`${label} is invalid`);
+  }
+  return timestamp;
+}
+
+function parseReferralCodeRevocationCommand(input: unknown): Readonly<{
+  referralCodeId: string;
+  expectedCreatedAt: Date;
+}> {
+  if (!exactRecord(input, ["referralCodeId", "expectedCreatedAt"])) {
+    throw new Error("Referral code revocation command is malformed");
+  }
+  if (
+    typeof input.referralCodeId !== "string" ||
+    !canonicalUuidPattern.test(input.referralCodeId)
+  ) {
+    throw new Error("Referral code ID is invalid");
+  }
+  return Object.freeze({
+    referralCodeId: input.referralCodeId,
+    expectedCreatedAt: requireCanonicalTimestampInput(
+      input.expectedCreatedAt,
+      "Expected referral code creation time",
+    ),
+  });
+}
+
+function parseSharedSetDeactivationCommand(input: unknown): Readonly<{
+  sharedSetId: string;
+  expectedUpdatedAt: Date;
+}> {
+  if (!exactRecord(input, ["sharedSetId", "expectedUpdatedAt"])) {
+    throw new Error("Shared set deactivation command is malformed");
+  }
+  if (
+    typeof input.sharedSetId !== "string" ||
+    !canonicalUuidPattern.test(input.sharedSetId)
+  ) {
+    throw new Error("Shared set ID is invalid");
+  }
+  return Object.freeze({
+    sharedSetId: input.sharedSetId,
+    expectedUpdatedAt: requireCanonicalTimestampInput(
+      input.expectedUpdatedAt,
+      "Expected shared set update time",
+    ),
+  });
+}
+
+function projectReferralCodeRevocationResult(
+  command: ReturnType<typeof parseReferralCodeRevocationCommand>,
+  result: ReferralCodeRevocationResult,
+  revokedAt: Date,
+): ReferralCodeRevocationResult {
+  if (
+    !exactRecord(result, ["status", "referralCodeId", "createdAt", "revokedAt"]) ||
+    (result.status !== "applied" && result.status !== "idempotent") ||
+    result.referralCodeId !== command.referralCodeId ||
+    result.createdAt !== command.expectedCreatedAt.toISOString() ||
+    result.revokedAt !== revokedAt.toISOString()
+  ) {
+    throw new Error("Referral code revocation transaction read-back is invalid");
+  }
+  return Object.freeze({ ...result });
+}
+
+function projectSharedSetDeactivationResult(
+  command: ReturnType<typeof parseSharedSetDeactivationCommand>,
+  result: SharedSetDeactivationResult,
+  deactivatedAt: Date,
+): SharedSetDeactivationResult {
+  const expectedResultAt = deactivatedAt.toISOString();
+  if (
+    !exactRecord(result, [
+      "status",
+      "sharedSetId",
+      "active",
+      "updatedAt",
+      "deactivatedAt",
+    ]) ||
+    (result.status !== "applied" && result.status !== "idempotent") ||
+    result.sharedSetId !== command.sharedSetId ||
+    result.active !== false ||
+    result.updatedAt !== expectedResultAt ||
+    result.deactivatedAt !== expectedResultAt
+  ) {
+    throw new Error("Shared set deactivation transaction read-back is invalid");
+  }
+  return Object.freeze({ ...result });
+}
+
+function parseRewardAdjustmentCommand(input: unknown): Readonly<{
+  entryId: string;
+  rewardAccountId: string;
+  delta: number;
+  reason: ManualRewardAdjustmentReasonV1;
+  internalAuditReason: string;
+  idempotencyKey: string;
+  fingerprint: string;
+}> {
+  if (!exactRecord(input, [
+    "entryId",
+    "rewardAccountId",
+    "delta",
+    "reason",
+    "internalAuditReason",
+    "idempotencyKey",
+  ])) {
+    throw new Error("Reward adjustment command is malformed");
+  }
+  if (typeof input.entryId !== "string" || !canonicalUuidPattern.test(input.entryId)) {
+    throw new Error("Reward adjustment ledger ID is invalid");
+  }
+  if (
+    typeof input.rewardAccountId !== "string" ||
+    !canonicalUuidPattern.test(input.rewardAccountId)
+  ) {
+    throw new Error("Reward account ID is invalid");
+  }
+  if (
+    typeof input.delta !== "number" ||
+    !Number.isSafeInteger(input.delta) ||
+    input.delta === 0 ||
+    Math.abs(input.delta) > MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1
+  ) {
+    throw new Error("Reward adjustment delta is invalid or out of bounds");
+  }
+  if (
+    typeof input.reason !== "string" ||
+    !MANUAL_REWARD_ADJUSTMENT_REASONS_V1.includes(
+      input.reason as ManualRewardAdjustmentReasonV1,
+    )
+  ) {
+    throw new Error("Reward adjustment reason is invalid");
+  }
+  if (
+    typeof input.internalAuditReason !== "string" ||
+    input.internalAuditReason.trim() !== input.internalAuditReason ||
+    input.internalAuditReason.length < 1 ||
+    input.internalAuditReason.length > internalAuditReasonMaxLength ||
+    /[\u0000-\u001f\u007f]/u.test(input.internalAuditReason)
+  ) {
+    throw new Error("Reward adjustment internal audit reason is invalid");
+  }
+  if (
+    typeof input.idempotencyKey !== "string" ||
+    input.idempotencyKey.trim() !== input.idempotencyKey ||
+    !rewardAdjustmentRawIdempotencyPattern.test(input.idempotencyKey)
+  ) {
+    throw new Error("Reward adjustment idempotency key is invalid");
+  }
+  const reason = input.reason as ManualRewardAdjustmentReasonV1;
+  const fingerprint = createHash("sha256").update(JSON.stringify({
+    entryId: input.entryId,
+    rewardAccountId: input.rewardAccountId,
+    delta: input.delta,
+    reason,
+    internalAuditReason: input.internalAuditReason,
+  }), "utf8").digest("hex");
+  return Object.freeze({
+    entryId: input.entryId,
+    rewardAccountId: input.rewardAccountId,
+    delta: input.delta,
+    reason,
+    internalAuditReason: input.internalAuditReason,
+    idempotencyKey: input.idempotencyKey,
+    fingerprint,
+  });
+}
+
+function projectRewardAdjustmentResult(
+  command: ReturnType<typeof parseRewardAdjustmentCommand>,
+  result: RewardAdjustmentResult & Readonly<{ reason: ManualRewardAdjustmentReasonV1 }>,
+): RewardAdjustmentResult {
+  if (
+    !exactRecord(result, [
+      "status",
+      "entryId",
+      "rewardAccountId",
+      "delta",
+      "reason",
+      "availablePointsBalanceAfter",
+    ]) ||
+    (result.status !== "applied" && result.status !== "idempotent") ||
+    result.entryId !== command.entryId ||
+    result.rewardAccountId !== command.rewardAccountId ||
+    result.delta !== command.delta ||
+    result.reason !== command.reason ||
+    !Number.isSafeInteger(result.availablePointsBalanceAfter)
+  ) {
+    throw new Error("Reward adjustment transaction read-back is invalid");
+  }
+  return Object.freeze({
+    status: result.status,
+    entryId: result.entryId,
+    rewardAccountId: result.rewardAccountId,
+    delta: result.delta,
+    availablePointsBalanceAfter: result.availablePointsBalanceAfter,
+  });
+}
+
+export async function adjustRewardBalance(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<RewardAdjustmentResult> {
+  const command = parseRewardAdjustmentCommand(input);
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedRetryingTransaction(
+    repository,
+    context,
+    principal,
+    "growth.manage",
+    async (tx) => {
+    if (!tx.adjustRewardBalance) throw new Error("Reward adjustment port is unavailable");
+    const result = projectRewardAdjustmentResult(command, await tx.adjustRewardBalance({
+      entryId: command.entryId,
+      rewardAccountId: command.rewardAccountId,
+      delta: command.delta,
+      reason: command.reason,
+      idempotencyKey: command.idempotencyKey,
+      fingerprint: command.fingerprint,
+      occurredAt: context.now,
+    }));
+    if (result.status === "applied") {
+      await tx.appendAudit(audit(
+        principal,
+        context,
+        "growth.reward.adjusted",
+        "reward_account",
+        command.rewardAccountId,
+        {
+          delta: command.delta,
+          reason: command.reason,
+          internalAuditReason: command.internalAuditReason,
+        },
+      ));
+    }
+      return result;
+    },
+  );
+}
+
+export async function revokeReferralCode(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<ReferralCodeRevocationResult> {
+  const command = parseReferralCodeRevocationCommand(input);
+  if (
+    !Number.isFinite(context.now.getTime()) ||
+    context.now.getTime() <= command.expectedCreatedAt.getTime()
+  ) {
+    throw new Error("Referral code revocation clock is invalid");
+  }
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedRetryingTransaction(
+    repository,
+    context,
+    principal,
+    "growth.manage",
+    async (tx) => {
+      if (!tx.revokeReferralCode) throw new Error("Referral code revocation port is unavailable");
+      const result = projectReferralCodeRevocationResult(
+        command,
+        await tx.revokeReferralCode({
+          referralCodeId: command.referralCodeId,
+          expectedCreatedAt: command.expectedCreatedAt,
+          revokedAt: context.now,
+        }),
+        context.now,
+      );
+      if (result.status === "applied") {
+        await tx.appendAudit(audit(
+          principal,
+          context,
+          "growth.referral_code.revoked",
+          "referral_code",
+          command.referralCodeId,
+          { status: "revoked" },
+        ));
+      }
+      return result;
+    },
+  );
+}
+
+export async function deactivateSharedSet(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<SharedSetDeactivationResult> {
+  const command = parseSharedSetDeactivationCommand(input);
+  if (
+    !Number.isFinite(context.now.getTime()) ||
+    context.now.getTime() <= command.expectedUpdatedAt.getTime()
+  ) {
+    throw new Error("Shared set deactivation clock is invalid");
+  }
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedRetryingTransaction(
+    repository,
+    context,
+    principal,
+    "growth.manage",
+    async (tx) => {
+      if (!tx.deactivateSharedSet) throw new Error("Shared set deactivation port is unavailable");
+      const result = projectSharedSetDeactivationResult(
+        command,
+        await tx.deactivateSharedSet({
+          sharedSetId: command.sharedSetId,
+          expectedUpdatedAt: command.expectedUpdatedAt,
+          deactivatedAt: context.now,
+        }),
+        context.now,
+      );
+      if (result.status === "applied") {
+        await tx.appendAudit(audit(
+          principal,
+          context,
+          "growth.shared_set.deactivated",
+          "shared_research_set",
+          command.sharedSetId,
+          { active: false },
+        ));
+      }
+      return result;
+    },
+  );
+}
+
+export async function createGrowthPolicyDraft(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<GrowthPolicyLifecycleResult & Readonly<{ status: "draft" }>> {
+  const command = parseGrowthPolicyDraftCommand(input);
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedTransaction(repository, context, principal, "growth.manage", async (tx) => {
+    if (!tx.createGrowthPolicyDraft) throw new Error("Growth policy draft port is unavailable");
+    const result = await tx.createGrowthPolicyDraft({
+      id: command.policyId,
+      kind: command.kind,
+      effectiveAt: command.effectiveAt,
+      values: command.values,
+    });
+    if (
+      result.id !== command.policyId ||
+      result.kind !== command.kind ||
+      result.status !== "draft" ||
+      !Number.isSafeInteger(result.version) ||
+      result.version < 1
+    ) {
+      throw new Error("Growth policy draft read-back is invalid");
+    }
+    return Object.freeze({ ...result });
+  });
+}
+
+export async function activateGrowthPolicy(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<GrowthPolicyLifecycleResult & Readonly<{ status: "active" }>> {
+  const command = parseGrowthPolicyActivationCommand(input);
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedTransaction(repository, context, principal, "growth.manage", async (tx) => {
+    if (!tx.activateGrowthPolicy) throw new Error("Growth policy activation port is unavailable");
+    const result = await tx.activateGrowthPolicy({
+      id: command.policyId,
+      kind: command.kind,
+      expectedVersion: command.expectedVersion,
+      now: context.now,
+    });
+    if (
+      result.id !== command.policyId ||
+      result.kind !== command.kind ||
+      result.status !== "active" ||
+      result.version !== command.expectedVersion
+    ) {
+      throw new Error("Growth policy activation read-back is invalid");
+    }
+    await tx.appendAudit(audit(
+      principal,
+      context,
+      "growth.policy.activated",
+      `${command.kind}_policy`,
+      command.policyId,
+      { kind: command.kind, version: result.version, status: "active" },
+    ));
+    return Object.freeze({ ...result });
+  });
 }
 
 function assertSafePublicString(value: string, label: string): void {

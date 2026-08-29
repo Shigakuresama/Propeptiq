@@ -70,6 +70,77 @@ describe("parseCheckoutRequest", () => {
     expect(Object.isFrozen(result.value.promotionIds)).toBe(true);
   });
 
+  it("accepts only an optional positive integer reward redemption request", () => {
+    expect(
+      parseCheckoutRequest({
+        ...validRequest(),
+        rewardRedemptionPoints: 500,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        ...validRequest(),
+        rewardRedemptionPoints: 500,
+      },
+    });
+
+    expect(parseCheckoutRequest(validRequest())).toMatchObject({
+      ok: true,
+      value: {
+        items: validRequest().items,
+        destination: validRequest().destination,
+        promotionIds: [],
+      },
+    });
+  });
+
+  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "500", null])(
+    "rejects invalid requested reward points %j",
+    (rewardRedemptionPoints) => {
+      expect(
+        parseCheckoutRequest({
+          ...validRequest(),
+          rewardRedemptionPoints,
+        }),
+      ).toEqual({
+        ok: false,
+        error: {
+          code: "invalid_reward_redemption_points",
+          field: "rewardRedemptionPoints",
+        },
+      });
+    },
+  );
+
+  it.each([
+    ["rewardBalance", 50_000],
+    ["rewardBalancePoints", 50_000],
+    ["rewardRedemptionRate", 100],
+    ["rewardRedemptionMinor", 500],
+    ["rewardDiscountMinor", 500],
+    ["rewardPolicy", { redemptionMinorPerPoint: 1 }],
+    ["rewardPolicyHash", "browser-policy-hash"],
+    ["pendingBaseEarnPoints", 100],
+    ["rewardLedgerId", "62000000-0000-4000-8000-000000000001"],
+    ["referralCode", "REFERRAL"],
+    ["referralUserId", "61000000-0000-4000-8000-000000000001"],
+    ["referralDiscountMinor", 500],
+    ["affiliateCode", "AFFILIATE"],
+    ["affiliateId", "63000000-0000-4000-8000-000000000001"],
+    ["affiliateCommissionMinor", 500],
+    ["role", "admin"],
+    ["subtotalMinor", 10_000],
+    ["discountMinor", 500],
+    ["totalMinor", 9_500],
+    ["taxMinor", 700],
+    ["shippingMinor", 900],
+  ])("rejects browser-controlled checkout authority in %s", (field, value) => {
+    expect(parseCheckoutRequest({ ...validRequest(), [field]: value })).toEqual({
+      ok: false,
+      error: { code: "unexpected_field", field: `request.${field}` },
+    });
+  });
+
   it.each([null, [], "request", 17])("rejects malformed root value %j", (input) => {
     expect(parseCheckoutRequest(input)).toEqual({
       ok: false,

@@ -19,6 +19,9 @@ export function assertMutationOrigin(
   if (!suppliedOrigin || !URL.canParse(suppliedOrigin)) {
     throw new Error("Mutation origin is required");
   }
+  if (environment.APP_ENV !== "local" && !environment.APP_ORIGIN) {
+    throw new Error("APP_ORIGIN is required for non-local mutations");
+  }
 
   const requestOrigin = new URL(request.url).origin;
   const expectedOrigin = environment.APP_ORIGIN

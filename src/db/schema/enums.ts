@@ -129,3 +129,60 @@ export const shipmentStateEnum = pgEnum("shipment_state", [
   "delivered",
   "exception",
 ]);
+export const growthPolicyStatusEnum = pgEnum("growth_policy_status", [
+  "draft",
+  "active",
+  "superseded",
+]);
+export const growthTermsProgramEnum = pgEnum("growth_terms_program", [
+  "customer_rewards_referrals",
+  "affiliate",
+]);
+export const rewardLedgerKindEnum = pgEnum("reward_ledger_kind", [
+  "order_earned_pending",
+  "order_earned_available",
+  "referral_earned_pending",
+  "referral_earned_available",
+  "redemption_reserved",
+  "redemption_consumed",
+  "redemption_released",
+  "refund_reversal",
+  "chargeback_reversal",
+  "admin_adjustment",
+]);
+export const rewardRedemptionStateEnum = pgEnum("reward_redemption_state", [
+  "reserved",
+  "consumed",
+  "released",
+]);
+export const referralCodeStatusEnum = pgEnum("referral_code_status", [
+  "active",
+  "revoked",
+]);
+export const referralConversionStatusEnum = pgEnum(
+  "referral_conversion_status",
+  ["pending", "qualified", "reversed"],
+);
+export const affiliateProfileStatusEnum = pgEnum("affiliate_profile_status", [
+  "pending",
+  "active",
+  "rejected",
+  "suspended",
+]);
+export const affiliatePromotionMethodEnum = pgEnum(
+  "affiliate_promotion_method",
+  ["website", "social", "email", "other"],
+);
+export const affiliateCommissionStatusEnum = pgEnum(
+  "affiliate_commission_status",
+  ["pending", "approved", "paid", "reversed"],
+);
+export const affiliatePayoutStateEnum = pgEnum("affiliate_payout_state", [
+  "pending",
+  "paid",
+  "cancelled",
+]);
+export const growthAttributionProgramEnum = pgEnum(
+  "growth_attribution_program",
+  ["customer_referral", "affiliate"],
+);

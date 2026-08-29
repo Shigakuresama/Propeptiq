@@ -12,7 +12,7 @@ import {
 
 describe("browse-only supplier catalog", () => {
   it("preserves every price-free PDF row while grouping package variants", () => {
-    expect(browseCatalogProducts).toHaveLength(53);
+    expect(browseCatalogProducts).toHaveLength(56);
     expect(browseCatalogVariantCount).toBe(103);
 
     const rows = browseCatalogProducts.flatMap((product) =>
@@ -28,6 +28,11 @@ describe("browse-only supplier catalog", () => {
     for (const { product, variant } of rows) {
       expect(product).not.toHaveProperty("price");
       expect(variant).not.toHaveProperty("price");
+    }
+  });
+
+  it("gives every product a distinct slug-bound illustration with nonempty alt text", () => {
+    for (const product of browseCatalogProducts) {
       expect(product.image.src).toMatch(/^\/catalog\/[^/]+\.webp$/u);
       expect(product.image.alt).toContain(product.name);
       expect(
@@ -35,10 +40,68 @@ describe("browse-only supplier catalog", () => {
       ).toBe(true);
     }
 
-    expect(new Set(browseCatalogProducts.map(({ image }) => image.src)).size).toBe(53);
+    expect(new Set(browseCatalogProducts.map(({ image }) => image.src)).size).toBe(56);
     for (const product of browseCatalogProducts) {
       expect(product.image.src).toBe(`/catalog/${product.slug}.webp`);
     }
+  });
+
+  it("creates exactly one product group for each identical source Name", () => {
+    const productSlugsBySourceName = new Map<string, Set<string>>();
+
+    for (const product of browseCatalogProducts) {
+      const exactNames = new Set(
+        product.variants.map((variant) => variant.sourceName ?? product.sourceName),
+      );
+      expect(exactNames, product.slug).toEqual(new Set([product.sourceName]));
+
+      const slugs = productSlugsBySourceName.get(product.sourceName) ?? new Set<string>();
+      slugs.add(product.slug);
+      productSlugsBySourceName.set(product.sourceName, slugs);
+    }
+
+    expect(productSlugsBySourceName.size).toBe(56);
+    for (const [sourceName, slugs] of productSlugsBySourceName) {
+      expect(slugs.size, sourceName).toBe(1);
+    }
+  });
+
+  it("keeps the five distinct BPC/TB and CJC/IPA source rows as one-variant slugs", () => {
+    expect(
+      [
+        "bpc-tb-blend",
+        "bpc-tb-blend-bb20",
+        "bpc-tb-blend-bb40",
+        "cjc-1295-no-dac-ipa",
+        "cjc-1295-no-dac-ipa-cp20",
+      ].map((slug) => findBrowseCatalogProduct(slug)),
+    ).toMatchObject([
+      {
+        slug: "bpc-tb-blend",
+        sourceName: "BPC 5mg + TB 5mg",
+        variants: [{ code: "BB10", packageForm: "10mg × 10 vials", sourcePage: 2 }],
+      },
+      {
+        slug: "bpc-tb-blend-bb20",
+        sourceName: "BPC 10mg + TB 10mg",
+        variants: [{ code: "BB20", packageForm: "20mg × 10 vials", sourcePage: 2 }],
+      },
+      {
+        slug: "bpc-tb-blend-bb40",
+        sourceName: "BPC 20mg + TB 20mg",
+        variants: [{ code: "BB40", packageForm: "40mg × 10 vials", sourcePage: 2 }],
+      },
+      {
+        slug: "cjc-1295-no-dac-ipa",
+        sourceName: "CJC-1295 NO DAC 5mg + IPA 5mg",
+        variants: [{ code: "CP10", packageForm: "10mg × 10 vials", sourcePage: 2 }],
+      },
+      {
+        slug: "cjc-1295-no-dac-ipa-cp20",
+        sourceName: "CJC-1295 NO DAC 10mg + IPA 10mg",
+        variants: [{ code: "CP20", packageForm: "20mg × 10 vials", sourcePage: 2 }],
+      },
+    ]);
   });
 
   it("keeps source ambiguities explicit instead of silently inventing facts", () => {
@@ -93,5 +156,22 @@ describe("browse-only supplier catalog", () => {
         variants: [{ code: "TEST", packageForm: "1mg × 10 vials" }],
       }),
     ).toThrow("Browse catalog product unsupported-claim is not publishable");
+
+    expect(() =>
+      validateBrowseCatalogProduct({
+        slug: "mixed-source-names",
+        name: "First exact Name",
+        sourceName: "First exact Name",
+        category: "blends",
+        image: {
+          src: "/catalog/mixed-source-names.webp",
+          alt: "Neutral illustrative research-catalog still life",
+        },
+        variants: [
+          { code: "FIRST", packageForm: "10mg × 10 vials", sourceName: "First exact Name" },
+          { code: "SECOND", packageForm: "20mg × 10 vials", sourceName: "Second exact Name" },
+        ],
+      }),
+    ).toThrow("must contain one exact source Name");
   });
 });

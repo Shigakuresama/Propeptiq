@@ -71,3 +71,69 @@ configuration, or webhook rate limiting. Those claims require separate
 implementation and operational evidence.
 
 Dependency audit, network package metadata, preview/release preparation, publication, deployment, and production activation remain Task 7 work and are excluded from the Task 6 checkpoint.
+
+## Task 10 growth release matrix
+
+Task 10 verifies the rewards, customer-referral, neutral shared-set, and reviewed
+affiliate experience without activating any Production policy, provider, or
+commerce capability. The deterministic browser driver and its fixed actors are
+local-only test doubles, and every authoritative-looking test surface is labeled
+`Synthetic local test only`.
+
+The fresh release-candidate results were:
+
+| Lane | Result |
+|---|---|
+| Unit | **PASS — 132 files / 1,396 tests** |
+| PGlite integration | **PASS — 30 files / 440 tests** |
+| Chromium browser | **PASS — 46/46, zero skips** |
+| Focused privacy/security | **PASS — 12 files / 144 tests** |
+| Artifact-scanner regression | **PASS — 11/11** |
+| Workspace boundary | **PASS** |
+| Lint | **PASS — zero warnings** |
+| Fresh Next type generation and strict typecheck | **PASS** |
+| Database generation/check | **PASS — both generations reported no schema changes; check passed** |
+| Migration/history stability | **PASS — 48 files unchanged; canonical manifest SHA-256 `8174eb00c3e9831a0daff255bbf904cfd5adf21cf7b198d1ffa7797c9180e98e`** |
+| Closed-Production Turbopack build and scan | **PASS — 1,016 deployable files / 54,144,678 bytes / zero forbidden matches** |
+| Closed-Production Webpack build and scan | **PASS — 297 deployable files / 9,730,927 bytes / zero forbidden matches** |
+| Production dependency tree | **PASS — `npm ls --omit=dev --depth=0`** |
+| Offline production dependency audit | **PASS from the local advisory cache — zero vulnerabilities; no network audit was run** |
+| Guarded real-PostgreSQL contention | **NOT RUN — both exact isolation guards were absent; no connection and no PostgreSQL concurrency claim** |
+| Protected growth Preview | **PASS — Vercel target Preview Ready; protection redirect confirmed; authenticated health/content checks passed; checkout/session denied; zero error/HTTP-500 log entries** |
+
+The browser lane covers 375, 768, 1024, and 1440 CSS pixels; keyboard focus;
+reduced motion; minimum targets; 16px explanatory text; progress semantics;
+narrow ledger reflow; a labeled 200% CSS zoom proxy; and horizontal-overflow
+checks. Literal browser zoom is not claimed by this automated lane. A separate
+production-built screenshot pass also passed 1/1 and refreshed 16 inspected PNGs
+at 375 and 1440 for home, catalog, rewards, referrals, partner, shared set, cart,
+and the loyalty-policy admin resource. The compiled screenshots contain no
+development issue overlay and show the complete, uncropped header logo.
+
+The first full browser run correctly failed on a 4.39:1 contrast regression in
+the new active-program eyebrow; the color was repaired and the focused Axe check
+then passed before the final 46/46 run. The first full unit and PGlite runs also
+exposed stale pre-growth expectations and setup timeouts; their focused repairs
+passed before the complete suites were rerun. These failures are retained in the
+ignored Task 10 report as RED evidence rather than being described as passes.
+
+Generated outputs are preserved outside the worktree under
+`C:\Users\Sergio\AppData\Local\Temp\propeptiq-task10-release-20260829-1455`.
+The isolated candidate had no inherited `.next` baseline. Each generated tree
+was moved intact; none was recursively deleted or substituted for external
+deployment evidence.
+
+Local/PGlite/browser/build proof does not establish legal approval, real catalog
+or destination approval, Stripe acceptance, tax/shipping readiness, fulfillment,
+affiliate payout operations, or Production activation.
+
+The protected branch Preview is
+`https://propeptiq-git-feat-propeptiq-growth-release-sergiosteam.vercel.app`.
+Its immutable verified deployment was
+`https://propeptiq-h19aci8w7-sergiosteam.vercel.app`. Browser automation proved
+the Vercel login boundary; Vercel-authenticated deployment requests verified the
+actual protected app without weakening that boundary. The Preview contains no
+synthetic growth identity or active economics: rewards and partner values remain
+inactive until real database policy records exist. It does expose the clearly
+labeled synthetic commerce demo route, while every live/provider capability is
+disabled. This Preview proof is not Production proof.

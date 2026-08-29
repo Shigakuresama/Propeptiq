@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getLocalTestDriver } from "local-auth-driver";
 import {
@@ -7,6 +7,7 @@ import {
   isBuyerCheckoutRuntimeReady,
 } from "@/commerce/server-runtime";
 import { parseServerEnv, type ServerEnv } from "@/config/env-schema";
+import { createAttributionCookie } from "@/growth/attribution-cookie";
 
 const origin = "http://127.0.0.1:4631";
 const localEnvironment = {
@@ -84,9 +85,16 @@ const checkoutRequest = {
   promotionIds: ["66000000-0000-4000-8000-000000000001"],
 } as const;
 const idempotencyKey = "6b000000-0000-4000-8000-000000000001";
+const localAffiliateCode = "aff_LocalRuntimePartner01";
+const localAffiliateProfileId = "6b000000-0000-4000-8000-000000000021";
+const localAffiliateUserId = "6b000000-0000-4000-8000-000000000022";
+const localReferralCode = "ref_LocalRuntimeReferrer01";
+const localReferralCodeId = "6b000000-0000-4000-8000-000000000031";
+const localReferrerUserId = "6b000000-0000-4000-8000-000000000032";
 
 describe("commerce server composition", () => {
   beforeEach(() => getLocalTestDriver().commerce.reset());
+  afterEach(() => vi.useRealTimers());
 
   it("reports buyer checkout ready only for the guarded local request and not the exact Preview matrix", async () => {
     const localRequest = requestForActor("non_admin");
@@ -139,6 +147,108 @@ describe("commerce server composition", () => {
       attemptCount: 1,
       providerSessionCount: 1,
       reservationCount: 1,
+    });
+  });
+
+  it("binds a real signed affiliate cookie through the unmodified deterministic driver", async () => {
+    const fixedNow = new Date("2026-08-28T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(fixedNow);
+    const request = requestForActor("non_admin");
+    const cookie = createAttributionCookie({
+      schemaVersion: 1,
+      program: "affiliate",
+      code: localAffiliateCode,
+      issuedAt: fixedNow.toISOString(),
+      expiresAt: "2026-09-27T12:00:00.000Z",
+    }, {
+      environment: "local",
+      now: fixedNow,
+      secret: localEnvironment.RATE_LIMIT_SECRET,
+    });
+    expect(cookie).not.toBeNull();
+    const runtime = await createCheckoutServerRuntime(request);
+    const quoted = await runtime!.quoteCheckout({
+      buyerUserId: request.principal!.actorId,
+      idempotencyKey,
+      attributionCookie: cookie!.value,
+      request: checkoutRequest,
+    });
+
+    expect(quoted.status).toBe("quoted");
+    if (quoted.status !== "quoted") throw new Error("expected affiliate runtime quote");
+    expect(quoted.plan.affiliateQuote).toMatchObject({
+      status: "eligible",
+      code: localAffiliateCode,
+      affiliateProfileId: localAffiliateProfileId,
+      affiliateUserId: localAffiliateUserId,
+      clickedAt: fixedNow.toISOString(),
+      expiresAt: "2026-09-27T12:00:00.000Z",
+    });
+    expect(quoted.plan.referralQuote).toBeNull();
+    expect(JSON.stringify(quoted.quote)).not.toContain(localAffiliateProfileId);
+    expect(JSON.stringify(quoted.quote)).not.toContain(localAffiliateUserId);
+    expect(quoted.quote).not.toHaveProperty("affiliate");
+    expect(quoted.quote).not.toHaveProperty("commission");
+  });
+
+  it("applies and binds a real signed customer-referral cookie through the unmodified deterministic driver", async () => {
+    const fixedNow = new Date("2026-08-28T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(fixedNow);
+    const request = requestForActor("non_admin");
+    const cookie = createAttributionCookie({
+      schemaVersion: 1,
+      program: "customer_referral",
+      code: localReferralCode,
+      issuedAt: fixedNow.toISOString(),
+      expiresAt: "2026-09-27T12:00:00.000Z",
+    }, {
+      environment: "local",
+      now: fixedNow,
+      secret: localEnvironment.RATE_LIMIT_SECRET,
+    });
+    expect(cookie).not.toBeNull();
+    const runtime = await createCheckoutServerRuntime(request);
+    const quoted = await runtime!.quoteCheckout({
+      buyerUserId: request.principal!.actorId,
+      idempotencyKey: "6b000000-0000-4000-8000-000000000002",
+      attributionCookie: cookie!.value,
+      request: { ...checkoutRequest, promotionIds: [] },
+    });
+
+    expect(quoted.status).toBe("quoted");
+    if (quoted.status !== "quoted") throw new Error("expected referral runtime quote");
+    expect(quoted.quote).toMatchObject({
+      discountMinor: 480,
+      referralDiscountMinor: 480,
+    });
+    expect(quoted.plan.referralQuote).toMatchObject({
+      status: "eligible",
+      code: localReferralCode,
+      referralCodeId: localReferralCodeId,
+      referrerUserId: localReferrerUserId,
+      clickedAt: fixedNow.toISOString(),
+      expiresAt: "2026-09-27T12:00:00.000Z",
+    });
+    expect(quoted.plan.affiliateQuote).toBeNull();
+    const browserQuote = JSON.stringify(quoted.quote);
+    expect(browserQuote).not.toContain(localReferralCode);
+    expect(browserQuote).not.toContain(localReferralCodeId);
+    expect(browserQuote).not.toContain(localReferrerUserId);
+    expect(quoted.quote).not.toHaveProperty("referrer");
+    expect(quoted.quote).not.toHaveProperty("reward");
+    const opened = await runtime!.startSession({
+      buyerUserId: request.principal!.actorId,
+      idempotencyKey: "6b000000-0000-4000-8000-000000000002",
+      attributionCookie: cookie!.value,
+      request: { ...checkoutRequest, promotionIds: [] },
+    });
+    expect(opened).toMatchObject({ status: "open" });
+    expect(request.localDriver.commerce.inspect()).toMatchObject({
+      orderCount: 1,
+      attemptCount: 1,
+      providerSessionCount: 1,
     });
   });
 

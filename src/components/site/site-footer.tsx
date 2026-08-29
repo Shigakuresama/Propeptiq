@@ -22,7 +22,7 @@ export function SiteFooter() {
           <p className="mt-6 font-heading text-3xl leading-tight text-canvas sm:text-4xl">
             Research materials, governed by evidence.
           </p>
-          <p className="mt-5 max-w-[62ch] text-sm leading-6 text-canvas/70">
+          <p className="mt-5 max-w-[62ch] text-base leading-7 text-canvas/70">
             {researchRestrictions[0]} {researchRestrictions[1]} Catalog names and package
             configurations come from owner-supplied records; cart and checkout facts remain server-authoritative.
           </p>
@@ -38,6 +38,12 @@ export function SiteFooter() {
               {item.label}
             </Link>
           ))}
+          <Link
+            href="/partners"
+            className="inline-flex min-h-11 min-w-11 items-center rounded-md px-2 py-2 text-sm text-canvas/75 transition-colors duration-200 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
+          >
+            Partner Program
+          </Link>
           <Link
             href="/cart"
             className="inline-flex min-h-11 min-w-11 items-center rounded-md px-2 py-2 text-sm text-canvas/75 transition-colors duration-200 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"

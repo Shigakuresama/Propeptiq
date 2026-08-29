@@ -19,8 +19,10 @@ import type {
 } from "@/admin/admin-read";
 import { signLocalActor, verifyLocalActor, type VerifiedIdentity } from "@/auth/identity";
 import { createLocalCommerceDriverV1 } from "@/auth/local-commerce-driver";
+import { createLocalGrowthDriverV1 } from "@/auth/local-growth-driver";
 import { CAPABILITIES, type Capability } from "@/domain/authorization";
 import type { BuyerStatus } from "@/domain/eligibility";
+import { createRewardsService } from "@/growth/rewards-service";
 
 import type { LocalTestDriver } from "./local-driver-types";
 
@@ -41,7 +43,9 @@ type ActorKey =
   | "admin"
   | "non_admin"
   | "missing_mfa"
-  | "limited_admin";
+  | "limited_admin"
+  | "growth_owner"
+  | "growth_buyer";
 
 type FixedActor = Readonly<{
   key: ActorKey;
@@ -143,6 +147,36 @@ const fixedActors: readonly FixedActor[] = Object.freeze([
     },
     initialStatus: null,
     capabilities: ["order:read:any"],
+  },
+  {
+    key: "growth_owner",
+    label: "Fixed growth owner",
+    description: "Active owner with deterministic points and a private growth workspace.",
+    userId: "50000000-0000-4000-8000-000000000007",
+    identity: {
+      clerkUserId: `${LOCAL_FIXTURE_SENTINEL}_GROWTH_OWNER`,
+      primaryEmail: "fixed-growth-owner@local.test",
+      emailVerifiedAt: fixedNow,
+      mfaConfigured: false,
+      secondFactorCompleted: false,
+    },
+    initialStatus: "active",
+    capabilities: [],
+  },
+  {
+    key: "growth_buyer",
+    label: "Fixed referred buyer",
+    description: "Active buyer used for deterministic referral and partner fixtures.",
+    userId: "50000000-0000-4000-8000-000000000008",
+    identity: {
+      clerkUserId: `${LOCAL_FIXTURE_SENTINEL}_GROWTH_BUYER`,
+      primaryEmail: "fixed-growth-buyer@local.test",
+      emailVerifiedAt: fixedNow,
+      mfaConfigured: false,
+      secondFactorCompleted: false,
+    },
+    initialStatus: "active",
+    capabilities: [],
   },
 ]);
 
@@ -272,6 +306,12 @@ const localProcessState = process as NodeJS.Process & {
 const state = localProcessState[localDriverProcessStateKey] ?? initialState();
 localProcessState[localDriverProcessStateKey] = state;
 
+const growth = createLocalGrowthDriverV1({
+  appendAudit(event) {
+    state.audits.push(event);
+  },
+});
+
 function canonicalLocalValue(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalLocalValue).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -397,6 +437,7 @@ const accountRepository: AccountRepository = {
 
 function adminTransaction(): AdminTransaction {
   return {
+    ...growth.adminTransactionMethods,
     async assertActorAuthority(input) {
       const actor = actorByClerkId(input.clerkUserId);
       const profile = actor ? state.profiles.get(actor.userId) ?? null : null;
@@ -922,19 +963,23 @@ const adminRepository: AdminRepository = {
   },
   async transaction(work) {
     const before = structuredClone(state);
+    const growthBefore = growth.captureState();
     try {
       return await work(adminTransaction());
     } catch (error) {
       Object.assign(state, before);
+      growth.restoreState(growthBefore);
       throw error;
     }
   },
   async retrySerializableTransaction(work) {
     const before = structuredClone(state);
+    const growthBefore = growth.captureState();
     try {
       return await work(adminTransaction());
     } catch (error) {
       Object.assign(state, before);
+      growth.restoreState(growthBefore);
       throw error;
     }
   },
@@ -996,6 +1041,8 @@ function ownerOrderId(userId: string): string | null {
 }
 
 function localAdminReadSnapshot(resource: AdminReadResource): AdminReadSnapshot {
+  const growthSnapshot = growth.readAdminSnapshot(resource);
+  if (growthSnapshot !== null) return growthSnapshot as AdminReadSnapshot;
   const base = { limit: 100 as const, truncated: false };
   switch (resource) {
     case "products":
@@ -1312,6 +1359,66 @@ function localAdminReadSnapshot(resource: AdminReadResource): AdminReadSnapshot 
           occurredAt: fixedNow,
         })),
       };
+    case "loyalty-policies":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "referral-policies":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "affiliate-policies":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "reward-adjustments":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "referral-codes":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "referral-conversions":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "shared-sets":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "affiliate-applications":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "commissions":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
+    case "payouts":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
   }
 }
 
@@ -1325,6 +1432,9 @@ const commerce = createLocalCommerceDriverV1({
   loadEmail(userId) {
     return fixedActors.find((actor) => actor.userId === userId)?.identity.primaryEmail ?? null;
   },
+  reserveCheckoutRewards: createRewardsService({
+    atomicPort: growth.rewardsAtomicPort,
+  }).reserveCheckoutRewards,
 }, () => {
   const secret = process.env.LOCAL_TEST_SECRET;
   return typeof secret === "string" && secret.length >= 32 ? secret : null;
@@ -1473,6 +1583,7 @@ const driver: LocalTestDriver = {
     return localAdminReadSnapshot(resource) as AdminReadSnapshotFor<Resource>;
   },
   commerce,
+  growth,
 };
 
 export function getLocalTestDriver(): LocalTestDriver {

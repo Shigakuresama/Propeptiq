@@ -15,7 +15,7 @@ export const browseCatalogSourceDocumentSha256 =
   "07cd4aa023c5455444d52f360841bc126b245c3eb30f0a19fea17bdf9b92f0bf" as const;
 
 export const browseCatalogRowsSha256 =
-  "172dc8d9a1b8989a80c5db124a44a84805350643ef4a4df01ba0c84caf1321f5" as const;
+  "4aea79b4199c53661bd972a55469e7d35a5eee3237c37c60337a4c32bf594867" as const;
 
 function fingerprintBrowseCatalogRows(
   products: readonly BrowseCatalogProduct[],
@@ -31,6 +31,7 @@ function fingerprintBrowseCatalogRows(
       variant.code,
       variant.packageForm,
       variant.sourceName ?? null,
+      variant.sourcePage ?? null,
     ]),
   ]);
 
@@ -82,7 +83,7 @@ export function validateBrowseCatalogManifest(
     (total, product) => total + product.variants.length,
     0,
   );
-  if (products.length !== 53 || variantCount !== 103) {
+  if (products.length !== 56 || variantCount !== 103) {
     throw new Error("Owner browse catalog is incomplete");
   }
   if (fingerprintBrowseCatalogRows(products) !== browseCatalogRowsSha256) {

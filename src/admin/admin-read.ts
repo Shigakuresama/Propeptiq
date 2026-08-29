@@ -15,6 +15,16 @@ export const ADMIN_READ_RESOURCE_REQUIREMENTS = Object.freeze({
   shipments: "fulfillment:release:consume",
   staff: "staff:manage",
   audit: "staff:manage",
+  "loyalty-policies": "growth:manage",
+  "referral-policies": "growth:manage",
+  "affiliate-policies": "growth:manage",
+  "reward-adjustments": "growth:manage",
+  "referral-codes": "growth:manage",
+  "referral-conversions": "growth:manage",
+  "shared-sets": "growth:manage",
+  "affiliate-applications": "growth:manage",
+  commissions: "growth:manage",
+  payouts: "affiliate:payout",
 } as const);
 
 export type AdminReadResource = keyof typeof ADMIN_READ_RESOURCE_REQUIREMENTS;
@@ -273,6 +283,120 @@ type AuditItem = {
   occurredAt: string;
 };
 
+type GrowthPolicyLifecycleItem = {
+  id: string;
+  version: number;
+  status: "draft" | "active" | "retired";
+  effectiveAt: string;
+  retiredAt: string | null;
+};
+
+type LoyaltyPolicyItem = GrowthPolicyLifecycleItem & {
+  pointsPerDollar: number;
+  redemptionMinorPerPoint: number;
+  minimumRedemptionPoints: number;
+  maximumRedemptionBasisPoints: number;
+  expiresAfterDays: null;
+};
+
+type ReferralPolicyItem = GrowthPolicyLifecycleItem & {
+  attributionDays: number;
+  referredDiscountBasisPoints: number;
+  referredDiscountCapMinor: number;
+  referrerPointsPerDollar: number;
+  referrerRewardCapPoints: number;
+};
+
+type AffiliatePolicyItem = GrowthPolicyLifecycleItem & {
+  attributionDays: number;
+  firstOrderCommissionBasisPoints: number;
+  reorderCommissionBasisPoints: number;
+  reorderWindowDays: number;
+  approvalDelayDays: number;
+  payoutThresholdMinor: number;
+  currency: "USD";
+};
+
+type RewardAdjustmentItem = {
+  rewardAccountId: string;
+  pendingPoints: number;
+  availablePoints: number;
+  recentAdjustments: readonly Readonly<{
+    adjustmentId: string;
+    delta: number;
+    occurredAt: string;
+  }>[];
+};
+
+type ReferralCodeItem = {
+  referralCodeId: string;
+  code: string;
+  status: "active" | "revoked";
+  createdAt: string;
+  revokedAt: string | null;
+};
+
+type SharedSetItem = {
+  sharedSetId: string;
+  publicCode: string;
+  label: string;
+  active: boolean;
+  itemCount: number;
+  createdAt: string;
+  updatedAt: string;
+  deactivatedAt: string | null;
+};
+
+type AffiliateApplicationItem = {
+  affiliateProfileId: string;
+  publicCode: string;
+  status: "pending" | "active" | "rejected" | "suspended";
+  version: number;
+  publicChannel: string;
+  promotionMethod: "website" | "social" | "email" | "other";
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ReferralConversionItem = {
+  conversionId: string;
+  referralPolicyVersion: number;
+  referredDiscountMinor: number;
+  referrerRewardPoints: number;
+  status: "pending" | "qualified" | "reversed";
+  createdAt: string;
+  qualifiedAt: string | null;
+  reversedAt: string | null;
+};
+
+type AffiliateCommissionItem = {
+  commissionId: string;
+  affiliateProfileId: string;
+  affiliatePolicyVersion: number;
+  grossCommissionMinor: number;
+  reversedCommissionMinor: number;
+  netCommissionMinor: number;
+  status: "pending" | "approved" | "paid" | "reversed";
+  approvalEligibleAt: string | null;
+  payoutId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AffiliatePayoutItem = {
+  payoutId: string;
+  affiliateProfileId: string;
+  affiliatePolicyVersion: number;
+  amountMinor: number;
+  currency: "USD";
+  state: "pending" | "paid" | "cancelled";
+  version: number;
+  commissionCount: number;
+  externalEvidenceRecorded: boolean;
+  createdAt: string;
+  paidAt: string | null;
+};
+
 export type AdminReadSnapshot =
   | Snapshot<"products", ProductItem>
   | Snapshot<"prices", PriceItem>
@@ -289,7 +413,17 @@ export type AdminReadSnapshot =
   | Snapshot<"refunds", RefundItem>
   | Snapshot<"shipments", ShipmentItem>
   | Snapshot<"staff", StaffItem>
-  | Snapshot<"audit", AuditItem>;
+  | Snapshot<"audit", AuditItem>
+  | Snapshot<"loyalty-policies", LoyaltyPolicyItem>
+  | Snapshot<"referral-policies", ReferralPolicyItem>
+  | Snapshot<"affiliate-policies", AffiliatePolicyItem>
+  | Snapshot<"reward-adjustments", RewardAdjustmentItem>
+  | Snapshot<"referral-codes", ReferralCodeItem>
+  | Snapshot<"referral-conversions", ReferralConversionItem>
+  | Snapshot<"shared-sets", SharedSetItem>
+  | Snapshot<"affiliate-applications", AffiliateApplicationItem>
+  | Snapshot<"commissions", AffiliateCommissionItem>
+  | Snapshot<"payouts", AffiliatePayoutItem>;
 
 export type AdminReadSnapshotFor<Resource extends AdminReadResource> = Extract<
   AdminReadSnapshot,

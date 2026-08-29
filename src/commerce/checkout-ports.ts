@@ -1,4 +1,8 @@
 import { isSha256 } from "@/commerce/checkout-identity";
+import {
+  parseCheckoutRequest,
+  type CheckoutRequest,
+} from "@/domain/checkout";
 
 type ContractError = Readonly<{
   code: "invalid_contract";
@@ -92,6 +96,9 @@ export type ProviderPreparation = Readonly<{
   providerLivemode: boolean;
   providerScope: string;
 }>;
+
+export type RewardsCheckoutRequest = CheckoutRequest &
+  Readonly<{ rewardRedemptionPoints?: number }>;
 
 export const LOCAL_PAYMENT_PROVIDER_SCOPE =
   "local_test:synthetic-propeptiq-v1" as const;
@@ -205,6 +212,44 @@ function fail(field: string): ContractResult<never> {
   return Object.freeze({
     ok: false,
     error: Object.freeze({ code: "invalid_contract", field }),
+  });
+}
+
+export function parseRewardsCheckoutRequest(
+  value: unknown,
+): ContractResult<RewardsCheckoutRequest> {
+  if (!isRecord(value)) return fail("request");
+  const hasRewards = Object.hasOwn(value, "rewardRedemptionPoints");
+  const expected = [
+    "items",
+    "destination",
+    "promotionIds",
+    ...(hasRewards ? ["rewardRedemptionPoints"] : []),
+  ];
+  if (!exactKeys(value, expected)) return fail("request");
+  if (
+    hasRewards &&
+    (!Number.isSafeInteger(value.rewardRedemptionPoints) ||
+      (value.rewardRedemptionPoints as number) <= 0)
+  ) {
+    return fail("request.rewardRedemptionPoints");
+  }
+  const base = parseCheckoutRequest({
+    items: value.items,
+    destination: value.destination,
+    promotionIds: value.promotionIds,
+  });
+  if (!base.ok) return fail("request");
+  return Object.freeze({
+    ok: true,
+    value: Object.freeze(
+      hasRewards
+        ? {
+            ...base.value,
+            rewardRedemptionPoints: value.rewardRedemptionPoints as number,
+          }
+        : base.value,
+    ),
   });
 }
 

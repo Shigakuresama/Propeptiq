@@ -3,8 +3,22 @@ import { describe, expect, it } from "vitest";
 
 import { browseCatalogProducts } from "@/catalog/browse-catalog";
 import { PublicHome } from "@/components/site/public-home";
+import type { LoyaltyPolicy } from "@/domain/rewards";
 
 import { ProofRail } from "./proof-rail";
+
+const activeLoyaltyPolicy: LoyaltyPolicy = {
+  id: "loyalty-active",
+  version: 1,
+  status: "active",
+  pointsPerDollar: 2,
+  redemptionMinorPerPoint: 1,
+  minimumRedemptionPoints: 500,
+  maximumRedemptionBasisPoints: 2_500,
+  expiresAfterDays: null,
+  effectiveAt: "2026-08-27T00:00:00.000Z",
+  supersededAt: null,
+};
 
 describe("public storefront semantics", () => {
   it("presents the owner-supplied catalog without inventing commerce facts", () => {
@@ -28,7 +42,10 @@ describe("public storefront semantics", () => {
       "href",
       "/cart",
     );
-    expect(screen.getByText("53")).toBeVisible();
+    expect(screen.getByText("56")).toBeVisible();
+    const catalogExplanation = screen.getByText(/Product families spanning 103 supplied package configurations/iu);
+    expect(catalogExplanation).toHaveClass("text-base");
+    expect(catalogExplanation).not.toHaveClass("text-sm");
     expect(screen.getByText("Tirzepatide")).toBeVisible();
     expect(
       screen.getByRole("link", { name: /view catalog item: tirzepatide/i }),
@@ -56,5 +73,20 @@ describe("public storefront semantics", () => {
     for (const item of within(rail).getAllByRole("listitem")) {
       expect(within(item).getByText("No approved public record")).toBeVisible();
     }
+  });
+
+  it("keeps one active program strip and the Proof Rail ahead of catalog highlights", () => {
+    render(
+      <PublicHome
+        loyaltyPolicy={activeLoyaltyPolicy}
+        products={browseCatalogProducts}
+        variantCount={103}
+      />,
+    );
+
+    expect(screen.getAllByRole("region", { name: "Active rewards program" })).toHaveLength(1);
+    const rail = screen.getByRole("list", { name: "Evidence relationship" });
+    const highlights = screen.getByText("Catalog highlights");
+    expect(rail.compareDocumentPosition(highlights) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

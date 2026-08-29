@@ -7,6 +7,7 @@ import type {
 } from "@/commerce/checkout-service";
 import type { ProviderCheckoutRouteResult } from "@/commerce/provider-checkout-orchestration";
 import { parseCheckoutRequest } from "@/domain/checkout";
+import { ATTRIBUTION_COOKIE_NAME } from "@/growth/attribution-cookie";
 import { assertMutationOrigin } from "@/security/origin";
 import {
   consumeFixedWindowLimit,
@@ -48,13 +49,34 @@ export type CheckoutHttpDependencies = Readonly<{
     buyerUserId: string;
     idempotencyKey: string;
     request: unknown;
+    attributionCookie: string | null;
   }>) => Promise<CheckoutQuoteResult>;
   startSession: (input: Readonly<{
     buyerUserId: string;
     idempotencyKey: string;
     request: unknown;
+    attributionCookie: string | null;
   }>) => Promise<ProviderCheckoutRouteResult>;
 }>;
+
+function attributionCookieFromRequest(request: Request): string | null {
+  const header = request.headers.get("cookie");
+  if (header === null || header.length > 8_192) return null;
+  const values = header.split(";").flatMap((part) => {
+    const separator = part.indexOf("=");
+    if (separator < 1 || part.slice(0, separator).trim() !== ATTRIBUTION_COOKIE_NAME) {
+      return [];
+    }
+    return [part.slice(separator + 1).trim()];
+  });
+  if (
+    values.length !== 1 ||
+    values[0]!.length === 0 ||
+    values[0]!.length > 2_048 ||
+    !/^[A-Za-z0-9_.-]+$/u.test(values[0]!)
+  ) return null;
+  return values[0]!;
+}
 
 function response(status: number, body: Readonly<Record<string, unknown>>, retryAfter?: number) {
   const headers = new Headers({
@@ -97,10 +119,24 @@ function boundedText(value: unknown, maximum = 240): value is string {
 
 function safeQuote(value: unknown): BrowserCheckoutQuote | null {
   try {
-    if (!plainRecord(value) || !exactOwnKeys(value, [
+    const baseKeys = [
       "status", "reviewRequired", "reasons", "currency", "subtotalMinor",
       "discountMinor", "shippingMinor", "taxMinor", "totalMinor", "lines",
-    ])) return null;
+    ] as const;
+    const acquisitionKeys = ["promotionDiscountMinor", "referralDiscountMinor"] as const;
+    const rewardKeys = [
+      "rewardRedemptionPoints", "rewardRedemptionMinor", "pendingBaseEarnPoints",
+      "rewardsBenefitAvailable", "rewardsUnavailableReason",
+    ] as const;
+    const allowedKeys = new Set<string>([...baseKeys, ...acquisitionKeys, ...rewardKeys]);
+    if (!plainRecord(value) ||
+      baseKeys.some((key) => !Object.hasOwn(value, key)) ||
+      Reflect.ownKeys(value).some((key) => typeof key !== "string" || !allowedKeys.has(key))) {
+      return null;
+    }
+    const hasAcquisition = acquisitionKeys.map((key) => Object.hasOwn(value, key));
+    const hasRewards = rewardKeys.map((key) => Object.hasOwn(value, key));
+    if (!hasAcquisition.every(Boolean) || !hasRewards.every(Boolean)) return null;
     if (
       (value.status !== "ready" && value.status !== "review_required") ||
       typeof value.reviewRequired !== "boolean" ||
@@ -114,6 +150,17 @@ function safeQuote(value: unknown): BrowserCheckoutQuote | null {
       value.reasons.some((reason) => !boundedText(reason, 80)) ||
       !Array.isArray(value.lines) || value.lines.length < 1 || value.lines.length > 50
     ) return null;
+    if (!safeMoney(value.promotionDiscountMinor) ||
+      !safeMoney(value.referralDiscountMinor)) return null;
+    if (!safeMoney(value.rewardRedemptionPoints) ||
+      !safeMoney(value.rewardRedemptionMinor) ||
+      !safeMoney(value.pendingBaseEarnPoints) ||
+      typeof value.rewardsBenefitAvailable !== "boolean" ||
+      (value.rewardsUnavailableReason !== null &&
+       !boundedText(value.rewardsUnavailableReason, 80))) return null;
+    if ((value.promotionDiscountMinor as number) +
+      (value.referralDiscountMinor as number) +
+      (value.rewardRedemptionMinor as number) !== value.discountMinor) return null;
     let lineSubtotal = 0;
     let lineDiscount = 0;
     const seen = new Set<string>();
@@ -155,6 +202,13 @@ function safeQuote(value: unknown): BrowserCheckoutQuote | null {
       shippingMinor: value.shippingMinor,
       taxMinor: value.taxMinor,
       totalMinor: value.totalMinor,
+      promotionDiscountMinor: value.promotionDiscountMinor,
+      referralDiscountMinor: value.referralDiscountMinor,
+      rewardRedemptionPoints: value.rewardRedemptionPoints,
+      rewardRedemptionMinor: value.rewardRedemptionMinor,
+      pendingBaseEarnPoints: value.pendingBaseEarnPoints,
+      rewardsBenefitAvailable: value.rewardsBenefitAvailable,
+      rewardsUnavailableReason: value.rewardsUnavailableReason,
       lines: Object.freeze(lines),
     });
   } catch {
@@ -269,7 +323,7 @@ async function parseRequest(
   dependencies: CheckoutHttpDependencies,
   operation: "checkout.quote" | "checkout.session",
   limit: number,
-): Promise<Readonly<{ ok: true; actor: Actor; idempotencyKey: string; body: unknown }> | Readonly<{ ok: false; response: Response }>> {
+): Promise<Readonly<{ ok: true; actor: Actor; idempotencyKey: string; body: unknown; attributionCookie: string | null }> | Readonly<{ ok: false; response: Response }>> {
   try {
     assertMutationOrigin(request, dependencies.environment);
   } catch {
@@ -319,7 +373,13 @@ async function parseRequest(
     const body = JSON.parse(decoded) as unknown;
     const parsed = parseCheckoutRequest(body);
     if (!parsed.ok || parsed.value.promotionIds.length > 1) return { ok: false, response: response(400, { status: "invalid_request" }) };
-    return { ok: true, actor, idempotencyKey, body: parsed.value };
+    return {
+      ok: true,
+      actor,
+      idempotencyKey,
+      body: parsed.value,
+      attributionCookie: attributionCookieFromRequest(request),
+    };
   } catch {
     return { ok: false, response: response(400, { status: "invalid_request" }) };
   }
@@ -335,6 +395,7 @@ export function createCheckoutHttpHandlers(dependencies: CheckoutHttpDependencie
           buyerUserId: parsed.actor.buyerUserId,
           idempotencyKey: parsed.idempotencyKey,
           request: parsed.body,
+          attributionCookie: parsed.attributionCookie,
         }));
       } catch {
         return response(503, { status: "quote_unavailable", component: "commerce" });
@@ -348,6 +409,7 @@ export function createCheckoutHttpHandlers(dependencies: CheckoutHttpDependencie
           buyerUserId: parsed.actor.buyerUserId,
           idempotencyKey: parsed.idempotencyKey,
           request: parsed.body,
+          attributionCookie: parsed.attributionCookie,
         }));
       } catch {
         return response(503, { status: "unavailable" });

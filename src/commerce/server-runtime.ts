@@ -19,8 +19,13 @@ import {
 } from "@/db/repositories/provider-event-repository";
 import { createPostgresRateLimitStore } from "@/db/repositories/rate-limit-store";
 import { createRefundFulfillmentRepository } from "@/db/repositories/refund-fulfillment-repository";
+import type { GrowthTransactionRunner } from "@/db/repositories/growth-repository";
 import { connectRuntimeDatabaseSession, withRuntimeTransaction } from "@/db/runtime";
 import { readServerEnv } from "@/env";
+import { createAffiliateCheckoutService } from "@/growth/affiliate-service";
+import { verifyAttributionCookie } from "@/growth/attribution-cookie";
+import { createReferralCheckoutService } from "@/growth/referral-service";
+import { createPostgresRewardsLifecycleService, createRewardsService } from "@/growth/rewards-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 
 export type CheckoutServerRuntimeV1 = Readonly<{
@@ -30,11 +35,13 @@ export type CheckoutServerRuntimeV1 = Readonly<{
     buyerUserId: string;
     idempotencyKey: string;
     request: unknown;
+    attributionCookie?: string | null;
   }>) => Promise<CheckoutQuoteResult>;
   startSession: (input: Readonly<{
     buyerUserId: string;
     idempotencyKey: string;
     request: unknown;
+    attributionCookie?: string | null;
   }>) => Promise<ProviderCheckoutRouteResult>;
 }>;
 
@@ -56,6 +63,28 @@ function deterministicUuid(value: string): string {
 
 function runtimeNow(): Date {
   return new Date(Math.floor(Date.now() / 1_000) * 1_000);
+}
+
+const rewardsDisabledLifecycle = Object.freeze({
+  async reconcileProcessedProviderEvent() {
+    return Object.freeze({ status: "idempotent" as const });
+  },
+  async reconcileDeliveredOrder() {
+    return Object.freeze({ status: "idempotent" as const });
+  },
+});
+
+function createRuntimeRewardsLifecycle(environment: ReturnType<typeof readServerEnv>) {
+  const runSerializableTransaction: GrowthTransactionRunner = (work, options) =>
+    withRuntimeTransaction(environment, work, options);
+  return createPostgresRewardsLifecycleService({
+    client: {
+      query: (sql, params = []) =>
+        withRuntimeTransaction(environment, (client) => client.query(sql, params)),
+    },
+    runSerializableTransaction,
+    keyedUuid: deterministicUuid,
+  });
 }
 
 export function isBuyerCheckoutRuntimeReady(request: RequestIdentity): boolean {
@@ -94,6 +123,28 @@ export async function createCheckoutServerRuntime(
   const now = runtimeNow();
   const contextResult = await localProviderContext(request, now);
   if (!contextResult.ok || contextResult.context.buyerUserId !== request.principal!.actorId) return null;
+  const attributionSecret = request.environment.RATE_LIMIT_SECRET;
+  if (attributionSecret === undefined) return null;
+  const affiliateService = createAffiliateCheckoutService({
+    verifyCookie(value, verifiedAt) {
+      return verifyAttributionCookie(value, {
+        environment: request.environment.APP_ENV,
+        now: verifiedAt,
+        secret: attributionSecret,
+      });
+    },
+    loadCandidate: driver.commerce.affiliateCandidateLookup,
+  });
+  const referralService = createReferralCheckoutService({
+    verifyCookie(value, verifiedAt) {
+      return verifyAttributionCookie(value, {
+        environment: request.environment.APP_ENV,
+        now: verifiedAt,
+        secret: attributionSecret,
+      });
+    },
+    loadCandidate: driver.commerce.referralCandidateLookup,
+  });
   const checkoutService = createCheckoutService({
     repository: driver.commerce.checkoutRepository,
     shippingQuotePort: driver.commerce.shippingQuotePort,
@@ -107,6 +158,9 @@ export async function createCheckoutServerRuntime(
       maximumQuantityPerLine: 25,
       maximumOrderAmountMinor: 100_000_000,
     },
+    referralService,
+    affiliateService,
+    rewardsService: createRewardsService({ atomicPort: driver.growth.rewardsAtomicPort }),
   });
   const orchestrator = createProviderCheckoutOrchestrator({
     checkoutService,
@@ -125,6 +179,9 @@ export async function createCheckoutServerRuntime(
         idempotencyKey: input.idempotencyKey,
         paymentProviderAvailable: contextResult.context.checkoutCreationAvailable,
         request: input.request,
+        ...(input.attributionCookie === undefined
+          ? {}
+          : { attributionCookie: input.attributionCookie }),
       });
     },
     startSession(input) {
@@ -133,6 +190,9 @@ export async function createCheckoutServerRuntime(
         context: contextResult.context,
         idempotencyKey: input.idempotencyKey,
         request: input.request,
+        ...(input.attributionCookie === undefined
+          ? {}
+          : { attributionCookie: input.attributionCookie }),
       });
     },
   });
@@ -154,6 +214,7 @@ export async function createStaffCommerceServerRuntime(
       adminRepository: driver.adminRepository,
       refundRepository: driver.commerce.refundRepository,
       fulfillmentRepository: driver.commerce.fulfillmentRepository,
+      rewardsLifecycle: rewardsDisabledLifecycle,
       async resolveDatabaseUsersByClerkId(clerkUserId) {
         const principal = driver.loadPrincipal(clerkUserId);
         return principal === null ? [] : [principal.actorId];
@@ -194,6 +255,7 @@ export async function createStaffCommerceServerRuntime(
     sha256,
     keyedUuid: deterministicUuid,
   });
+  const rewardsLifecycle = createRuntimeRewardsLifecycle(environment);
   let stripe = null;
   if (
     (environment.PAYMENTS_MODE === "test" || environment.PAYMENTS_MODE === "live") &&
@@ -219,6 +281,7 @@ export async function createStaffCommerceServerRuntime(
     adminRepository,
     refundRepository,
     fulfillmentRepository,
+    rewardsLifecycle,
     async resolveDatabaseUsersByClerkId(clerkUserId) {
       return withRuntimeTransaction(environment, async (client) => {
         const result = await client.query<{ id: string }>(
@@ -250,6 +313,7 @@ export async function createStripeWebhookServerRuntime(): Promise<StripeWebhookS
     ),
     keyedUuid: deterministicUuid,
   });
+  const rewardsLifecycle = createRuntimeRewardsLifecycle(environment);
   const service = createProviderEventServiceV1({
     authority,
     repository,
@@ -259,6 +323,7 @@ export async function createStripeWebhookServerRuntime(): Promise<StripeWebhookS
     clock: () => new Date(),
     uuid: () => randomUUID(),
     leaseToken: () => `provider_event_${randomBytes(24).toString("hex")}`,
+    rewardsLifecycle,
   });
   return Object.freeze({ handleDelivery: service.handleDelivery });
 }

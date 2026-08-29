@@ -22,7 +22,10 @@ export function AdminShell({ children, resources }: { children: ReactNode; resou
             <SheetTrigger asChild><Button type="button" variant="outline" size="icon" className="ml-auto size-11 xl:hidden" aria-label="Open administration navigation"><Menu /></Button></SheetTrigger>
             <SheetContent className="w-[min(26rem,calc(100vw-1rem))] overflow-y-auto border-border bg-canvas p-0">
               <SheetHeader className="border-b border-border p-6 text-left"><SheetTitle>Administration</SheetTitle><SheetDescription>Only resources covered by active capabilities are shown.</SheetDescription></SheetHeader>
-              <nav aria-label="Mobile administration" className="grid gap-1 p-4">{resources.map((resource) => <SheetClose asChild key={resource.slug}><ShellNavLink href={`/admin/${resource.slug}`}>{resource.label}</ShellNavLink></SheetClose>)}</nav>
+              <nav aria-label="Mobile administration" className="grid gap-1 p-4">
+                {resources.map((resource) => <SheetClose asChild key={resource.slug}><ShellNavLink href={`/admin/${resource.slug}`}>{resource.label}</ShellNavLink></SheetClose>)}
+                <SheetClose asChild><ShellNavLink href="/account">Account</ShellNavLink></SheetClose>
+              </nav>
             </SheetContent>
           </Sheet>
         </div>

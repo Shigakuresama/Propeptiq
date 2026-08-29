@@ -31,6 +31,10 @@ function yesNo(value: boolean): string {
   return value ? "Yes" : "No";
 }
 
+function formatBasisPoints(value: number): string {
+  return `${(value / 100).toFixed(2)}%`;
+}
+
 function promotionConfiguration(configuration: SafePromotionConfiguration): string {
   switch (configuration.kind) {
     case "discount":
@@ -173,6 +177,195 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
           ["Schedule", `${formatInstant(item.startsAt)} → ${formatInstant(item.endsAt)}`],
           ["Current version", item.updatedAt],
         ]} />
+      ));
+      break;
+    case "loyalty-policies":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.id}
+          title={`Loyalty policy version ${item.version}`}
+          status={item.status}
+          facts={[
+            ["Policy ID", item.id],
+            ["Points earned", `${item.pointsPerDollar.toLocaleString("en-US")} points per USD`],
+            ["Redemption value", `${formatMoney(item.redemptionMinorPerPoint, "USD")} per point`],
+            ["Minimum redemption", `${item.minimumRedemptionPoints.toLocaleString("en-US")} points`],
+            ["Maximum redemption", `${formatBasisPoints(item.maximumRedemptionBasisPoints)} of order value`],
+            ["Expiration", item.expiresAfterDays === null ? "No expiration" : `${item.expiresAfterDays} days`],
+            ["Effective", formatInstant(item.effectiveAt)],
+            ["Retired", formatInstant(item.retiredAt)],
+          ]}
+        />
+      ));
+      break;
+    case "referral-policies":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.id}
+          title={`Referral policy version ${item.version}`}
+          status={item.status}
+          facts={[
+            ["Policy ID", item.id],
+            ["Attribution window", `${item.attributionDays} days`],
+            ["Buyer discount", formatBasisPoints(item.referredDiscountBasisPoints)],
+            ["Buyer discount cap", formatMoney(item.referredDiscountCapMinor, "USD")],
+            ["Referrer earning", `${item.referrerPointsPerDollar.toLocaleString("en-US")} points per USD`],
+            ["Referrer reward cap", `${item.referrerRewardCapPoints.toLocaleString("en-US")} points`],
+            ["Effective", formatInstant(item.effectiveAt)],
+            ["Retired", formatInstant(item.retiredAt)],
+          ]}
+        />
+      ));
+      break;
+    case "affiliate-policies":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.id}
+          title={`Affiliate policy version ${item.version}`}
+          status={item.status}
+          facts={[
+            ["Policy ID", item.id],
+            ["Attribution window", `${item.attributionDays} days`],
+            ["First-order commission", formatBasisPoints(item.firstOrderCommissionBasisPoints)],
+            ["Reorder commission", formatBasisPoints(item.reorderCommissionBasisPoints)],
+            ["Reorder window", `${item.reorderWindowDays} days`],
+            ["Approval delay", `${item.approvalDelayDays} days`],
+            ["Payout threshold", formatMoney(item.payoutThresholdMinor, item.currency)],
+            ["Currency", item.currency],
+            ["Effective", formatInstant(item.effectiveAt)],
+            ["Retired", formatInstant(item.retiredAt)],
+          ]}
+        />
+      ));
+      break;
+    case "reward-adjustments":
+      records = snapshot.items.map((item) => (
+        <RecordCard key={item.rewardAccountId} title="Reward account" facts={[
+          ["Reward account ID", item.rewardAccountId],
+          ["Available points", item.availablePoints.toLocaleString("en-US")],
+          ["Pending points", item.pendingPoints.toLocaleString("en-US")],
+          ["Recent administrator adjustments", item.recentAdjustments.length === 0
+            ? "No administrator adjustments recorded"
+            : (
+              <ul className="grid gap-3 p-0">
+                {item.recentAdjustments.map((adjustment) => (
+                  <li className="min-w-0 border-t border-line pt-3 first:border-0 first:pt-0" key={adjustment.adjustmentId}>
+                    <span className="block break-words">{adjustment.adjustmentId}</span>
+                    <span className="mt-1 block">
+                      {adjustment.delta > 0 ? "+" : ""}{adjustment.delta.toLocaleString("en-US")} points
+                      {" · "}{formatInstant(adjustment.occurredAt)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )],
+        ]} />
+      ));
+      break;
+    case "referral-codes":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.referralCodeId}
+          title={`Referral code · ${item.code}`}
+          status={item.status}
+          facts={[
+            ["Referral code ID", item.referralCodeId],
+            ["Public code", item.code],
+            ["Created", formatInstant(item.createdAt)],
+            ["Revoked", formatInstant(item.revokedAt)],
+          ]}
+        />
+      ));
+      break;
+    case "shared-sets":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.sharedSetId}
+          title={`${item.label} · ${item.publicCode}`}
+          status={item.active ? "active" : "inactive"}
+          facts={[
+            ["Shared set ID", item.sharedSetId],
+            ["Public code", item.publicCode],
+            ["Public label", item.label],
+            ["Items", item.itemCount],
+            ["Created", formatInstant(item.createdAt)],
+            ["Current version", formatInstant(item.updatedAt)],
+            ["Deactivated", formatInstant(item.deactivatedAt)],
+          ]}
+        />
+      ));
+      break;
+    case "affiliate-applications":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.affiliateProfileId}
+          title={`Affiliate application · ${item.publicCode}`}
+          status={item.status}
+          facts={[
+            ["Affiliate profile ID", item.affiliateProfileId],
+            ["Public code", item.publicCode],
+            ["Public channel", item.publicChannel],
+            ["Promotion method", item.promotionMethod.replaceAll("_", " ")],
+            ["Version", item.version],
+            ["Created", formatInstant(item.createdAt)],
+            ["Updated", formatInstant(item.updatedAt)],
+          ]}
+        />
+      ));
+      break;
+    case "referral-conversions":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.conversionId}
+          title={`Referral conversion · ${item.conversionId}`}
+          status={item.status}
+          facts={[
+            ["Referral policy version", item.referralPolicyVersion],
+            ["Referred discount", formatMoney(item.referredDiscountMinor, "USD")],
+            ["Referrer reward", `${item.referrerRewardPoints.toLocaleString("en-US")} points`],
+            ["Created", formatInstant(item.createdAt)],
+            ["Qualified", formatInstant(item.qualifiedAt)],
+            ["Reversed", formatInstant(item.reversedAt)],
+          ]}
+        />
+      ));
+      break;
+    case "commissions":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.commissionId}
+          title={`Affiliate commission · ${item.commissionId}`}
+          status={item.status}
+          facts={[
+            ["Affiliate profile ID", item.affiliateProfileId],
+            ["Affiliate policy version", item.affiliatePolicyVersion],
+            ["Gross commission", formatMoney(item.grossCommissionMinor, "USD")],
+            ["Reversed commission", formatMoney(item.reversedCommissionMinor, "USD")],
+            ["Net commission", formatMoney(item.netCommissionMinor, "USD")],
+            ["Approval eligible", formatInstant(item.approvalEligibleAt)],
+            ["Payout ID", item.payoutId ?? "Not assigned"],
+            ["Current version", formatInstant(item.updatedAt)],
+          ]}
+        />
+      ));
+      break;
+    case "payouts":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.payoutId}
+          title={`Affiliate payout · ${item.payoutId}`}
+          status={item.state}
+          facts={[
+            ["Affiliate profile ID", item.affiliateProfileId],
+            ["Affiliate policy version", item.affiliatePolicyVersion],
+            ["Amount", formatMoney(item.amountMinor, item.currency)],
+            ["Version", item.version],
+            ["Commission count", item.commissionCount],
+            ["External evidence recorded", yesNo(item.externalEvidenceRecorded)],
+            ["Created", formatInstant(item.createdAt)],
+            ["Paid", formatInstant(item.paidAt)],
+          ]}
+        />
       ));
       break;
     case "buyers":

@@ -11,6 +11,7 @@ import {
 } from "@/commerce/checkout-identity";
 import {
   parseProviderPreparation,
+  parseRewardsCheckoutRequest,
   parseShippingQuoteResult,
   parseTaxQuoteResult,
   type ProviderPreparation,
@@ -18,11 +19,9 @@ import {
   type ShippingQuotePort,
   type TaxQuote,
   type TaxQuotePort,
+  type RewardsCheckoutRequest,
 } from "@/commerce/checkout-ports";
-import {
-  parseCheckoutRequest,
-  type CheckoutRequest,
-} from "@/domain/checkout";
+import type { CheckoutRequest } from "@/domain/checkout";
 import {
   evaluateCheckout,
   type BuyerStatus,
@@ -36,9 +35,23 @@ import {
 } from "@/domain/money";
 import {
   calculatePromotionDiscount,
+  selectBestAcquisitionDiscount,
   type PromotionRecord,
 } from "@/domain/promotions";
 import type { OrderState } from "@/domain/orders";
+import type {
+  CheckoutRewardsQuote,
+  AppliedCheckoutRewards,
+  RewardsCheckoutReservationResult,
+} from "@/growth/rewards-service";
+import type {
+  EligibleReferralCheckoutQuote,
+  ReferralCheckoutQuote,
+} from "@/growth/referral-service";
+import type {
+  AffiliateCheckoutQuote,
+  EligibleAffiliateCheckoutQuote,
+} from "@/growth/affiliate-service";
 
 export type AuthoritativeLotFact = Readonly<{
   id: string;
@@ -91,6 +104,13 @@ export type BrowserCheckoutQuote = Readonly<{
   shippingMinor: number;
   taxMinor: number;
   totalMinor: number;
+  promotionDiscountMinor: number;
+  referralDiscountMinor: number;
+  rewardRedemptionPoints: number;
+  rewardRedemptionMinor: number;
+  pendingBaseEarnPoints: number;
+  rewardsBenefitAvailable: boolean;
+  rewardsUnavailableReason: string | null;
   lines: readonly Readonly<{
     productId: string;
     productName: string;
@@ -215,7 +235,7 @@ export type AuthoritativeCheckoutPlanData = Readonly<{
   identity: CheckoutIdentity;
   buyerUserId: string;
   idempotencyKey: string;
-  request: CheckoutRequest;
+  request: RewardsCheckoutRequest;
   requestHash: string;
   authoritativeAt: Date;
   factsHash: string;
@@ -226,6 +246,16 @@ export type AuthoritativeCheckoutPlanData = Readonly<{
   shippingQuote: ShippingQuote | null;
   taxQuote: TaxQuote | null;
   totals: OrderTotals | null;
+  promotionDiscountMinor: number;
+  referralDiscountMinor: number;
+  selectedAcquisitionSource: "promotion" | "referral";
+  promotionAllocations: readonly Readonly<{
+    productId: string;
+    discountMinor: number;
+  }>[];
+  rewardsQuote: CheckoutRewardsQuote | null;
+  referralQuote: EligibleReferralCheckoutQuote | null;
+  affiliateQuote: EligibleAffiliateCheckoutQuote | null;
   browserQuote: BrowserCheckoutQuote;
 }>;
 
@@ -405,8 +435,41 @@ function browserQuote(
   decision: CheckoutDecision,
   facts: AuthoritativeCheckoutFacts,
   totals: OrderTotals,
+  promotionDiscountMinor: number,
+  referralDiscountMinor: number,
+  rewardsQuote: CheckoutRewardsQuote | null,
 ): BrowserCheckoutQuote {
   const byProduct = new Map(facts.items.map((item) => [item.productId, item]));
+  const rewardsProjection =
+    rewardsQuote === null
+      ? {
+          promotionDiscountMinor,
+          referralDiscountMinor,
+          rewardRedemptionPoints: 0,
+          rewardRedemptionMinor: 0,
+          pendingBaseEarnPoints: 0,
+          rewardsBenefitAvailable: false,
+          rewardsUnavailableReason: "not_requested",
+        }
+      : rewardsQuote.status === "applied"
+        ? {
+            promotionDiscountMinor,
+            referralDiscountMinor,
+            rewardRedemptionPoints: rewardsQuote.redemptionPoints,
+            rewardRedemptionMinor: rewardsQuote.redemptionMinor,
+            pendingBaseEarnPoints: rewardsQuote.pendingBaseEarnPoints,
+            rewardsBenefitAvailable: true,
+            rewardsUnavailableReason: null,
+          }
+        : {
+            promotionDiscountMinor,
+            referralDiscountMinor,
+            rewardRedemptionPoints: 0,
+            rewardRedemptionMinor: 0,
+            pendingBaseEarnPoints: 0,
+            rewardsBenefitAvailable: false,
+            rewardsUnavailableReason: rewardsQuote.reason,
+          };
   return Object.freeze({
     status: decision.reviewRequired ? "review_required" : "ready",
     reviewRequired: decision.reviewRequired,
@@ -417,6 +480,7 @@ function browserQuote(
     shippingMinor: totals.shippingMinor,
     taxMinor: totals.taxMinor,
     totalMinor: totals.totalMinor,
+    ...rewardsProjection,
     lines: Object.freeze(
       totals.lines.map((line) => {
         const fact = byProduct.get(line.productId)!;
@@ -479,22 +543,61 @@ export function createCheckoutService(dependencies: Readonly<{
   clock: () => Date;
   keyedUuid: KeyedUuidGenerator;
   moneyPolicy: MoneyPolicy;
+  rewardsService?: Readonly<{
+    quoteCheckoutRewards: (input: Readonly<{
+      buyerUserId: string;
+      requestedPoints: number;
+      postPromotionMerchandiseMinor: number;
+      currency: "USD";
+      now: Date;
+    }>) => Promise<CheckoutRewardsQuote>;
+    reserveCheckoutRewards: (input: Readonly<{
+      buyerUserId: string;
+      orderId: string;
+      checkoutAttemptId: string;
+      idempotencyKey: string;
+      quote: AppliedCheckoutRewards;
+      reservedAt: Date;
+    }>) => Promise<RewardsCheckoutReservationResult>;
+  }>;
+  referralService?: Readonly<{
+    quoteCustomerReferral: (input: Readonly<{
+      buyerUserId: string;
+      attributionCookie: string;
+      merchandiseSubtotalMinor: number;
+      currency: "USD";
+      now: Date;
+    }>) => Promise<ReferralCheckoutQuote>;
+  }>;
+  affiliateService?: Readonly<{
+    quoteAffiliateAttribution: (input: Readonly<{
+      buyerUserId: string;
+      attributionCookie: string;
+      now: Date;
+    }>) => Promise<AffiliateCheckoutQuote>;
+  }>;
 }>) {
   return Object.freeze({
     async quote(input: Readonly<{
       buyerUserId: string;
       idempotencyKey: string;
       paymentProviderAvailable: boolean;
+      attributionCookie?: string | null;
       request: unknown;
     }>): Promise<CheckoutQuoteResult> {
       if (
         !isCanonicalUuid(input.buyerUserId) ||
         !isCanonicalUuid(input.idempotencyKey) ||
         typeof input.paymentProviderAvailable !== "boolean"
+        || (input.attributionCookie !== undefined &&
+          input.attributionCookie !== null &&
+          (typeof input.attributionCookie !== "string" ||
+            input.attributionCookie.length === 0 ||
+            input.attributionCookie.length > 2_048))
       ) {
         return { status: "invalid_request", reason: "checkout_input_invalid" };
       }
-      const parsed = parseCheckoutRequest(input.request);
+      const parsed = parseRewardsCheckoutRequest(input.request);
       if (!parsed.ok) {
         return { status: "invalid_request", reason: "checkout_input_invalid" };
       }
@@ -646,6 +749,13 @@ export function createCheckoutService(dependencies: Readonly<{
             shippingMinor: 0,
             taxMinor: 0,
             totalMinor: 0,
+            promotionDiscountMinor: 0,
+            referralDiscountMinor: 0,
+            rewardRedemptionPoints: 0,
+            rewardRedemptionMinor: 0,
+            pendingBaseEarnPoints: 0,
+            rewardsBenefitAvailable: false,
+            rewardsUnavailableReason: "checkout_not_permitted",
             lines: Object.freeze([]),
           });
           const factsHash = await hashCanonicalEnvelope(
@@ -673,6 +783,13 @@ export function createCheckoutService(dependencies: Readonly<{
               shippingQuote: null,
               taxQuote: null,
               totals: null,
+              promotionDiscountMinor: 0,
+              referralDiscountMinor: 0,
+              selectedAcquisitionSource: "promotion",
+              promotionAllocations: Object.freeze([]),
+              rewardsQuote: null,
+              referralQuote: null,
+              affiliateQuote: null,
               browserQuote: emptyQuote,
             });
           return resultWithOpaquePlan(
@@ -707,14 +824,140 @@ export function createCheckoutService(dependencies: Readonly<{
           (candidate) => candidate.productId === item.productId,
         )!.quantity,
       }));
-      const merchandiseLines = priceLines.map((line) => ({
+      const merchandiseSubtotalMinor = priceLines.reduce(
+        (sum, line) => sum + line.unitAmountMinor * line.quantity,
+        0,
+      );
+      if (
+        typeof input.attributionCookie === "string" &&
+        dependencies.referralService === undefined
+      ) {
+        return { status: "internal_conflict" };
+      }
+      const referralResult =
+        typeof input.attributionCookie === "string" &&
+        dependencies.referralService !== undefined
+          ? await dependencies.referralService.quoteCustomerReferral({
+              buyerUserId: input.buyerUserId,
+              attributionCookie: input.attributionCookie,
+              merchandiseSubtotalMinor,
+              currency: "USD",
+              now: authoritativeAt,
+            })
+          : null;
+      if (referralResult?.status === "internal_conflict") {
+        return { status: "internal_conflict" };
+      }
+      const referralQuote =
+        referralResult?.status === "eligible" ? referralResult : null;
+      const affiliateResult =
+        typeof input.attributionCookie === "string"
+          ? dependencies.affiliateService === undefined
+            ? null
+            : await dependencies.affiliateService.quoteAffiliateAttribution({
+              buyerUserId: input.buyerUserId,
+              attributionCookie: input.attributionCookie,
+              now: authoritativeAt,
+            })
+          : null;
+      if (
+        typeof input.attributionCookie === "string" &&
+        dependencies.affiliateService === undefined
+      ) {
+        return { status: "internal_conflict" };
+      }
+      if (affiliateResult?.status === "internal_conflict") {
+        return { status: "internal_conflict" };
+      }
+      const affiliateQuote =
+        affiliateResult?.status === "eligible" ? affiliateResult : null;
+      if (referralQuote !== null && affiliateQuote !== null) {
+        return { status: "internal_conflict" };
+      }
+      const acquisition = selectBestAcquisitionDiscount({
+        candidates: [
+          {
+            source: "promotion",
+            discountMinor: promotionResult.value.discountMinor,
+          },
+          ...(referralQuote === null
+            ? []
+            : [{
+                source: "referral" as const,
+                discountMinor: referralQuote.referralDiscountMinor,
+              }]),
+        ],
+      });
+      if (!acquisition.ok) return { status: "internal_conflict" };
+      const promotionDiscountMinor =
+        acquisition.value.source === "promotion"
+          ? acquisition.value.discountMinor
+          : 0;
+      const referralDiscountMinor =
+        acquisition.value.source === "referral"
+          ? acquisition.value.discountMinor
+          : 0;
+      const acquisitionAllocationByProduct = new Map<string, number>();
+      if (acquisition.value.source === "promotion") {
+        for (const allocation of promotionResult.value.allocations) {
+          acquisitionAllocationByProduct.set(
+            allocation.productId,
+            allocation.discountMinor,
+          );
+        }
+      } else {
+        let remaining = referralDiscountMinor;
+        for (const line of priceLines.toSorted((left, right) =>
+          left.productId.localeCompare(right.productId))) {
+          const gross = line.unitAmountMinor * line.quantity;
+          const allocated = Math.min(remaining, gross);
+          acquisitionAllocationByProduct.set(line.productId, allocated);
+          remaining -= allocated;
+        }
+        if (remaining !== 0) return { status: "internal_conflict" };
+      }
+      const postPromotionLines = priceLines.map((line) => ({
         productId: line.productId,
         quantity: line.quantity,
         netAmountMinor:
           line.unitAmountMinor * line.quantity -
-          (promotionResult.value.allocations.find(
-            (allocation) => allocation.productId === line.productId,
-          )?.discountMinor ?? 0),
+          (acquisitionAllocationByProduct.get(line.productId) ?? 0),
+      }));
+      const postPromotionMerchandiseMinor = postPromotionLines.reduce(
+        (sum, line) => sum + line.netAmountMinor,
+        0,
+      );
+      const rewardsQuote = Object.hasOwn(request, "rewardRedemptionPoints")
+        ? dependencies.rewardsService === undefined
+          ? Object.freeze({
+              status: "unavailable" as const,
+              reason: "configuration_unavailable" as const,
+            })
+          : await dependencies.rewardsService.quoteCheckoutRewards({
+              buyerUserId: input.buyerUserId,
+              requestedPoints: request.rewardRedemptionPoints!,
+              postPromotionMerchandiseMinor,
+              currency: "USD",
+              now: authoritativeAt,
+            })
+        : null;
+      const rewardRedemptionMinor =
+        rewardsQuote?.status === "applied" ? rewardsQuote.redemptionMinor : 0;
+      let remainingRewardMinor = rewardRedemptionMinor;
+      const rewardAllocationByProduct = new Map<string, number>();
+      for (const line of postPromotionLines.toSorted((left, right) =>
+        left.productId.localeCompare(right.productId))) {
+        const allocated = Math.min(remainingRewardMinor, line.netAmountMinor);
+        rewardAllocationByProduct.set(line.productId, allocated);
+        remainingRewardMinor -= allocated;
+      }
+      if (remainingRewardMinor !== 0) {
+        return { status: "internal_conflict" };
+      }
+      const merchandiseLines = postPromotionLines.map((line) => ({
+        ...line,
+        netAmountMinor:
+          line.netAmountMinor - (rewardAllocationByProduct.get(line.productId) ?? 0),
       }));
       const merchandiseTotalMinor = merchandiseLines.reduce(
         (sum, line) => sum + line.netAmountMinor,
@@ -801,9 +1044,15 @@ export function createCheckoutService(dependencies: Readonly<{
           lines: priceLines,
           discount: {
             authority: "server_calculated_discount",
-            amountMinor: promotionResult.value.discountMinor,
+            amountMinor:
+              promotionDiscountMinor + referralDiscountMinor + rewardRedemptionMinor,
             currency: "USD",
-            allocations: promotionResult.value.allocations,
+            allocations: priceLines.map((line) => ({
+              productId: line.productId,
+              discountMinor:
+                (acquisitionAllocationByProduct.get(line.productId) ?? 0) +
+                (rewardAllocationByProduct.get(line.productId) ?? 0),
+            })),
           },
           shipping: {
             authority: "server_resolved_shipping",
@@ -824,7 +1073,14 @@ export function createCheckoutService(dependencies: Readonly<{
           reasons: [`money_${totalsResult.error.code}`],
         };
       }
-      const quote = browserQuote(decision, facts, totalsResult.value);
+      const quote = browserQuote(
+        decision,
+        facts,
+        totalsResult.value,
+        promotionDiscountMinor,
+        referralDiscountMinor,
+        rewardsQuote,
+      );
       const plan = makePlan({
         identity,
         buyerUserId: input.buyerUserId,
@@ -840,6 +1096,16 @@ export function createCheckoutService(dependencies: Readonly<{
         shippingQuote,
         taxQuote,
         totals: totalsResult.value,
+        promotionDiscountMinor,
+        referralDiscountMinor,
+        selectedAcquisitionSource: acquisition.value.source,
+        promotionAllocations:
+          acquisition.value.source === "promotion"
+            ? promotionResult.value.allocations
+            : Object.freeze([]),
+        rewardsQuote,
+        referralQuote,
+        affiliateQuote,
         browserQuote: quote,
       });
       return resultWithOpaquePlan({ status: "quoted" as const, quote }, plan);

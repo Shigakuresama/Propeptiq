@@ -15,6 +15,8 @@ export type PublicCopyCandidate = Readonly<{
   claims: readonly PublicClaim[];
 }>;
 
+export type PublicCopySurface = "general" | "program_terms";
+
 export type ContentViolationCode =
   | "publication_policy_unavailable"
   | "copy_candidate_invalid"
@@ -133,7 +135,7 @@ const prohibitedPatterns: readonly Readonly<{
   {
     code: "unsupported_claim",
     pattern:
-      /\b(?:guaranteed|clinically proven|best in class|highest purity|safe and effective)\b/,
+      /\b(?:guaranteed|clinically proven|best in class|highest purity|safe and effective|hurry|act now|while supplies last|selling fast|only \d{1,6} left|join \d+(?: \d+)* (?:researchers?|customers?|laborator(?:y|ies)|labs?)|was \d+(?: \d+)* now \d+(?: \d+)*|compare at \d+|better than (?:every|any|other)|customer testimonial|researcher testimonial)\b/,
   },
 ]);
 
@@ -177,7 +179,39 @@ const prohibitedCompactPatterns: readonly Readonly<{
   {
     code: "unsupported_claim",
     pattern:
-      /(?:guaranteed|clinicallyproven|bestinclass|highestpurity|safeandeffective)/,
+      /(?:guaranteed|clinicallyproven|bestinclass|highestpurity|safeandeffective|hurry|actnow|whilesupplieslast|sellingfast|only\d{1,6}left|join\d+(?:researcher|customer|laboratory|lab)|was\d+now\d+|compareat\d+|betterthan(?:every|any|other)|customertestimonial|researchertestimonial)/,
+  },
+]);
+
+const programTermsContextPatterns: readonly Readonly<{
+  code: ContentViolationCode;
+  pattern: RegExp;
+}>[] = Object.freeze([
+  {
+    code: "administration",
+    pattern:
+      /\b(?:orally|sublingual|administration (?:instructions?|route|protocol)|administer(?:ed|ing)?(?: \w+){0,4} (?:product|peptide|compound|solution|dose|vial|material)|administration of(?: the)? (?:product|peptide|compound|solution|dose|vial|material))\b/,
+  },
+  {
+    code: "treatment",
+    pattern:
+      /\b(?:(?:treat(?:s|ed|ing|ment)?|cure[sd]?|prevent(?:s|ed|ing|ion)?|diagnos(?:e|ed|is|ing))(?: \w+){0,5} (?:disease|condition|symptom|pain|obesity|diabetes|infection|illness|injury|cancer|disorder|patient|human|animal)|(?:disease|condition|symptom|pain|obesity|diabetes|infection|illness|injury|cancer|disorder|patient|human|animal)(?: \w+){0,5} (?:treat(?:s|ed|ing|ment)?|cure[sd]?|prevent(?:s|ed|ing|ion)?|diagnos(?:e|ed|is|ing)))\b/,
+  },
+]);
+
+const programTermsContextCompactPatterns: readonly Readonly<{
+  code: ContentViolationCode;
+  pattern: RegExp;
+}>[] = Object.freeze([
+  {
+    code: "administration",
+    pattern:
+      /(?:orally|sublingual|administration(?:instruction|route|protocol)|administer(?:ed|ing)?(?:the|this|research)*(?:product|peptide|compound|solution|dose|vial|material)|administrationof(?:the)?(?:product|peptide|compound|solution|dose|vial|material))/,
+  },
+  {
+    code: "treatment",
+    pattern:
+      /(?:(?:treat|cure|prevent|diagnos)(?:disease|condition|symptom|pain|obesity|diabetes|infection|illness|injury|cancer|disorder|patient|human|animal)|(?:disease|condition|symptom|pain|obesity|diabetes|infection|illness|injury|cancer|disorder|patient|human|animal)(?:treat|cure|prevent|diagnos))/,
   },
 ]);
 
@@ -295,20 +329,51 @@ function appendProhibitedViolations(
   normalizedText: string,
   claimId: string | null,
   violations: ContentViolation[],
+  surface: PublicCopySurface,
 ): void {
+  const scannableText = surface === "program_terms"
+    ? normalizedText.replace(
+      /\bnot (?:intended )?for (?:human|veterinary|animal)(?: or (?:human|veterinary|animal))* (?:use|consumption)\b/g,
+      "research restriction",
+    )
+    : normalizedText;
   for (const { code, pattern } of prohibitedPatterns) {
-    const match = normalizedText.match(pattern)?.[0] ?? null;
+    if (surface === "program_terms" && (code === "administration" || code === "treatment")) {
+      continue;
+    }
+    const match = scannableText.match(pattern)?.[0] ?? null;
     if (match !== null) violations.push(violation(code, match, claimId));
   }
 
-  const compactText = normalizedText.replace(/\s+/g, "");
+  if (surface === "program_terms") {
+    for (const { code, pattern } of programTermsContextPatterns) {
+      const match = scannableText.match(pattern)?.[0] ?? null;
+      if (match !== null) violations.push(violation(code, match, claimId));
+    }
+  }
+
+  const compactText = scannableText.replace(/\s+/g, "");
   for (const { code, pattern } of prohibitedCompactPatterns) {
+    if (surface === "program_terms" && (code === "administration" || code === "treatment")) {
+      continue;
+    }
     const match = compactText.match(pattern)?.[0] ?? null;
     const alreadyRecorded = violations.some(
       (current) => current.code === code && current.claimId === claimId,
     );
     if (match !== null && !alreadyRecorded) {
       violations.push(violation(code, match, claimId));
+    }
+  }
+  if (surface === "program_terms") {
+    for (const { code, pattern } of programTermsContextCompactPatterns) {
+      const match = compactText.match(pattern)?.[0] ?? null;
+      const alreadyRecorded = violations.some(
+        (current) => current.code === code && current.claimId === claimId,
+      );
+      if (match !== null && !alreadyRecorded) {
+        violations.push(violation(code, match, claimId));
+      }
     }
   }
 }
@@ -339,6 +404,7 @@ function isValidCandidateShell(value: unknown): value is PublicCopyCandidate {
 export function scanPublicCopy(
   candidate: PublicCopyCandidate,
   policy: PublicationPolicy,
+  options: Readonly<{ surface?: PublicCopySurface }> = {},
 ): ContentScanResult {
   if (!isValidPolicy(policy)) {
     return result(
@@ -358,12 +424,15 @@ export function scanPublicCopy(
   }
 
   const violations: ContentViolation[] = [];
+  const surface: PublicCopySurface = options.surface === "program_terms"
+    ? "program_terms"
+    : "general";
   const { text: normalizedCopy, statementRanges } =
     normalizeCopyWithStatements(candidate.text);
   const topLevelAnalyticalMarkers = analyticalMarkerMatches(normalizedCopy);
   const coveredAnalyticalRanges: TextRange[] = [];
   const allocatedContainedRanges = new Set<string>();
-  appendProhibitedViolations(normalizedCopy, null, violations);
+  appendProhibitedViolations(normalizedCopy, null, violations, surface);
 
   const activeLotEvidenceIds = new Set(policy.activeLotEvidenceIds);
   for (const claim of candidate.claims as readonly unknown[]) {
@@ -435,6 +504,7 @@ export function scanPublicCopy(
         normalizedClaimText,
         claimId,
         violations,
+        surface,
       );
     }
   }

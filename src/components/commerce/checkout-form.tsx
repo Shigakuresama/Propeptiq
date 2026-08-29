@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 
 type PromotionOption = Readonly<{ id: string; name: string }>;
 type DestinationField = "recipientName" | "line1" | "city" | "stateCode" | "postalCode";
-type Errors = Partial<Record<DestinationField | "items", string>>;
+type Errors = Partial<Record<DestinationField | "items" | "rewardRedemptionPoints", string>>;
 
 type SafeQuote = Readonly<{
   status: "ready" | "review_required";
@@ -26,6 +26,13 @@ type SafeQuote = Readonly<{
   shippingMinor: number;
   taxMinor: number;
   totalMinor: number;
+  promotionDiscountMinor: number;
+  referralDiscountMinor: number;
+  rewardRedemptionPoints: number;
+  rewardRedemptionMinor: number;
+  pendingBaseEarnPoints: number;
+  rewardsBenefitAvailable: boolean;
+  rewardsUnavailableReason: string | null;
   lines: readonly Readonly<{
     productId: string;
     productName: string;
@@ -69,6 +76,16 @@ function exactRecord(value: unknown, keys: readonly string[]): value is Record<s
   return own.length === keys.length && own.every((key) => typeof key === "string" && keys.includes(key));
 }
 
+function recordWithRequiredAndAllowedKeys(
+  value: unknown,
+  requiredKeys: readonly string[],
+  allowedKeys: ReadonlySet<string>,
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  return requiredKeys.every((key) => Object.hasOwn(value, key)) &&
+    Reflect.ownKeys(value).every((key) => typeof key === "string" && allowedKeys.has(key));
+}
+
 function safeMoney(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
@@ -79,10 +96,22 @@ function boundedText(value: unknown, maximum = 240): value is string {
 }
 
 function parseSafeQuote(value: unknown): SafeQuote | null {
-  if (!exactRecord(value, [
+  const baseKeys = [
     "status", "reviewRequired", "reasons", "currency", "subtotalMinor", "discountMinor",
     "shippingMinor", "taxMinor", "totalMinor", "lines",
-  ])) return null;
+  ] as const;
+  const acquisitionKeys = ["promotionDiscountMinor", "referralDiscountMinor"] as const;
+  const rewardKeys = [
+    "rewardRedemptionPoints", "rewardRedemptionMinor", "pendingBaseEarnPoints",
+    "rewardsBenefitAvailable", "rewardsUnavailableReason",
+  ] as const;
+  const allowedKeys = new Set<string>([...baseKeys, ...acquisitionKeys, ...rewardKeys]);
+  if (!recordWithRequiredAndAllowedKeys(value, baseKeys, allowedKeys)) {
+    return null;
+  }
+  const hasAcquisition = acquisitionKeys.map((key) => Object.hasOwn(value, key));
+  const hasRewards = rewardKeys.map((key) => Object.hasOwn(value, key));
+  if (!hasAcquisition.every(Boolean) || !hasRewards.every(Boolean)) return null;
   if (
     (value.status !== "ready" && value.status !== "review_required") ||
     typeof value.reviewRequired !== "boolean" ||
@@ -100,6 +129,21 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     (value.status === "ready" ? value.reasons.length !== 0 : value.reasons.length < 1) ||
     !Array.isArray(value.lines) || value.lines.length < 1 || value.lines.length > 50
   ) return null;
+  if (!safeMoney(value.promotionDiscountMinor) || !safeMoney(value.referralDiscountMinor)) {
+    return null;
+  }
+  if (!safeMoney(value.rewardRedemptionPoints) ||
+    !safeMoney(value.rewardRedemptionMinor) ||
+    !safeMoney(value.pendingBaseEarnPoints) ||
+    typeof value.rewardsBenefitAvailable !== "boolean" ||
+    (value.rewardsUnavailableReason !== null && !boundedText(value.rewardsUnavailableReason, 80))) {
+    return null;
+  }
+  if ((value.promotionDiscountMinor as number) +
+    (value.referralDiscountMinor as number) +
+    (value.rewardRedemptionMinor as number) !== value.discountMinor) {
+    return null;
+  }
   const lines: Array<SafeQuote["lines"][number]> = [];
   const productIds = new Set<string>();
   let lineSubtotal = 0;
@@ -142,6 +186,13 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     shippingMinor: value.shippingMinor,
     taxMinor: value.taxMinor,
     totalMinor: value.totalMinor,
+    promotionDiscountMinor: value.promotionDiscountMinor,
+    referralDiscountMinor: value.referralDiscountMinor,
+    rewardRedemptionPoints: value.rewardRedemptionPoints,
+    rewardRedemptionMinor: value.rewardRedemptionMinor,
+    pendingBaseEarnPoints: value.pendingBaseEarnPoints,
+    rewardsBenefitAvailable: value.rewardsBenefitAvailable,
+    rewardsUnavailableReason: value.rewardsUnavailableReason,
     lines,
   };
 }
@@ -174,6 +225,19 @@ function responseMessage(status: unknown, component?: unknown): string {
   return "Checkout is temporarily unavailable. Your browser-saved cart has not been cleared.";
 }
 
+function rewardsUnavailableCopy(reason: string | null): string | null {
+  if (reason === null || reason === "not_requested") return null;
+  if (reason === "below_minimum") return "More points are required for redemption.";
+  if (reason === "redemption_cap_exceeded") return "The requested redemption exceeds the current checkout limit.";
+  if (reason === "insufficient_balance") return "The requested points are not currently available.";
+  if (reason === "negative_balance") return "Points redemption is currently unavailable.";
+  if (reason === "terms_unavailable" || reason === "acceptance_unavailable") {
+    return "Current rewards terms are unavailable or not accepted.";
+  }
+  if (reason === "invalid_request") return "The requested points could not be applied.";
+  return "Rewards are currently unavailable.";
+}
+
 export function CheckoutForm({
   promotions,
   syntheticLocal = false,
@@ -186,6 +250,7 @@ export function CheckoutForm({
   const { items, hydrated } = useCart();
   const [destination, setDestination] = useState(initialDestination);
   const [promotionId, setPromotionId] = useState("");
+  const [rewardRedemptionPoints, setRewardRedemptionPoints] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [quoteView, setQuoteView] = useState<QuoteView | null>(null);
   const [feedback, setFeedback] = useState<Readonly<{
@@ -214,6 +279,9 @@ export function CheckoutForm({
     () => items.map((item) => ({ productId: item.productId.toLowerCase(), quantity: item.quantity })),
     [items],
   );
+  const requestedRewardPoints = Number(rewardRedemptionPoints);
+  const hasValidRequestedRewardPoints = rewardRedemptionPoints !== "" &&
+    Number.isSafeInteger(requestedRewardPoints) && requestedRewardPoints > 0;
   const normalizedRequest = useMemo(() => ({
     items: checkoutItems,
     destination: {
@@ -226,7 +294,10 @@ export function CheckoutForm({
       countryCode: "US" as const,
     },
     promotionIds: promotionId ? [promotionId.toLowerCase()] : [],
-  }), [checkoutItems, destination, promotionId]);
+    ...(hasValidRequestedRewardPoints
+      ? { rewardRedemptionPoints: requestedRewardPoints }
+      : {}),
+  }), [checkoutItems, destination, hasValidRequestedRewardPoints, promotionId, requestedRewardPoints]);
   const fingerprint = useMemo(() => JSON.stringify(normalizedRequest), [normalizedRequest]);
   const cartKey = useMemo(() => JSON.stringify(checkoutItems), [checkoutItems]);
   const currentFeedback = feedback?.fingerprint === fingerprint ? feedback : null;
@@ -318,6 +389,17 @@ export function CheckoutForm({
     }
   }
 
+  function updateRewardRedemptionPoints(value: string) {
+    setRewardRedemptionPoints(value);
+    setQuoteView(null);
+    setFeedback(null);
+    setErrors((current) => {
+      const next = { ...current };
+      delete next.rewardRedemptionPoints;
+      return next;
+    });
+  }
+
   function validate(): boolean {
     const next: Errors = {};
     if (items.length < 1) next.items = "Add at least one available catalog record";
@@ -326,6 +408,9 @@ export function CheckoutForm({
     if (!normalizedRequest.destination.city || normalizedRequest.destination.city.length > 100) next.city = "Enter a city";
     if (!stateCodes.includes(normalizedRequest.destination.stateCode)) next.stateCode = "Select a state or district";
     if (!/^\d{5}(?:-\d{4})?$/u.test(normalizedRequest.destination.postalCode)) next.postalCode = "Enter a valid U.S. postal code";
+    if (rewardRedemptionPoints !== "" && !hasValidRequestedRewardPoints) {
+      next.rewardRedemptionPoints = "Enter a positive whole number of points";
+    }
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -432,6 +517,9 @@ export function CheckoutForm({
   if (!hydrated) return <div className="cart-loading" aria-label="Loading saved cart for checkout" />;
 
   const errorEntries = Object.entries(errors) as Array<[keyof Errors, string]>;
+  const rewardsWarning = quoteView === null
+    ? null
+    : rewardsUnavailableCopy(quoteView.quote.rewardsUnavailableReason);
   return (
     <section className="record-card" aria-labelledby="checkout-form-heading">
       <p className="eyebrow">Authoritative checkout</p>
@@ -447,7 +535,7 @@ export function CheckoutForm({
         <div className="cart-loading mt-6" aria-label="Refreshing current server preview" />
       ) : null}
       {previewState.key === cartKey && previewState.error ? (
-        <div className="error-record mt-6" role="alert">
+        <div className="error-record mt-6 text-base leading-7" role="alert">
           <p>The current server preview is unavailable. No quote can be requested.</p>
           <div className="mt-4 flex flex-wrap gap-3">
             <Button type="button" variant="outline" className="min-h-11" onClick={() => setPreviewReload((current) => current + 1)}>Try server preview again</Button>
@@ -456,14 +544,14 @@ export function CheckoutForm({
         </div>
       ) : null}
       {currentPreview && !currentPreview.requiresAcknowledgement ? (
-        <div className="info-record mt-6" role="status">
+        <div className="info-record mt-6 text-base leading-7" role="status">
           {previewState.retained
             ? "The retained server preview still matches the current authoritative baseline."
             : "This is the current authoritative baseline; no earlier same-tab server preview was available."}
         </div>
       ) : null}
       {currentPreview?.requiresAcknowledgement ? (
-        <section className="warning-record mt-6" aria-labelledby="preview-change-heading">
+        <section className="warning-record mt-6 text-base leading-7" aria-labelledby="preview-change-heading">
           <h3 id="preview-change-heading" className="font-semibold">Server preview changed or became unavailable.</h3>
           <p className="mt-2">Your requested product IDs and quantities were not replaced. Review the current server facts before checkout.</p>
           {previewState.changes.length ? (
@@ -489,7 +577,7 @@ export function CheckoutForm({
       ) : null}
 
       {errorEntries.length > 0 ? (
-        <div ref={summaryRef} className="error-record mt-6" role="alert" tabIndex={-1}>
+        <div ref={summaryRef} className="error-record mt-6 text-base leading-7" role="alert" tabIndex={-1}>
           <h3 className="font-semibold">Review the highlighted fields</h3>
           <ul className="mt-3 list-disc space-y-2 pl-5">
             {errorEntries.map(([field, error]) => (
@@ -538,13 +626,33 @@ export function CheckoutForm({
             {promotions.map((promotion) => <option key={promotion.id} value={promotion.id}>{promotion.name}</option>)}
           </select>
         </Field>
-        {errors.items ? <p id="items-error" className="error-record" role="alert">{errors.items}</p> : null}
+        <Field
+          id="rewardRedemptionPoints"
+          label="Points to redeem (optional)"
+          error={errors.rewardRedemptionPoints}
+        >
+          <input
+            id="rewardRedemptionPoints"
+            name="rewardRedemptionPoints"
+            className="form-input"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={Number.MAX_SAFE_INTEGER}
+            step={1}
+            value={rewardRedemptionPoints}
+            aria-invalid={Boolean(errors.rewardRedemptionPoints)}
+            aria-describedby={errors.rewardRedemptionPoints ? "rewardRedemptionPoints-error" : undefined}
+            onChange={(event) => updateRewardRedemptionPoints(event.currentTarget.value)}
+          />
+        </Field>
+        {errors.items ? <p id="items-error" className="error-record text-base" role="alert">{errors.items}</p> : null}
         <Button type="submit" className="action-primary min-h-12 w-full sm:w-auto" disabled={busy !== null || items.length === 0 || !previewCanContinue}>
           {busy === "quote" ? "Getting authoritative quote…" : "Get authoritative quote"}
         </Button>
       </form>
 
-      <p className="mt-6 min-h-6 text-sm leading-6 text-muted-ink" role="status" aria-live="polite">{message}</p>
+      <p className="mt-6 min-h-6 text-base leading-7 text-muted-ink" role="status" aria-live="polite">{message}</p>
       {lastFailed === "quote" ? (
         <Button type="button" variant="outline" className="mt-3 min-h-11" onClick={() => formRef.current?.requestSubmit()}>
           Try authoritative quote again
@@ -563,20 +671,40 @@ export function CheckoutForm({
           <ul className="mt-5 grid gap-3 p-0">
             {quoteView.quote.lines.map((line) => (
               <li key={line.productId} className="flex flex-wrap justify-between gap-3 border-b border-border pb-3">
-                <span><strong>{line.productName}</strong><span className="block text-sm text-muted-ink">{line.packageForm} · {line.quantity} × {money(line.unitAmountMinor)}</span></span>
+                <span><strong>{line.productName}</strong><span className="block text-base text-muted-ink">{line.packageForm} · {line.quantity} × {money(line.unitAmountMinor)}</span></span>
                 <span className="tabular-nums">{money(line.totalMinor)}</span>
               </li>
             ))}
           </ul>
           <dl className="mt-6 grid gap-3 text-base">
             <MoneyRow label="Merchandise subtotal" amount={money(quoteView.quote.subtotalMinor)} />
-            <MoneyRow label="Promotion discount" amount={`−${money(quoteView.quote.discountMinor)}`} />
+            <MoneyRow
+              label="Promotion discount"
+              amount={`−${money(quoteView.quote.promotionDiscountMinor)}`}
+            />
+            <MoneyRow
+              label="Referral benefit"
+              amount={`−${money(quoteView.quote.referralDiscountMinor)}`}
+            />
+            <MoneyRow
+              label={`Points redemption (${quoteView.quote.rewardRedemptionPoints} points)`}
+              amount={`−${money(quoteView.quote.rewardRedemptionMinor)}`}
+            />
             <MoneyRow label={syntheticLocal ? "Synthetic local test only shipping" : "Shipping"} amount={money(quoteView.quote.shippingMinor)} />
             <MoneyRow label={syntheticLocal ? "Synthetic local test only tax" : "Tax"} amount={money(quoteView.quote.taxMinor)} />
             <MoneyRow label="Total" amount={money(quoteView.quote.totalMinor)} strong />
           </dl>
+          <p className="info-record mt-6 text-base tabular-nums">
+            {quoteView.quote.pendingBaseEarnPoints} points pending after qualifying payment
+          </p>
+          {quoteView.quote.rewardsBenefitAvailable === false &&
+          rewardsWarning !== null ? (
+            <p className="warning-record mt-4 text-base">
+              Rewards benefit unavailable: {rewardsWarning}
+            </p>
+          ) : null}
           {quoteView.quote.status === "review_required" ? (
-            <div className="warning-record mt-6" role="status">
+            <div className="warning-record mt-6 text-base leading-7" role="status">
               <strong>Manual review is required</strong>
               <p className="mt-2">No hosted-payment action is available until the exact review facts are approved.</p>
             </div>
@@ -606,7 +734,7 @@ function Field({
     <div>
       <label className="form-label" htmlFor={id}>{label}</label>
       {children}
-      {error ? <p id={`${id}-error`} className="mt-2 text-sm font-semibold text-danger">{error}</p> : null}
+      {error ? <p id={`${id}-error`} className="mt-2 text-base font-semibold text-danger">{error}</p> : null}
     </div>
   );
 }

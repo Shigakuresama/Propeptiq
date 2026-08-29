@@ -59,3 +59,17 @@ One capable administrator with a current MFA session may publish a product, dest
 ## Money and lifecycle
 
 Use integer minor units and one currency per order. Reprice products and promotions from server records. Provider events, payment changes, inventory consumption, refunds, fulfillment release, and shipment are idempotent. A success-page request is read-only. Fulfillment rechecks payment, hold, inventory, buyer, product, and destination facts.
+
+## Rewards, referrals, and affiliates
+
+Growth policy records are versioned server facts. Customer referral and affiliate attribution use opaque public codes and signed environment-bound first-party cookies that expire after 30 days. A code lookup never authorizes value by itself. Enrollment reloads the active code, buyer identity, current policy, and exactly one current terms version inside the server transaction. The server computes the terms SHA-256 hash; browser-provided text or hashes are ignored. Missing, overlapping, stale, or mismatched facts roll back without a partial acceptance or attribution.
+
+Self-referral and duplicate referred accounts deny under the exact identity facts available to V1. One order may carry exactly one growth program: customer referral or affiliate, never both. The order stores the chosen attribution and policy version before settlement. Discounts, points, and commissions are integer values derived from that immutable server snapshot and verified lifecycle facts.
+
+Reward and commission ledgers are append-only. Provider, refund, and shipment event replays cannot create or release value twice. A reversal is derived only from a verified reversal of the underlying order lifecycle. Referral code revocation or affiliate suspension stops new attribution and earning but does not rewrite prior owner-visible history.
+
+Payout creation consumes eligible approved commissions once in a serializable transaction. Payout completion requires an authorized MFA staff principal, an expected version, a stable idempotency key, and truthful external provider/reference evidence. The idempotency fingerprint binds the business command rather than per-attempt server timestamps or correlation IDs, so response-loss retries replay the original result while changed payout facts conflict. The application records external execution; it does not claim to move money in V1.
+
+Public and administrator-authored growth strings pass the existing prohibited-use and unsupported-claim policy. Shared-set labels must remain neutral. Testimonials implying product use, fabricated popularity or savings, unsupported comparisons, and false urgency do not publish.
+
+Production growth activation is separate from implementation and remains disabled until real commerce data, provider acceptance, destination policy, tax/shipping, fulfillment, counsel-reviewed terms, unit economics, and payout operations are verified.

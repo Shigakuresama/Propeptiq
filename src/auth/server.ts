@@ -12,6 +12,8 @@ import {
   type AdminReadSnapshotFor,
 } from "@/admin/admin-read";
 import type { AdminRepository } from "@/admin/admin-service";
+import type { AffiliateApplicationAdminRepository } from "@/admin/affiliate-application-admin-service";
+import type { AffiliatePayoutAdminRepository } from "@/admin/affiliate-payout-admin-service";
 import type { LocalTestDriver } from "@/auth/local-driver-types";
 import {
   loadCheckoutSuccess,
@@ -29,6 +31,11 @@ import {
 import { createPostgresRateLimitStore } from "@/db/repositories/rate-limit-store";
 import { withRuntimeTransaction, type RuntimeDatabaseClient } from "@/db/runtime";
 import { readServerEnv } from "@/env";
+import {
+  createPostgresAffiliateAdminMutationTransaction,
+  createPostgresAffiliatePayoutCreateTransaction,
+  createPostgresAffiliatePayoutPaidTransaction,
+} from "@/growth/affiliate-service";
 import { createRuntimeStorageVerifier } from "@/security/blob-storage";
 import type { StorageVerifier } from "@/security/storage";
 
@@ -51,6 +58,8 @@ export type RequestIdentity = Readonly<{
 export type RequestRepositories = Readonly<{
   accountRepository: AccountRepository;
   adminRepository: AdminRepository;
+  affiliateApplicationAdminRepository: AffiliateApplicationAdminRepository;
+  affiliatePayoutAdminRepository: AffiliatePayoutAdminRepository;
   storageVerifier: StorageVerifier;
   loadAccount: () => Promise<AccountSummary | null>;
   loadCurrentAttestation: () => Promise<Readonly<{ version: number; policyText: string }> | null>;
@@ -162,6 +171,8 @@ export function getRequestRepositories(
     return {
       accountRepository: driver.accountRepository,
       adminRepository: driver.adminRepository,
+      affiliateApplicationAdminRepository: driver.growth.affiliateApplicationAdminRepository,
+      affiliatePayoutAdminRepository: driver.growth.affiliatePayoutAdminRepository,
       storageVerifier: driver.storageVerifier,
       loadAccount: async () => (ownerId ? driver.loadAccount(ownerId) : null),
       loadCurrentAttestation: async () => driver.loadCurrentAttestation(),
@@ -204,9 +215,41 @@ export function getRequestRepositories(
         { isolationLevel: options.isolationLevel },
       ),
   );
+  const affiliateApplicationAdminRepository = Object.freeze({
+    rateLimitStore,
+    mutateInTransaction: createPostgresAffiliateAdminMutationTransaction({
+      runSerializableTransaction: (work, options) =>
+        withRuntimeTransaction(
+          request.environment,
+          (client) => work(databaseQueryPort(client)),
+          { isolationLevel: options.isolationLevel },
+        ),
+    }),
+  });
+  const payoutTransactionRunner = {
+    runSerializableTransaction: <Value>(
+      work: (client: ReturnType<typeof databaseQueryPort>) => Promise<Value>,
+      options: Readonly<{ isolationLevel: "serializable" }>,
+    ) => withRuntimeTransaction(
+      request.environment,
+      (client) => work(databaseQueryPort(client)),
+      { isolationLevel: options.isolationLevel },
+    ),
+  };
+  const affiliatePayoutAdminRepository = Object.freeze({
+    rateLimitStore,
+    createInTransaction: createPostgresAffiliatePayoutCreateTransaction(
+      payoutTransactionRunner,
+    ),
+    markPaidInTransaction: createPostgresAffiliatePayoutPaidTransaction(
+      payoutTransactionRunner,
+    ),
+  });
   return {
     accountRepository: createPostgresAccountRepository(run),
     adminRepository: createPostgresAdminRepository(run, rateLimitStore),
+    affiliateApplicationAdminRepository,
+    affiliatePayoutAdminRepository,
     storageVerifier: createRuntimeStorageVerifier(request.environment),
     loadAccount: () =>
       withRuntimeTransaction(request.environment, (client) =>

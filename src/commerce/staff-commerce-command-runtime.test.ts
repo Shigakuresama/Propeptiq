@@ -105,6 +105,9 @@ describe("server-only staff commerce command runtime", () => {
       fulfillmentRepository,
       resolveDatabaseUsersByClerkId,
       adapters: { stripe: null, localTest: provider() },
+      rewardsLifecycle: {
+        reconcileDeliveredOrder: vi.fn(async () => ({ status: "idempotent" as const })),
+      },
     });
 
     await expect(runtime.clearFulfillmentHold(ids.order)).resolves.toEqual({ status: "cleared" });
@@ -140,6 +143,9 @@ describe("server-only staff commerce command runtime", () => {
       fulfillmentRepository,
       resolveDatabaseUsersByClerkId: vi.fn(async () => [ids.actor]),
       adapters: { stripe: null, localTest: adapter },
+      rewardsLifecycle: {
+        reconcileDeliveredOrder: vi.fn(async () => ({ status: "idempotent" as const })),
+      },
     });
 
     await expect(runtime.submitOrRecoverRefund(ids.refund)).resolves.toEqual({ status: "unavailable" });
@@ -177,6 +183,7 @@ describe("server-only staff commerce command runtime", () => {
       })),
     } satisfies FulfillmentCommandRepository;
     const adapter = provider();
+    const reconcileDeliveredOrder = vi.fn(async () => ({ status: "applied" as const }));
     const runtime = await createStaffCommerceCommandRuntimeV1({
       environment: parseServerEnv({
         APP_ENV: "local",
@@ -194,6 +201,7 @@ describe("server-only staff commerce command runtime", () => {
       fulfillmentRepository,
       resolveDatabaseUsersByClerkId: vi.fn(async () => [ids.actor]),
       adapters: { stripe: null, localTest: adapter },
+      rewardsLifecycle: { reconcileDeliveredOrder },
     });
 
     await expect(runtime.submitOrRecoverRefund(ids.refund)).resolves.toEqual({
@@ -222,6 +230,7 @@ describe("server-only staff commerce command runtime", () => {
       1,
       expect.objectContaining({ action: "deliver" }),
     );
+    expect(reconcileDeliveredOrder).toHaveBeenCalledWith({ orderId: ids.order, now });
     expect(fulfillmentRepository.transitionShipment).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ action: "record_exception" }),

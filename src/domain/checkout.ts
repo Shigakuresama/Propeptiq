@@ -12,6 +12,7 @@ export type CheckoutRequest = Readonly<{
     countryCode: "US";
   }>;
   promotionIds: readonly string[];
+  rewardRedemptionPoints?: number;
 }>;
 
 export type CheckoutRequestError = Readonly<{
@@ -24,7 +25,8 @@ export type CheckoutRequestError = Readonly<{
     | "duplicate_product"
     | "invalid_destination"
     | "invalid_promotion_id"
-    | "duplicate_promotion";
+    | "duplicate_promotion"
+    | "invalid_reward_redemption_points";
   field: string;
 }>;
 
@@ -114,6 +116,7 @@ export function parseCheckoutRequest(
     "items",
     "destination",
     "promotionIds",
+    "rewardRedemptionPoints",
   ]);
   if (unexpectedRequestField !== null) {
     return fail(
@@ -285,6 +288,21 @@ export function parseCheckoutRequest(
     return fail("invalid_promotion_id", "promotionIds");
   }
 
+  const hasRewardRedemptionPoints = Object.hasOwn(
+    input,
+    "rewardRedemptionPoints",
+  );
+  if (
+    hasRewardRedemptionPoints &&
+    (!Number.isSafeInteger(input.rewardRedemptionPoints) ||
+      (input.rewardRedemptionPoints as number) <= 0)
+  ) {
+    return fail(
+      "invalid_reward_redemption_points",
+      "rewardRedemptionPoints",
+    );
+  }
+
   items.sort((left, right) =>
     left.productId < right.productId
       ? -1
@@ -308,6 +326,9 @@ export function parseCheckoutRequest(
         countryCode: "US" as const,
       },
       promotionIds,
+      ...(hasRewardRedemptionPoints
+        ? { rewardRedemptionPoints: input.rewardRedemptionPoints as number }
+        : {}),
     }),
   });
 }

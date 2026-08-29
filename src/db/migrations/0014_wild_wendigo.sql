@@ -1,0 +1,2 @@
+ALTER TABLE "affiliate_profiles" ADD COLUMN "version" integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+ALTER TABLE "affiliate_profiles" ADD CONSTRAINT "affiliate_profiles_version_positive" CHECK ("affiliate_profiles"."version" > 0);

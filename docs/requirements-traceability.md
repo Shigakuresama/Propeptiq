@@ -17,6 +17,13 @@
 | FUL-01 | Release/shipment consumes once after payment, hold, inventory, buyer, product, and destination checks | Data model, runbooks | Concurrency and replay tests |
 | UI-01 | Desktop-v3 visuals plus `responsive-v2` public catalog/prices/promotions/anonymous cart behavior | Design master, responsive handoff | Viewport, keyboard, zoom, reduced-motion tests |
 | EXT-01 | Legal, manifest, destination, tax, shipping, fulfillment, and provider inputs fail closed when missing | Requirements, deployment | Configuration-denial tests plus owner sign-off |
+| GRW-01 | Public rewards explanation exposes only active policy values and a truthful inactive state | Rewards/referrals/growth design, product requirements | Public rewards route content and inactive-state checks |
+| GRW-02 | Points, referral, and affiliate ledgers are owner-only and preserve pending, available, reversed, approved, and paid states | Rewards/referrals/growth design | Authorization, ledger immutability, and state-transition tests |
+| GRW-03 | Every active buyer receives one stable, revocable customer-referral code automatically | Rewards/referrals/growth design | Referral-code creation, idempotency, revocation, and owner-scope tests |
+| GRW-04 | Cash affiliate applications require verified identity and one administrator approval; customer referrals do not require staff approval | Rewards/referrals/growth design | Capability and approval-state tests |
+| GRW-05 | Shared research sets contain only server-resolved product IDs/quantities and cannot define a discount or commission | Rewards/referrals/growth design | Set sanitization, inactive-product omission, and attribution tests |
+| GRW-06 | Delivery, refund, chargeback, and reversal lifecycle events create delayed rewards/commission and compensating immutable entries | Rewards/referrals/growth design | Lifecycle qualification, reversal, idempotency, and ledger tests |
+| GRW-07 | Growth routes and homepage modules meet 375px, 768px, 1024px, 1440px, 200% zoom, keyboard-only, reduced-motion, touch-target, text-size, state-label, and no-overflow checks | Rewards/referrals/growth design, responsive handoff | Responsive browser, accessibility, and content-state checks |
 
 ## Task 6 implemented boundary evidence
 

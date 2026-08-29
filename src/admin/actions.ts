@@ -1,18 +1,32 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { resourceBySlug, adminGate } from "@/admin/access";
 import {
+  decideAffiliateApplication,
+  suspendAffiliateApplication,
+} from "@/admin/affiliate-application-admin-service";
+import {
+  createAffiliatePayoutBatch,
+  recordAffiliatePayoutPaid,
+} from "@/admin/affiliate-payout-admin-service";
+import {
+  adjustRewardBalance,
   activateProduct,
+  activateGrowthPolicy,
   activatePromotion,
   changeBuyerStatus,
   changeStaffCapability,
+  createGrowthPolicyDraft,
+  deactivateSharedSet,
   decideReviewRequest,
   publishAttestationVersion,
   publishCoaDocument,
   requestRefundIntent,
+  revokeReferralCode,
   retireProduct,
   retirePromotion,
   saveAnalyticalClaimDraft,
@@ -28,7 +42,12 @@ import {
   setPolicyGroupLifecycle,
   supersedeDestinationPolicy,
   supersedeProductPrice,
+  MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1,
+  MANUAL_REWARD_ADJUSTMENT_REASONS_V1,
   type AdminCommandContext,
+  type GrowthPolicyKind,
+  type GrowthPolicyValues,
+  type ManualRewardAdjustmentReasonV1,
   type PromotionTargetInput,
 } from "@/admin/admin-service";
 import {
@@ -40,6 +59,7 @@ import { isCanonicalUuid } from "@/commerce/checkout-identity";
 import { createStaffCommerceServerRuntime } from "@/commerce/server-runtime";
 import { isCapability } from "@/domain/authorization";
 import type { BuyerStatus } from "@/domain/eligibility";
+import { assertMutationOrigin } from "@/security/origin";
 
 type TrustedAdmin = Readonly<{
   request: Awaited<ReturnType<typeof getRequestIdentity>>;
@@ -49,6 +69,38 @@ type TrustedAdmin = Readonly<{
 
 async function trustedAdmin(resourceSlug: string): Promise<TrustedAdmin> {
   const request = await getRequestIdentity();
+  const resource = resourceBySlug(resourceSlug);
+  const repositories = getRequestRepositories(request);
+  if (!resource || !repositories || !request.environment.RATE_LIMIT_SECRET) {
+    throw new Error("Admin dependency unavailable");
+  }
+  const gate = adminGate(request, resource);
+  if (!gate.allowed) throw new Error("Admin authorization denied");
+  return {
+    request,
+    repositories,
+    context: {
+      principal: request.principal,
+      identity: request.identity,
+      now: new Date(),
+      correlationId: randomUUID(),
+      rateLimitSecret: request.environment.RATE_LIMIT_SECRET,
+    },
+  };
+}
+
+async function trustedGrowthAdmin(resourceSlug: string): Promise<TrustedAdmin> {
+  const request = await getRequestIdentity();
+  const appOrigin = request.environment.APP_ORIGIN;
+  if (!appOrigin) throw new Error("Admin dependency unavailable");
+  const incomingHeaders = await headers();
+  assertMutationOrigin(
+    new Request(appOrigin, {
+      method: "POST",
+      headers: incomingHeaders,
+    }),
+    { APP_ENV: request.environment.APP_ENV, APP_ORIGIN: appOrigin },
+  );
   const resource = resourceBySlug(resourceSlug);
   const repositories = getRequestRepositories(request);
   if (!resource || !repositories || !request.environment.RATE_LIMIT_SECRET) {
@@ -79,6 +131,124 @@ function integer(formData: FormData, name: string): number {
   const parsed = Number(value(formData, name));
   if (!Number.isSafeInteger(parsed)) throw new Error(`${name} is invalid`);
   return parsed;
+}
+
+function canonicalInteger(formData: FormData, name: string): number {
+  const supplied = value(formData, name);
+  if (!/^(?:0|[1-9]\d*)$/u.test(supplied)) throw new Error(`${name} is invalid`);
+  const parsed = Number(supplied);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} is invalid`);
+  return parsed;
+}
+
+function signedCanonicalInteger(formData: FormData, name: string): number {
+  const supplied = value(formData, name);
+  if (!/^-?(?:0|[1-9]\d*)$/u.test(supplied)) throw new Error(`${name} is invalid`);
+  const parsed = Number(supplied);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} is invalid`);
+  return parsed;
+}
+
+function exactFormFields(formData: FormData, expected: readonly string[]): void {
+  const actual = [...formData.keys()]
+    .filter((name) => !name.startsWith("$ACTION_"))
+    .toSorted();
+  const allowed = [...expected].toSorted();
+  if (
+    actual.length !== allowed.length ||
+    actual.some((name, index) => name !== allowed[index])
+  ) {
+    throw new Error("Growth policy form is malformed");
+  }
+}
+
+const canonicalV4UuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+function canonicalV4Uuid(formData: FormData, name: string): string {
+  const supplied = formData.get(name);
+  if (typeof supplied !== "string" || !canonicalV4UuidPattern.test(supplied)) {
+    throw new Error(`${name} is invalid`);
+  }
+  return supplied;
+}
+
+function canonicalTimestamp(formData: FormData, name: string): string {
+  const supplied = formData.get(name);
+  if (typeof supplied !== "string") throw new Error(`${name} is invalid`);
+  const parsed = new Date(supplied);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== supplied) {
+    throw new Error(`${name} is invalid`);
+  }
+  return supplied;
+}
+
+function canonicalUtcFormInstant(formData: FormData, name: string): string {
+  const supplied = value(formData, name);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/u.test(supplied)) {
+    const canonical = `${supplied}:00.000Z`;
+    const parsed = new Date(canonical);
+    if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== canonical) {
+      throw new Error(`${name} is invalid`);
+    }
+    return canonical;
+  }
+  return canonicalTimestamp(formData, name);
+}
+
+const policyValueFields = {
+  loyalty: [
+    "pointsPerDollar",
+    "redemptionMinorPerPoint",
+    "minimumRedemptionPoints",
+    "maximumRedemptionBasisPoints",
+  ],
+  referral: [
+    "attributionDays",
+    "referredDiscountBasisPoints",
+    "referredDiscountCapMinor",
+    "referrerPointsPerDollar",
+    "referrerRewardCapPoints",
+  ],
+  affiliate: [
+    "attributionDays",
+    "firstOrderCommissionBasisPoints",
+    "reorderCommissionBasisPoints",
+    "reorderWindowDays",
+    "approvalDelayDays",
+    "payoutThresholdMinor",
+    "currency",
+  ],
+} as const satisfies Readonly<Record<GrowthPolicyKind, readonly string[]>>;
+
+function policyValues(formData: FormData, kind: GrowthPolicyKind): GrowthPolicyValues {
+  if (kind === "loyalty") {
+    return {
+      pointsPerDollar: canonicalInteger(formData, "pointsPerDollar"),
+      redemptionMinorPerPoint: canonicalInteger(formData, "redemptionMinorPerPoint"),
+      minimumRedemptionPoints: canonicalInteger(formData, "minimumRedemptionPoints"),
+      maximumRedemptionBasisPoints: canonicalInteger(formData, "maximumRedemptionBasisPoints"),
+      expiresAfterDays: null,
+    };
+  }
+  if (kind === "referral") {
+    return {
+      attributionDays: canonicalInteger(formData, "attributionDays"),
+      referredDiscountBasisPoints: canonicalInteger(formData, "referredDiscountBasisPoints"),
+      referredDiscountCapMinor: canonicalInteger(formData, "referredDiscountCapMinor"),
+      referrerPointsPerDollar: canonicalInteger(formData, "referrerPointsPerDollar"),
+      referrerRewardCapPoints: canonicalInteger(formData, "referrerRewardCapPoints"),
+    };
+  }
+  return {
+    attributionDays: canonicalInteger(formData, "attributionDays"),
+    firstOrderCommissionBasisPoints: canonicalInteger(formData, "firstOrderCommissionBasisPoints"),
+    reorderCommissionBasisPoints: canonicalInteger(formData, "reorderCommissionBasisPoints"),
+    reorderWindowDays: canonicalInteger(formData, "reorderWindowDays"),
+    approvalDelayDays: canonicalInteger(formData, "approvalDelayDays"),
+    payoutThresholdMinor: canonicalInteger(formData, "payoutThresholdMinor"),
+    currency: value(formData, "currency"),
+  };
 }
 
 function optionalValue(formData: FormData, name: string): string | undefined {
@@ -192,8 +362,10 @@ function promotionReference(
 
 function resultCode(error: unknown): "saved" | "stale" | "rate-limited" | "denied" | "unavailable" {
   const message = error instanceof Error ? error.message : "";
-  if (/stale|changed during/i.test(message)) return "stale";
+  if (/stale|changed during|version_conflict/i.test(message)) return "stale";
   if (/rate limit/i.test(message)) return "rate-limited";
+  if (/origin/i.test(message)) return "denied";
+  if (/threshold_not_met|profile_ineligible/i.test(message)) return "unavailable";
   if (/unavailable|does not exist|required/i.test(message)) return "unavailable";
   return "denied";
 }
@@ -650,5 +822,221 @@ export async function changeStaffCapabilityAction(formData: FormData): Promise<n
       capability,
       enabled: value(formData, "enabled") === "true",
     });
+  });
+}
+
+async function createPolicyDraftAction(
+  kind: GrowthPolicyKind,
+  resource: "loyalty-policies" | "referral-policies" | "affiliate-policies",
+  formData: FormData,
+): Promise<never> {
+  return run(resource, async () => {
+    exactFormFields(formData, ["effectiveAt", ...policyValueFields[kind]]);
+    const values = policyValues(formData, kind);
+    const effectiveAt = canonicalUtcFormInstant(formData, "effectiveAt");
+    const admin = await trustedGrowthAdmin(resource);
+    await createGrowthPolicyDraft(admin.repositories.adminRepository, admin.context, {
+      kind,
+      policyId: randomUUID(),
+      effectiveAt,
+      values,
+    });
+  });
+}
+
+async function activatePolicyAction(
+  kind: GrowthPolicyKind,
+  resource: "loyalty-policies" | "referral-policies" | "affiliate-policies",
+  formData: FormData,
+): Promise<never> {
+  return run(resource, async () => {
+    exactFormFields(formData, ["policyId", "expectedVersion"]);
+    const policyId = value(formData, "policyId");
+    const expectedVersion = canonicalInteger(formData, "expectedVersion");
+    const admin = await trustedGrowthAdmin(resource);
+    await activateGrowthPolicy(admin.repositories.adminRepository, admin.context, {
+      kind,
+      policyId,
+      expectedVersion,
+    });
+  });
+}
+
+export async function createLoyaltyPolicyDraftAction(formData: FormData): Promise<never> {
+  return createPolicyDraftAction("loyalty", "loyalty-policies", formData);
+}
+
+export async function activateLoyaltyPolicyAction(formData: FormData): Promise<never> {
+  return activatePolicyAction("loyalty", "loyalty-policies", formData);
+}
+
+export async function createReferralPolicyDraftAction(formData: FormData): Promise<never> {
+  return createPolicyDraftAction("referral", "referral-policies", formData);
+}
+
+export async function activateReferralPolicyAction(formData: FormData): Promise<never> {
+  return activatePolicyAction("referral", "referral-policies", formData);
+}
+
+export async function createAffiliatePolicyDraftAction(formData: FormData): Promise<never> {
+  return createPolicyDraftAction("affiliate", "affiliate-policies", formData);
+}
+
+export async function activateAffiliatePolicyAction(formData: FormData): Promise<never> {
+  return activatePolicyAction("affiliate", "affiliate-policies", formData);
+}
+
+export async function adjustRewardBalanceAction(formData: FormData): Promise<never> {
+  return run("reward-adjustments", async () => {
+    exactFormFields(formData, [
+      "commandToken",
+      "rewardAccountId",
+      "delta",
+      "reason",
+      "internalAuditReason",
+    ]);
+    const commandToken = canonicalV4Uuid(formData, "commandToken");
+    const rewardAccountId = value(formData, "rewardAccountId");
+    const delta = signedCanonicalInteger(formData, "delta");
+    const reason = value(formData, "reason");
+    const internalAuditReason = value(formData, "internalAuditReason");
+    if (!isCanonicalUuid(rewardAccountId)) throw new Error("Reward account ID is invalid");
+    if (
+      delta === 0 ||
+      Math.abs(delta) > MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1
+    ) {
+      throw new Error("Reward adjustment delta is invalid");
+    }
+    if (!MANUAL_REWARD_ADJUSTMENT_REASONS_V1.includes(
+      reason as ManualRewardAdjustmentReasonV1,
+    )) {
+      throw new Error("Reward adjustment reason is invalid");
+    }
+    if (
+      internalAuditReason.trim() !== internalAuditReason ||
+      internalAuditReason.length < 1 ||
+      internalAuditReason.length > 240 ||
+      /[\u0000-\u001f\u007f]/u.test(internalAuditReason)
+    ) {
+      throw new Error("Reward adjustment internal audit reason is invalid");
+    }
+    const admin = await trustedGrowthAdmin("reward-adjustments");
+    await adjustRewardBalance(admin.repositories.adminRepository, admin.context, {
+      entryId: commandToken,
+      rewardAccountId,
+      delta,
+      reason,
+      internalAuditReason,
+      idempotencyKey: `reward-adjustment:${commandToken}`,
+    });
+  });
+}
+
+export async function revokeReferralCodeAction(formData: FormData): Promise<never> {
+  return run("referral-codes", async () => {
+    exactFormFields(formData, ["referralCodeId", "expectedCreatedAt"]);
+    const referralCodeId = canonicalV4Uuid(formData, "referralCodeId");
+    const expectedCreatedAt = canonicalTimestamp(formData, "expectedCreatedAt");
+    const admin = await trustedGrowthAdmin("referral-codes");
+    await revokeReferralCode(admin.repositories.adminRepository, admin.context, {
+      referralCodeId,
+      expectedCreatedAt,
+    });
+  });
+}
+
+export async function deactivateSharedSetAction(formData: FormData): Promise<never> {
+  return run("shared-sets", async () => {
+    exactFormFields(formData, ["sharedSetId", "expectedUpdatedAt"]);
+    const sharedSetId = canonicalV4Uuid(formData, "sharedSetId");
+    const expectedUpdatedAt = canonicalTimestamp(formData, "expectedUpdatedAt");
+    const admin = await trustedGrowthAdmin("shared-sets");
+    await deactivateSharedSet(admin.repositories.adminRepository, admin.context, {
+      sharedSetId,
+      expectedUpdatedAt,
+    });
+  });
+}
+
+export async function decideAffiliateApplicationAction(formData: FormData): Promise<never> {
+  return run("affiliate-applications", async () => {
+    exactFormFields(formData, ["profileId", "expectedVersion", "decision"]);
+    const profileId = canonicalV4Uuid(formData, "profileId");
+    const expectedVersion = canonicalInteger(formData, "expectedVersion");
+    const decision = value(formData, "decision");
+    if (expectedVersion < 1 || (decision !== "active" && decision !== "rejected")) {
+      throw new Error("Affiliate application decision is invalid");
+    }
+    const admin = await trustedGrowthAdmin("affiliate-applications");
+    await decideAffiliateApplication(
+      admin.repositories.affiliateApplicationAdminRepository,
+      admin.context,
+      { profileId, expectedVersion, decision },
+    );
+  });
+}
+
+export async function suspendAffiliateApplicationAction(formData: FormData): Promise<never> {
+  return run("affiliate-applications", async () => {
+    exactFormFields(formData, ["profileId", "expectedVersion"]);
+    const profileId = canonicalV4Uuid(formData, "profileId");
+    const expectedVersion = canonicalInteger(formData, "expectedVersion");
+    if (expectedVersion < 1) throw new Error("Affiliate application version is invalid");
+    const admin = await trustedGrowthAdmin("affiliate-applications");
+    await suspendAffiliateApplication(
+      admin.repositories.affiliateApplicationAdminRepository,
+      admin.context,
+      { profileId, expectedVersion },
+    );
+  });
+}
+
+export async function createAffiliatePayoutBatchAdminAction(
+  formData: FormData,
+): Promise<never> {
+  return run("payouts", async () => {
+    exactFormFields(formData, ["commandToken", "profileId"]);
+    const commandToken = canonicalV4Uuid(formData, "commandToken");
+    const profileId = canonicalV4Uuid(formData, "profileId");
+    const admin = await trustedGrowthAdmin("payouts");
+    await createAffiliatePayoutBatch(
+      admin.repositories.affiliatePayoutAdminRepository,
+      admin.context,
+      {
+        profileId,
+        payoutId: commandToken,
+        idempotencyKey: `affiliate-payout-create:${commandToken}`,
+      },
+    );
+  });
+}
+
+export async function recordAffiliatePayoutPaidAdminAction(
+  formData: FormData,
+): Promise<never> {
+  return run("payouts", async () => {
+    exactFormFields(formData, [
+      "commandToken",
+      "payoutId",
+      "expectedVersion",
+      "providerName",
+      "externalReference",
+    ]);
+    const commandToken = canonicalV4Uuid(formData, "commandToken");
+    const payoutId = canonicalV4Uuid(formData, "payoutId");
+    const expectedVersion = canonicalInteger(formData, "expectedVersion");
+    if (expectedVersion < 1) throw new Error("Affiliate payout version is invalid");
+    const admin = await trustedGrowthAdmin("payouts");
+    await recordAffiliatePayoutPaid(
+      admin.repositories.affiliatePayoutAdminRepository,
+      admin.context,
+      {
+        payoutId,
+        expectedVersion,
+        idempotencyKey: `affiliate-payout-paid:${commandToken}`,
+        providerName: value(formData, "providerName"),
+        externalReference: value(formData, "externalReference"),
+      },
+    );
   });
 }

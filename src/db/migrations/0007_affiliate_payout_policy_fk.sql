@@ -1,0 +1,3 @@
+ALTER TABLE "affiliate_commissions" DROP CONSTRAINT "affiliate_commissions_payout_profile_fk";
+--> statement-breakpoint
+ALTER TABLE "affiliate_commissions" ADD CONSTRAINT "affiliate_commissions_payout_policy_fk" FOREIGN KEY ("payout_id","affiliate_profile_id","affiliate_policy_id","affiliate_policy_version") REFERENCES "public"."affiliate_payouts"("id","affiliate_profile_id","affiliate_policy_id","affiliate_policy_version") ON DELETE restrict ON UPDATE no action;

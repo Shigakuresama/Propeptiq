@@ -50,6 +50,75 @@ describe("scanPublicCopy", () => {
     ).toMatchObject({ publishable: true, status: "pass" });
   });
 
+  it.each([
+    "Earn points on eligible merchandise.",
+    "Share your referral link.",
+    "Payout processing remains outside this dashboard.",
+    "Only the current effective terms record is shown here.",
+    "Analytical reference set",
+  ])("allows neutral growth copy: %s", (text) => {
+    expect(scanPublicCopy(candidate({ text }), policy)).toMatchObject({
+      publishable: true,
+      status: "pass",
+    });
+  });
+
+  it("allows ordinary administrative legal language only on the program-terms surface", () => {
+    const text = "Points are administered by PROPEPTIQ and may be revoked to prevent fraud.";
+
+    expect(scanPublicCopy(candidate({ text }), policy)).toMatchObject({
+      publishable: false,
+      status: "blocked",
+    });
+    expect(
+      scanPublicCopy(candidate({ text }), policy, { surface: "program_terms" }),
+    ).toMatchObject({ publishable: true, status: "pass" });
+  });
+
+  it("allows an explicit negated research-use restriction only on the program-terms surface", () => {
+    const text = "Products are not intended for human or veterinary use.";
+
+    expect(scanPublicCopy(candidate({ text }), policy)).toMatchObject({
+      publishable: false,
+      status: "blocked",
+    });
+    expect(
+      scanPublicCopy(candidate({ text }), policy, { surface: "program_terms" }),
+    ).toMatchObject({ publishable: true, status: "pass" });
+    expect(
+      scanPublicCopy(
+        candidate({ text: "Products are intended for human use." }),
+        policy,
+        { surface: "program_terms" },
+      ),
+    ).toMatchObject({ publishable: false, status: "blocked" });
+  });
+
+  it.each([
+    "Administer the peptide orally.",
+    "This program rewards researchers when the product treats pain.",
+    "Use one dose after reconstitution.",
+    "Customer testimonial: this product improves human health.",
+  ])("keeps unsafe positioning blocked on the program-terms surface: %s", (text) => {
+    expect(
+      scanPublicCopy(candidate({ text }), policy, { surface: "program_terms" }),
+    ).toMatchObject({ publishable: false, status: "blocked" });
+  });
+
+  it.each([
+    "Hurry — only 2 left.",
+    "Join 10,000 researchers who already chose us.",
+    "Was $999, now $49.",
+    "Better than every competing peptide supplier.",
+    "Customer testimonial: it changed my life.",
+  ])("blocks unsupported commercial positioning: %s", (text) => {
+    const result = scanPublicCopy(candidate({ text }), policy);
+    expect(result.publishable).toBe(false);
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({ code: "unsupported_claim" }),
+    );
+  });
+
   it("allows an analytical claim backed by active matching lot evidence", () => {
     expect(
       scanPublicCopy(

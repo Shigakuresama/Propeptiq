@@ -15,6 +15,10 @@ import type { RefundClaimDescriptorV1, RefundCommandRepository } from "@/commerc
 import { createRepositoryDurableCheckoutRequestV1, projectDurableCheckoutRequestV1, type DurableCheckoutRequestV1, type ProviderSessionRepository } from "@/db/repositories/provider-session-repository";
 import type { BuyerStatus } from "@/domain/eligibility";
 import type { PromotionRecord } from "@/domain/promotions";
+import type {
+  AppliedCheckoutRewards,
+  RewardsCheckoutReservationResult,
+} from "@/growth/rewards-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 import { loadSyntheticDemoCatalogRecords } from "catalog-demo-fixtures";
 
@@ -30,11 +34,30 @@ const COMMAND_PAYMENT_EVENT_ID = "68000000-0000-4000-8000-000000000003";
 const COMMAND_FULFILLMENT_ORDER_ID = "68000000-0000-4000-8000-000000000004";
 const SYNTHETIC_PROVIDER_PAYMENT_ID = "pi_local_synthetic_staff_refund";
 const FIXED_NOW = "2026-08-26T12:00:00.000Z";
+const LOCAL_AFFILIATE_CODE = "aff_LocalRuntimePartner01";
+const LOCAL_AFFILIATE_PROFILE_ID = "6b000000-0000-4000-8000-000000000021";
+const LOCAL_AFFILIATE_USER_ID = "6b000000-0000-4000-8000-000000000022";
+const LOCAL_AFFILIATE_POLICY_ID = "6b000000-0000-4000-8000-000000000023";
+const LOCAL_REFERRAL_CODE = "ref_LocalRuntimeReferrer01";
+const LOCAL_REFERRAL_CODE_ID = "6b000000-0000-4000-8000-000000000031";
+const LOCAL_REFERRER_USER_ID = "6b000000-0000-4000-8000-000000000032";
+const LOCAL_REFERRAL_POLICY_ID = "6b000000-0000-4000-8000-000000000033";
+const LOCAL_SHARED_SET_CODE = "set_LocalRuntimeResearch01";
+const LOCAL_GROWTH_POLICY_BUNDLE_SENTINEL =
+  "LOCAL_GROWTH_POLICY_BUNDLE_TEST_ONLY_PROPEPTIQ_2PPD_1MPP_500MIN_2500MAX_30D_1000BP_2500CAP_5PPD_2500PTS_1000BP_500BP_180D_30D_5000USD_4F8C21";
 
 type SharedFacts = Readonly<{
   loadProfile: (userId: string) => BuyerProfileRecord | null;
   hasCurrentAttestation: (userId: string) => boolean;
   loadEmail: (userId: string) => string | null;
+  reserveCheckoutRewards: (input: Readonly<{
+    buyerUserId: string;
+    orderId: string;
+    checkoutAttemptId: string;
+    idempotencyKey: string;
+    quote: AppliedCheckoutRewards;
+    reservedAt: Date;
+  }>) => Promise<RewardsCheckoutReservationResult>;
 }>;
 
 type AttemptRecord = {
@@ -76,6 +99,7 @@ type CommandOrder = {
 };
 
 type CommerceState = {
+  artifactSentinels: readonly string[];
   revision: number;
   attempts: Map<string, AttemptRecord>;
   orders: Map<string, OrderRecord>;
@@ -95,6 +119,10 @@ type CommerceState = {
 
 function initialState(): CommerceState {
   return {
+    artifactSentinels: Object.freeze([
+      LOCAL_GROWTH_POLICY_BUNDLE_SENTINEL,
+      LOCAL_SHARED_SET_CODE,
+    ]),
     revision: 0,
     attempts: new Map(),
     orders: new Map(),
@@ -405,6 +433,19 @@ export function createLocalCommerceDriverV1(
         return Object.freeze({ status: "review_required" as const, orderId: plan.identity.orderId, attemptId: plan.identity.attemptId, reviewRequestId, quote: cloneQuote(plan.browserQuote) });
       }
       if (providerPreparation === null || plan.totals === null) return Object.freeze({ status: "facts_changed_retry" as const });
+      if (plan.rewardsQuote?.status === "applied") {
+        const rewardsReservation = await shared.reserveCheckoutRewards({
+          buyerUserId: plan.buyerUserId,
+          orderId: plan.identity.orderId,
+          checkoutAttemptId: plan.identity.attemptId,
+          idempotencyKey: plan.idempotencyKey,
+          quote: plan.rewardsQuote,
+          reservedAt: plan.authoritativeAt,
+        });
+        if (rewardsReservation.status === "conflict" || rewardsReservation.status === "unavailable") {
+          return Object.freeze({ status: "facts_changed_retry" as const });
+        }
+      }
       const success = successFromPlan(plan);
       const stored: StoredCheckoutAttempt = Object.freeze({
         orderId: plan.identity.orderId,
@@ -683,6 +724,50 @@ export function createLocalCommerceDriverV1(
     paymentProvider: providerHarness.provider,
     shippingQuotePort,
     taxQuotePort,
+    async affiliateCandidateLookup(input) {
+      if (input.code !== LOCAL_AFFILIATE_CODE) {
+        return Object.freeze({ status: "unavailable" as const, reason: "profile_inactive" as const });
+      }
+      if (shared.loadProfile(input.buyerUserId)?.status !== "active") {
+        return Object.freeze({ status: "unavailable" as const, reason: "buyer_ineligible" as const });
+      }
+      return Object.freeze({
+        status: "eligible" as const,
+        code: LOCAL_AFFILIATE_CODE,
+        affiliateProfileId: LOCAL_AFFILIATE_PROFILE_ID,
+        affiliateUserId: LOCAL_AFFILIATE_USER_ID,
+        existingAttributionId: null,
+        clickedAt: input.clickedAt,
+        expiresAt: input.expiresAt,
+        affiliatePolicyId: LOCAL_AFFILIATE_POLICY_ID,
+        affiliatePolicyVersion: 1,
+      });
+    },
+    async referralCandidateLookup(input) {
+      if (input.code !== LOCAL_REFERRAL_CODE) {
+        return Object.freeze({ status: "unavailable" as const, reason: "code_inactive" as const });
+      }
+      if (shared.loadProfile(input.buyerUserId)?.status !== "active") {
+        return Object.freeze({ status: "unavailable" as const, reason: "policy_unavailable" as const });
+      }
+      return Object.freeze({
+        status: "eligible" as const,
+        referralCodeId: LOCAL_REFERRAL_CODE_ID,
+        referrerUserId: LOCAL_REFERRER_USER_ID,
+        policy: Object.freeze({
+          id: LOCAL_REFERRAL_POLICY_ID,
+          version: 1,
+          status: "active" as const,
+          attributionDays: 30 as const,
+          referredDiscountBasisPoints: 1_000,
+          referredDiscountCapMinor: 2_500,
+          referrerPointsPerDollar: 5,
+          referrerRewardCapPoints: 2_500,
+          effectiveAt: "2026-08-01T00:00:00.000Z",
+          supersededAt: null,
+        }),
+      });
+    },
     rateLimitStore,
     refundRepository,
     fulfillmentRepository,

@@ -22,8 +22,11 @@ describe("CatalogItemDetail", () => {
 
   it.each([
     ["bpc-tb-blend", "BB10", "BPC 5mg + TB 5mg"],
+    ["bpc-tb-blend-bb20", "BB20", "BPC 10mg + TB 10mg"],
+    ["bpc-tb-blend-bb40", "BB40", "BPC 20mg + TB 20mg"],
     ["cjc-1295-no-dac-ipa", "CP10", "CJC-1295 NO DAC 5mg + IPA 5mg"],
-  ])("keeps the first supplied blend composition attached to %s", (slug, code, sourceName) => {
+    ["cjc-1295-no-dac-ipa-cp20", "CP20", "CJC-1295 NO DAC 10mg + IPA 10mg"],
+  ])("keeps the exact supplied blend composition attached to %s", (slug, code, sourceName) => {
     const product = findBrowseCatalogProduct(slug)!;
     render(<CatalogItemDetail product={product} />);
 

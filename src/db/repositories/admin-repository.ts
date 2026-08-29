@@ -1,6 +1,14 @@
+import {
+  MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1,
+  MANUAL_REWARD_ADJUSTMENT_REASONS_V1,
+} from "@/admin/admin-service";
+import { createHash } from "node:crypto";
 import type {
   AdminRepository,
   AdminTransaction,
+  GrowthPolicyKind,
+  GrowthPolicyValues,
+  ManualRewardAdjustmentReasonV1,
   PromotionRecord,
 } from "@/admin/admin-service";
 import type { ProductPublicationFacts } from "@/admin/admin-policy";
@@ -12,6 +20,9 @@ import {
   hasExactProviderEventEnvelopeIdentity,
 } from "@/commerce/payment-authority";
 import { runSerializableWithRetry } from "@/db/serializable-retry";
+import { parseAffiliatePolicy } from "@/domain/affiliates";
+import { parseReferralPolicy } from "@/domain/referrals";
+import { parseLoyaltyPolicy } from "@/domain/rewards";
 
 export type AdminSqlClient = Readonly<{
   query: <T extends object>(
@@ -36,6 +47,331 @@ function asSafeInteger(value: number | string | null): number | null {
   const numeric = Number(value);
   if (!Number.isSafeInteger(numeric)) throw new Error("Database integer is unsafe");
   return numeric;
+}
+
+function requireSafeDatabaseInteger(value: number | string | null, field: string): number {
+  const integer = asSafeInteger(value);
+  if (integer === null) throw new Error(`Database ${field} is missing`);
+  return integer;
+}
+
+type RewardAdjustmentAccountRow = {
+  id: string;
+  buyerUserId: string;
+  pendingPoints: number | string;
+  availablePoints: number | string;
+};
+
+type RewardAdjustmentLedgerRow = {
+  id: string;
+  rewardAccountId: string;
+  buyerUserId: string;
+  kind: string;
+  sourceType: string;
+  sourceId: string;
+  idempotencyKey: string;
+  pendingPointsDelta: number | string;
+  availablePointsDelta: number | string;
+  pendingPointsBalanceAfter: number | string;
+  availablePointsBalanceAfter: number | string;
+};
+
+const rewardAdjustmentUuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const rewardAdjustmentFingerprintPattern = /^[0-9a-f]{64}$/u;
+const rewardAdjustmentIdempotencyNamespace = "admin_adjustment:";
+const rewardAdjustmentRawIdempotencyMaxLength = 183;
+const rewardAdjustmentLedgerProjection = `id::text AS id,
+  reward_account_id::text AS "rewardAccountId",
+  buyer_user_id::text AS "buyerUserId", kind,
+  source_type AS "sourceType", source_id AS "sourceId",
+  idempotency_key AS "idempotencyKey",
+  pending_points_delta AS "pendingPointsDelta",
+  available_points_delta AS "availablePointsDelta",
+  pending_points_balance_after AS "pendingPointsBalanceAfter",
+  available_points_balance_after AS "availablePointsBalanceAfter"`;
+
+function validateRewardAdjustmentPortInput(input: Parameters<
+  NonNullable<AdminTransaction["adjustRewardBalance"]>
+>[0]): void {
+  if (
+    !rewardAdjustmentUuidPattern.test(input.entryId) ||
+    !rewardAdjustmentUuidPattern.test(input.rewardAccountId) ||
+    !Number.isSafeInteger(input.delta) ||
+    input.delta === 0 ||
+    Math.abs(input.delta) > MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1 ||
+    !MANUAL_REWARD_ADJUSTMENT_REASONS_V1.includes(input.reason) ||
+    input.idempotencyKey.trim() !== input.idempotencyKey ||
+    input.idempotencyKey.length < 16 ||
+    input.idempotencyKey.length > rewardAdjustmentRawIdempotencyMaxLength ||
+    /[\u0000-\u001f\u007f]/u.test(input.idempotencyKey) ||
+    !rewardAdjustmentFingerprintPattern.test(input.fingerprint) ||
+    !Number.isFinite(input.occurredAt.getTime())
+  ) {
+    throw new Error("Reward adjustment persistence input is invalid");
+  }
+}
+
+function projectRewardAdjustmentLedger(
+  row: RewardAdjustmentLedgerRow,
+  reason: ManualRewardAdjustmentReasonV1,
+) {
+  return {
+    status: "applied" as const,
+    entryId: row.id,
+    rewardAccountId: row.rewardAccountId,
+    delta: requireSafeDatabaseInteger(row.availablePointsDelta, "reward adjustment delta"),
+    reason,
+    availablePointsBalanceAfter: requireSafeDatabaseInteger(
+      row.availablePointsBalanceAfter,
+      "reward adjustment balance",
+    ),
+  };
+}
+
+function assertExactRewardAdjustmentReplay(
+  row: RewardAdjustmentLedgerRow,
+  account: RewardAdjustmentAccountRow,
+  input: Parameters<NonNullable<AdminTransaction["adjustRewardBalance"]>>[0],
+  persistedIdempotencyKey: string,
+): void {
+  if (
+    row.id !== input.entryId ||
+    row.rewardAccountId !== input.rewardAccountId ||
+    row.buyerUserId !== account.buyerUserId ||
+    row.kind !== "admin_adjustment" ||
+    row.sourceType !== "admin_adjustment" ||
+    row.sourceId !== input.fingerprint ||
+    row.idempotencyKey !== persistedIdempotencyKey ||
+    requireSafeDatabaseInteger(row.pendingPointsDelta, "reward adjustment pending delta") !== 0 ||
+    requireSafeDatabaseInteger(row.availablePointsDelta, "reward adjustment delta") !== input.delta ||
+    requireSafeDatabaseInteger(
+      row.pendingPointsBalanceAfter,
+      "reward adjustment pending balance",
+    ) !== requireSafeDatabaseInteger(account.pendingPoints, "reward account pending balance")
+  ) {
+    throw new Error("Reward adjustment idempotency fingerprint conflict");
+  }
+}
+
+type ReferralCodeLifecycleRow = {
+  id: string;
+  status: "active" | "revoked";
+  createdAt: Date | string;
+  revokedAt: Date | string | null;
+};
+
+type SharedSetLifecycleRow = {
+  id: string;
+  ownerUserId: string;
+  publicCode: string;
+  label: string;
+  active: boolean;
+  updatedAt: Date | string;
+  deactivatedAt: Date | string | null;
+  itemCount: number | string;
+};
+
+type SharedSetDeactivationReceiptRow = {
+  sharedSetId: string;
+  kind: string;
+  expectedUpdatedAt: Date | string;
+  resultActive: boolean;
+  resultUpdatedAt: Date | string;
+  appliedAt: Date | string;
+};
+
+function validateReferralCodeRevocationInput(
+  input: Parameters<NonNullable<AdminTransaction["revokeReferralCode"]>>[0],
+): void {
+  if (
+    !rewardAdjustmentUuidPattern.test(input.referralCodeId) ||
+    !Number.isFinite(input.expectedCreatedAt.getTime()) ||
+    !Number.isFinite(input.revokedAt.getTime()) ||
+    input.revokedAt.getTime() <= input.expectedCreatedAt.getTime()
+  ) {
+    throw new Error("Referral code revocation persistence input is invalid");
+  }
+}
+
+function validateSharedSetDeactivationInput(
+  input: Parameters<NonNullable<AdminTransaction["deactivateSharedSet"]>>[0],
+): void {
+  if (
+    !rewardAdjustmentUuidPattern.test(input.sharedSetId) ||
+    !Number.isFinite(input.expectedUpdatedAt.getTime()) ||
+    !Number.isFinite(input.deactivatedAt.getTime()) ||
+    input.deactivatedAt.getTime() <= input.expectedUpdatedAt.getTime()
+  ) {
+    throw new Error("Shared set deactivation persistence input is invalid");
+  }
+}
+
+function sharedSetAdminDeactivationIdentity(input: Parameters<
+  NonNullable<AdminTransaction["deactivateSharedSet"]>
+>[0]): Readonly<{ idempotencyKey: string; payloadHash: string }> {
+  const payloadHash = createHash("sha256").update(JSON.stringify({
+    kind: "deactivate",
+    sharedSetId: input.sharedSetId,
+    expectedUpdatedAt: input.expectedUpdatedAt.toISOString(),
+    deactivatedAt: input.deactivatedAt.toISOString(),
+  }), "utf8").digest("hex");
+  return Object.freeze({
+    idempotencyKey: `admin_shared_set_deactivate:${payloadHash}`,
+    payloadHash,
+  });
+}
+
+type GrowthPolicyRow = {
+  id: string;
+  version: number | string;
+  status: "draft" | "active" | "superseded";
+  effectiveAt: Date | string;
+  supersededAt: Date | string | null;
+  pointsPerDollar?: number | string;
+  redemptionMinorPerPoint?: number | string;
+  minimumRedemptionPoints?: number | string;
+  maximumRedemptionBasisPoints?: number | string;
+  expiresAfterDays?: number | string | null;
+  attributionDays?: number | string;
+  referredDiscountBasisPoints?: number | string;
+  referredDiscountCapMinor?: number | string;
+  referrerPointsPerDollar?: number | string;
+  referrerRewardCapPoints?: number | string;
+  firstOrderCommissionBasisPoints?: number | string;
+  reorderCommissionBasisPoints?: number | string;
+  reorderWindowDays?: number | string;
+  approvalDelayDays?: number | string;
+  payoutThresholdMinor?: number | string;
+  currency?: string;
+};
+
+function growthPolicyTable(kind: GrowthPolicyKind): string {
+  if (kind === "loyalty") return "loyalty_policies";
+  if (kind === "referral") return "referral_policies";
+  return "affiliate_policies";
+}
+
+function growthPolicyProjection(kind: GrowthPolicyKind): string {
+  const common = `id::text AS id, version, status,
+    effective_at AS "effectiveAt", superseded_at AS "supersededAt"`;
+  if (kind === "loyalty") {
+    return `${common}, points_per_dollar AS "pointsPerDollar",
+      redemption_minor_per_point AS "redemptionMinorPerPoint",
+      minimum_redemption_points AS "minimumRedemptionPoints",
+      maximum_redemption_basis_points AS "maximumRedemptionBasisPoints",
+      expires_after_days AS "expiresAfterDays"`;
+  }
+  if (kind === "referral") {
+    return `${common}, attribution_days AS "attributionDays",
+      referred_discount_basis_points AS "referredDiscountBasisPoints",
+      referred_discount_cap_minor AS "referredDiscountCapMinor",
+      referrer_points_per_dollar AS "referrerPointsPerDollar",
+      referrer_reward_cap_points AS "referrerRewardCapPoints"`;
+  }
+  return `${common}, attribution_days AS "attributionDays",
+    first_order_commission_basis_points AS "firstOrderCommissionBasisPoints",
+    reorder_commission_basis_points AS "reorderCommissionBasisPoints",
+    reorder_window_days AS "reorderWindowDays",
+    approval_delay_days AS "approvalDelayDays",
+    payout_threshold_minor AS "payoutThresholdMinor", currency`;
+}
+
+function assertPersistedGrowthPolicy(kind: GrowthPolicyKind, row: GrowthPolicyRow): void {
+  const common = {
+    id: row.id,
+    version: requireSafeDatabaseInteger(row.version, "growth policy version"),
+    status: row.status === "superseded" ? "retired" : row.status,
+    effectiveAt: toIso(row.effectiveAt),
+    supersededAt: row.supersededAt === null ? null : toIso(row.supersededAt),
+  };
+  const candidate = kind === "loyalty"
+    ? {
+        ...common,
+        pointsPerDollar: requireSafeDatabaseInteger(row.pointsPerDollar ?? null, "pointsPerDollar"),
+        redemptionMinorPerPoint: requireSafeDatabaseInteger(row.redemptionMinorPerPoint ?? null, "redemptionMinorPerPoint"),
+        minimumRedemptionPoints: requireSafeDatabaseInteger(row.minimumRedemptionPoints ?? null, "minimumRedemptionPoints"),
+        maximumRedemptionBasisPoints: requireSafeDatabaseInteger(row.maximumRedemptionBasisPoints ?? null, "maximumRedemptionBasisPoints"),
+        expiresAfterDays: row.expiresAfterDays ?? null,
+      }
+    : kind === "referral"
+      ? {
+          ...common,
+          attributionDays: requireSafeDatabaseInteger(row.attributionDays ?? null, "attributionDays"),
+          referredDiscountBasisPoints: requireSafeDatabaseInteger(row.referredDiscountBasisPoints ?? null, "referredDiscountBasisPoints"),
+          referredDiscountCapMinor: requireSafeDatabaseInteger(row.referredDiscountCapMinor ?? null, "referredDiscountCapMinor"),
+          referrerPointsPerDollar: requireSafeDatabaseInteger(row.referrerPointsPerDollar ?? null, "referrerPointsPerDollar"),
+          referrerRewardCapPoints: requireSafeDatabaseInteger(row.referrerRewardCapPoints ?? null, "referrerRewardCapPoints"),
+        }
+      : {
+          ...common,
+          attributionDays: requireSafeDatabaseInteger(row.attributionDays ?? null, "attributionDays"),
+          firstOrderCommissionBasisPoints: requireSafeDatabaseInteger(row.firstOrderCommissionBasisPoints ?? null, "firstOrderCommissionBasisPoints"),
+          reorderCommissionBasisPoints: requireSafeDatabaseInteger(row.reorderCommissionBasisPoints ?? null, "reorderCommissionBasisPoints"),
+          reorderWindowDays: requireSafeDatabaseInteger(row.reorderWindowDays ?? null, "reorderWindowDays"),
+          approvalDelayDays: requireSafeDatabaseInteger(row.approvalDelayDays ?? null, "approvalDelayDays"),
+          payoutThresholdMinor: requireSafeDatabaseInteger(row.payoutThresholdMinor ?? null, "payoutThresholdMinor"),
+          currency: row.currency,
+        };
+  const parsed = kind === "loyalty"
+    ? parseLoyaltyPolicy(candidate)
+    : kind === "referral"
+      ? parseReferralPolicy(candidate)
+      : parseAffiliatePolicy(candidate);
+  if (!parsed.ok) {
+    throw new Error(`Persisted growth policy domain shape is invalid: ${parsed.error.field}`);
+  }
+}
+
+async function insertGrowthPolicyDraft(
+  client: AdminSqlClient,
+  input: Readonly<{
+    id: string;
+    kind: GrowthPolicyKind;
+    effectiveAt: Date;
+    values: GrowthPolicyValues;
+  }>,
+  version: number,
+): Promise<void> {
+  const values = input.values as Readonly<Record<string, unknown>>;
+  const effectiveAt = input.effectiveAt.toISOString();
+  if (input.kind === "loyalty") {
+    await client.query(
+      `INSERT INTO loyalty_policies
+        (id, version, status, points_per_dollar, redemption_minor_per_point,
+         minimum_redemption_points, maximum_redemption_basis_points,
+         expires_after_days, effective_at)
+       VALUES ($1::uuid, $2, 'draft', $3, $4, $5, $6, $7, $8::timestamptz)`,
+      [input.id, version, values.pointsPerDollar, values.redemptionMinorPerPoint,
+        values.minimumRedemptionPoints, values.maximumRedemptionBasisPoints,
+        values.expiresAfterDays, effectiveAt],
+    );
+    return;
+  }
+  if (input.kind === "referral") {
+    await client.query(
+      `INSERT INTO referral_policies
+        (id, version, status, attribution_days, referred_discount_basis_points,
+         referred_discount_cap_minor, referrer_points_per_dollar,
+         referrer_reward_cap_points, effective_at)
+       VALUES ($1::uuid, $2, 'draft', $3, $4, $5, $6, $7, $8::timestamptz)`,
+      [input.id, version, values.attributionDays, values.referredDiscountBasisPoints,
+        values.referredDiscountCapMinor, values.referrerPointsPerDollar,
+        values.referrerRewardCapPoints, effectiveAt],
+    );
+    return;
+  }
+  await client.query(
+    `INSERT INTO affiliate_policies
+      (id, version, status, attribution_days, first_order_commission_basis_points,
+       reorder_commission_basis_points, reorder_window_days, approval_delay_days,
+       payout_threshold_minor, currency, effective_at)
+     VALUES ($1::uuid, $2, 'draft', $3, $4, $5, $6, $7, $8, $9, $10::timestamptz)`,
+    [input.id, version, values.attributionDays,
+      values.firstOrderCommissionBasisPoints, values.reorderCommissionBasisPoints,
+      values.reorderWindowDays, values.approvalDelayDays,
+      values.payoutThresholdMinor, values.currency, effectiveAt],
+  );
 }
 
 type ProductRow = {
@@ -216,6 +552,373 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
       if (result.rows[0]?.authorized !== true) {
         throw new Error(`Persisted ${input.capability} capability is required`);
       }
+    },
+
+    async adjustRewardBalance(input) {
+      validateRewardAdjustmentPortInput(input);
+      const persistedIdempotencyKey =
+        `${rewardAdjustmentIdempotencyNamespace}${input.idempotencyKey}`;
+      const accounts = await client.query<RewardAdjustmentAccountRow>(
+        `SELECT id::text AS id, buyer_user_id::text AS "buyerUserId",
+                pending_points AS "pendingPoints", available_points AS "availablePoints"
+         FROM reward_accounts WHERE id = $1::uuid FOR UPDATE`,
+        [input.rewardAccountId],
+      );
+      if (accounts.rows.length !== 1 || accounts.rows[0]?.id !== input.rewardAccountId) {
+        throw new Error("Reward account is missing or unavailable");
+      }
+      const account = accounts.rows[0];
+      const prior = await client.query<RewardAdjustmentLedgerRow>(
+        `SELECT ${rewardAdjustmentLedgerProjection}
+         FROM reward_ledger_entries
+         WHERE source_type = 'admin_adjustment' AND idempotency_key = $1
+         FOR UPDATE`,
+        [persistedIdempotencyKey],
+      );
+      if (prior.rows.length > 1) throw new Error("Reward adjustment idempotency conflict");
+      if (prior.rows[0]) {
+        assertExactRewardAdjustmentReplay(
+          prior.rows[0],
+          account,
+          input,
+          persistedIdempotencyKey,
+        );
+        return {
+          ...projectRewardAdjustmentLedger(prior.rows[0], input.reason),
+          status: "idempotent",
+        };
+      }
+
+      const pendingBefore = requireSafeDatabaseInteger(
+        account.pendingPoints,
+        "reward account pending balance",
+      );
+      const availableBefore = requireSafeDatabaseInteger(
+        account.availablePoints,
+        "reward account available balance",
+      );
+      const availableAfter = availableBefore + input.delta;
+      if (!Number.isSafeInteger(availableAfter)) {
+        throw new Error("Reward account balance overflow is unsafe");
+      }
+      const inserted = await client.query<RewardAdjustmentLedgerRow>(
+        `INSERT INTO reward_ledger_entries
+           (id, reward_account_id, buyer_user_id, kind, source_type, source_id,
+            idempotency_key, pending_points_delta, available_points_delta,
+            pending_points_balance_after, available_points_balance_after, occurred_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'admin_adjustment',
+                 'admin_adjustment', $4, $5, 0, $6, $7, $8, $9::timestamptz)
+         ON CONFLICT DO NOTHING
+         RETURNING ${rewardAdjustmentLedgerProjection}`,
+        [
+          input.entryId,
+          input.rewardAccountId,
+          account.buyerUserId,
+          input.fingerprint,
+          persistedIdempotencyKey,
+          input.delta,
+          pendingBefore,
+          availableAfter,
+          input.occurredAt.toISOString(),
+        ],
+      );
+      const insertedRow = inserted.rows[0];
+      if (inserted.rows.length !== 1 || !insertedRow) {
+        const collision = await client.query<RewardAdjustmentLedgerRow>(
+          `SELECT ${rewardAdjustmentLedgerProjection}
+           FROM reward_ledger_entries
+           WHERE source_type = 'admin_adjustment' AND idempotency_key = $1
+           FOR UPDATE`,
+          [persistedIdempotencyKey],
+        );
+        if (collision.rows.length === 1 && collision.rows[0]) {
+          assertExactRewardAdjustmentReplay(
+            collision.rows[0],
+            account,
+            input,
+            persistedIdempotencyKey,
+          );
+          return {
+            ...projectRewardAdjustmentLedger(collision.rows[0], input.reason),
+            status: "idempotent",
+          };
+        }
+        throw new Error("Reward adjustment idempotency or fingerprint conflict");
+      }
+      const updated = await client.query<{ id: string }>(
+        `UPDATE reward_accounts
+         SET available_points = $3, updated_at = $4::timestamptz
+         WHERE id = $1::uuid AND buyer_user_id = $2::uuid
+           AND pending_points = $5 AND available_points = $6
+         RETURNING id::text AS id`,
+        [
+          input.rewardAccountId,
+          account.buyerUserId,
+          availableAfter,
+          input.occurredAt.toISOString(),
+          pendingBefore,
+          availableBefore,
+        ],
+      );
+      if (updated.rows.length !== 1 || updated.rows[0]?.id !== input.rewardAccountId) {
+        throw new Error("Stale reward account balance conflict");
+      }
+      return projectRewardAdjustmentLedger(insertedRow, input.reason);
+    },
+
+    async revokeReferralCode(input) {
+      validateReferralCodeRevocationInput(input);
+      const expectedCreatedAt = input.expectedCreatedAt.toISOString();
+      const revokedAt = input.revokedAt.toISOString();
+      const loaded = await client.query<ReferralCodeLifecycleRow>(
+        `SELECT id::text AS id, status, created_at AS "createdAt",
+                revoked_at AS "revokedAt"
+         FROM referral_codes WHERE id = $1::uuid FOR UPDATE`,
+        [input.referralCodeId],
+      );
+      if (loaded.rows.length !== 1 || loaded.rows[0]?.id !== input.referralCodeId) {
+        throw new Error("Referral code is missing or unavailable");
+      }
+      const row = loaded.rows[0];
+      if (toIso(row.createdAt) !== expectedCreatedAt) {
+        throw new Error("Stale referral code revocation");
+      }
+      if (row.status === "revoked") {
+        if (row.revokedAt === null || toIso(row.revokedAt) !== revokedAt) {
+          throw new Error("Stale referral code revocation");
+        }
+        return {
+          status: "idempotent" as const,
+          referralCodeId: row.id,
+          createdAt: expectedCreatedAt,
+          revokedAt,
+        };
+      }
+      if (row.status !== "active" || row.revokedAt !== null) {
+        throw new Error("Referral code lifecycle state is invalid");
+      }
+      const updated = await client.query<ReferralCodeLifecycleRow>(
+        `UPDATE referral_codes
+         SET status = 'revoked', revoked_at = $3::timestamptz
+         WHERE id = $1::uuid AND status = 'active' AND revoked_at IS NULL
+           AND created_at = $2::timestamptz
+         RETURNING id::text AS id, status, created_at AS "createdAt",
+                   revoked_at AS "revokedAt"`,
+        [input.referralCodeId, expectedCreatedAt, revokedAt],
+      );
+      const result = updated.rows[0];
+      if (
+        updated.rows.length !== 1 ||
+        !result ||
+        result.id !== input.referralCodeId ||
+        result.status !== "revoked" ||
+        toIso(result.createdAt) !== expectedCreatedAt ||
+        result.revokedAt === null ||
+        toIso(result.revokedAt) !== revokedAt
+      ) {
+        throw new Error("Stale referral code revocation");
+      }
+      return {
+        status: "applied" as const,
+        referralCodeId: result.id,
+        createdAt: expectedCreatedAt,
+        revokedAt,
+      };
+    },
+
+    async deactivateSharedSet(input) {
+      validateSharedSetDeactivationInput(input);
+      const expectedUpdatedAt = input.expectedUpdatedAt.toISOString();
+      const deactivatedAt = input.deactivatedAt.toISOString();
+      const identity = sharedSetAdminDeactivationIdentity(input);
+      const receipt = await client.query<SharedSetDeactivationReceiptRow>(
+        `SELECT shared_set_id::text AS "sharedSetId", kind,
+                expected_updated_at AS "expectedUpdatedAt",
+                result_active AS "resultActive",
+                result_updated_at AS "resultUpdatedAt", applied_at AS "appliedAt"
+         FROM shared_research_set_mutations
+         WHERE idempotency_key = $1 FOR UPDATE`,
+        [identity.idempotencyKey],
+      );
+      if (receipt.rows.length > 1) throw new Error("Shared set deactivation receipt conflict");
+      if (receipt.rows[0]) {
+        const prior = receipt.rows[0];
+        if (
+          prior.sharedSetId !== input.sharedSetId ||
+          prior.kind !== "deactivate" ||
+          toIso(prior.expectedUpdatedAt) !== expectedUpdatedAt ||
+          prior.resultActive !== false ||
+          toIso(prior.resultUpdatedAt) !== deactivatedAt ||
+          toIso(prior.appliedAt) !== deactivatedAt
+        ) {
+          throw new Error("Shared set deactivation receipt conflict");
+        }
+        return {
+          status: "idempotent" as const,
+          sharedSetId: prior.sharedSetId,
+          active: false as const,
+          updatedAt: deactivatedAt,
+          deactivatedAt,
+        };
+      }
+
+      const loaded = await client.query<SharedSetLifecycleRow>(
+        `SELECT s.id::text AS id, s.owner_user_id::text AS "ownerUserId",
+                s.public_code AS "publicCode", s.label, s.active,
+                s.updated_at AS "updatedAt", s.deactivated_at AS "deactivatedAt",
+                (SELECT count(*) FROM shared_research_set_items i
+                 WHERE i.shared_set_id = s.id) AS "itemCount"
+         FROM shared_research_sets s WHERE s.id = $1::uuid FOR UPDATE`,
+        [input.sharedSetId],
+      );
+      if (loaded.rows.length !== 1 || loaded.rows[0]?.id !== input.sharedSetId) {
+        throw new Error("Shared set is missing or unavailable");
+      }
+      const row = loaded.rows[0];
+      const itemCount = requireSafeDatabaseInteger(row.itemCount, "shared set item count");
+      if (
+        !row.active ||
+        row.deactivatedAt !== null ||
+        toIso(row.updatedAt) !== expectedUpdatedAt
+      ) {
+        throw new Error("Stale shared set deactivation");
+      }
+      if (itemCount < 2 || itemCount > 8) {
+        throw new Error("Shared set item history is invalid");
+      }
+      const updated = await client.query<{
+        id: string;
+        active: boolean;
+        updatedAt: Date | string;
+        deactivatedAt: Date | string | null;
+      }>(
+        `UPDATE shared_research_sets
+         SET active = false, deactivated_at = $3::timestamptz,
+             updated_at = $3::timestamptz
+         WHERE id = $1::uuid AND active = true AND deactivated_at IS NULL
+           AND updated_at = $2::timestamptz
+         RETURNING id::text AS id, active, updated_at AS "updatedAt",
+                   deactivated_at AS "deactivatedAt"`,
+        [input.sharedSetId, expectedUpdatedAt, deactivatedAt],
+      );
+      const result = updated.rows[0];
+      if (
+        updated.rows.length !== 1 ||
+        !result ||
+        result.id !== input.sharedSetId ||
+        result.active !== false ||
+        toIso(result.updatedAt) !== deactivatedAt ||
+        result.deactivatedAt === null ||
+        toIso(result.deactivatedAt) !== deactivatedAt
+      ) {
+        throw new Error("Stale shared set deactivation");
+      }
+      await client.query(
+        `INSERT INTO shared_research_set_mutations
+          (idempotency_key, shared_set_id, owner_user_id, kind,
+           expected_updated_at, payload_hash, result_public_code, result_label,
+           result_active, result_item_count, result_updated_at, applied_at)
+         VALUES ($1, $2::uuid, $3::uuid, 'deactivate', $4::timestamptz,
+                 $5, $6, $7, false, $8, $9::timestamptz, $9::timestamptz)`,
+        [
+          identity.idempotencyKey,
+          input.sharedSetId,
+          row.ownerUserId,
+          expectedUpdatedAt,
+          identity.payloadHash,
+          row.publicCode,
+          row.label,
+          itemCount,
+          deactivatedAt,
+        ],
+      );
+      return {
+        status: "applied" as const,
+        sharedSetId: result.id,
+        active: false as const,
+        updatedAt: deactivatedAt,
+        deactivatedAt,
+      };
+    },
+
+    async createGrowthPolicyDraft(input) {
+      const table = growthPolicyTable(input.kind);
+      const latest = await client.query<{ version: number | string }>(
+        `SELECT version FROM ${table} ORDER BY version DESC LIMIT 1 FOR UPDATE`,
+      );
+      const priorVersion = latest.rows[0]
+        ? requireSafeDatabaseInteger(latest.rows[0].version, "growth policy version")
+        : 0;
+      const version = priorVersion + 1;
+      if (!Number.isSafeInteger(version)) throw new Error("Growth policy version is unsafe");
+      await insertGrowthPolicyDraft(client, input, version);
+      return { id: input.id, kind: input.kind, version, status: "draft" };
+    },
+
+    async activateGrowthPolicy(input) {
+      const table = growthPolicyTable(input.kind);
+      const candidateResult = await client.query<GrowthPolicyRow>(
+        `SELECT ${growthPolicyProjection(input.kind)} FROM ${table}
+         WHERE id = $1::uuid AND version = $2 AND status = 'draft'
+           AND superseded_at IS NULL
+         FOR UPDATE`,
+        [input.id, input.expectedVersion],
+      );
+      const candidate = candidateResult.rows[0];
+      if (!candidate) throw new Error("Stale growth policy activation rejected");
+      assertPersistedGrowthPolicy(input.kind, candidate);
+
+      const effectiveAt = toIso(candidate.effectiveAt);
+      if (new Date(effectiveAt).getTime() < input.now.getTime()) {
+        throw new Error("Growth policy effective window overlaps elapsed time");
+      }
+      const priorOverlap = await client.query<{ id: string }>(
+        `SELECT id::text AS id FROM ${table}
+         WHERE status = 'superseded' AND superseded_at > $1::timestamptz
+         LIMIT 1 FOR UPDATE`,
+        [effectiveAt],
+      );
+      if (priorOverlap.rows.length > 0) {
+        throw new Error("Growth policy effective window overlaps a prior policy");
+      }
+      const active = await client.query<{ id: string; effectiveAt: Date | string }>(
+        `SELECT id::text AS id, effective_at AS "effectiveAt" FROM ${table}
+         WHERE status = 'active' AND superseded_at IS NULL
+         FOR UPDATE`,
+      );
+      if (active.rows.length > 1) throw new Error("Multiple active growth policies are invalid");
+      const prior = active.rows[0];
+      if (prior) {
+        if (new Date(toIso(prior.effectiveAt)).getTime() >= new Date(effectiveAt).getTime()) {
+          throw new Error("Growth policy effective windows overlap");
+        }
+        const retired = await client.query<{ id: string }>(
+          `UPDATE ${table} SET status = 'superseded', superseded_at = $2::timestamptz
+           WHERE id = $1::uuid AND status = 'active' AND superseded_at IS NULL
+           RETURNING id::text AS id`,
+          [prior.id, effectiveAt],
+        );
+        if (retired.rows.length !== 1) {
+          throw new Error("Stale active growth policy retirement rejected");
+        }
+      }
+      const activated = await client.query<{ id: string; version: number | string }>(
+        `UPDATE ${table} SET status = 'active'
+         WHERE id = $1::uuid AND version = $2 AND status = 'draft'
+           AND superseded_at IS NULL
+         RETURNING id::text AS id, version`,
+        [input.id, input.expectedVersion],
+      );
+      const row = activated.rows[0];
+      if (!row || activated.rows.length !== 1) {
+        throw new Error("Stale growth policy activation rejected");
+      }
+      return {
+        id: row.id,
+        kind: input.kind,
+        version: requireSafeDatabaseInteger(row.version, "growth policy version"),
+        status: "active",
+      };
     },
 
     async savePolicyGroup(input) {

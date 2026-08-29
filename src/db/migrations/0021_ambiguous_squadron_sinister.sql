@@ -1,0 +1,2 @@
+ALTER TABLE "reward_ledger_entries" DROP CONSTRAINT "reward_ledger_entries_idempotency_unique";--> statement-breakpoint
+ALTER TABLE "reward_ledger_entries" ADD CONSTRAINT "reward_ledger_entries_flow_idempotency_unique" UNIQUE("source_type","idempotency_key");

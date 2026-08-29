@@ -7,13 +7,13 @@ export function BrandMark({ className }: { className?: string }) {
     <span
       aria-hidden="true"
       className={cn(
-        "relative block size-10 shrink-0 overflow-hidden",
+        "relative block size-10 shrink-0",
         className,
       )}
     >
       <Image
         alt=""
-        className="object-cover object-[50%_30%] scale-[2.1]"
+        className="object-contain object-center"
         fill
         sizes="40px"
         src="/brand/propeptiq-logo.png"

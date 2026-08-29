@@ -1,18 +1,31 @@
+import { randomUUID } from "node:crypto";
 import type { ReactNode } from "react";
 
 import {
+  activateAffiliatePolicyAction,
+  activateLoyaltyPolicyAction,
   activateProductAction,
   activatePromotionAction,
+  activateReferralPolicyAction,
+  adjustRewardBalanceAction,
   changeBuyerStatusAction,
   changeStaffCapabilityAction,
   clearFulfillmentHoldAction,
+  createAffiliatePolicyDraftAction,
+  createLoyaltyPolicyDraftAction,
+  createReferralPolicyDraftAction,
+  deactivateSharedSetAction,
+  decideAffiliateApplicationAction,
   decideReviewAction,
+  createAffiliatePayoutBatchAdminAction,
   handoffFulfillmentAction,
   markShipmentDeliveredAction,
   publishAttestationAction,
   publishCoaAction,
+  recordAffiliatePayoutPaidAdminAction,
   recordShipmentExceptionAction,
   requestRefundAction,
+  revokeReferralCodeAction,
   retireProductAction,
   retirePromotionAction,
   saveAnalyticalClaimDraftAction,
@@ -29,6 +42,7 @@ import {
   submitOrRecoverRefundAction,
   supersedeDestinationAction,
   supersedeProductPriceAction,
+  suspendAffiliateApplicationAction,
 } from "@/admin/actions";
 import type { AdminResource } from "@/admin/access";
 import type { AdminReadSnapshot, SafePromotionConfiguration } from "@/admin/admin-read";
@@ -123,6 +137,7 @@ function Field({
   maxLength,
   min,
   max,
+  step,
   readOnly = false,
   list,
 }: {
@@ -134,6 +149,7 @@ function Field({
   maxLength?: number;
   min?: number;
   max?: number;
+  step?: number;
   readOnly?: boolean;
   list?: string;
 }) {
@@ -149,6 +165,7 @@ function Field({
         maxLength={maxLength}
         min={min}
         max={max}
+        step={step}
         readOnly={readOnly}
         list={list}
       />
@@ -165,12 +182,14 @@ function TextArea({
   name,
   defaultValue = "",
   maxLength,
+  minLength,
   required = true,
 }: {
   label: string;
   name: string;
   defaultValue?: string | undefined;
   maxLength: number;
+  minLength?: number;
   required?: boolean;
 }) {
   return (
@@ -181,6 +200,7 @@ function TextArea({
         className="form-input min-h-32"
         required={required}
         maxLength={maxLength}
+        minLength={minLength}
         defaultValue={defaultValue}
       />
     </label>
@@ -217,19 +237,21 @@ function CommandForm({
   title,
   children,
   outcome,
+  submitLabel = "Submit guarded command",
 }: {
   action: (formData: FormData) => Promise<never>;
   title: string;
   children: ReactNode;
   outcome?: Readonly<{ message: string; error: boolean }> | undefined;
+  submitLabel?: string;
 }) {
   return (
     <section className="record-card">
-      <h2 className="font-heading text-2xl">{title}</h2>
+      <h2 className="min-w-0 break-words font-heading text-2xl">{title}</h2>
       <form action={action} aria-label={title} className="mt-6 grid gap-5">
         {children}
         <Button type="submit" className="action-primary w-full sm:w-auto">
-          Submit guarded command
+          {submitLabel}
         </Button>
       </form>
       {outcome ? (
@@ -282,20 +304,481 @@ function promotionConfigFields(configuration?: SafePromotionConfiguration) {
   );
 }
 
+type GrowthPolicyLifecycleItem = Readonly<{
+  id: string;
+  version: number;
+  status: "draft" | "active" | "retired";
+  effectiveAt: string;
+  retiredAt: string | null;
+}>;
+
+function GrowthPolicyPanel({
+  title,
+  items,
+  createAction,
+  activateAction,
+  fields,
+}: {
+  title: "loyalty" | "referral" | "affiliate";
+  items: readonly GrowthPolicyLifecycleItem[];
+  createAction: (formData: FormData) => Promise<never>;
+  activateAction: (formData: FormData) => Promise<never>;
+  fields: ReactNode;
+}) {
+  const drafts = items.filter((item) => item.status === "draft");
+  return (
+    <div className="grid gap-6">
+      {items.length === 0 ? (
+        <p className="info-record text-base">Inactive — no database policy records exist.</p>
+      ) : (
+        <section className="record-card" aria-label={`${title} policy lifecycle`}>
+          <h2 className="font-heading text-2xl">Database policy lifecycle</h2>
+          <div className="mt-5 grid gap-4">
+            {items.map((item) => (
+              <article className="info-record text-base" key={item.id}>
+                <strong>{item.status.replace(/^./u, (value) => value.toUpperCase())}</strong>
+                <p className="mt-2 break-all">{item.id} · version {item.version}</p>
+                <p className="mt-1">Effective {item.effectiveAt}</p>
+                {item.retiredAt ? <p className="mt-1">Retired {item.retiredAt}</p> : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+      <CommandForm action={createAction} title={`Create ${title} policy draft`}>
+        {fields}
+      </CommandForm>
+      {drafts.map((draft) => (
+        <CommandForm
+          key={draft.id}
+          action={activateAction}
+          title={drafts.length === 1
+            ? `Activate ${title} policy draft`
+            : `Activate ${title} policy draft · version ${draft.version}`}
+        >
+          <Hidden name="policyId" value={draft.id} />
+          <Hidden name="expectedVersion" value={String(draft.version)} />
+          <p className="info-record text-base">
+            Activation uses the exact database ID and version shown above. The server rechecks CAS,
+            policy shape, authority, rate limit, and audit insertion atomically.
+          </p>
+        </CommandForm>
+      ))}
+    </div>
+  );
+}
+
 export function ResourceCommandPanel({
   resource,
   snapshot,
   outcome,
 }: {
   resource: AdminResource;
-  snapshot: AdminReadSnapshot;
+  snapshot: AdminReadSnapshot | null;
   outcome?: CommerceCommandOutcome | undefined;
 }) {
+  if (snapshot === null) {
+    const actions = resource.actions ?? [];
+    const actionSummary = actions.length === 0
+      ? "Read only"
+      : actions
+          .map((action) => action.replaceAll("-", " ").replace(/^./u, (value) => value.toUpperCase()))
+          .join(" · ");
+    return (
+      <section className="record-card">
+        <h2 className="font-heading text-2xl">Growth administration boundary</h2>
+        <p className="mt-4 text-base font-semibold text-ink">{actionSummary}</p>
+        <p className="mt-3 text-base leading-7 text-muted-ink">
+          Database-backed records and commands are not available for this resource.
+        </p>
+      </section>
+    );
+  }
+
   if (resource.slug !== snapshot.resource) {
     return <EmptyCommand>The authoritative resource read-back did not match this route. Commands fail closed.</EmptyCommand>;
   }
 
   switch (snapshot.resource) {
+    case "loyalty-policies": {
+      const latest = snapshot.items.toSorted((left, right) => right.version - left.version)[0];
+      return (
+        <GrowthPolicyPanel
+          title="loyalty"
+          items={snapshot.items}
+          createAction={createLoyaltyPolicyDraftAction}
+          activateAction={activateLoyaltyPolicyAction}
+          fields={<>
+            <Field label="Effective time (UTC)" name="effectiveAt" defaultValue={datetimeInput(latest?.effectiveAt)} type="datetime-local" />
+            <Field label="Points earned per dollar" name="pointsPerDollar" defaultValue={latest?.pointsPerDollar} type="number" min={1} max={10_000} />
+            <Field label="Redemption minor units per point" name="redemptionMinorPerPoint" defaultValue={latest?.redemptionMinorPerPoint} type="number" min={1} max={10_000} />
+            <Field label="Minimum redemption points" name="minimumRedemptionPoints" defaultValue={latest?.minimumRedemptionPoints} type="number" min={1} max={1_000_000} />
+            <Field label="Maximum redemption basis points" name="maximumRedemptionBasisPoints" defaultValue={latest?.maximumRedemptionBasisPoints} type="number" min={1} max={10_000} />
+          </>}
+        />
+      );
+    }
+    case "referral-policies": {
+      const latest = snapshot.items.toSorted((left, right) => right.version - left.version)[0];
+      return (
+        <GrowthPolicyPanel
+          title="referral"
+          items={snapshot.items}
+          createAction={createReferralPolicyDraftAction}
+          activateAction={activateReferralPolicyAction}
+          fields={<>
+            <Field label="Effective time (UTC)" name="effectiveAt" defaultValue={datetimeInput(latest?.effectiveAt)} type="datetime-local" />
+            <Field label="Attribution window days" name="attributionDays" defaultValue={latest?.attributionDays} type="number" min={1} max={365} />
+            <Field label="Referred buyer discount basis points" name="referredDiscountBasisPoints" defaultValue={latest?.referredDiscountBasisPoints} type="number" min={1} max={10_000} />
+            <Field label="Referred buyer discount cap (minor units)" name="referredDiscountCapMinor" defaultValue={latest?.referredDiscountCapMinor} type="number" min={1} max={1_000_000_000} />
+            <Field label="Referrer points per dollar" name="referrerPointsPerDollar" defaultValue={latest?.referrerPointsPerDollar} type="number" min={1} max={10_000} />
+            <Field label="Referrer reward cap points" name="referrerRewardCapPoints" defaultValue={latest?.referrerRewardCapPoints} type="number" min={1} max={1_000_000_000} />
+          </>}
+        />
+      );
+    }
+    case "affiliate-policies": {
+      const latest = snapshot.items.toSorted((left, right) => right.version - left.version)[0];
+      return (
+        <GrowthPolicyPanel
+          title="affiliate"
+          items={snapshot.items}
+          createAction={createAffiliatePolicyDraftAction}
+          activateAction={activateAffiliatePolicyAction}
+          fields={<>
+            <Field label="Effective time (UTC)" name="effectiveAt" defaultValue={datetimeInput(latest?.effectiveAt)} type="datetime-local" />
+            <Field label="Attribution window days" name="attributionDays" defaultValue={latest?.attributionDays} type="number" min={1} max={365} />
+            <Field label="First-order commission basis points" name="firstOrderCommissionBasisPoints" defaultValue={latest?.firstOrderCommissionBasisPoints} type="number" min={1} max={10_000} />
+            <Field label="Reorder commission basis points" name="reorderCommissionBasisPoints" defaultValue={latest?.reorderCommissionBasisPoints} type="number" min={1} max={10_000} />
+            <Field label="Reorder window days" name="reorderWindowDays" defaultValue={latest?.reorderWindowDays} type="number" min={1} max={3_650} />
+            <Field label="Approval delay days" name="approvalDelayDays" defaultValue={latest?.approvalDelayDays} type="number" min={1} max={365} />
+            <Field label="Payout threshold (minor units)" name="payoutThresholdMinor" defaultValue={latest?.payoutThresholdMinor} type="number" min={1} max={1_000_000_000} />
+            <Field label="Currency" name="currency" defaultValue={latest?.currency} maxLength={3} />
+          </>}
+        />
+      );
+    }
+    case "reward-adjustments": {
+      if (snapshot.items.length === 0) {
+        return (
+          <section className="record-card">
+            <h2 className="font-heading text-2xl">Reward adjustments unavailable</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              No reward accounts are available in the authoritative database view. An adjustment
+              cannot be submitted until a real reward account exists.
+            </p>
+          </section>
+        );
+      }
+      const accountOptions = snapshot.items.map((item) => ({
+        value: item.rewardAccountId,
+        label: `${item.rewardAccountId} · Available ${item.availablePoints.toLocaleString("en-US")} · Pending ${item.pendingPoints.toLocaleString("en-US")}`,
+      }));
+      const commandToken = randomUUID();
+      return (
+        <CommandForm
+          action={adjustRewardBalanceAction}
+          title="Adjust reward balance"
+          submitLabel="Apply reward adjustment"
+        >
+          <Hidden name="commandToken" value={commandToken} />
+          <p className="info-record text-base leading-7">
+            Select an authoritative reward account. The server rechecks administrator authority,
+            MFA, rate limit, account state, duplicate protection, balance safety, and atomic audit storage.
+          </p>
+          <SelectField label="Reward account" name="rewardAccountId" options={accountOptions} />
+          <Field
+            label="Points adjustment"
+            name="delta"
+            type="number"
+            min={-10_000}
+            max={10_000}
+            step={1}
+          />
+          <p className="text-base leading-7 text-muted-ink">
+            Enter a signed nonzero integer from -10,000 to +10,000 points. Zero and fractional
+            values are rejected.
+          </p>
+          <SelectField
+            label="Adjustment reason"
+            name="reason"
+            options={[{ value: "account_correction", label: "Account correction" }]}
+            defaultValue="account_correction"
+          />
+          <TextArea
+            label="Private internal reason"
+            name="internalAuditReason"
+            minLength={1}
+            maxLength={240}
+          />
+          <p className="text-base leading-7 text-muted-ink">
+            Required, 1–240 characters. This private explanation is written only to the redacted
+            administrator audit record and is never copied into public reward ledger references.
+          </p>
+        </CommandForm>
+      );
+    }
+    case "referral-codes": {
+      const active = snapshot.items.filter((item) => item.status === "active");
+      if (snapshot.items.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">Referral code revocation unavailable</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              No referral code records are available in the authoritative database view. A
+              revocation cannot be submitted until an active code exists.
+            </p>
+          </section>
+        );
+      }
+      if (active.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">No active referral codes are available</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              The database records shown below are terminal history. Revoked codes remain
+              preserved and cannot be revoked again from this view.
+            </p>
+          </section>
+        );
+      }
+      return (
+        <div className="grid min-w-0 gap-6">
+          {active.map((item) => (
+            <CommandForm
+              key={item.referralCodeId}
+              action={revokeReferralCodeAction}
+              title={`Revoke referral code · ${item.code}`}
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.code}</strong>
+                <span className="mt-2 block">Referral code ID: {item.referralCodeId}</span>
+                <span className="mt-1 block">Created: {item.createdAt}</span>
+              </p>
+              <Hidden name="referralCodeId" value={item.referralCodeId} />
+              <Hidden name="expectedCreatedAt" value={item.createdAt} />
+              <p className="text-base leading-7 text-muted-ink">
+                Revocation is a soft active-to-revoked transition that preserves the public code
+                and its history. The server rechecks the immutable creation time, current state,
+                administrator authority, MFA, rate limit, and atomic audit before committing.
+              </p>
+            </CommandForm>
+          ))}
+        </div>
+      );
+    }
+    case "shared-sets": {
+      const active = snapshot.items.filter((item) => item.active);
+      if (snapshot.items.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">Shared set deactivation unavailable</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              No shared set records are available in the authoritative database view. A
+              deactivation cannot be submitted until an active set exists.
+            </p>
+          </section>
+        );
+      }
+      if (active.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">No active shared sets are available</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              The database records shown below are inactive history. Deactivated sets and their
+              items remain preserved and cannot be deactivated again from this view.
+            </p>
+          </section>
+        );
+      }
+      return (
+        <div className="grid min-w-0 gap-6">
+          {active.map((item) => (
+            <CommandForm
+              key={item.sharedSetId}
+              action={deactivateSharedSetAction}
+              title={`Deactivate shared set · ${item.label} · ${item.publicCode}`}
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.label}</strong>
+                <span className="mt-2 block">Public code: {item.publicCode}</span>
+                <span className="mt-1 block">Shared set ID: {item.sharedSetId}</span>
+                <span className="mt-1 block">Current version: {item.updatedAt}</span>
+              </p>
+              <Hidden name="sharedSetId" value={item.sharedSetId} />
+              <Hidden name="expectedUpdatedAt" value={item.updatedAt} />
+              <p className="text-base leading-7 text-muted-ink">
+                Deactivation is a soft active-to-inactive transition that preserves the set,
+                its public facts, and item history. The server rechecks the current version,
+                state, administrator authority, MFA, rate limit, and atomic audit before committing.
+              </p>
+            </CommandForm>
+          ))}
+        </div>
+      );
+    }
+    case "affiliate-applications": {
+      const pending = snapshot.items.filter((item) => item.status === "pending");
+      const active = snapshot.items.filter((item) => item.status === "active");
+      if (snapshot.items.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">Affiliate application decisions unavailable</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              No affiliate application records are available in the authoritative database view.
+              A decision cannot be submitted until an application exists.
+            </p>
+          </section>
+        );
+      }
+      if (pending.length === 0 && active.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">No pending or active affiliate applications are available</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              The records shown below are terminal decision history. Rejected and suspended
+              applications cannot be changed from this view.
+            </p>
+          </section>
+        );
+      }
+      return (
+        <div className="grid min-w-0 gap-6">
+          {pending.flatMap((item) => [
+            <CommandForm
+              key={`approve:${item.affiliateProfileId}`}
+              action={decideAffiliateApplicationAction}
+              title={`Approve affiliate application · ${item.publicCode}`}
+              submitLabel="Approve application"
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.publicCode}</strong>
+                <span className="mt-2 block">Public channel: {item.publicChannel}</span>
+                <span className="mt-1 block">Promotion method: {item.promotionMethod}</span>
+              </p>
+              <Hidden name="profileId" value={item.affiliateProfileId} />
+              <Hidden name="expectedVersion" value={String(item.version)} />
+              <Hidden name="decision" value="active" />
+              <p className="text-base leading-7 text-muted-ink">
+                Approval activates this public affiliate profile only after the server rechecks
+                current state, version, administrator authority, MFA, rate limit, and atomic audit.
+              </p>
+            </CommandForm>,
+            <CommandForm
+              key={`reject:${item.affiliateProfileId}`}
+              action={decideAffiliateApplicationAction}
+              title={`Reject affiliate application · ${item.publicCode}`}
+              submitLabel="Reject application permanently"
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.publicCode}</strong>
+                <span className="mt-2 block">Public channel: {item.publicChannel}</span>
+                <span className="mt-1 block">Promotion method: {item.promotionMethod}</span>
+              </p>
+              <Hidden name="profileId" value={item.affiliateProfileId} />
+              <Hidden name="expectedVersion" value={String(item.version)} />
+              <Hidden name="decision" value="rejected" />
+              <p className="text-base leading-7 text-muted-ink">
+                Rejection is a terminal pending-to-rejected decision. The server rechecks the
+                exact application version and stores one redacted audit record atomically.
+              </p>
+            </CommandForm>,
+          ])}
+          {active.map((item) => (
+            <CommandForm
+              key={`suspend:${item.affiliateProfileId}`}
+              action={suspendAffiliateApplicationAction}
+              title={`Suspend affiliate · ${item.publicCode}`}
+              submitLabel="Suspend affiliate"
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.publicCode}</strong>
+                <span className="mt-2 block">Public channel: {item.publicChannel}</span>
+                <span className="mt-1 block">Promotion method: {item.promotionMethod}</span>
+              </p>
+              <Hidden name="profileId" value={item.affiliateProfileId} />
+              <Hidden name="expectedVersion" value={String(item.version)} />
+              <p className="text-base leading-7 text-muted-ink">
+                Suspension preserves prior commissions and history while preventing future active
+                affiliate use. The server rechecks current state, version, authority, and audit.
+              </p>
+            </CommandForm>
+          ))}
+        </div>
+      );
+    }
+    case "referral-conversions":
+      return (
+        <ReadOnlyBoundary>
+          Referral conversion records are immutable, redacted settlement history. Qualification
+          and reversal are driven only by authoritative payment lifecycle events; no administrator
+          edit or manual value command is exposed.
+        </ReadOnlyBoundary>
+      );
+    case "commissions":
+      return (
+        <ReadOnlyBoundary>
+          Affiliate commissions are immutable, redacted earned-value history. Approval eligibility,
+          reversals, and payout membership are derived by server-side lifecycle transactions; no
+          administrator amount or status edit is exposed.
+        </ReadOnlyBoundary>
+      );
+    case "payouts": {
+      const pending = snapshot.items.filter((item) => item.state === "pending");
+      const knownProfileIds = snapshot.items.map((item) => item.affiliateProfileId);
+      const createCommandToken = randomUUID();
+      return (
+        <div className="grid min-w-0 gap-6">
+          <CommandForm
+            action={createAffiliatePayoutBatchAdminAction}
+            title="Create affiliate payout batch"
+            submitLabel="Create payout batch record"
+          >
+            <Hidden name="commandToken" value={createCommandToken} />
+            <p className="info-record text-base leading-7">
+              Enter an active affiliate profile ID from the applications view. The server selects
+              only currently eligible, approved, unpaid commissions and calculates the exact USD
+              amount. Browser-supplied amounts and commission membership are not accepted.
+            </p>
+            <Field
+              label="Affiliate profile ID"
+              name="profileId"
+              list="known-affiliate-payout-profiles"
+            />
+            <IdDatalist id="known-affiliate-payout-profiles" values={knownProfileIds} />
+          </CommandForm>
+          <p className="warning-record text-base leading-7">
+            These commands create a settlement record or record evidence of an externally completed
+            payment. This application does not transmit funds.
+          </p>
+          {pending.map((item) => (
+            <CommandForm
+              key={item.payoutId}
+              action={recordAffiliatePayoutPaidAdminAction}
+              title={`Record payout paid · ${item.payoutId}`}
+              submitLabel="Record external payment evidence"
+            >
+              <Hidden name="commandToken" value={randomUUID()} />
+              <Hidden name="payoutId" value={item.payoutId} />
+              <Hidden name="expectedVersion" value={String(item.version)} />
+              <Field label="Provider name" name="providerName" maxLength={120} />
+              <Field label="External reference" name="externalReference" maxLength={200} />
+              <p className="info-record text-base leading-7">
+                Submit only after an authorized operator has independently completed the payment.
+                This records bounded evidence with version checking and one atomic audit event; it
+                does not contact a bank or payment provider.
+              </p>
+            </CommandForm>
+          ))}
+          {snapshot.items.length > 0 && pending.length === 0 ? (
+            <p className="info-record text-base leading-7">
+              Existing payout records are terminal history. No paid or cancelled payout can be
+              changed from this view.
+            </p>
+          ) : null}
+        </div>
+      );
+    }
     case "products": {
       const draftOptions = snapshot.items.filter((item) => item.status === "draft").map((item) => ({
         value: versionedValue(item.id, item.updatedAt),

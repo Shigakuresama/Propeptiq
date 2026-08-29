@@ -36,9 +36,14 @@ export function CartView({
     removeItem,
     clearCart,
   } = useCart();
-  const [preview, setPreview] = useState<CartPreview | null>(null);
+  const cartKey = JSON.stringify(items);
+  const [previewState, setPreviewState] = useState<{
+    cartKey: string;
+    preview: CartPreview;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [previewReload, setPreviewReload] = useState(0);
   const [acknowledgedToken, setAcknowledgedToken] = useState<string | null>(null);
   const [handoffMessage, setHandoffMessage] = useState("");
   const previousPreviewToken = useRef<string | null>(null);
@@ -59,6 +64,7 @@ export function CartView({
       if (!controller.signal.aborted) {
         setLoading(true);
         setError(false);
+        setPreviewState((current) => current?.cartKey === cartKey ? current : null);
       }
     });
     void fetch("/api/catalog/preview", {
@@ -80,7 +86,7 @@ export function CartView({
         setAcknowledgedToken((current) =>
           current === nextPreview.previewToken ? current : null,
         );
-        setPreview(nextPreview);
+        setPreviewState({ cartKey, preview: nextPreview });
       })
       .catch((caught: unknown) => {
         if (caught instanceof DOMException && caught.name === "AbortError") return;
@@ -91,9 +97,13 @@ export function CartView({
       });
 
     return () => controller.abort();
-  }, [hydrated, items]);
+  }, [cartKey, hydrated, items, previewReload]);
 
-  const canContinue = preview
+  const preview = previewState?.cartKey === cartKey
+    ? previewState.preview
+    : null;
+
+  const canContinue = !loading && !error && preview
     ? canContinueFromPreview(preview, acknowledgedToken)
     : false;
   const displayedItems: readonly CartPreviewItem[] =
@@ -146,8 +156,16 @@ export function CartView({
         </div>
 
         {error ? (
-          <div className="error-record mt-6" role="alert">
-            The authoritative cart preview is unavailable. Retry before continuing.
+          <div className="error-record mt-6 text-base leading-7" role="alert">
+            <p>The authoritative cart preview is unavailable. Retry before continuing.</p>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-4 min-h-11"
+              onClick={() => setPreviewReload((current) => current + 1)}
+            >
+              Retry current cart facts
+            </Button>
           </div>
         ) : null}
         {loading ? (
@@ -163,15 +181,15 @@ export function CartView({
                   <div>
                     <p className="font-heading text-2xl text-ink">{label}</p>
                     {item.packageForm ? (
-                      <p className="mt-2 text-sm text-muted-ink">{item.packageForm}</p>
+                      <p className="mt-2 text-base text-muted-ink">{item.packageForm}</p>
                     ) : null}
                     {!loading && !item.available ? (
-                      <p className="mt-3 text-sm font-semibold text-danger">
+                      <p className="mt-3 text-base font-semibold text-danger">
                         This requested record or quantity is no longer available.
                       </p>
                     ) : null}
                     {item.unitAmountMinor !== null && item.currency ? (
-                      <p className="mt-3 text-sm tabular-nums text-ink">
+                      <p className="mt-3 text-base tabular-nums text-ink">
                         {formatMoney(item.unitAmountMinor, item.currency)} each
                       </p>
                     ) : null}
@@ -240,17 +258,28 @@ export function CartView({
       <aside className="cart-summary" aria-labelledby="cart-summary-heading">
         <p className="eyebrow">Server preview</p>
         <h2 id="cart-summary-heading" className="mt-3 font-heading text-3xl text-ink">
-          Merchandise subtotal
+          Order summary
         </h2>
-        <p className="mt-6 text-4xl font-semibold tabular-nums text-ink">
-          {preview?.currency
-            ? formatMoney(preview.subtotalMinor, preview.currency)
-            : "Unavailable"}
-        </p>
-        <dl className="mt-7 space-y-3 border-y border-border py-5 text-sm">
+        <dl className="mt-7 space-y-3 border-y border-border py-5 text-base">
           <div className="flex justify-between gap-5">
-            <dt>Final discount</dt>
+            <dt>Merchandise subtotal</dt>
+            <dd className="tabular-nums">
+              {preview?.currency
+                ? formatMoney(preview.subtotalMinor, preview.currency)
+                : "Unavailable"}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-5">
+            <dt>Promotion</dt>
             <dd>Calculated at checkout</dd>
+          </div>
+          <div className="flex justify-between gap-5">
+            <dt>Referral benefit</dt>
+            <dd>Available after checkout quote</dd>
+          </div>
+          <div className="flex justify-between gap-5">
+            <dt>Points redemption</dt>
+            <dd>Available after checkout quote</dd>
           </div>
           <div className="flex justify-between gap-5">
             <dt>Tax</dt>
@@ -260,12 +289,16 @@ export function CartView({
             <dt>Shipping</dt>
             <dd>Not yet calculated</dd>
           </div>
+          <div className="flex justify-between gap-5 border-t border-border pt-3 font-semibold">
+            <dt>Total</dt>
+            <dd>Available after checkout quote</dd>
+          </div>
         </dl>
 
         {preview?.requiresAcknowledgement ? (
           <div className="warning-record mt-6">
             <p className="font-semibold">Cart facts changed or became unavailable.</p>
-            <p className="mt-2 text-sm leading-6">
+            <p className="mt-2 text-base leading-7">
               Requested IDs and quantities were preserved. Review the server facts before continuing.
             </p>
             {preview.items.every((item) => item.available) ? (
@@ -282,12 +315,12 @@ export function CartView({
         ) : null}
 
         {checkoutIntent ? (
-          <p className="info-record mt-6">
+          <p className="info-record mt-6 text-base leading-7">
             Your saved request is ready to continue at checkout.
           </p>
         ) : null}
         {handoffMessage ? (
-          <p className="info-record mt-6" role="status">
+          <p className="info-record mt-6 text-base leading-7" role="status">
             {handoffMessage}
           </p>
         ) : null}
@@ -300,8 +333,8 @@ export function CartView({
         >
           Continue to sign in
         </Button>
-        <p className="mt-4 text-xs leading-5 text-muted-ink">
-          Account verification continues at checkout. Destination, tax, shipping, final discount, and payment remain unavailable until the next commerce step.
+        <p className="mt-4 text-base leading-7 text-muted-ink">
+          Account verification continues at checkout. Destination, promotion, referral benefit, points redemption, tax, shipping, total, and payment remain unavailable until the next commerce step.
         </p>
         <Link className="record-link mt-6 inline-block" href="/catalog">
           Continue shopping

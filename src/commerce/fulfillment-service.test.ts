@@ -119,6 +119,9 @@ describe("fulfillment command orchestration", () => {
       executionContext: authority(true),
       repository: repo,
       authorize: authorize(),
+      rewardsLifecycle: {
+        reconcileDeliveredOrder: vi.fn(async () => ({ status: "idempotent" as const })),
+      },
     };
     await expect(clearFulfillmentHold(base)).resolves.toEqual({ status: "cleared" });
     await expect(markShipmentDelivered(base)).resolves.toEqual({ status: "delivered" });
@@ -140,5 +143,33 @@ describe("fulfillment command orchestration", () => {
       now,
       correlationId: "fulfillment-command-6f",
     });
+  });
+
+  it.each(["delivered", "already_delivered"] as const)(
+    "reconciles pending rewards after a %s repository result",
+    async (status) => {
+      const repo = repository();
+      repo.transitionShipment.mockResolvedValueOnce({ status });
+      const reconcile = vi.fn(async () => ({ status: "applied" as const }));
+      await expect(markShipmentDelivered({
+        ...common(),
+        executionContext: authority(true),
+        repository: repo,
+        authorize: authorize(),
+        rewardsLifecycle: { reconcileDeliveredOrder: reconcile },
+      })).resolves.toEqual({ status });
+      expect(reconcile).toHaveBeenCalledWith({ orderId, now });
+    },
+  );
+
+  it("does not report delivery success when reward reconciliation is omitted", async () => {
+    const repo = repository();
+    await expect(markShipmentDelivered({
+      ...common(),
+      executionContext: authority(true),
+      repository: repo,
+      authorize: authorize(),
+    })).resolves.toEqual({ status: "conflict" });
+    expect(repo.transitionShipment).toHaveBeenCalledTimes(1);
   });
 });
