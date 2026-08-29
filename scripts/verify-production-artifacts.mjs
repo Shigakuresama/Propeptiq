@@ -32,9 +32,31 @@ const markerGroups = Object.freeze([
       /Synthetic Reference (?:Alpha|Beta) — Demo Only/gu,
     ],
   },
+  {
+    label: "local growth policy bundle",
+    patterns: [
+      /LOCAL_GROWTH_POLICY_BUNDLE_TEST_ONLY_PROPEPTIQ_2PPD_1MPP_500MIN_2500MAX_30D_1000BP_2500CAP_5PPD_2500PTS_1000BP_500BP_180D_30D_5000USD_4F8C21/gu,
+    ],
+  },
+  {
+    label: "local growth identity",
+    patterns: [/6b000000-0000-4000-8000-0000000000(?:21|22|23|31|32|33)/gu],
+  },
+  {
+    label: "synthetic growth code",
+    patterns: [
+      /aff_LocalRuntimePartner01/gu,
+      /ref_LocalRuntimeReferrer01/gu,
+      /set_LocalRuntimeResearch01/gu,
+    ],
+  },
+  {
+    label: "fixture-only growth financial state",
+    patterns: [/pi_local_synthetic_staff_refund/gu],
+  },
 ]);
 
-const localModulePattern = /(?:src[\\/]+auth[\\/]+local-driver\.ts|src_auth_local-driver_ts|src[\\/]+catalog[\\/]+demo-fixtures\.ts|src_catalog_demo-fixtures_ts|src[\\/]+commerce[\\/]+local-payment-provider\.ts|src_commerce_local-payment-provider_ts|src[\\/]+commerce[\\/]+local-commerce-harness-routes\.ts|src_commerce_local-commerce-harness-routes_ts)/gu;
+const localModulePattern = /(?:src[\\/]+auth[\\/]+local-driver\.ts|src_auth_local-driver_ts|src[\\/]+auth[\\/]+local-commerce-driver\.ts|src_auth_local-commerce-driver_ts|src[\\/]+catalog[\\/]+demo-fixtures\.ts|src_catalog_demo-fixtures_ts|src[\\/]+commerce[\\/]+local-payment-provider\.ts|src_commerce_local-payment-provider_ts|src[\\/]+commerce[\\/]+local-commerce-harness-routes\.ts|src_commerce_local-commerce-harness-routes_ts)/gu;
 const deployableDirectoryNames = new Set(["server", "standalone", "static"]);
 const deployableRootFilePattern = /\.(?:json|[cm]?js|map)$/iu;
 

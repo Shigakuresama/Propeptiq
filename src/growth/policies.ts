@@ -7,6 +7,7 @@ import {
   type GrowthProgramStatus,
   type LoyaltyPolicy,
 } from "@/domain/rewards";
+import { scanPublicCopy } from "@/domain/content-policy";
 
 export type GrowthPolicySqlClient = Readonly<{
   query: <Row extends object>(
@@ -261,6 +262,13 @@ export async function loadCurrentGrowthTerms(
   }
   const computedHash = createHash("sha256").update(row.termsText, "utf8").digest("hex");
   if (computedHash !== row.contentHash) throw new Error("Growth terms hash mismatch");
+  const publicCopy = scanPublicCopy(
+    { text: row.termsText, claims: [] },
+    { version: "growth-terms-publication-v1", activeLotEvidenceIds: [] },
+  );
+  if (!publicCopy.publishable) {
+    throw new Error("Growth terms violate public content policy");
+  }
   return deepFreeze({
     id: row.id,
     program: row.program,

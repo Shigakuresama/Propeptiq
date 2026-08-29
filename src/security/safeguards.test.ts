@@ -49,6 +49,20 @@ describe("mutation safeguards", () => {
     ).not.toThrow();
   });
 
+  it.each(["preview", "production"] as const)(
+    "fails %s mutations closed when APP_ORIGIN is not configured",
+    (APP_ENV) => {
+      const request = new Request("https://research.example.test/api/admin", {
+        method: "POST",
+        headers: { origin: "https://research.example.test" },
+      });
+
+      expect(() => assertMutationOrigin(request, { APP_ENV })).toThrow(
+        /APP_ORIGIN|origin/i,
+      );
+    },
+  );
+
   it("accepts the local Next development URL canonicalization only with the exact trusted Host and Origin", () => {
     const environment = { APP_ENV: "local" as const, APP_ORIGIN: "http://127.0.0.1:4631" };
     const canonicalized = new Request("http://localhost:4631/api/checkout/quote", {
@@ -108,6 +122,26 @@ describe("mutation safeguards", () => {
       }),
     ).resolves.toMatchObject({ allowed: true, remaining: 1 });
   });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    "fails closed when the rate-limit store returns malformed count %s",
+    async (count) => {
+      const store: RateLimitStore = { increment: async () => count };
+      await expect(
+        consumeFixedWindowLimit({
+          store,
+          scope: createRateLimitScope(
+            "actor-raw-identity",
+            "growth.lookup",
+            "rate-limit-secret-at-least-32-characters",
+          ),
+          limit: 2,
+          windowMs: 60_000,
+          now: new Date("2026-08-25T12:00:00.000Z"),
+        }),
+      ).rejects.toThrow(/counter|count/i);
+    },
+  );
 
   it.each([
     ["disabled", { exists: true, sha256: "a".repeat(64) }],

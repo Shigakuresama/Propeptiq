@@ -223,7 +223,6 @@ describe("affiliate payout service", () => {
       "affiliate:payout",
       profileId,
       payoutDraft.idempotencyKey,
-      correlationId,
     ])).digest("hex");
     const sqlClient: GrowthSqlClient = Object.freeze({
       query: async <Row extends object>(sql: string) => {

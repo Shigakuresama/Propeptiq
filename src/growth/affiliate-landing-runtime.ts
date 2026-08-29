@@ -5,12 +5,14 @@ import {
   connectRuntimeDatabaseSession,
   type RuntimeDatabaseClient,
 } from "@/db/runtime";
+import { createPostgresRateLimitStore } from "@/db/repositories/rate-limit-store";
 import { readServerEnv } from "@/env";
 import {
   createAffiliateAttributionCandidate,
   type AffiliateAttributionCandidate,
 } from "@/growth/affiliate-service";
 import type { AttributionEnvironment } from "@/growth/attribution-cookie";
+import { createRateLimitedAttributionLandingLookup } from "@/growth/landing-rate-limit";
 
 const boundedOpaqueCodePattern = /^aff_[A-Za-z0-9_-]{16,64}$/u;
 
@@ -101,7 +103,12 @@ export async function createAffiliateLandingRuntime(): Promise<
     async lookup(input) {
       const session = await connectRuntimeDatabaseSession(environment);
       try {
-        return await createAffiliateLandingLookup(session)(input);
+        return await createRateLimitedAttributionLandingLookup({
+          program: "affiliate",
+          lookup: createAffiliateLandingLookup(session),
+          rateLimitStore: createPostgresRateLimitStore(session),
+          secret: environment.RATE_LIMIT_SECRET,
+        })(input);
       } finally {
         session.release();
       }

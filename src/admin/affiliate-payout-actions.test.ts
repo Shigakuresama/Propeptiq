@@ -27,6 +27,8 @@ const profileId = "8f400000-0000-4000-8000-000000000002";
 const payoutId = "8f400000-0000-4000-8000-000000000003";
 const policyId = "8f400000-0000-4000-8000-000000000004";
 const commissionId = "8f400000-0000-4000-8000-000000000005";
+const createCommandToken = "8f400000-0000-4000-8000-000000000006";
+const paidCommandToken = "8f400000-0000-4000-8000-000000000007";
 
 type PayoutAction = (formData: FormData) => Promise<never>;
 
@@ -159,10 +161,10 @@ describe("Task 8 affiliate payout server actions", () => {
 
   afterEach(() => vi.useRealTimers());
 
-  it("accepts only a profile for server-selected batching and server-owned identifiers", async () => {
+  it("accepts only a rendered command token and profile for server-selected batching", async () => {
     const store = harness();
     install(store);
-    await expectResult(actions().create(form({ profileId })), "saved");
+    await expectResult(actions().create(form({ commandToken: createCommandToken, profileId })), "saved");
 
     const input = store.read().createInputs[0] as Record<string, unknown>;
     expect(input).toMatchObject({
@@ -170,21 +172,18 @@ describe("Task 8 affiliate payout server actions", () => {
       actorClerkUserId: "clerk-task8-payout-action-admin",
       requiredCapability: "affiliate:payout",
       profileId,
+      payoutId: createCommandToken,
+      idempotencyKey: `affiliate-payout-create:${createCommandToken}`,
       correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
       createdAt: now,
     });
-    expect(input.payoutId).toEqual(expect.stringMatching(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
-    ));
-    expect(input.idempotencyKey).toEqual(expect.stringMatching(
-      /^affiliate-payout-create:[0-9a-f-]{36}$/u,
-    ));
   });
 
   it("accepts only expected-version and bounded external evidence for paid recording", async () => {
     const store = harness();
     install(store);
     await expectResult(actions().paid(form({
+      commandToken: paidCommandToken,
       payoutId,
       expectedVersion: "1",
       providerName: "Offline ACH operator",
@@ -197,7 +196,7 @@ describe("Task 8 affiliate payout server actions", () => {
       requiredCapability: "affiliate:payout",
       payoutId,
       expectedVersion: 1,
-      idempotencyKey: expect.stringMatching(/^affiliate-payout-paid:[0-9a-f-]{36}$/u),
+      idempotencyKey: `affiliate-payout-paid:${paidCommandToken}`,
       providerName: "Offline ACH operator",
       externalReference: "ach-confirmation-0001",
       correlationId: expect.stringMatching(/^[0-9a-f-]{36}$/u),
@@ -205,14 +204,56 @@ describe("Task 8 affiliate payout server actions", () => {
     });
   });
 
+  it("reuses the rendered command token for exact payout retries", async () => {
+    const store = harness();
+    install(store);
+    const commandToken = "8f400000-0000-4000-8000-000000000099";
+    const createForm = form({ commandToken, profileId });
+    await expectResult(actions().create(createForm), "saved");
+    await expectResult(actions().create(createForm), "saved");
+
+    const paidForm = form({
+      commandToken,
+      payoutId,
+      expectedVersion: "1",
+      providerName: "Offline ACH operator",
+      externalReference: "ach-confirmation-0001",
+    });
+    await expectResult(actions().paid(paidForm), "saved");
+    await expectResult(actions().paid(paidForm), "saved");
+
+    const { createInputs, paidInputs } = store.read();
+    expect(createInputs).toHaveLength(2);
+    expect(paidInputs).toHaveLength(2);
+    expect(createInputs[0]).toMatchObject({
+      payoutId: commandToken,
+      idempotencyKey: `affiliate-payout-create:${commandToken}`,
+    });
+    expect(createInputs[1]).toMatchObject({
+      payoutId: commandToken,
+      idempotencyKey: `affiliate-payout-create:${commandToken}`,
+      profileId,
+    });
+    expect(paidInputs[0]).toMatchObject({
+      idempotencyKey: `affiliate-payout-paid:${commandToken}`,
+    });
+    expect(paidInputs[1]).toMatchObject({
+      payoutId,
+      expectedVersion: 1,
+      idempotencyKey: `affiliate-payout-paid:${commandToken}`,
+      providerName: "Offline ACH operator",
+      externalReference: "ach-confirmation-0001",
+    });
+  });
+
   it.each([
-    ["browser amount", () => actions().create(form({ profileId, amountMinor: "5000" }))],
-    ["browser idempotency", () => actions().create(form({ profileId, idempotencyKey: "chosen" }))],
-    ["missing profile", () => actions().create(form({}))],
-    ["non-v4 profile", () => actions().create(form({ profileId: profileId.replace("-4000-", "-1000-") }))],
-    ["coercible version", () => actions().paid(form({ payoutId, expectedVersion: "1e0", providerName: "ACH", externalReference: "ref" }))],
-    ["unsafe version", () => actions().paid(form({ payoutId, expectedVersion: "9007199254740992", providerName: "ACH", externalReference: "ref" }))],
-    ["external command field", () => actions().paid(form({ payoutId, expectedVersion: "1", providerName: "ACH", externalReference: "ref", sendMoney: "yes" }))],
+    ["browser amount", () => actions().create(form({ commandToken: createCommandToken, profileId, amountMinor: "5000" }))],
+    ["browser idempotency", () => actions().create(form({ commandToken: createCommandToken, profileId, idempotencyKey: "chosen" }))],
+    ["missing profile", () => actions().create(form({ commandToken: createCommandToken }))],
+    ["non-v4 profile", () => actions().create(form({ commandToken: createCommandToken, profileId: profileId.replace("-4000-", "-1000-") }))],
+    ["coercible version", () => actions().paid(form({ commandToken: paidCommandToken, payoutId, expectedVersion: "1e0", providerName: "ACH", externalReference: "ref" }))],
+    ["unsafe version", () => actions().paid(form({ commandToken: paidCommandToken, payoutId, expectedVersion: "9007199254740992", providerName: "ACH", externalReference: "ref" }))],
+    ["external command field", () => actions().paid(form({ commandToken: paidCommandToken, payoutId, expectedVersion: "1", providerName: "ACH", externalReference: "ref", sendMoney: "yes" }))],
   ])("rejects %s before identity, limiter, or transaction", async (_label, invoke) => {
     await expectResult(invoke(), "denied");
     expect(mocks.getRequestIdentity).not.toHaveBeenCalled();
@@ -222,7 +263,7 @@ describe("Task 8 affiliate payout server actions", () => {
     const wrongOrigin = harness();
     install(wrongOrigin);
     mocks.headers.mockResolvedValue(new Headers({ origin: "https://attacker.example" }));
-    await expectResult(actions().create(form({ profileId })), "denied");
+    await expectResult(actions().create(form({ commandToken: createCommandToken, profileId })), "denied");
 
     for (const supplied of [
       { ...request(), identity: { ...request().identity, secondFactorCompleted: false } },
@@ -232,7 +273,7 @@ describe("Task 8 affiliate payout server actions", () => {
       const denied = harness();
       install(denied, supplied);
       mocks.headers.mockResolvedValue(new Headers({ origin: "https://admin.example.test" }));
-      await expectResult(actions().create(form({ profileId })), "denied");
+      await expectResult(actions().create(form({ commandToken: createCommandToken, profileId })), "denied");
       expect(denied.read()).toMatchObject({ limiterCalls: 0, createInputs: [] });
     }
   });
@@ -240,21 +281,21 @@ describe("Task 8 affiliate payout server actions", () => {
   it("reports local unavailability, rate limit, stale version, and threshold honestly", async () => {
     const local = harness({ error: "Affiliate payout mutation is unavailable in local mode" });
     install(local, request({ localDriver: {} }));
-    await expectResult(actions().create(form({ profileId })), "unavailable");
+    await expectResult(actions().create(form({ commandToken: createCommandToken, profileId })), "unavailable");
 
     const limited = harness({ rateCount: 31 });
     install(limited);
-    await expectResult(actions().create(form({ profileId })), "rate-limited");
+    await expectResult(actions().create(form({ commandToken: createCommandToken, profileId })), "rate-limited");
     expect(limited.read()).toMatchObject({ limiterCalls: 1, createInputs: [] });
 
     const stale = harness({ error: "version_conflict" });
     install(stale);
     await expectResult(actions().paid(form({
-      payoutId, expectedVersion: "1", providerName: "ACH", externalReference: "ref",
+      commandToken: paidCommandToken, payoutId, expectedVersion: "1", providerName: "ACH", externalReference: "ref",
     })), "stale");
 
     const threshold = harness({ error: "threshold_not_met" });
     install(threshold);
-    await expectResult(actions().create(form({ profileId })), "unavailable");
+    await expectResult(actions().create(form({ commandToken: createCommandToken, profileId })), "unavailable");
   });
 });

@@ -483,7 +483,6 @@ async function createPayoutWithPostgresClient(
     input.requiredCapability,
     input.profileId,
     input.idempotencyKey,
-    input.correlationId,
   ]);
   const existing = await client.query<AffiliatePayoutSqlRow>(
     `SELECT ${affiliatePayoutSqlProjection} FROM affiliate_payouts
@@ -738,8 +737,6 @@ async function markPayoutPaidWithPostgresClient(
     input.idempotencyKey,
     input.providerName,
     input.externalReference,
-    input.correlationId,
-    input.paidAt.toISOString(),
   ]);
   const loaded = await client.query<AffiliatePayoutSqlRow>(
     `SELECT ${affiliatePayoutSqlProjection} FROM affiliate_payouts

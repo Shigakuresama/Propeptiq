@@ -38,6 +38,11 @@ describe("public rewards terms page", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Rewards terms" })).toBeVisible();
     expect(screen.getByText(/Server-projected rewards terms/)).toBeVisible();
     expect(screen.getByText("Version 8")).toBeVisible();
+    expect(screen.getByText("Effective August 27, 2026 (UTC)")).toBeVisible();
+    expect(screen.getByText(/Effective August 27/)).toHaveAttribute(
+      "datetime",
+      "2026-08-27T00:00:00.000Z",
+    );
   });
 
   it("fails closed when current terms are unavailable", async () => {

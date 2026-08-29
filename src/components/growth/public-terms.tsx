@@ -4,6 +4,13 @@ import Link from "next/link";
 import { PageIntro } from "@/components/site/page-intro";
 import type { CurrentGrowthTerms } from "@/growth/policies";
 
+function formatEffectiveDate(value: string): string {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "long",
+    timeZone: "UTC",
+  }).format(new Date(value));
+}
+
 export function PublicTermsRecord({
   backHref,
   backLabel,
@@ -27,6 +34,12 @@ export function PublicTermsRecord({
       {terms ? (
         <article className="record-sheet max-w-[76ch] p-6 sm:p-9">
           <p className="eyebrow">Version {terms.version}</p>
+          <time
+            className="mt-3 block text-base leading-7 text-muted-ink"
+            dateTime={terms.effectiveAt}
+          >
+            Effective {formatEffectiveDate(terms.effectiveAt)} (UTC)
+          </time>
           <p className="mt-6 whitespace-pre-wrap text-base leading-8 text-ink">
             {terms.termsText}
           </p>

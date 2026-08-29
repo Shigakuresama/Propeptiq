@@ -223,6 +223,7 @@ describe("affiliate payout transactions on PGlite", () => {
     const first = await create(createInput());
     const replay = await create(createInput({
       payoutId: "6c100000-0000-4000-8000-000000000099",
+      correlationId: "task-6c-create-payout-response-loss-retry",
       createdAt: new Date("2026-08-28T19:05:00.000Z"),
     }));
 
@@ -277,7 +278,6 @@ describe("affiliate payout transactions on PGlite", () => {
     await create(createInput());
     for (const conflicting of [
       createInput({ profileId: "6c100000-0000-4000-8000-000000000098" }),
-      createInput({ correlationId: "task-6c-create-payout-different-correlation" }),
     ]) {
       await expect(create(conflicting)).rejects.toMatchObject({ code: "idempotency_conflict" });
     }
@@ -436,7 +436,11 @@ describe("affiliate payout transactions on PGlite", () => {
     await expect(markPaid({ ...paidInput, expectedVersion: 2 }))
       .rejects.toMatchObject({ code: "version_conflict" });
     const first = await markPaid(paidInput);
-    const replay = await markPaid(paidInput);
+    const replay = await markPaid({
+      ...paidInput,
+      correlationId: "task-6c-record-paid-response-loss-retry",
+      paidAt: new Date("2026-08-28T20:05:00.000Z"),
+    });
     expect(first.status).toBe("applied");
     expect(first.payout).toMatchObject({ state: "paid", version: 2,
       providerName: "ACH operator", externalReference: "bank-confirmation-6c-001",
@@ -472,8 +476,6 @@ describe("affiliate payout transactions on PGlite", () => {
       { ...paidInput, expectedVersion: 2 },
       { ...paidInput, providerName: "Different offline operator" },
       { ...paidInput, externalReference: "different-bank-reference" },
-      { ...paidInput, correlationId: "task-6c-record-paid-different-correlation" },
-      { ...paidInput, paidAt: new Date("2026-08-28T20:00:01.000Z") },
     ]) {
       await expect(markPaid(conflicting)).rejects.toMatchObject({ code: "idempotency_conflict" });
     }

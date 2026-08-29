@@ -53,6 +53,9 @@ export async function consumeFixedWindowLimit(input: Readonly<{
     windowStart: new Date(windowStart),
     expiresAt,
   });
+  if (!Number.isSafeInteger(count) || count < 1) {
+    throw new Error("Rate-limit counter is invalid");
+  }
   return Object.freeze({
     allowed: count <= input.limit,
     remaining: Math.max(0, input.limit - count),

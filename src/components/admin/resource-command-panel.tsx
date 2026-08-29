@@ -726,6 +726,7 @@ export function ResourceCommandPanel({
     case "payouts": {
       const pending = snapshot.items.filter((item) => item.state === "pending");
       const knownProfileIds = snapshot.items.map((item) => item.affiliateProfileId);
+      const createCommandToken = randomUUID();
       return (
         <div className="grid min-w-0 gap-6">
           <CommandForm
@@ -733,6 +734,7 @@ export function ResourceCommandPanel({
             title="Create affiliate payout batch"
             submitLabel="Create payout batch record"
           >
+            <Hidden name="commandToken" value={createCommandToken} />
             <p className="info-record text-base leading-7">
               Enter an active affiliate profile ID from the applications view. The server selects
               only currently eligible, approved, unpaid commissions and calculates the exact USD
@@ -756,6 +758,7 @@ export function ResourceCommandPanel({
               title={`Record payout paid · ${item.payoutId}`}
               submitLabel="Record external payment evidence"
             >
+              <Hidden name="commandToken" value={randomUUID()} />
               <Hidden name="payoutId" value={item.payoutId} />
               <Hidden name="expectedVersion" value={String(item.version)} />
               <Field label="Provider name" name="providerName" maxLength={120} />

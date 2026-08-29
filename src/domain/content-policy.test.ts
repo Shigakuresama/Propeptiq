@@ -50,6 +50,33 @@ describe("scanPublicCopy", () => {
     ).toMatchObject({ publishable: true, status: "pass" });
   });
 
+  it.each([
+    "Earn points on eligible merchandise.",
+    "Share your referral link.",
+    "Payout processing remains outside this dashboard.",
+    "Only the current effective terms record is shown here.",
+    "Analytical reference set",
+  ])("allows neutral growth copy: %s", (text) => {
+    expect(scanPublicCopy(candidate({ text }), policy)).toMatchObject({
+      publishable: true,
+      status: "pass",
+    });
+  });
+
+  it.each([
+    "Hurry — only 2 left.",
+    "Join 10,000 researchers who already chose us.",
+    "Was $999, now $49.",
+    "Better than every competing peptide supplier.",
+    "Customer testimonial: it changed my life.",
+  ])("blocks unsupported commercial positioning: %s", (text) => {
+    const result = scanPublicCopy(candidate({ text }), policy);
+    expect(result.publishable).toBe(false);
+    expect(result.violations).toContainEqual(
+      expect.objectContaining({ code: "unsupported_claim" }),
+    );
+  });
+
   it("allows an analytical claim backed by active matching lot evidence", () => {
     expect(
       scanPublicCopy(

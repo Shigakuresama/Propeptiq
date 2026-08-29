@@ -5,11 +5,13 @@ import {
   connectRuntimeDatabaseSession,
   type RuntimeDatabaseClient,
 } from "@/db/runtime";
+import { createPostgresRateLimitStore } from "@/db/repositories/rate-limit-store";
 import { readServerEnv } from "@/env";
 import type {
   AttributionEnvironment,
   AttributionProgram,
 } from "@/growth/attribution-cookie";
+import { createRateLimitedAttributionLandingLookup } from "@/growth/landing-rate-limit";
 
 const boundedOpaqueCodePattern = /^ref_[A-Za-z0-9_-]{16,64}$/u;
 
@@ -112,7 +114,12 @@ export async function createReferralLandingRuntime(): Promise<
     async lookup(input) {
       const session = await connectRuntimeDatabaseSession(environment);
       try {
-        return await createReferralLandingLookup(session)(input);
+        return await createRateLimitedAttributionLandingLookup({
+          program: "customer_referral",
+          lookup: createReferralLandingLookup(session),
+          rateLimitStore: createPostgresRateLimitStore(session),
+          secret: environment.RATE_LIMIT_SECRET,
+        })(input);
       } finally {
         session.release();
       }

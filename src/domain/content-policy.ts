@@ -133,7 +133,7 @@ const prohibitedPatterns: readonly Readonly<{
   {
     code: "unsupported_claim",
     pattern:
-      /\b(?:guaranteed|clinically proven|best in class|highest purity|safe and effective)\b/,
+      /\b(?:guaranteed|clinically proven|best in class|highest purity|safe and effective|hurry|act now|while supplies last|selling fast|only \d{1,6} left|join \d+(?: \d+)* (?:researchers?|customers?|laborator(?:y|ies)|labs?)|was \d+(?: \d+)* now \d+(?: \d+)*|compare at \d+|better than (?:every|any|other)|customer testimonial|researcher testimonial)\b/,
   },
 ]);
 
@@ -177,7 +177,7 @@ const prohibitedCompactPatterns: readonly Readonly<{
   {
     code: "unsupported_claim",
     pattern:
-      /(?:guaranteed|clinicallyproven|bestinclass|highestpurity|safeandeffective)/,
+      /(?:guaranteed|clinicallyproven|bestinclass|highestpurity|safeandeffective|hurry|actnow|whilesupplieslast|sellingfast|only\d{1,6}left|join\d+(?:researcher|customer|laboratory|lab)|was\d+now\d+|compareat\d+|betterthan(?:every|any|other)|customertestimonial|researchertestimonial)/,
   },
 ]);
 

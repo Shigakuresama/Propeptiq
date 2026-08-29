@@ -38,6 +38,9 @@ const LOCAL_REFERRAL_CODE = "ref_LocalRuntimeReferrer01";
 const LOCAL_REFERRAL_CODE_ID = "6b000000-0000-4000-8000-000000000031";
 const LOCAL_REFERRER_USER_ID = "6b000000-0000-4000-8000-000000000032";
 const LOCAL_REFERRAL_POLICY_ID = "6b000000-0000-4000-8000-000000000033";
+const LOCAL_SHARED_SET_CODE = "set_LocalRuntimeResearch01";
+const LOCAL_GROWTH_POLICY_BUNDLE_SENTINEL =
+  "LOCAL_GROWTH_POLICY_BUNDLE_TEST_ONLY_PROPEPTIQ_2PPD_1MPP_500MIN_2500MAX_30D_1000BP_2500CAP_5PPD_2500PTS_1000BP_500BP_180D_30D_5000USD_4F8C21";
 
 type SharedFacts = Readonly<{
   loadProfile: (userId: string) => BuyerProfileRecord | null;
@@ -84,6 +87,7 @@ type CommandOrder = {
 };
 
 type CommerceState = {
+  artifactSentinels: readonly string[];
   revision: number;
   attempts: Map<string, AttemptRecord>;
   orders: Map<string, OrderRecord>;
@@ -103,6 +107,10 @@ type CommerceState = {
 
 function initialState(): CommerceState {
   return {
+    artifactSentinels: Object.freeze([
+      LOCAL_GROWTH_POLICY_BUNDLE_SENTINEL,
+      LOCAL_SHARED_SET_CODE,
+    ]),
     revision: 0,
     attempts: new Map(),
     orders: new Map(),

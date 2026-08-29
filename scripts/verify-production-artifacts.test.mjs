@@ -241,6 +241,45 @@ test("detects the synthetic local payment provider sentinel and module names", (
   );
 });
 
+test("detects every exact local growth fixture category without echoing its values", (t) => {
+  const workspace = createWorkspace(t);
+  const artifactRoot = join(workspace, "closed-production-output");
+  const policyBundle = "LOCAL_GROWTH_POLICY_BUNDLE_TEST_ONLY_PROPEPTIQ_2PPD_1MPP_500MIN_2500MAX_30D_1000BP_2500CAP_5PPD_2500PTS_1000BP_500BP_180D_30D_5000USD_4F8C21";
+  const growthIds = [
+    "6b000000-0000-4000-8000-000000000021",
+    "6b000000-0000-4000-8000-000000000033",
+  ];
+  const codes = [
+    "aff_LocalRuntimePartner01",
+    "ref_LocalRuntimeReferrer01",
+    "set_LocalRuntimeResearch01",
+  ];
+  const financialState = "pi_local_synthetic_staff_refund";
+
+  writeArtifact(artifactRoot, "server/growth-policy.js", policyBundle);
+  writeArtifact(artifactRoot, "server/growth-identities.js", growthIds.join("\n"));
+  writeArtifact(artifactRoot, "static/growth-codes.js", codes.join("\n"));
+  writeArtifact(artifactRoot, "server/growth-financial.js", financialState);
+  writeArtifact(
+    artifactRoot,
+    "server/chunks/src_auth_local-commerce-driver_ts_84e1.js",
+    "(()=>{})();",
+  );
+
+  const result = runScanner({ cwd: workspace, artifactRoot });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1, output);
+  assert.match(result.stderr, /local growth policy bundle: 1 match in 1 file/u);
+  assert.match(result.stderr, /local growth identity: 2 matches in 1 file/u);
+  assert.match(result.stderr, /synthetic growth code: 3 matches in 1 file/u);
+  assert.match(result.stderr, /fixture-only growth financial state: 1 match in 1 file/u);
+  assert.match(result.stderr, /local implementation module: 1 match in 1 file/u);
+  for (const forbiddenValue of [policyBundle, ...growthIds, ...codes, financialState]) {
+    assert.equal(output.includes(forbiddenValue), false);
+  }
+});
+
 test("detects an active synthetic hosted checkout page and action path", (t) => {
   const workspace = createWorkspace(t);
   const artifactRoot = join(workspace, "closed-production-output");
@@ -262,7 +301,7 @@ test("detects an active synthetic hosted checkout page and action path", (t) => 
   assert.equal(output.includes("/__synthetic_local_checkout/session/complete"), false);
 });
 
-test("configures the local payment provider alias for Turbopack and Webpack", () => {
+test("configures every local driver alias for Turbopack and Webpack", () => {
   const config = readFileSync(
     fileURLToPath(new URL("../next.config.ts", import.meta.url)),
     "utf8",
@@ -278,6 +317,18 @@ test("configures the local payment provider alias for Turbopack and Webpack", ()
   assert.match(
     config,
     /localPaymentProviderModule = includeLocalTestDriver[\s\S]*local-payment-provider\.ts[\s\S]*local-payment-provider-disabled\.ts/u,
+  );
+  assert.match(
+    config,
+    /"local-auth-driver": localTestDriverModule/u,
+  );
+  assert.match(
+    config,
+    /config\.resolve\.alias\["local-auth-driver\$"\][\s\S]*localTestDriverModule/u,
+  );
+  assert.match(
+    config,
+    /localTestDriverModule = includeLocalTestDriver[\s\S]*local-driver\.ts[\s\S]*local-driver-disabled\.ts/u,
   );
   assert.match(
     config,

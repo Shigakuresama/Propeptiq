@@ -993,7 +993,8 @@ export async function createAffiliatePayoutBatchAdminAction(
   formData: FormData,
 ): Promise<never> {
   return run("payouts", async () => {
-    exactFormFields(formData, ["profileId"]);
+    exactFormFields(formData, ["commandToken", "profileId"]);
+    const commandToken = canonicalV4Uuid(formData, "commandToken");
     const profileId = canonicalV4Uuid(formData, "profileId");
     const admin = await trustedGrowthAdmin("payouts");
     await createAffiliatePayoutBatch(
@@ -1001,8 +1002,8 @@ export async function createAffiliatePayoutBatchAdminAction(
       admin.context,
       {
         profileId,
-        payoutId: randomUUID(),
-        idempotencyKey: `affiliate-payout-create:${randomUUID()}`,
+        payoutId: commandToken,
+        idempotencyKey: `affiliate-payout-create:${commandToken}`,
       },
     );
   });
@@ -1013,11 +1014,13 @@ export async function recordAffiliatePayoutPaidAdminAction(
 ): Promise<never> {
   return run("payouts", async () => {
     exactFormFields(formData, [
+      "commandToken",
       "payoutId",
       "expectedVersion",
       "providerName",
       "externalReference",
     ]);
+    const commandToken = canonicalV4Uuid(formData, "commandToken");
     const payoutId = canonicalV4Uuid(formData, "payoutId");
     const expectedVersion = canonicalInteger(formData, "expectedVersion");
     if (expectedVersion < 1) throw new Error("Affiliate payout version is invalid");
@@ -1028,7 +1031,7 @@ export async function recordAffiliatePayoutPaidAdminAction(
       {
         payoutId,
         expectedVersion,
-        idempotencyKey: `affiliate-payout-paid:${randomUUID()}`,
+        idempotencyKey: `affiliate-payout-paid:${commandToken}`,
         providerName: value(formData, "providerName"),
         externalReference: value(formData, "externalReference"),
       },

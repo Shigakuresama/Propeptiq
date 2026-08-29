@@ -38,6 +38,11 @@ describe("public partner terms page", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Partner terms" })).toBeVisible();
     expect(screen.getByText("Server-projected partner terms.")).toBeVisible();
     expect(screen.getByText("Version 5")).toBeVisible();
+    expect(screen.getByText("Effective August 27, 2026 (UTC)")).toBeVisible();
+    expect(screen.getByText(/Effective August 27/)).toHaveAttribute(
+      "datetime",
+      "2026-08-27T00:00:00.000Z",
+    );
   });
 
   it("fails closed when current terms are unavailable", async () => {

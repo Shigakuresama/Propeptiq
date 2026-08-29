@@ -168,9 +168,14 @@ describe("Task 8 growth settlement administration presentation", () => {
     const create = screen.getByRole("form", { name: "Create affiliate payout batch" });
     const paid = screen.getByRole("form", { name: `Record payout paid · ${pendingPayoutId}` });
     expect([...create.querySelectorAll<HTMLInputElement>("input[name]")].map(({ name }) => name))
-      .toEqual(["profileId"]);
+      .toEqual(["commandToken", "profileId"]);
     expect([...paid.querySelectorAll<HTMLInputElement>("input[name]")].map(({ name }) => name))
-      .toEqual(["payoutId", "expectedVersion", "providerName", "externalReference"]);
+      .toEqual(["commandToken", "payoutId", "expectedVersion", "providerName", "externalReference"]);
+    for (const payoutForm of [create, paid]) {
+      expect(payoutForm.querySelector<HTMLInputElement>('[name="commandToken"]')?.value).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+      );
+    }
     expect(within(create).getByLabelText(/affiliate profile id/i)).toHaveAttribute(
       "list",
       "known-affiliate-payout-profiles",
