@@ -1,11 +1,17 @@
 import type { ReactNode } from "react";
 
 import {
+  activateAffiliatePolicyAction,
+  activateLoyaltyPolicyAction,
   activateProductAction,
   activatePromotionAction,
+  activateReferralPolicyAction,
   changeBuyerStatusAction,
   changeStaffCapabilityAction,
   clearFulfillmentHoldAction,
+  createAffiliatePolicyDraftAction,
+  createLoyaltyPolicyDraftAction,
+  createReferralPolicyDraftAction,
   decideReviewAction,
   handoffFulfillmentAction,
   markShipmentDeliveredAction,
@@ -282,6 +288,70 @@ function promotionConfigFields(configuration?: SafePromotionConfiguration) {
   );
 }
 
+type GrowthPolicyLifecycleItem = Readonly<{
+  id: string;
+  version: number;
+  status: "draft" | "active" | "retired";
+  effectiveAt: string;
+  retiredAt: string | null;
+}>;
+
+function GrowthPolicyPanel({
+  title,
+  items,
+  createAction,
+  activateAction,
+  fields,
+}: {
+  title: "loyalty" | "referral" | "affiliate";
+  items: readonly GrowthPolicyLifecycleItem[];
+  createAction: (formData: FormData) => Promise<never>;
+  activateAction: (formData: FormData) => Promise<never>;
+  fields: ReactNode;
+}) {
+  const drafts = items.filter((item) => item.status === "draft");
+  return (
+    <div className="grid gap-6">
+      {items.length === 0 ? (
+        <p className="info-record text-base">Inactive — no database policy records exist.</p>
+      ) : (
+        <section className="record-card" aria-label={`${title} policy lifecycle`}>
+          <h2 className="font-heading text-2xl">Database policy lifecycle</h2>
+          <div className="mt-5 grid gap-4">
+            {items.map((item) => (
+              <article className="info-record text-base" key={item.id}>
+                <strong>{item.status.replace(/^./u, (value) => value.toUpperCase())}</strong>
+                <p className="mt-2 break-all">{item.id} · version {item.version}</p>
+                <p className="mt-1">Effective {item.effectiveAt}</p>
+                {item.retiredAt ? <p className="mt-1">Retired {item.retiredAt}</p> : null}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+      <CommandForm action={createAction} title={`Create ${title} policy draft`}>
+        {fields}
+      </CommandForm>
+      {drafts.map((draft) => (
+        <CommandForm
+          key={draft.id}
+          action={activateAction}
+          title={drafts.length === 1
+            ? `Activate ${title} policy draft`
+            : `Activate ${title} policy draft · version ${draft.version}`}
+        >
+          <Hidden name="policyId" value={draft.id} />
+          <Hidden name="expectedVersion" value={String(draft.version)} />
+          <p className="info-record text-base">
+            Activation uses the exact database ID and version shown above. The server rechecks CAS,
+            policy shape, authority, rate limit, and audit insertion atomically.
+          </p>
+        </CommandForm>
+      ))}
+    </div>
+  );
+}
+
 export function ResourceCommandPanel({
   resource,
   snapshot,
@@ -314,6 +384,65 @@ export function ResourceCommandPanel({
   }
 
   switch (snapshot.resource) {
+    case "loyalty-policies": {
+      const latest = snapshot.items.toSorted((left, right) => right.version - left.version)[0];
+      return (
+        <GrowthPolicyPanel
+          title="loyalty"
+          items={snapshot.items}
+          createAction={createLoyaltyPolicyDraftAction}
+          activateAction={activateLoyaltyPolicyAction}
+          fields={<>
+            <Field label="Effective time (ISO 8601 UTC)" name="effectiveAt" defaultValue={latest?.effectiveAt} maxLength={35} />
+            <Field label="Points earned per dollar" name="pointsPerDollar" defaultValue={latest?.pointsPerDollar} type="number" min={1} max={10_000} />
+            <Field label="Redemption minor units per point" name="redemptionMinorPerPoint" defaultValue={latest?.redemptionMinorPerPoint} type="number" min={1} max={10_000} />
+            <Field label="Minimum redemption points" name="minimumRedemptionPoints" defaultValue={latest?.minimumRedemptionPoints} type="number" min={1} max={1_000_000} />
+            <Field label="Maximum redemption basis points" name="maximumRedemptionBasisPoints" defaultValue={latest?.maximumRedemptionBasisPoints} type="number" min={1} max={10_000} />
+            <Field label="Expiry days (blank means no expiry)" name="expiresAfterDays" defaultValue={latest?.expiresAfterDays} required={false} type="number" min={1} max={3_650} />
+          </>}
+        />
+      );
+    }
+    case "referral-policies": {
+      const latest = snapshot.items.toSorted((left, right) => right.version - left.version)[0];
+      return (
+        <GrowthPolicyPanel
+          title="referral"
+          items={snapshot.items}
+          createAction={createReferralPolicyDraftAction}
+          activateAction={activateReferralPolicyAction}
+          fields={<>
+            <Field label="Effective time (ISO 8601 UTC)" name="effectiveAt" defaultValue={latest?.effectiveAt} maxLength={35} />
+            <Field label="Attribution window days" name="attributionDays" defaultValue={latest?.attributionDays} type="number" min={1} max={365} />
+            <Field label="Referred buyer discount basis points" name="referredDiscountBasisPoints" defaultValue={latest?.referredDiscountBasisPoints} type="number" min={1} max={10_000} />
+            <Field label="Referred buyer discount cap (minor units)" name="referredDiscountCapMinor" defaultValue={latest?.referredDiscountCapMinor} type="number" min={1} max={1_000_000_000} />
+            <Field label="Referrer points per dollar" name="referrerPointsPerDollar" defaultValue={latest?.referrerPointsPerDollar} type="number" min={1} max={10_000} />
+            <Field label="Referrer reward cap points" name="referrerRewardCapPoints" defaultValue={latest?.referrerRewardCapPoints} type="number" min={1} max={1_000_000_000} />
+          </>}
+        />
+      );
+    }
+    case "affiliate-policies": {
+      const latest = snapshot.items.toSorted((left, right) => right.version - left.version)[0];
+      return (
+        <GrowthPolicyPanel
+          title="affiliate"
+          items={snapshot.items}
+          createAction={createAffiliatePolicyDraftAction}
+          activateAction={activateAffiliatePolicyAction}
+          fields={<>
+            <Field label="Effective time (ISO 8601 UTC)" name="effectiveAt" defaultValue={latest?.effectiveAt} maxLength={35} />
+            <Field label="Attribution window days" name="attributionDays" defaultValue={latest?.attributionDays} type="number" min={1} max={365} />
+            <Field label="First-order commission basis points" name="firstOrderCommissionBasisPoints" defaultValue={latest?.firstOrderCommissionBasisPoints} type="number" min={1} max={10_000} />
+            <Field label="Reorder commission basis points" name="reorderCommissionBasisPoints" defaultValue={latest?.reorderCommissionBasisPoints} type="number" min={1} max={10_000} />
+            <Field label="Reorder window days" name="reorderWindowDays" defaultValue={latest?.reorderWindowDays} type="number" min={1} max={3_650} />
+            <Field label="Approval delay days" name="approvalDelayDays" defaultValue={latest?.approvalDelayDays} type="number" min={1} max={365} />
+            <Field label="Payout threshold (minor units)" name="payoutThresholdMinor" defaultValue={latest?.payoutThresholdMinor} type="number" min={1} max={1_000_000_000} />
+            <Field label="Currency" name="currency" defaultValue={latest?.currency} maxLength={3} />
+          </>}
+        />
+      );
+    }
     case "products": {
       const draftOptions = snapshot.items.filter((item) => item.status === "draft").map((item) => ({
         value: versionedValue(item.id, item.updatedAt),

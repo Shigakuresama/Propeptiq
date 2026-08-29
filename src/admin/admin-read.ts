@@ -15,6 +15,9 @@ export const ADMIN_READ_RESOURCE_REQUIREMENTS = Object.freeze({
   shipments: "fulfillment:release:consume",
   staff: "staff:manage",
   audit: "staff:manage",
+  "loyalty-policies": "growth:manage",
+  "referral-policies": "growth:manage",
+  "affiliate-policies": "growth:manage",
 } as const);
 
 export type AdminReadResource = keyof typeof ADMIN_READ_RESOURCE_REQUIREMENTS;
@@ -273,6 +276,40 @@ type AuditItem = {
   occurredAt: string;
 };
 
+type GrowthPolicyLifecycleItem = {
+  id: string;
+  version: number;
+  status: "draft" | "active" | "retired";
+  effectiveAt: string;
+  retiredAt: string | null;
+};
+
+type LoyaltyPolicyItem = GrowthPolicyLifecycleItem & {
+  pointsPerDollar: number;
+  redemptionMinorPerPoint: number;
+  minimumRedemptionPoints: number;
+  maximumRedemptionBasisPoints: number;
+  expiresAfterDays: null;
+};
+
+type ReferralPolicyItem = GrowthPolicyLifecycleItem & {
+  attributionDays: number;
+  referredDiscountBasisPoints: number;
+  referredDiscountCapMinor: number;
+  referrerPointsPerDollar: number;
+  referrerRewardCapPoints: number;
+};
+
+type AffiliatePolicyItem = GrowthPolicyLifecycleItem & {
+  attributionDays: number;
+  firstOrderCommissionBasisPoints: number;
+  reorderCommissionBasisPoints: number;
+  reorderWindowDays: number;
+  approvalDelayDays: number;
+  payoutThresholdMinor: number;
+  currency: "USD";
+};
+
 export type AdminReadSnapshot =
   | Snapshot<"products", ProductItem>
   | Snapshot<"prices", PriceItem>
@@ -289,7 +326,10 @@ export type AdminReadSnapshot =
   | Snapshot<"refunds", RefundItem>
   | Snapshot<"shipments", ShipmentItem>
   | Snapshot<"staff", StaffItem>
-  | Snapshot<"audit", AuditItem>;
+  | Snapshot<"audit", AuditItem>
+  | Snapshot<"loyalty-policies", LoyaltyPolicyItem>
+  | Snapshot<"referral-policies", ReferralPolicyItem>
+  | Snapshot<"affiliate-policies", AffiliatePolicyItem>;
 
 export type AdminReadSnapshotFor<Resource extends AdminReadResource> = Extract<
   AdminReadSnapshot,

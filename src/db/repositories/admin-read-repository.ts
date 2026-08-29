@@ -7,6 +7,9 @@ import {
   type SafePromotionConfiguration,
 } from "@/admin/admin-read";
 import { isVerifiedIdentityAt, type VerifiedIdentity } from "@/auth/identity";
+import { parseAffiliatePolicy } from "@/domain/affiliates";
+import { parseReferralPolicy } from "@/domain/referrals";
+import { parseLoyaltyPolicy } from "@/domain/rewards";
 
 export type AdminReadSqlClient = Readonly<{
   query: <Row extends object>(
@@ -166,6 +169,24 @@ function promotionTargets(raw: unknown): readonly Readonly<{
       return Object.freeze({ kind: candidate.kind, id: candidate.id });
     }),
   );
+}
+
+type GrowthLifecycleRow = {
+  id: string;
+  version: number | string;
+  status: "draft" | "active" | "superseded";
+  effectiveAt: Date | string;
+  retiredAt: Date | string | null;
+};
+
+function growthLifecycle(row: GrowthLifecycleRow) {
+  return {
+    id: row.id,
+    version: safeInteger(row.version),
+    status: row.status === "superseded" ? "retired" as const : row.status,
+    effectiveAt: toIso(row.effectiveAt),
+    retiredAt: nullableIso(row.retiredAt),
+  };
 }
 
 async function assertPersistedAuthority(
@@ -552,6 +573,143 @@ async function loadSnapshot(
         }),
       );
       return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "promotions" }>;
+    }
+    case "loyalty-policies": {
+      const result = await boundedRows<GrowthLifecycleRow & {
+        pointsPerDollar: number | string;
+        redemptionMinorPerPoint: number | string;
+        minimumRedemptionPoints: number | string;
+        maximumRedemptionBasisPoints: number | string;
+        expiresAfterDays: number | string | null;
+      }, SnapshotItem<"loyalty-policies">>(
+        client,
+        `
+          SELECT id::text AS id, version, status,
+                 effective_at AS "effectiveAt", superseded_at AS "retiredAt",
+                 points_per_dollar AS "pointsPerDollar",
+                 redemption_minor_per_point AS "redemptionMinorPerPoint",
+                 minimum_redemption_points AS "minimumRedemptionPoints",
+                 maximum_redemption_basis_points AS "maximumRedemptionBasisPoints",
+                 expires_after_days AS "expiresAfterDays"
+          FROM loyalty_policies
+          ORDER BY version DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const lifecycle = growthLifecycle(row);
+          const economics = {
+            pointsPerDollar: safeInteger(row.pointsPerDollar),
+            redemptionMinorPerPoint: safeInteger(row.redemptionMinorPerPoint),
+            minimumRedemptionPoints: safeInteger(row.minimumRedemptionPoints),
+            maximumRedemptionBasisPoints: safeInteger(row.maximumRedemptionBasisPoints),
+            expiresAfterDays: row.expiresAfterDays,
+          };
+          const parsed = parseLoyaltyPolicy({
+            id: lifecycle.id,
+            version: lifecycle.version,
+            status: lifecycle.status,
+            effectiveAt: lifecycle.effectiveAt,
+            ...economics,
+            supersededAt: lifecycle.retiredAt,
+          });
+          if (!parsed.ok) throw new Error("Invalid loyalty policy admin projection");
+          return { ...lifecycle, ...economics, expiresAfterDays: null };
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "loyalty-policies" }>;
+    }
+    case "referral-policies": {
+      const result = await boundedRows<GrowthLifecycleRow & {
+        attributionDays: number | string;
+        referredDiscountBasisPoints: number | string;
+        referredDiscountCapMinor: number | string;
+        referrerPointsPerDollar: number | string;
+        referrerRewardCapPoints: number | string;
+      }, SnapshotItem<"referral-policies">>(
+        client,
+        `
+          SELECT id::text AS id, version, status,
+                 effective_at AS "effectiveAt", superseded_at AS "retiredAt",
+                 attribution_days AS "attributionDays",
+                 referred_discount_basis_points AS "referredDiscountBasisPoints",
+                 referred_discount_cap_minor AS "referredDiscountCapMinor",
+                 referrer_points_per_dollar AS "referrerPointsPerDollar",
+                 referrer_reward_cap_points AS "referrerRewardCapPoints"
+          FROM referral_policies
+          ORDER BY version DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const lifecycle = growthLifecycle(row);
+          const economics = {
+            attributionDays: safeInteger(row.attributionDays),
+            referredDiscountBasisPoints: safeInteger(row.referredDiscountBasisPoints),
+            referredDiscountCapMinor: safeInteger(row.referredDiscountCapMinor),
+            referrerPointsPerDollar: safeInteger(row.referrerPointsPerDollar),
+            referrerRewardCapPoints: safeInteger(row.referrerRewardCapPoints),
+          };
+          const parsed = parseReferralPolicy({
+            id: lifecycle.id,
+            version: lifecycle.version,
+            status: lifecycle.status,
+            effectiveAt: lifecycle.effectiveAt,
+            ...economics,
+            supersededAt: lifecycle.retiredAt,
+          });
+          if (!parsed.ok) throw new Error("Invalid referral policy admin projection");
+          return { ...lifecycle, ...economics };
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "referral-policies" }>;
+    }
+    case "affiliate-policies": {
+      const result = await boundedRows<GrowthLifecycleRow & {
+        attributionDays: number | string;
+        firstOrderCommissionBasisPoints: number | string;
+        reorderCommissionBasisPoints: number | string;
+        reorderWindowDays: number | string;
+        approvalDelayDays: number | string;
+        payoutThresholdMinor: number | string;
+        currency: string;
+      }, SnapshotItem<"affiliate-policies">>(
+        client,
+        `
+          SELECT id::text AS id, version, status,
+                 effective_at AS "effectiveAt", superseded_at AS "retiredAt",
+                 attribution_days AS "attributionDays",
+                 first_order_commission_basis_points AS "firstOrderCommissionBasisPoints",
+                 reorder_commission_basis_points AS "reorderCommissionBasisPoints",
+                 reorder_window_days AS "reorderWindowDays",
+                 approval_delay_days AS "approvalDelayDays",
+                 payout_threshold_minor AS "payoutThresholdMinor", currency
+          FROM affiliate_policies
+          ORDER BY version DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const lifecycle = growthLifecycle(row);
+          const economics = {
+            attributionDays: safeInteger(row.attributionDays),
+            firstOrderCommissionBasisPoints: safeInteger(row.firstOrderCommissionBasisPoints),
+            reorderCommissionBasisPoints: safeInteger(row.reorderCommissionBasisPoints),
+            reorderWindowDays: safeInteger(row.reorderWindowDays),
+            approvalDelayDays: safeInteger(row.approvalDelayDays),
+            payoutThresholdMinor: safeInteger(row.payoutThresholdMinor),
+            currency: row.currency,
+          };
+          const parsed = parseAffiliatePolicy({
+            id: lifecycle.id,
+            version: lifecycle.version,
+            status: lifecycle.status,
+            effectiveAt: lifecycle.effectiveAt,
+            ...economics,
+            supersededAt: lifecycle.retiredAt,
+          });
+          if (!parsed.ok) throw new Error("Invalid affiliate policy admin projection");
+          return { ...lifecycle, ...economics, currency: "USD" };
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "affiliate-policies" }>;
     }
     case "buyers": {
       const result = await boundedRows<{
