@@ -309,8 +309,8 @@ describe("growth policy and repository boundary", () => {
     expect(rows.rows).toEqual([{ pending: 250, available: 0, ledgerCount: 1 }]);
   });
 
-  it("accepts an exact 64-character reward ledger source type", async () => {
-    const sourceType = "s".repeat(64);
+  it("accepts an exact 64-code-point astral reward ledger source type", async () => {
+    const sourceType = "🧬".repeat(64);
 
     await expect(growthRepository(client).appendRewardLedger(
       ledgerInput({ sourceType }),
@@ -320,9 +320,9 @@ describe("growth policy and repository boundary", () => {
     });
   });
 
-  it("rejects a 65-character reward ledger source type before issuing SQL", async () => {
+  it("rejects a 65-code-point astral reward ledger source type before issuing SQL", async () => {
     await expect(growthRepository(client, /./u).appendRewardLedger(
-      ledgerInput({ sourceType: "s".repeat(65) }),
+      ledgerInput({ sourceType: "🧬".repeat(65) }),
     )).rejects.toBeInstanceOf(GrowthPersistenceConflict);
     const rows = await client.query<{ accounts: number; ledger: number }>(`
       SELECT (SELECT count(*)::int FROM reward_accounts) AS accounts,

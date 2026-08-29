@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 
 import { runSerializableWithRetry } from "@/db/serializable-retry";
-import { REWARD_LEDGER_SOURCE_TYPE_MAX_LENGTH } from "@/domain/rewards";
+import {
+  countRewardLedgerSourceTypeCodePoints,
+  REWARD_LEDGER_SOURCE_TYPE_MAX_LENGTH,
+} from "@/domain/rewards";
 
 export type GrowthSqlClient = Readonly<{
   query: <Row extends object>(
@@ -310,7 +313,8 @@ function nonblank(value: string): boolean {
 }
 
 function boundedRewardLedgerSourceType(value: string): boolean {
-  return nonblank(value) && value.length <= REWARD_LEDGER_SOURCE_TYPE_MAX_LENGTH;
+  return nonblank(value) &&
+    countRewardLedgerSourceTypeCodePoints(value) <= REWARD_LEDGER_SOURCE_TYPE_MAX_LENGTH;
 }
 
 function boundedOpaqueIdempotencyKey(value: string): boolean {
