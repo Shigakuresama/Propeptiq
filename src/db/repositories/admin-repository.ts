@@ -1,8 +1,13 @@
+import {
+  MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1,
+  MANUAL_REWARD_ADJUSTMENT_REASONS_V1,
+} from "@/admin/admin-service";
 import type {
   AdminRepository,
   AdminTransaction,
   GrowthPolicyKind,
   GrowthPolicyValues,
+  ManualRewardAdjustmentReasonV1,
   PromotionRecord,
 } from "@/admin/admin-service";
 import type { ProductPublicationFacts } from "@/admin/admin-policy";
@@ -47,6 +52,102 @@ function requireSafeDatabaseInteger(value: number | string | null, field: string
   const integer = asSafeInteger(value);
   if (integer === null) throw new Error(`Database ${field} is missing`);
   return integer;
+}
+
+type RewardAdjustmentAccountRow = {
+  id: string;
+  buyerUserId: string;
+  pendingPoints: number | string;
+  availablePoints: number | string;
+};
+
+type RewardAdjustmentLedgerRow = {
+  id: string;
+  rewardAccountId: string;
+  buyerUserId: string;
+  kind: string;
+  sourceType: string;
+  sourceId: string;
+  idempotencyKey: string;
+  pendingPointsDelta: number | string;
+  availablePointsDelta: number | string;
+  pendingPointsBalanceAfter: number | string;
+  availablePointsBalanceAfter: number | string;
+};
+
+const rewardAdjustmentUuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const rewardAdjustmentFingerprintPattern = /^[0-9a-f]{64}$/u;
+const rewardAdjustmentLedgerProjection = `id::text AS id,
+  reward_account_id::text AS "rewardAccountId",
+  buyer_user_id::text AS "buyerUserId", kind,
+  source_type AS "sourceType", source_id AS "sourceId",
+  idempotency_key AS "idempotencyKey",
+  pending_points_delta AS "pendingPointsDelta",
+  available_points_delta AS "availablePointsDelta",
+  pending_points_balance_after AS "pendingPointsBalanceAfter",
+  available_points_balance_after AS "availablePointsBalanceAfter"`;
+
+function validateRewardAdjustmentPortInput(input: Parameters<
+  NonNullable<AdminTransaction["adjustRewardBalance"]>
+>[0]): void {
+  if (
+    !rewardAdjustmentUuidPattern.test(input.entryId) ||
+    !rewardAdjustmentUuidPattern.test(input.rewardAccountId) ||
+    !Number.isSafeInteger(input.delta) ||
+    input.delta === 0 ||
+    Math.abs(input.delta) > MANUAL_REWARD_ADJUSTMENT_MAX_ABS_POINTS_V1 ||
+    !MANUAL_REWARD_ADJUSTMENT_REASONS_V1.includes(input.reason) ||
+    input.idempotencyKey.trim() !== input.idempotencyKey ||
+    input.idempotencyKey.length < 16 ||
+    input.idempotencyKey.length > 200 ||
+    /[\u0000-\u001f\u007f]/u.test(input.idempotencyKey) ||
+    !rewardAdjustmentFingerprintPattern.test(input.fingerprint) ||
+    !Number.isFinite(input.occurredAt.getTime())
+  ) {
+    throw new Error("Reward adjustment persistence input is invalid");
+  }
+}
+
+function projectRewardAdjustmentLedger(
+  row: RewardAdjustmentLedgerRow,
+  reason: ManualRewardAdjustmentReasonV1,
+) {
+  return {
+    status: "applied" as const,
+    entryId: row.id,
+    rewardAccountId: row.rewardAccountId,
+    delta: requireSafeDatabaseInteger(row.availablePointsDelta, "reward adjustment delta"),
+    reason,
+    availablePointsBalanceAfter: requireSafeDatabaseInteger(
+      row.availablePointsBalanceAfter,
+      "reward adjustment balance",
+    ),
+  };
+}
+
+function assertExactRewardAdjustmentReplay(
+  row: RewardAdjustmentLedgerRow,
+  account: RewardAdjustmentAccountRow,
+  input: Parameters<NonNullable<AdminTransaction["adjustRewardBalance"]>>[0],
+): void {
+  if (
+    row.id !== input.entryId ||
+    row.rewardAccountId !== input.rewardAccountId ||
+    row.buyerUserId !== account.buyerUserId ||
+    row.kind !== "admin_adjustment" ||
+    row.sourceType !== "admin_adjustment" ||
+    row.sourceId !== input.fingerprint ||
+    row.idempotencyKey !== input.idempotencyKey ||
+    requireSafeDatabaseInteger(row.pendingPointsDelta, "reward adjustment pending delta") !== 0 ||
+    requireSafeDatabaseInteger(row.availablePointsDelta, "reward adjustment delta") !== input.delta ||
+    requireSafeDatabaseInteger(
+      row.pendingPointsBalanceAfter,
+      "reward adjustment pending balance",
+    ) !== requireSafeDatabaseInteger(account.pendingPoints, "reward account pending balance")
+  ) {
+    throw new Error("Reward adjustment idempotency fingerprint conflict");
+  }
 }
 
 type GrowthPolicyRow = {
@@ -379,6 +480,102 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
       if (result.rows[0]?.authorized !== true) {
         throw new Error(`Persisted ${input.capability} capability is required`);
       }
+    },
+
+    async adjustRewardBalance(input) {
+      validateRewardAdjustmentPortInput(input);
+      const accounts = await client.query<RewardAdjustmentAccountRow>(
+        `SELECT id::text AS id, buyer_user_id::text AS "buyerUserId",
+                pending_points AS "pendingPoints", available_points AS "availablePoints"
+         FROM reward_accounts WHERE id = $1::uuid FOR UPDATE`,
+        [input.rewardAccountId],
+      );
+      if (accounts.rows.length !== 1 || accounts.rows[0]?.id !== input.rewardAccountId) {
+        throw new Error("Reward account is missing or unavailable");
+      }
+      const account = accounts.rows[0];
+      const prior = await client.query<RewardAdjustmentLedgerRow>(
+        `SELECT ${rewardAdjustmentLedgerProjection}
+         FROM reward_ledger_entries WHERE idempotency_key = $1 FOR UPDATE`,
+        [input.idempotencyKey],
+      );
+      if (prior.rows.length > 1) throw new Error("Reward adjustment idempotency conflict");
+      if (prior.rows[0]) {
+        assertExactRewardAdjustmentReplay(prior.rows[0], account, input);
+        return {
+          ...projectRewardAdjustmentLedger(prior.rows[0], input.reason),
+          status: "idempotent",
+        };
+      }
+
+      const pendingBefore = requireSafeDatabaseInteger(
+        account.pendingPoints,
+        "reward account pending balance",
+      );
+      const availableBefore = requireSafeDatabaseInteger(
+        account.availablePoints,
+        "reward account available balance",
+      );
+      const availableAfter = availableBefore + input.delta;
+      if (!Number.isSafeInteger(availableAfter)) {
+        throw new Error("Reward account balance overflow is unsafe");
+      }
+      const inserted = await client.query<RewardAdjustmentLedgerRow>(
+        `INSERT INTO reward_ledger_entries
+           (id, reward_account_id, buyer_user_id, kind, source_type, source_id,
+            idempotency_key, pending_points_delta, available_points_delta,
+            pending_points_balance_after, available_points_balance_after, occurred_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, 'admin_adjustment',
+                 'admin_adjustment', $4, $5, 0, $6, $7, $8, $9::timestamptz)
+         ON CONFLICT DO NOTHING
+         RETURNING ${rewardAdjustmentLedgerProjection}`,
+        [
+          input.entryId,
+          input.rewardAccountId,
+          account.buyerUserId,
+          input.fingerprint,
+          input.idempotencyKey,
+          input.delta,
+          pendingBefore,
+          availableAfter,
+          input.occurredAt.toISOString(),
+        ],
+      );
+      const insertedRow = inserted.rows[0];
+      if (inserted.rows.length !== 1 || !insertedRow) {
+        const collision = await client.query<RewardAdjustmentLedgerRow>(
+          `SELECT ${rewardAdjustmentLedgerProjection}
+           FROM reward_ledger_entries WHERE idempotency_key = $1 FOR UPDATE`,
+          [input.idempotencyKey],
+        );
+        if (collision.rows.length === 1 && collision.rows[0]) {
+          assertExactRewardAdjustmentReplay(collision.rows[0], account, input);
+          return {
+            ...projectRewardAdjustmentLedger(collision.rows[0], input.reason),
+            status: "idempotent",
+          };
+        }
+        throw new Error("Reward adjustment idempotency or fingerprint conflict");
+      }
+      const updated = await client.query<{ id: string }>(
+        `UPDATE reward_accounts
+         SET available_points = $3, updated_at = $4::timestamptz
+         WHERE id = $1::uuid AND buyer_user_id = $2::uuid
+           AND pending_points = $5 AND available_points = $6
+         RETURNING id::text AS id`,
+        [
+          input.rewardAccountId,
+          account.buyerUserId,
+          availableAfter,
+          input.occurredAt.toISOString(),
+          pendingBefore,
+          availableBefore,
+        ],
+      );
+      if (updated.rows.length !== 1 || updated.rows[0]?.id !== input.rewardAccountId) {
+        throw new Error("Stale reward account balance conflict");
+      }
+      return projectRewardAdjustmentLedger(insertedRow, input.reason);
     },
 
     async createGrowthPolicyDraft(input) {
