@@ -18,6 +18,7 @@ const userId = "8c1b0000-0000-4000-8000-000000000001";
 const accountId = "8c1b0000-0000-4000-8000-000000000002";
 const entryId = "8c1b0000-0000-4000-8000-000000000003";
 const missingAccountId = "8c1b0000-0000-4000-8000-000000000004";
+const unrelatedEntryId = "8c1b0000-0000-4000-8000-000000000005";
 
 function context(correlationId: string): AdminCommandContext {
   return {
@@ -150,7 +151,7 @@ describe("Task 8C1A1 reward adjustment admin persistence", () => {
       availablePoints: 1_250,
       kind: "admin_adjustment",
       sourceType: "admin_adjustment",
-      idempotencyKey: "task-8c1a1-pglite-adjustment-0001",
+      idempotencyKey: "admin_adjustment:task-8c1a1-pglite-adjustment-0001",
       availablePointsDelta: 250,
       availablePointsBalanceAfter: 1_250,
       audits: 1,
@@ -182,6 +183,60 @@ describe("Task 8C1A1 reward adjustment admin persistence", () => {
       command({ internalAuditReason: "A different internal explanation." }),
     )).rejects.toThrow(/idempotency|fingerprint|conflict/i);
     expect(await persistedState()).toEqual([{ balance: 1_250, ledger: 1, audits: 1 }]);
+  });
+
+  it("isolates adjustment idempotency from an unrelated ledger flow using the same raw key", async () => {
+    const rawKey = "task-8c1a1-pglite-adjustment-0001";
+    await client.query(
+      `UPDATE reward_accounts SET pending_points = 5 WHERE id = $1::uuid`,
+      [accountId],
+    );
+    await client.query(`
+      INSERT INTO reward_ledger_entries (
+        id, reward_account_id, buyer_user_id, kind, source_type, source_id,
+        idempotency_key, pending_points_delta, available_points_delta,
+        pending_points_balance_after, available_points_balance_after, occurred_at
+      ) VALUES (
+        $1::uuid, $2::uuid, $3::uuid, 'order_earned_pending', 'order',
+        'unrelated-order-source', $4, 5, 0, 5, 1000, $5::timestamptz
+      )
+    `, [unrelatedEntryId, accountId, userId, rawKey, now.toISOString()]);
+    const adminRepository = repository();
+
+    await expect(adjustRewardBalance(
+      adminRepository,
+      context("task-8c1a1-namespaced-applied"),
+      command({ idempotencyKey: rawKey }),
+    )).resolves.toMatchObject({ status: "applied", availablePointsBalanceAfter: 1_250 });
+    await expect(adjustRewardBalance(
+      adminRepository,
+      context("task-8c1a1-namespaced-replay"),
+      command({ idempotencyKey: rawKey }),
+    )).resolves.toMatchObject({ status: "idempotent", availablePointsBalanceAfter: 1_250 });
+    await expect(adjustRewardBalance(
+      adminRepository,
+      context("task-8c1a1-namespaced-conflict"),
+      command({ idempotencyKey: rawKey, internalAuditReason: "Changed fingerprint." }),
+    )).rejects.toThrow(/idempotency|fingerprint|conflict/i);
+
+    const persisted = await client.query<{
+      idempotencyKey: string;
+      audits: number;
+      metadata: Record<string, unknown>;
+    }>(`
+      SELECT idempotency_key AS "idempotencyKey",
+             (SELECT count(*)::int FROM admin_audit) AS audits,
+             (SELECT metadata FROM admin_audit LIMIT 1) AS metadata
+      FROM reward_ledger_entries
+      ORDER BY idempotency_key
+    `);
+    expect(persisted.rows.map((row) => row.idempotencyKey)).toEqual([
+      "admin_adjustment:task-8c1a1-pglite-adjustment-0001",
+      rawKey,
+    ]);
+    expect(persisted.rows).toHaveLength(2);
+    expect(persisted.rows[0]!.audits).toBe(1);
+    expect(JSON.stringify(persisted.rows[0]!.metadata)).not.toContain("admin_adjustment:");
   });
 
   it("rejects a missing exact account without ledger or audit writes", async () => {

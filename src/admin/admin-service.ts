@@ -616,7 +616,7 @@ function parseGrowthPolicyActivationCommand(input: unknown): Readonly<{
 
 const canonicalUuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const boundedIdempotencyPattern = /^[^\u0000-\u001f\u007f]{16,200}$/u;
+const rewardAdjustmentRawIdempotencyPattern = /^[^\u0000-\u001f\u007f]{16,183}$/u;
 const internalAuditReasonMaxLength = 240;
 
 function parseRewardAdjustmentCommand(input: unknown): Readonly<{
@@ -675,7 +675,7 @@ function parseRewardAdjustmentCommand(input: unknown): Readonly<{
   if (
     typeof input.idempotencyKey !== "string" ||
     input.idempotencyKey.trim() !== input.idempotencyKey ||
-    !boundedIdempotencyPattern.test(input.idempotencyKey)
+    !rewardAdjustmentRawIdempotencyPattern.test(input.idempotencyKey)
   ) {
     throw new Error("Reward adjustment idempotency key is invalid");
   }
@@ -736,7 +736,12 @@ export async function adjustRewardBalance(
 ): Promise<RewardAdjustmentResult> {
   const command = parseRewardAdjustmentCommand(input);
   const principal = await authorizeAndLimit(repository, context, "growth.manage");
-  return authorizedTransaction(repository, context, principal, "growth.manage", async (tx) => {
+  return authorizedRetryingTransaction(
+    repository,
+    context,
+    principal,
+    "growth.manage",
+    async (tx) => {
     if (!tx.adjustRewardBalance) throw new Error("Reward adjustment port is unavailable");
     const result = projectRewardAdjustmentResult(command, await tx.adjustRewardBalance({
       entryId: command.entryId,
@@ -761,8 +766,9 @@ export async function adjustRewardBalance(
         },
       ));
     }
-    return result;
-  });
+      return result;
+    },
+  );
 }
 
 export async function createGrowthPolicyDraft(

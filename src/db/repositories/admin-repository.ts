@@ -78,6 +78,8 @@ type RewardAdjustmentLedgerRow = {
 const rewardAdjustmentUuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const rewardAdjustmentFingerprintPattern = /^[0-9a-f]{64}$/u;
+const rewardAdjustmentIdempotencyNamespace = "admin_adjustment:";
+const rewardAdjustmentRawIdempotencyMaxLength = 183;
 const rewardAdjustmentLedgerProjection = `id::text AS id,
   reward_account_id::text AS "rewardAccountId",
   buyer_user_id::text AS "buyerUserId", kind,
@@ -100,7 +102,7 @@ function validateRewardAdjustmentPortInput(input: Parameters<
     !MANUAL_REWARD_ADJUSTMENT_REASONS_V1.includes(input.reason) ||
     input.idempotencyKey.trim() !== input.idempotencyKey ||
     input.idempotencyKey.length < 16 ||
-    input.idempotencyKey.length > 200 ||
+    input.idempotencyKey.length > rewardAdjustmentRawIdempotencyMaxLength ||
     /[\u0000-\u001f\u007f]/u.test(input.idempotencyKey) ||
     !rewardAdjustmentFingerprintPattern.test(input.fingerprint) ||
     !Number.isFinite(input.occurredAt.getTime())
@@ -130,6 +132,7 @@ function assertExactRewardAdjustmentReplay(
   row: RewardAdjustmentLedgerRow,
   account: RewardAdjustmentAccountRow,
   input: Parameters<NonNullable<AdminTransaction["adjustRewardBalance"]>>[0],
+  persistedIdempotencyKey: string,
 ): void {
   if (
     row.id !== input.entryId ||
@@ -138,7 +141,7 @@ function assertExactRewardAdjustmentReplay(
     row.kind !== "admin_adjustment" ||
     row.sourceType !== "admin_adjustment" ||
     row.sourceId !== input.fingerprint ||
-    row.idempotencyKey !== input.idempotencyKey ||
+    row.idempotencyKey !== persistedIdempotencyKey ||
     requireSafeDatabaseInteger(row.pendingPointsDelta, "reward adjustment pending delta") !== 0 ||
     requireSafeDatabaseInteger(row.availablePointsDelta, "reward adjustment delta") !== input.delta ||
     requireSafeDatabaseInteger(
@@ -484,6 +487,8 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
 
     async adjustRewardBalance(input) {
       validateRewardAdjustmentPortInput(input);
+      const persistedIdempotencyKey =
+        `${rewardAdjustmentIdempotencyNamespace}${input.idempotencyKey}`;
       const accounts = await client.query<RewardAdjustmentAccountRow>(
         `SELECT id::text AS id, buyer_user_id::text AS "buyerUserId",
                 pending_points AS "pendingPoints", available_points AS "availablePoints"
@@ -497,11 +502,16 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
       const prior = await client.query<RewardAdjustmentLedgerRow>(
         `SELECT ${rewardAdjustmentLedgerProjection}
          FROM reward_ledger_entries WHERE idempotency_key = $1 FOR UPDATE`,
-        [input.idempotencyKey],
+        [persistedIdempotencyKey],
       );
       if (prior.rows.length > 1) throw new Error("Reward adjustment idempotency conflict");
       if (prior.rows[0]) {
-        assertExactRewardAdjustmentReplay(prior.rows[0], account, input);
+        assertExactRewardAdjustmentReplay(
+          prior.rows[0],
+          account,
+          input,
+          persistedIdempotencyKey,
+        );
         return {
           ...projectRewardAdjustmentLedger(prior.rows[0], input.reason),
           status: "idempotent",
@@ -534,7 +544,7 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
           input.rewardAccountId,
           account.buyerUserId,
           input.fingerprint,
-          input.idempotencyKey,
+          persistedIdempotencyKey,
           input.delta,
           pendingBefore,
           availableAfter,
@@ -546,10 +556,15 @@ function transactionFor(client: AdminSqlClient): AdminTransaction {
         const collision = await client.query<RewardAdjustmentLedgerRow>(
           `SELECT ${rewardAdjustmentLedgerProjection}
            FROM reward_ledger_entries WHERE idempotency_key = $1 FOR UPDATE`,
-          [input.idempotencyKey],
+          [persistedIdempotencyKey],
         );
         if (collision.rows.length === 1 && collision.rows[0]) {
-          assertExactRewardAdjustmentReplay(collision.rows[0], account, input);
+          assertExactRewardAdjustmentReplay(
+            collision.rows[0],
+            account,
+            input,
+            persistedIdempotencyKey,
+          );
           return {
             ...projectRewardAdjustmentLedger(collision.rows[0], input.reason),
             status: "idempotent",

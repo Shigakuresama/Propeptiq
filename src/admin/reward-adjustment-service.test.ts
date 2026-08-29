@@ -78,7 +78,7 @@ function context(): AdminCommandContext {
   };
 }
 
-function harness() {
+function harness(options: Readonly<{ retryWorkTwice?: boolean }> = {}) {
   let audits: AdminAuditEvent[] = [];
   let availablePoints = 1_000;
   let stored: Readonly<{
@@ -86,23 +86,20 @@ function harness() {
     result: AdjustmentPortResult;
   }> | null = null;
   let adjustmentCalls = 0;
+  let directTransactionCalls = 0;
   let rateLimitCalls = 0;
+  let retryTransactionCalls = 0;
   let transactions = 0;
 
-  const repository = {
-    rateLimitStore: {
-      async increment() {
-        rateLimitCalls += 1;
-        return 1;
-      },
-    },
-    async transaction<Result>(work: (transaction: AdminTransaction) => Promise<Result>) {
-      transactions += 1;
-      const stagedAudits = [...audits];
-      const balanceBefore = availablePoints;
-      const storedBefore = stored;
-      try {
-        const result = await work({
+  async function runTransaction<Result>(
+    work: (transaction: AdminTransaction) => Promise<Result>,
+  ) {
+    transactions += 1;
+    const stagedAudits = [...audits];
+    const balanceBefore = availablePoints;
+    const storedBefore = stored;
+    try {
+      const result = await work({
           assertActorAuthority: async () => undefined,
           async adjustRewardBalance(input: AdjustmentPortInput) {
             adjustmentCalls += 1;
@@ -130,17 +127,35 @@ function harness() {
           appendAudit: async (event: AdminAuditEvent) => {
             stagedAudits.push(event);
           },
-        } as unknown as AdminTransaction);
-        audits = stagedAudits;
-        return result;
-      } catch (error) {
-        availablePoints = balanceBefore;
-        stored = storedBefore;
-        throw error;
-      }
+      } as unknown as AdminTransaction);
+      audits = stagedAudits;
+      return result;
+    } catch (error) {
+      availablePoints = balanceBefore;
+      stored = storedBefore;
+      throw error;
+    }
+  }
+
+  const repository = {
+    rateLimitStore: {
+      async increment() {
+        rateLimitCalls += 1;
+        return 1;
+      },
     },
-    retrySerializableTransaction<Result>(work: (transaction: AdminTransaction) => Promise<Result>) {
-      return repository.transaction(work);
+    async transaction<Result>(work: (transaction: AdminTransaction) => Promise<Result>) {
+      directTransactionCalls += 1;
+      return runTransaction(work);
+    },
+    async retrySerializableTransaction<Result>(
+      work: (transaction: AdminTransaction) => Promise<Result>,
+    ) {
+      retryTransactionCalls += 1;
+      if (options.retryWorkTwice) {
+        await runTransaction(work);
+      }
+      return runTransaction(work);
     },
   } as unknown as AdminRepository;
 
@@ -150,7 +165,9 @@ function harness() {
       adjustmentCalls,
       audits,
       availablePoints,
+      directTransactionCalls,
       rateLimitCalls,
+      retryTransactionCalls,
       stored,
       transactions,
     }),
@@ -204,6 +221,27 @@ describe("Task 8C1A1 reward adjustment service", () => {
       adjustmentCalls: 2,
       availablePoints: 1_250,
       rateLimitCalls: 2,
+      transactions: 2,
+    });
+    expect(store.read().audits).toHaveLength(1);
+  });
+
+  it("consumes authorization once and returns an exact retry replay without duplicate audit", async () => {
+    const store = harness({ retryWorkTwice: true });
+
+    await expect(execute(store.repository, command())).resolves.toEqual({
+      status: "idempotent",
+      entryId,
+      rewardAccountId: accountId,
+      delta: 250,
+      availablePointsBalanceAfter: 1_250,
+    });
+    expect(store.read()).toMatchObject({
+      adjustmentCalls: 2,
+      availablePoints: 1_250,
+      directTransactionCalls: 0,
+      rateLimitCalls: 1,
+      retryTransactionCalls: 1,
       transactions: 2,
     });
     expect(store.read().audits).toHaveLength(1);
