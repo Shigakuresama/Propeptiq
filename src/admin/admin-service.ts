@@ -10,6 +10,9 @@ import type { AuthorizationOperation, Capability, Principal } from "@/domain/aut
 import { isCapability } from "@/domain/authorization";
 import { scanPublicCopy } from "@/domain/content-policy";
 import { evaluateBuyerActivation, type BuyerStatus, type ResearchPurpose } from "@/domain/eligibility";
+import { parseAffiliatePolicy } from "@/domain/affiliates";
+import { parseReferralPolicy } from "@/domain/referrals";
+import { parseLoyaltyPolicy } from "@/domain/rewards";
 import {
   consumeFixedWindowLimit,
   createRateLimitScope,
@@ -57,6 +60,15 @@ export type PromotionTargetInput = Readonly<{
   targetKind: "product" | "policy_group";
   targetId: string;
 }>;
+
+export type GrowthPolicyKind = "loyalty" | "referral" | "affiliate";
+export type GrowthPolicyLifecycleResult = Readonly<{
+  id: string;
+  kind: GrowthPolicyKind;
+  version: number;
+  status: "draft" | "active";
+}>;
+export type GrowthPolicyValues = Readonly<Record<string, number | string | null>>;
 
 export type AdminTransaction = Readonly<{
   assertActorAuthority: (input: Readonly<{
@@ -300,6 +312,18 @@ export type AdminTransaction = Readonly<{
     correlationId: string;
     now: Date;
   }>) => Promise<Readonly<{ changed: boolean }>>;
+  createGrowthPolicyDraft?: (input: Readonly<{
+    id: string;
+    kind: GrowthPolicyKind;
+    effectiveAt: Date;
+    values: GrowthPolicyValues;
+  }>) => Promise<GrowthPolicyLifecycleResult & Readonly<{ status: "draft" }>>;
+  activateGrowthPolicy?: (input: Readonly<{
+    id: string;
+    kind: GrowthPolicyKind;
+    expectedVersion: number;
+    now: Date;
+  }>) => Promise<GrowthPolicyLifecycleResult & Readonly<{ status: "active" }>>;
   appendAudit: (event: AdminAuditEvent) => Promise<void>;
 }>;
 
@@ -324,6 +348,7 @@ const operationCapability: Readonly<
   "refund.request": "refund:request",
   "fulfillment.release.consume": "fulfillment:release:consume",
   "staff.manage": "staff:manage",
+  "growth.manage": "growth:manage",
 });
 
 function authorizedTransaction<T>(
@@ -437,6 +462,182 @@ function requirePositiveVersion(value: number, label: string): number {
     throw new Error(`${label} is invalid`);
   }
   return value;
+}
+
+function exactRecord(
+  value: unknown,
+  fields: readonly string[],
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const keys = Reflect.ownKeys(value);
+  return keys.length === fields.length &&
+    keys.every((key) => typeof key === "string" && fields.includes(key)) &&
+    fields.every((field) => Object.hasOwn(value, field));
+}
+
+function growthPolicyValueFields(kind: GrowthPolicyKind): readonly string[] {
+  switch (kind) {
+    case "loyalty":
+      return [
+        "pointsPerDollar",
+        "redemptionMinorPerPoint",
+        "minimumRedemptionPoints",
+        "maximumRedemptionBasisPoints",
+        "expiresAfterDays",
+      ];
+    case "referral":
+      return [
+        "attributionDays",
+        "referredDiscountBasisPoints",
+        "referredDiscountCapMinor",
+        "referrerPointsPerDollar",
+        "referrerRewardCapPoints",
+      ];
+    case "affiliate":
+      return [
+        "attributionDays",
+        "firstOrderCommissionBasisPoints",
+        "reorderCommissionBasisPoints",
+        "reorderWindowDays",
+        "approvalDelayDays",
+        "payoutThresholdMinor",
+        "currency",
+      ];
+  }
+}
+
+function parseGrowthPolicyDraftCommand(input: unknown): Readonly<{
+  kind: GrowthPolicyKind;
+  policyId: string;
+  effectiveAt: Date;
+  values: GrowthPolicyValues;
+}> {
+  if (!exactRecord(input, ["kind", "policyId", "effectiveAt", "values"])) {
+    throw new Error("Growth policy draft command is malformed");
+  }
+  if (input.kind !== "loyalty" && input.kind !== "referral" && input.kind !== "affiliate") {
+    throw new Error("Growth policy kind is invalid");
+  }
+  const kind = input.kind;
+  if (!exactRecord(input.values, growthPolicyValueFields(kind))) {
+    throw new Error("Growth policy values are malformed");
+  }
+  const policyId = requireId(String(input.policyId), "Growth policy ID");
+  if (typeof input.effectiveAt !== "string") {
+    throw new Error("Growth policy effective time is invalid");
+  }
+  const effectiveAt = new Date(input.effectiveAt);
+  if (!Number.isFinite(effectiveAt.getTime()) || effectiveAt.toISOString() !== input.effectiveAt) {
+    throw new Error("Growth policy effective time is invalid");
+  }
+  const candidate = {
+    ...input.values,
+    id: policyId,
+    version: 1,
+    status: "draft",
+    effectiveAt: effectiveAt.toISOString(),
+    supersededAt: null,
+  };
+  const parsed = kind === "loyalty"
+    ? parseLoyaltyPolicy(candidate)
+    : kind === "referral"
+      ? parseReferralPolicy(candidate)
+      : parseAffiliatePolicy(candidate);
+  if (!parsed.ok) {
+    throw new Error(`Growth policy domain shape is invalid: ${parsed.error.field}`);
+  }
+  return Object.freeze({
+    kind,
+    policyId,
+    effectiveAt,
+    values: Object.freeze({ ...input.values }) as GrowthPolicyValues,
+  });
+}
+
+function parseGrowthPolicyActivationCommand(input: unknown): Readonly<{
+  kind: GrowthPolicyKind;
+  policyId: string;
+  expectedVersion: number;
+}> {
+  if (!exactRecord(input, ["kind", "policyId", "expectedVersion"])) {
+    throw new Error("Growth policy activation command is malformed");
+  }
+  if (input.kind !== "loyalty" && input.kind !== "referral" && input.kind !== "affiliate") {
+    throw new Error("Growth policy kind is invalid");
+  }
+  return Object.freeze({
+    kind: input.kind,
+    policyId: requireId(String(input.policyId), "Growth policy ID"),
+    expectedVersion: requirePositiveVersion(
+      Number(input.expectedVersion),
+      "Expected growth policy version",
+    ),
+  });
+}
+
+export async function createGrowthPolicyDraft(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<GrowthPolicyLifecycleResult & Readonly<{ status: "draft" }>> {
+  const command = parseGrowthPolicyDraftCommand(input);
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedTransaction(repository, context, principal, "growth.manage", async (tx) => {
+    if (!tx.createGrowthPolicyDraft) throw new Error("Growth policy draft port is unavailable");
+    const result = await tx.createGrowthPolicyDraft({
+      id: command.policyId,
+      kind: command.kind,
+      effectiveAt: command.effectiveAt,
+      values: command.values,
+    });
+    if (
+      result.id !== command.policyId ||
+      result.kind !== command.kind ||
+      result.status !== "draft" ||
+      !Number.isSafeInteger(result.version) ||
+      result.version < 1
+    ) {
+      throw new Error("Growth policy draft read-back is invalid");
+    }
+    return Object.freeze({ ...result });
+  });
+}
+
+export async function activateGrowthPolicy(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  input: unknown,
+): Promise<GrowthPolicyLifecycleResult & Readonly<{ status: "active" }>> {
+  const command = parseGrowthPolicyActivationCommand(input);
+  const principal = await authorizeAndLimit(repository, context, "growth.manage");
+  return authorizedTransaction(repository, context, principal, "growth.manage", async (tx) => {
+    if (!tx.activateGrowthPolicy) throw new Error("Growth policy activation port is unavailable");
+    const result = await tx.activateGrowthPolicy({
+      id: command.policyId,
+      kind: command.kind,
+      expectedVersion: command.expectedVersion,
+      now: context.now,
+    });
+    if (
+      result.id !== command.policyId ||
+      result.kind !== command.kind ||
+      result.status !== "active" ||
+      result.version !== command.expectedVersion
+    ) {
+      throw new Error("Growth policy activation read-back is invalid");
+    }
+    await tx.appendAudit(audit(
+      principal,
+      context,
+      "growth.policy.activated",
+      `${command.kind}_policy`,
+      command.policyId,
+      { kind: command.kind, version: result.version, status: "active" },
+    ));
+    return Object.freeze({ ...result });
+  });
 }
 
 function assertSafePublicString(value: string, label: string): void {
