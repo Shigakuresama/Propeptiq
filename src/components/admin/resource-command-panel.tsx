@@ -13,6 +13,7 @@ import {
   createAffiliatePolicyDraftAction,
   createLoyaltyPolicyDraftAction,
   createReferralPolicyDraftAction,
+  deactivateSharedSetAction,
   decideReviewAction,
   handoffFulfillmentAction,
   markShipmentDeliveredAction,
@@ -20,6 +21,7 @@ import {
   publishCoaAction,
   recordShipmentExceptionAction,
   requestRefundAction,
+  revokeReferralCodeAction,
   retireProductAction,
   retirePromotionAction,
   saveAnalyticalClaimDraftAction,
@@ -238,7 +240,7 @@ function CommandForm({
 }) {
   return (
     <section className="record-card">
-      <h2 className="font-heading text-2xl">{title}</h2>
+      <h2 className="min-w-0 break-words font-heading text-2xl">{title}</h2>
       <form action={action} aria-label={title} className="mt-6 grid gap-5">
         {children}
         <Button type="submit" className="action-primary w-full sm:w-auto">
@@ -501,6 +503,105 @@ export function ResourceCommandPanel({
             administrator audit record and is never copied into public reward ledger references.
           </p>
         </CommandForm>
+      );
+    }
+    case "referral-codes": {
+      const active = snapshot.items.filter((item) => item.status === "active");
+      if (snapshot.items.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">Referral code revocation unavailable</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              No referral code records are available in the authoritative database view. A
+              revocation cannot be submitted until an active code exists.
+            </p>
+          </section>
+        );
+      }
+      if (active.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">No active referral codes are available</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              The database records shown below are terminal history. Revoked codes remain
+              preserved and cannot be revoked again from this view.
+            </p>
+          </section>
+        );
+      }
+      return (
+        <div className="grid min-w-0 gap-6">
+          {active.map((item) => (
+            <CommandForm
+              key={item.referralCodeId}
+              action={revokeReferralCodeAction}
+              title={`Revoke referral code · ${item.code}`}
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.code}</strong>
+                <span className="mt-2 block">Referral code ID: {item.referralCodeId}</span>
+                <span className="mt-1 block">Created: {item.createdAt}</span>
+              </p>
+              <Hidden name="referralCodeId" value={item.referralCodeId} />
+              <Hidden name="expectedCreatedAt" value={item.createdAt} />
+              <p className="text-base leading-7 text-muted-ink">
+                Revocation is a soft active-to-revoked transition that preserves the public code
+                and its history. The server rechecks the immutable creation time, current state,
+                administrator authority, MFA, rate limit, and atomic audit before committing.
+              </p>
+            </CommandForm>
+          ))}
+        </div>
+      );
+    }
+    case "shared-sets": {
+      const active = snapshot.items.filter((item) => item.active);
+      if (snapshot.items.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">Shared set deactivation unavailable</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              No shared set records are available in the authoritative database view. A
+              deactivation cannot be submitted until an active set exists.
+            </p>
+          </section>
+        );
+      }
+      if (active.length === 0) {
+        return (
+          <section className="record-card min-w-0">
+            <h2 className="font-heading text-2xl">No active shared sets are available</h2>
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              The database records shown below are inactive history. Deactivated sets and their
+              items remain preserved and cannot be deactivated again from this view.
+            </p>
+          </section>
+        );
+      }
+      return (
+        <div className="grid min-w-0 gap-6">
+          {active.map((item) => (
+            <CommandForm
+              key={item.sharedSetId}
+              action={deactivateSharedSetAction}
+              title={`Deactivate shared set · ${item.label} · ${item.publicCode}`}
+            >
+              <p className="info-record min-w-0 break-words text-base leading-7">
+                <strong className="block">{item.label}</strong>
+                <span className="mt-2 block">Public code: {item.publicCode}</span>
+                <span className="mt-1 block">Shared set ID: {item.sharedSetId}</span>
+                <span className="mt-1 block">Current version: {item.updatedAt}</span>
+              </p>
+              <Hidden name="sharedSetId" value={item.sharedSetId} />
+              <Hidden name="expectedUpdatedAt" value={item.updatedAt} />
+              <p className="text-base leading-7 text-muted-ink">
+                Deactivation is a soft active-to-inactive transition that preserves the set,
+                its public facts, and item history. The server rechecks the current version,
+                state, administrator authority, MFA, rate limit, and atomic audit before committing.
+              </p>
+            </CommandForm>
+          ))}
+        </div>
       );
     }
     case "products": {

@@ -199,6 +199,39 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
         ]} />
       ));
       break;
+    case "referral-codes":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.referralCodeId}
+          title={`Referral code · ${item.code}`}
+          status={item.status}
+          facts={[
+            ["Referral code ID", item.referralCodeId],
+            ["Public code", item.code],
+            ["Created", formatInstant(item.createdAt)],
+            ["Revoked", formatInstant(item.revokedAt)],
+          ]}
+        />
+      ));
+      break;
+    case "shared-sets":
+      records = snapshot.items.map((item) => (
+        <RecordCard
+          key={item.sharedSetId}
+          title={`${item.label} · ${item.publicCode}`}
+          status={item.active ? "active" : "inactive"}
+          facts={[
+            ["Shared set ID", item.sharedSetId],
+            ["Public code", item.publicCode],
+            ["Public label", item.label],
+            ["Items", item.itemCount],
+            ["Created", formatInstant(item.createdAt)],
+            ["Current version", formatInstant(item.updatedAt)],
+            ["Deactivated", formatInstant(item.deactivatedAt)],
+          ]}
+        />
+      ));
+      break;
     case "buyers":
       records = snapshot.items.map((item) => (
         <RecordCard key={item.userId} title={`Buyer · ${item.userId}`} status={item.status} facts={[
