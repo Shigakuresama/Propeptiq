@@ -21,6 +21,7 @@ export const ADMIN_READ_RESOURCE_REQUIREMENTS = Object.freeze({
   "reward-adjustments": "growth:manage",
   "referral-codes": "growth:manage",
   "shared-sets": "growth:manage",
+  "affiliate-applications": "growth:manage",
 } as const);
 
 export type AdminReadResource = keyof typeof ADMIN_READ_RESOURCE_REQUIREMENTS;
@@ -343,6 +344,17 @@ type SharedSetItem = {
   deactivatedAt: string | null;
 };
 
+type AffiliateApplicationItem = {
+  affiliateProfileId: string;
+  publicCode: string;
+  status: "pending" | "active" | "rejected" | "suspended";
+  version: number;
+  publicChannel: string;
+  promotionMethod: "website" | "social" | "email" | "other";
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AdminReadSnapshot =
   | Snapshot<"products", ProductItem>
   | Snapshot<"prices", PriceItem>
@@ -365,7 +377,8 @@ export type AdminReadSnapshot =
   | Snapshot<"affiliate-policies", AffiliatePolicyItem>
   | Snapshot<"reward-adjustments", RewardAdjustmentItem>
   | Snapshot<"referral-codes", ReferralCodeItem>
-  | Snapshot<"shared-sets", SharedSetItem>;
+  | Snapshot<"shared-sets", SharedSetItem>
+  | Snapshot<"affiliate-applications", AffiliateApplicationItem>;
 
 export type AdminReadSnapshotFor<Resource extends AdminReadResource> = Extract<
   AdminReadSnapshot,

@@ -13,6 +13,7 @@ import { isVerifiedIdentityAt, type VerifiedIdentity } from "@/auth/identity";
 import { parseAffiliatePolicy } from "@/domain/affiliates";
 import { parseReferralPolicy } from "@/domain/referrals";
 import { parseLoyaltyPolicy } from "@/domain/rewards";
+import { scanPublicCopy } from "@/domain/content-policy";
 
 export type AdminReadSqlClient = Readonly<{
   query: <Row extends object>(
@@ -97,8 +98,61 @@ function hasExactKeys(
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const referralCodePattern = /^ref_[A-Za-z0-9_-]{16,64}$/u;
 const sharedSetCodePattern = /^set_[A-Za-z0-9_-]{16,64}$/u;
+const affiliateCodePattern = /^aff_[A-Za-z0-9_-]{16,64}$/u;
+const affiliateHandlePattern = /^@[A-Za-z0-9_][A-Za-z0-9._-]{1,63}$/u;
 const controlCharacterPattern = /[\u0000-\u001f\u007f-\u009f]/u;
 const recentRewardAdjustmentLimit = 20;
+const affiliatePublicChannelMaxLength = 200;
+const affiliateChannelReadPolicy = Object.freeze({
+  version: "affiliate-channel-read-validation",
+  activeLotEvidenceIds: Object.freeze([]) as readonly string[],
+});
+
+function safeAffiliatePublicChannel(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > affiliatePublicChannelMaxLength ||
+    value.trim() !== value ||
+    controlCharacterPattern.test(value)
+  ) {
+    throw new Error("Invalid affiliate application admin projection");
+  }
+  let canonical = affiliateHandlePattern.test(value);
+  if (!canonical) {
+    try {
+      const parsed = new URL(value);
+      canonical =
+        parsed.protocol === "https:" &&
+        parsed.username.length === 0 &&
+        parsed.password.length === 0 &&
+        parsed.hostname.length > 0 &&
+        parsed.search.length === 0 &&
+        parsed.hash.length === 0 &&
+        parsed.toString() === value;
+    } catch {
+      canonical = false;
+    }
+  }
+  if (
+    !canonical ||
+    !scanPublicCopy(
+      { text: value, claims: [] },
+      affiliateChannelReadPolicy,
+    ).publishable
+  ) {
+    throw new Error("Invalid affiliate application admin projection");
+  }
+  return value;
+}
+
+function coherentAffiliateApplicationState(status: unknown, version: number): boolean {
+  return (
+    (status === "pending" && version === 1) ||
+    ((status === "active" || status === "rejected") && version === 2) ||
+    (status === "suspended" && version === 3)
+  );
+}
 
 function safePublicLabel(value: unknown): string {
   if (
@@ -898,6 +952,57 @@ async function loadSnapshot(
         },
       );
       return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "shared-sets" }>;
+    }
+    case "affiliate-applications": {
+      const result = await boundedRows<{
+        affiliateProfileId: string;
+        publicCode: string;
+        status: "pending" | "active" | "rejected" | "suspended";
+        version: number | string;
+        publicChannel: string;
+        promotionMethod: "website" | "social" | "email" | "other";
+        createdAt: Date | string;
+        updatedAt: Date | string;
+      }, SnapshotItem<"affiliate-applications">>(
+        client,
+        `
+          SELECT id::text AS "affiliateProfileId", public_code AS "publicCode",
+                 status, version, public_channel AS "publicChannel",
+                 promotion_method AS "promotionMethod",
+                 created_at AS "createdAt", updated_at AS "updatedAt"
+          FROM affiliate_profiles
+          ORDER BY updated_at DESC, id DESC
+          LIMIT $1
+        `,
+        (row) => {
+          const version = safeInteger(row.version);
+          const createdAt = toIso(row.createdAt);
+          const updatedAt = toIso(row.updatedAt);
+          if (
+            !uuidPattern.test(row.affiliateProfileId) ||
+            !affiliateCodePattern.test(row.publicCode) ||
+            !coherentAffiliateApplicationState(row.status, version) ||
+            (row.promotionMethod !== "website" &&
+              row.promotionMethod !== "social" &&
+              row.promotionMethod !== "email" &&
+              row.promotionMethod !== "other") ||
+            new Date(updatedAt).getTime() < new Date(createdAt).getTime()
+          ) {
+            throw new Error("Invalid affiliate application admin projection");
+          }
+          return Object.freeze({
+            affiliateProfileId: row.affiliateProfileId,
+            publicCode: row.publicCode,
+            status: row.status,
+            version,
+            publicChannel: safeAffiliatePublicChannel(row.publicChannel),
+            promotionMethod: row.promotionMethod,
+            createdAt,
+            updatedAt,
+          });
+        },
+      );
+      return snapshot(resource, result) as Extract<AdminReadSnapshot, { resource: "affiliate-applications" }>;
     }
     case "buyers": {
       const result = await boundedRows<{

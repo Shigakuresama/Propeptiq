@@ -1348,6 +1348,12 @@ function localAdminReadSnapshot(resource: AdminReadResource): AdminReadSnapshot 
         resource,
         items: Object.freeze([]),
       };
+    case "affiliate-applications":
+      return {
+        ...base,
+        resource,
+        items: Object.freeze([]),
+      };
   }
 }
 

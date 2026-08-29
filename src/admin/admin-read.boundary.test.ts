@@ -31,6 +31,7 @@ describe("Task 5 admin read boundary", () => {
       "reward-adjustments": "growth:manage",
       "referral-codes": "growth:manage",
       "shared-sets": "growth:manage",
+      "affiliate-applications": "growth:manage",
     });
   });
 
@@ -43,5 +44,6 @@ describe("Task 5 admin read boundary", () => {
     expect(requiredAdminReadCapability("reward-adjustments")).toBe("growth:manage");
     expect(requiredAdminReadCapability("referral-codes")).toBe("growth:manage");
     expect(requiredAdminReadCapability("shared-sets")).toBe("growth:manage");
+    expect(requiredAdminReadCapability("affiliate-applications")).toBe("growth:manage");
   });
 });
