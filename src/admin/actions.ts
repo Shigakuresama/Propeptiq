@@ -308,6 +308,7 @@ function resultCode(error: unknown): "saved" | "stale" | "rate-limited" | "denie
   const message = error instanceof Error ? error.message : "";
   if (/stale|changed during/i.test(message)) return "stale";
   if (/rate limit/i.test(message)) return "rate-limited";
+  if (/origin/i.test(message)) return "denied";
   if (/unavailable|does not exist|required/i.test(message)) return "unavailable";
   return "denied";
 }
