@@ -176,10 +176,14 @@ describe("Task 8 affiliate application resource presentation", () => {
       expect(form.querySelector(
         "[name='actorUserId'], [name='capability'], [name='correlationId'], [name='idempotencyKey']",
       )).toBeNull();
-      expect(within(form).getByRole("button", { name: /submit guarded command/i })).toHaveClass(
-        "action-primary",
-      );
     }
+    expect(within(approve).getByRole("button", { name: "Approve application" }))
+      .toHaveClass("action-primary");
+    expect(within(reject).getByRole("button", { name: "Reject application permanently" }))
+      .toHaveClass("action-primary");
+    expect(within(suspend).getByRole("button", { name: "Suspend affiliate" }))
+      .toHaveClass("action-primary");
+    expect(screen.queryByRole("button", { name: /submit guarded command/i })).toBeNull();
 
     fireEvent.submit(approve);
     fireEvent.submit(reject);

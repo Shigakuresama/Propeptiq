@@ -181,6 +181,19 @@ function canonicalTimestamp(formData: FormData, name: string): string {
   return supplied;
 }
 
+function canonicalUtcFormInstant(formData: FormData, name: string): string {
+  const supplied = value(formData, name);
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/u.test(supplied)) {
+    const canonical = `${supplied}:00.000Z`;
+    const parsed = new Date(canonical);
+    if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== canonical) {
+      throw new Error(`${name} is invalid`);
+    }
+    return canonical;
+  }
+  return canonicalTimestamp(formData, name);
+}
+
 const policyValueFields = {
   loyalty: [
     "pointsPerDollar",
@@ -818,7 +831,7 @@ async function createPolicyDraftAction(
   return run(resource, async () => {
     exactFormFields(formData, ["effectiveAt", ...policyValueFields[kind]]);
     const values = policyValues(formData, kind);
-    const effectiveAt = value(formData, "effectiveAt");
+    const effectiveAt = canonicalUtcFormInstant(formData, "effectiveAt");
     const admin = await trustedGrowthAdmin(resource);
     await createGrowthPolicyDraft(admin.repositories.adminRepository, admin.context, {
       kind,
@@ -874,11 +887,13 @@ export async function activateAffiliatePolicyAction(formData: FormData): Promise
 export async function adjustRewardBalanceAction(formData: FormData): Promise<never> {
   return run("reward-adjustments", async () => {
     exactFormFields(formData, [
+      "commandToken",
       "rewardAccountId",
       "delta",
       "reason",
       "internalAuditReason",
     ]);
+    const commandToken = canonicalV4Uuid(formData, "commandToken");
     const rewardAccountId = value(formData, "rewardAccountId");
     const delta = signedCanonicalInteger(formData, "delta");
     const reason = value(formData, "reason");
@@ -905,12 +920,12 @@ export async function adjustRewardBalanceAction(formData: FormData): Promise<nev
     }
     const admin = await trustedGrowthAdmin("reward-adjustments");
     await adjustRewardBalance(admin.repositories.adminRepository, admin.context, {
-      entryId: randomUUID(),
+      entryId: commandToken,
       rewardAccountId,
       delta,
       reason,
       internalAuditReason,
-      idempotencyKey: `reward-adjustment:${randomUUID()}`,
+      idempotencyKey: `reward-adjustment:${commandToken}`,
     });
   });
 }

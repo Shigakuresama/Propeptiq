@@ -84,7 +84,7 @@ describe("Task 8C1A3 reward adjustment resource UI", () => {
     expect(screen.queryByText(/available points.*\d/iu)).toBeNull();
   });
 
-  it("binds the guarded action to exactly four bounded browser fields", () => {
+  it("binds the guarded action to a stable command token and four bounded operator fields", () => {
     const value = snapshot([{
       rewardAccountId,
       pendingPoints: 7,
@@ -98,11 +98,17 @@ describe("Task 8C1A3 reward adjustment resource UI", () => {
       "input[name], select[name], textarea[name]",
     )];
     expect(named.map((field) => field.name)).toEqual([
+      "commandToken",
       "rewardAccountId",
       "delta",
       "reason",
       "internalAuditReason",
     ]);
+    const commandToken = form.querySelector<HTMLInputElement>('[name="commandToken"]');
+    expect(commandToken).toHaveAttribute("type", "hidden");
+    expect(commandToken?.value).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+    );
 
     const account = within(form).getByRole("combobox", { name: /reward account/i });
     expect(account).toHaveValue(rewardAccountId);
@@ -123,7 +129,8 @@ describe("Task 8C1A3 reward adjustment resource UI", () => {
     expect(internalReason).toHaveAttribute("minlength", "1");
     expect(internalReason).toHaveAttribute("maxlength", "240");
     expect(form.querySelector("[name='actorId'], [name='idempotencyKey'], [name='correlationId'], [name='userId']")).toBeNull();
-    expect(named.every((field) => field.classList.contains("form-input"))).toBe(true);
+    expect(named.filter((field) => field.type !== "hidden")
+      .every((field) => field.classList.contains("form-input"))).toBe(true);
   });
 
   it("renders safe balances and bounded immutable adjustment history only", () => {

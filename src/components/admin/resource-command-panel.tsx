@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ReactNode } from "react";
 
 import {
@@ -236,11 +237,13 @@ function CommandForm({
   title,
   children,
   outcome,
+  submitLabel = "Submit guarded command",
 }: {
   action: (formData: FormData) => Promise<never>;
   title: string;
   children: ReactNode;
   outcome?: Readonly<{ message: string; error: boolean }> | undefined;
+  submitLabel?: string;
 }) {
   return (
     <section className="record-card">
@@ -248,7 +251,7 @@ function CommandForm({
       <form action={action} aria-label={title} className="mt-6 grid gap-5">
         {children}
         <Button type="submit" className="action-primary w-full sm:w-auto">
-          Submit guarded command
+          {submitLabel}
         </Button>
       </form>
       {outcome ? (
@@ -406,7 +409,7 @@ export function ResourceCommandPanel({
           createAction={createLoyaltyPolicyDraftAction}
           activateAction={activateLoyaltyPolicyAction}
           fields={<>
-            <Field label="Effective time (ISO 8601 UTC)" name="effectiveAt" defaultValue={latest?.effectiveAt} maxLength={35} />
+            <Field label="Effective time (UTC)" name="effectiveAt" defaultValue={datetimeInput(latest?.effectiveAt)} type="datetime-local" />
             <Field label="Points earned per dollar" name="pointsPerDollar" defaultValue={latest?.pointsPerDollar} type="number" min={1} max={10_000} />
             <Field label="Redemption minor units per point" name="redemptionMinorPerPoint" defaultValue={latest?.redemptionMinorPerPoint} type="number" min={1} max={10_000} />
             <Field label="Minimum redemption points" name="minimumRedemptionPoints" defaultValue={latest?.minimumRedemptionPoints} type="number" min={1} max={1_000_000} />
@@ -424,7 +427,7 @@ export function ResourceCommandPanel({
           createAction={createReferralPolicyDraftAction}
           activateAction={activateReferralPolicyAction}
           fields={<>
-            <Field label="Effective time (ISO 8601 UTC)" name="effectiveAt" defaultValue={latest?.effectiveAt} maxLength={35} />
+            <Field label="Effective time (UTC)" name="effectiveAt" defaultValue={datetimeInput(latest?.effectiveAt)} type="datetime-local" />
             <Field label="Attribution window days" name="attributionDays" defaultValue={latest?.attributionDays} type="number" min={1} max={365} />
             <Field label="Referred buyer discount basis points" name="referredDiscountBasisPoints" defaultValue={latest?.referredDiscountBasisPoints} type="number" min={1} max={10_000} />
             <Field label="Referred buyer discount cap (minor units)" name="referredDiscountCapMinor" defaultValue={latest?.referredDiscountCapMinor} type="number" min={1} max={1_000_000_000} />
@@ -443,7 +446,7 @@ export function ResourceCommandPanel({
           createAction={createAffiliatePolicyDraftAction}
           activateAction={activateAffiliatePolicyAction}
           fields={<>
-            <Field label="Effective time (ISO 8601 UTC)" name="effectiveAt" defaultValue={latest?.effectiveAt} maxLength={35} />
+            <Field label="Effective time (UTC)" name="effectiveAt" defaultValue={datetimeInput(latest?.effectiveAt)} type="datetime-local" />
             <Field label="Attribution window days" name="attributionDays" defaultValue={latest?.attributionDays} type="number" min={1} max={365} />
             <Field label="First-order commission basis points" name="firstOrderCommissionBasisPoints" defaultValue={latest?.firstOrderCommissionBasisPoints} type="number" min={1} max={10_000} />
             <Field label="Reorder commission basis points" name="reorderCommissionBasisPoints" defaultValue={latest?.reorderCommissionBasisPoints} type="number" min={1} max={10_000} />
@@ -471,8 +474,14 @@ export function ResourceCommandPanel({
         value: item.rewardAccountId,
         label: `${item.rewardAccountId} · Available ${item.availablePoints.toLocaleString("en-US")} · Pending ${item.pendingPoints.toLocaleString("en-US")}`,
       }));
+      const commandToken = randomUUID();
       return (
-        <CommandForm action={adjustRewardBalanceAction} title="Adjust reward balance">
+        <CommandForm
+          action={adjustRewardBalanceAction}
+          title="Adjust reward balance"
+          submitLabel="Apply reward adjustment"
+        >
+          <Hidden name="commandToken" value={commandToken} />
           <p className="info-record text-base leading-7">
             Select an authoritative reward account. The server rechecks administrator authority,
             MFA, rate limit, account state, duplicate protection, balance safety, and atomic audit storage.
@@ -640,6 +649,7 @@ export function ResourceCommandPanel({
               key={`approve:${item.affiliateProfileId}`}
               action={decideAffiliateApplicationAction}
               title={`Approve affiliate application · ${item.publicCode}`}
+              submitLabel="Approve application"
             >
               <p className="info-record min-w-0 break-words text-base leading-7">
                 <strong className="block">{item.publicCode}</strong>
@@ -658,6 +668,7 @@ export function ResourceCommandPanel({
               key={`reject:${item.affiliateProfileId}`}
               action={decideAffiliateApplicationAction}
               title={`Reject affiliate application · ${item.publicCode}`}
+              submitLabel="Reject application permanently"
             >
               <p className="info-record min-w-0 break-words text-base leading-7">
                 <strong className="block">{item.publicCode}</strong>
@@ -678,6 +689,7 @@ export function ResourceCommandPanel({
               key={`suspend:${item.affiliateProfileId}`}
               action={suspendAffiliateApplicationAction}
               title={`Suspend affiliate · ${item.publicCode}`}
+              submitLabel="Suspend affiliate"
             >
               <p className="info-record min-w-0 break-words text-base leading-7">
                 <strong className="block">{item.publicCode}</strong>
@@ -719,6 +731,7 @@ export function ResourceCommandPanel({
           <CommandForm
             action={createAffiliatePayoutBatchAdminAction}
             title="Create affiliate payout batch"
+            submitLabel="Create payout batch record"
           >
             <p className="info-record text-base leading-7">
               Enter an active affiliate profile ID from the applications view. The server selects
@@ -741,6 +754,7 @@ export function ResourceCommandPanel({
               key={item.payoutId}
               action={recordAffiliatePayoutPaidAdminAction}
               title={`Record payout paid · ${item.payoutId}`}
+              submitLabel="Record external payment evidence"
             >
               <Hidden name="payoutId" value={item.payoutId} />
               <Hidden name="expectedVersion" value={String(item.version)} />

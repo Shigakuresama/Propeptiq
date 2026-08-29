@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const actions = vi.hoisted(() => ({
@@ -49,6 +49,7 @@ vi.mock("@/admin/actions", () => actions);
 
 import { resourceBySlug } from "@/admin/access";
 import type { AdminReadSnapshot } from "@/admin/admin-read";
+import { AdminResourceRecords } from "./admin-resource-records";
 import { ResourceCommandPanel } from "./resource-command-panel";
 
 const ids = {
@@ -72,6 +73,13 @@ const cases = [
       "effectiveAt", "pointsPerDollar", "redemptionMinorPerPoint",
       "minimumRedemptionPoints", "maximumRedemptionBasisPoints",
     ],
+    readBack: [
+      "2 points per USD",
+      "$0.01 per point",
+      "500 points",
+      "25.00% of order value",
+      "No expiration",
+    ],
   },
   {
     resource: "referral-policies",
@@ -86,6 +94,13 @@ const cases = [
     fieldNames: [
       "effectiveAt", "attributionDays", "referredDiscountBasisPoints",
       "referredDiscountCapMinor", "referrerPointsPerDollar", "referrerRewardCapPoints",
+    ],
+    readBack: [
+      "30 days",
+      "10.00%",
+      "$25.00",
+      "5 points per USD",
+      "2,500 points",
     ],
   },
   {
@@ -104,6 +119,14 @@ const cases = [
       "effectiveAt", "attributionDays", "firstOrderCommissionBasisPoints",
       "reorderCommissionBasisPoints", "reorderWindowDays", "approvalDelayDays",
       "payoutThresholdMinor", "currency",
+    ],
+    readBack: [
+      "30 days",
+      "10.00%",
+      "5.00%",
+      "180 days",
+      "$50.00",
+      "USD",
     ],
   },
 ] as const;
@@ -134,7 +157,11 @@ function namedControls(form: HTMLElement): string[] {
 
 describe("Task 8B4 growth policy resource panel", () => {
   it.each(cases)("renders bounded database-backed $title policy forms without hidden authority", (entry) => {
-    render(<ResourceCommandPanel resource={resource(entry.resource)} snapshot={snapshot(entry)} />);
+    const value = snapshot(entry);
+    render(<>
+      <ResourceCommandPanel resource={resource(entry.resource)} snapshot={value} />
+      <AdminResourceRecords snapshot={value} />
+    </>);
 
     expect(screen.getByText("Active", { selector: "strong" })).toBeVisible();
     expect(screen.getByText("Draft", { selector: "strong" })).toBeVisible();
@@ -142,6 +169,9 @@ describe("Task 8B4 growth policy resource panel", () => {
 
     const create = screen.getByRole("form", { name: `Create ${entry.title} policy draft` });
     expect(namedControls(create)).toEqual(entry.fieldNames);
+    const effective = create.querySelector('[name="effectiveAt"]') as HTMLInputElement;
+    expect(effective).toHaveAttribute("type", "datetime-local");
+    expect(effective).toHaveValue("2026-08-29T20:00");
     for (const [name, value] of Object.entries(entry.economics)) {
       if (name === "expiresAfterDays") {
         expect(create.querySelector('[name="expiresAfterDays"]')).toBeNull();
@@ -160,6 +190,17 @@ describe("Task 8B4 growth policy resource panel", () => {
 
     const forbidden = ["kind", "status", "actorUserId", "capability", "auditId", "correlationId"];
     expect(forbidden.flatMap((name) => [...document.querySelectorAll(`[name="${name}"]`)])).toEqual([]);
+    const records = screen.getByRole("list", {
+      name: `${entry.resource.replaceAll("-", " ")} authoritative records`,
+    });
+    expect(within(records).getAllByRole("listitem")).toHaveLength(3);
+    const current = within(records)
+      .getByRole("heading", { name: new RegExp(`^${entry.title} policy version 3$`, "iu") })
+      .closest("li");
+    expect(current).not.toBeNull();
+    for (const fact of entry.readBack) {
+      expect(current).toHaveTextContent(fact);
+    }
     expect(screen.queryByText(/Synthetic local test only/i)).not.toBeInTheDocument();
   });
 

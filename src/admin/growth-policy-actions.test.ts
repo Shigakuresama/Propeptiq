@@ -159,6 +159,18 @@ describe("Task 8B3 growth policy server actions", () => {
     );
   });
 
+  it.each(cases)("canonicalizes a minute-precision $kind browser time to exact UTC", async (entry) => {
+    await expect(entry.create(draftForm(entry, {
+      effectiveAt: "2026-08-29T20:00",
+    }))).rejects.toThrow(`redirect:/admin/${entry.resource}?result=saved`);
+
+    expect(mocks.createDraft).toHaveBeenLastCalledWith(
+      {},
+      expect.any(Object),
+      expect.objectContaining({ effectiveAt: "2026-08-29T20:00:00.000Z" }),
+    );
+  });
+
   it.each(cases)("rejects browser kind/resource/extra authority for $resource", async (entry) => {
     for (const extra of [
       { kind: entry.kind === "loyalty" ? "referral" : "loyalty" },

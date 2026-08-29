@@ -33,6 +33,7 @@ import * as actionsModule from "./actions";
 const now = new Date("2026-08-29T18:00:00.000Z");
 const actorId = "8c1c0000-0000-4000-8000-000000000002";
 const rewardAccountId = "8c1c0000-0000-4000-8000-000000000003";
+const commandToken = "8c1c0000-0000-4000-8000-000000000004";
 
 type RewardAdjustmentAction = (formData: FormData) => Promise<never>;
 
@@ -47,6 +48,7 @@ function action(): RewardAdjustmentAction {
 function form(overrides: Record<string, string> = {}): FormData {
   const data = new FormData();
   for (const [name, value] of Object.entries({
+    commandToken,
     rewardAccountId,
     delta: "250",
     reason: "account_correction",
@@ -128,6 +130,19 @@ function harness(options: Readonly<{ failAudit?: boolean; rateCount?: number }> 
             }
           },
           async adjustRewardBalance(input) {
+            if (storedInput?.idempotencyKey === input.idempotencyKey) {
+              if (storedInput.fingerprint !== input.fingerprint) {
+                throw new Error("Synthetic idempotency fingerprint conflict");
+              }
+              return {
+                status: "idempotent" as const,
+                entryId: storedInput.entryId,
+                rewardAccountId: storedInput.rewardAccountId,
+                delta: storedInput.delta,
+                reason: storedInput.reason,
+                availablePointsBalanceAfter: availablePoints,
+              };
+            }
             storedInput = input;
             availablePoints += input.delta;
             return {
@@ -192,17 +207,13 @@ describe("Task 8C1A2 reward adjustment action safeguards", () => {
       rateLimitCalls: 1,
       transactions: 1,
       storedInput: {
-        entryId: expect.stringMatching(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
-        ),
+        entryId: commandToken,
         rewardAccountId,
         delta: 250,
         reason: "account_correction",
       },
     });
-    expect(store.read().storedInput?.idempotencyKey).toMatch(
-      /^reward-adjustment:[0-9a-f-]{36}$/u,
-    );
+    expect(store.read().storedInput?.idempotencyKey).toBe(`reward-adjustment:${commandToken}`);
     expect(store.read().audits).toEqual([expect.objectContaining({
       actorUserId: actorId,
       action: "growth.reward.adjusted",
@@ -216,9 +227,30 @@ describe("Task 8C1A2 reward adjustment action safeguards", () => {
     })]);
   });
 
+  it("replays the same rendered command token without applying points or audit twice", async () => {
+    const store = harness();
+    install(store);
+    const submitted = form();
+
+    await expectResult(submitted, "saved");
+    await expectResult(submitted, "saved");
+
+    expect(store.read()).toMatchObject({
+      availablePoints: 1_250,
+      rateLimitCalls: 2,
+      transactions: 2,
+      storedInput: {
+        entryId: commandToken,
+        idempotencyKey: `reward-adjustment:${commandToken}`,
+      },
+    });
+    expect(store.read().audits).toHaveLength(1);
+  });
+
   it.each([
     ["extra actor authority", { actorUserId: actorId }],
     ["browser idempotency", { idempotencyKey: "browser-owned-idempotency" }],
+    ["invalid command token", { commandToken: "browser-owned-token" }],
     ["coercible delta", { delta: "1e2" }],
     ["zero delta", { delta: "0" }],
     ["out-of-bound delta", { delta: "10001" }],
