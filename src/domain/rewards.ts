@@ -1,5 +1,8 @@
 import type { Result } from "@/domain/result";
 
+/** Maximum length of an immutable reward-ledger flow authority label. */
+export const REWARD_LEDGER_SOURCE_TYPE_MAX_LENGTH = 64;
+
 export type GrowthProgramStatus = "draft" | "active" | "retired";
 
 export type LoyaltyPolicy = Readonly<{

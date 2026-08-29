@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { runSerializableWithRetry } from "@/db/serializable-retry";
+import { REWARD_LEDGER_SOURCE_TYPE_MAX_LENGTH } from "@/domain/rewards";
 
 export type GrowthSqlClient = Readonly<{
   query: <Row extends object>(
@@ -308,6 +309,10 @@ function nonblank(value: string): boolean {
   return value.trim() === value && value.length > 0 && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
+function boundedRewardLedgerSourceType(value: string): boolean {
+  return nonblank(value) && value.length <= REWARD_LEDGER_SOURCE_TYPE_MAX_LENGTH;
+}
+
 function boundedOpaqueIdempotencyKey(value: string): boolean {
   return value.length >= 16 && value.length <= 200 && nonblank(value);
 }
@@ -334,7 +339,7 @@ function validateInput(input: RewardLedgerAppendInput): void {
     !uuidPattern.test(input.rewardAccountId) ||
     !uuidPattern.test(input.buyerUserId) ||
     !ledgerKinds.has(input.kind) ||
-    !nonblank(input.sourceType) ||
+    !boundedRewardLedgerSourceType(input.sourceType) ||
     !nonblank(input.sourceId) ||
     !nonblank(input.idempotencyKey) ||
     !Number.isSafeInteger(input.pendingPointsDelta) ||
@@ -347,6 +352,9 @@ function validateInput(input: RewardLedgerAppendInput): void {
 }
 
 function projectLedger(row: LedgerRow): RewardLedgerEntry {
+  if (!boundedRewardLedgerSourceType(row.sourceType)) {
+    throw new GrowthPersistenceConflict("Invalid persisted reward ledger source type");
+  }
   return Object.freeze({
     id: row.id,
     rewardAccountId: row.rewardAccountId,

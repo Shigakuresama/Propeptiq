@@ -42,6 +42,7 @@ import {
   updatedAt,
 } from "./helpers";
 import { users } from "./identity";
+import { REWARD_LEDGER_SOURCE_TYPE_MAX_LENGTH } from "@/domain/rewards";
 
 const safeSignedInteger = (column: SQLWrapper) =>
   sql`${column} between -9007199254740991 and 9007199254740991`;
@@ -366,6 +367,12 @@ export const rewardLedgerEntries = pgTable(
       nonblank(table.idempotencyKey),
     ),
     check("reward_ledger_entries_source_type_nonblank", nonblank(table.sourceType)),
+    check(
+      "reward_ledger_entries_source_type_bounded",
+      sql`char_length(${table.sourceType}) <= ${sql.raw(
+        String(REWARD_LEDGER_SOURCE_TYPE_MAX_LENGTH),
+      )}`,
+    ),
     check("reward_ledger_entries_source_id_nonblank", nonblank(table.sourceId)),
     check(
       "reward_ledger_entries_pending_delta_safe",

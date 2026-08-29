@@ -309,6 +309,28 @@ describe("growth policy and repository boundary", () => {
     expect(rows.rows).toEqual([{ pending: 250, available: 0, ledgerCount: 1 }]);
   });
 
+  it("accepts an exact 64-character reward ledger source type", async () => {
+    const sourceType = "s".repeat(64);
+
+    await expect(growthRepository(client).appendRewardLedger(
+      ledgerInput({ sourceType }),
+    )).resolves.toMatchObject({
+      status: "applied",
+      entry: { sourceType },
+    });
+  });
+
+  it("rejects a 65-character reward ledger source type before issuing SQL", async () => {
+    await expect(growthRepository(client, /./u).appendRewardLedger(
+      ledgerInput({ sourceType: "s".repeat(65) }),
+    )).rejects.toBeInstanceOf(GrowthPersistenceConflict);
+    const rows = await client.query<{ accounts: number; ledger: number }>(`
+      SELECT (SELECT count(*)::int FROM reward_accounts) AS accounts,
+             (SELECT count(*)::int FROM reward_ledger_entries) AS ledger
+    `);
+    expect(rows.rows).toEqual([{ accounts: 0, ledger: 0 }]);
+  });
+
   it("returns the prior immutable ledger result for an exact replay and fails closed on a conflicting replay", async () => {
     const repository = growthRepository(client);
     const first = await repository.appendRewardLedger(ledgerInput());

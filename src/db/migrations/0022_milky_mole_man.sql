@@ -1,0 +1,1 @@
+ALTER TABLE "reward_ledger_entries" ADD CONSTRAINT "reward_ledger_entries_source_type_bounded" CHECK (char_length("reward_ledger_entries"."source_type") <= 64);

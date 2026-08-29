@@ -573,6 +573,42 @@ describe("growth database schema", () => {
     ]);
   });
 
+  it("bounds persisted reward ledger source types at 64 characters", async () => {
+    client = await createMigratedPglite();
+    await insertCoreFixture(client);
+    await client.exec(`
+      INSERT INTO reward_accounts
+        (id, buyer_user_id, pending_points, available_points)
+      VALUES ('${ids.rewardAccount}', '${ids.referred}', 0, 0);
+      INSERT INTO reward_ledger_entries
+        (id, reward_account_id, buyer_user_id, kind, source_type, source_id,
+         idempotency_key, pending_points_delta, available_points_delta,
+         pending_points_balance_after, available_points_balance_after)
+      VALUES
+        ('20000000-0000-4000-8000-000000000001', '${ids.rewardAccount}', '${ids.referred}',
+         'admin_adjustment', '${"s".repeat(64)}', 'bounded-source-one',
+         'bounded-source-key-one', 0, 1, 0, 1);
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO reward_ledger_entries
+        (id, reward_account_id, buyer_user_id, kind, source_type, source_id,
+         idempotency_key, pending_points_delta, available_points_delta,
+         pending_points_balance_after, available_points_balance_after)
+       VALUES
+        ('20000000-0000-4000-8000-000000000002', '${ids.rewardAccount}', '${ids.referred}',
+         'admin_adjustment', '${"s".repeat(65)}', 'bounded-source-two',
+         'bounded-source-key-two', 0, 1, 0, 2)`,
+    );
+    const rows = await client.query<{ sourceType: string }>(`
+      SELECT source_type AS "sourceType"
+      FROM reward_ledger_entries
+      WHERE source_id LIKE 'bounded-source-%'
+    `);
+    expect(rows.rows).toEqual([{ sourceType: "s".repeat(64) }]);
+  });
+
   it("allows verified reversal deficits while bounding pending balances and nonzero signed ledger deltas", async () => {
     client = await createMigratedPglite();
     await insertCoreFixture(client);
