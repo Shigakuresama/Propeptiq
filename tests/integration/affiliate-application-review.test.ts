@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { decideAffiliateApplication } from "@/admin/affiliate-application-admin-service";
+import type { AdminCommandContext } from "@/admin/admin-service";
 import type { GrowthSqlClient } from "@/db/repositories/growth-repository";
 import {
   AffiliateAdminError,
@@ -287,6 +289,13 @@ describe("affiliate admin decision transaction on PGlite", () => {
       [adminUserId, ownerUserId, ids.otherBuyer],
     );
     await client.query(
+      `INSERT INTO staff_roles
+         (user_id, capability, granted_by_user_id, grant_correlation_id)
+       VALUES ($1::uuid, 'growth:manage', $1::uuid,
+               'task-8-affiliate-admin-authority')`,
+      [adminUserId],
+    );
+    await client.query(
       `INSERT INTO buyer_profiles
          (user_id, status, age_confirmed_at, research_purpose, updated_at)
        VALUES ($1::uuid, 'active', '2026-08-01T00:00:00.000Z', 'analytical',
@@ -381,6 +390,8 @@ describe("affiliate admin decision transaction on PGlite", () => {
   ) {
     return {
       actorUserId: adminUserId,
+      actorClerkUserId: "clerk-task6a-admin",
+      requiredCapability: "growth:manage" as const,
       profileId: adminProfileId,
       expectedVersion: 1,
       targetStatus,
@@ -650,6 +661,38 @@ describe("affiliate admin decision transaction on PGlite", () => {
     });
   });
 
+  it.each(["revoked-role", "blocked-actor"] as const)(
+    "rechecks persisted administrator authority inside the mutation transaction: %s",
+    async (state) => {
+      if (state === "revoked-role") {
+        await client.query(
+          `UPDATE staff_roles
+           SET revoked_by_user_id = $1::uuid,
+               revoke_correlation_id = 'task-8-affiliate-role-revoked',
+               revoked_at = '2026-08-29T21:30:00.000Z'
+           WHERE user_id = $1::uuid AND capability = 'growth:manage'`,
+          [adminUserId],
+        );
+      } else {
+        await client.query(
+          `INSERT INTO buyer_profiles
+             (user_id, status, updated_at)
+           VALUES ($1::uuid, 'blocked', '2026-08-29T21:30:00.000Z')`,
+          [adminUserId],
+        );
+      }
+
+      await expect(adminMutation()(adminInput("active"))).rejects.toMatchObject({
+        code: "authorization_denied",
+      });
+      await expect(adminState()).resolves.toMatchObject({
+        status: "pending",
+        version: 1,
+        auditCount: 0,
+      });
+    },
+  );
+
   it("rejects a replay deterministically without a second audit", async () => {
     const mutate = adminMutation();
     const input = adminInput("active");
@@ -677,6 +720,72 @@ describe("affiliate admin decision transaction on PGlite", () => {
       status: "pending",
       version: 1,
       auditCount: 0,
+    });
+  });
+
+  it("consumes the limiter once while the concrete serializable adapter retries once", async () => {
+    let transactionAttempts = 0;
+    let limiterCalls = 0;
+    const mutateInTransaction = createPostgresAffiliateAdminMutationTransaction({
+      runSerializableTransaction: async <Value>(
+        work: (sqlClient: GrowthSqlClient) => Promise<Value>,
+      ) => {
+        transactionAttempts += 1;
+        if (transactionAttempts === 1) {
+          throw Object.assign(new Error("synthetic serialization conflict"), { code: "40001" });
+        }
+        return client.transaction((transaction) => work({
+          query: async <Row extends object>(sql: string, params: readonly unknown[] = []) => {
+            const result = await transaction.query<Row>(sql, [...params]);
+            return { rows: result.rows };
+          },
+        }));
+      },
+      retrySleep: async () => undefined,
+    });
+    const commandContext: AdminCommandContext = {
+      principal: {
+        actorId: adminUserId,
+        clerkUserId: "clerk-task6a-admin",
+        buyerStatus: null,
+        capabilities: ["growth:manage"],
+        mfaSatisfied: true,
+      },
+      identity: {
+        clerkUserId: "clerk-task6a-admin",
+        primaryEmail: "task8-admin@example.test",
+        emailVerifiedAt: "2026-08-28T17:00:00.000Z",
+        mfaConfigured: true,
+        secondFactorCompleted: true,
+      },
+      now,
+      correlationId: "task-8-affiliate-retry-correlation",
+      rateLimitSecret: "task-8-affiliate-retry-rate-secret-32-characters",
+    };
+
+    await expect(decideAffiliateApplication({
+      rateLimitStore: {
+        async increment() {
+          limiterCalls += 1;
+          return 1;
+        },
+      },
+      mutateInTransaction,
+    }, commandContext, {
+      profileId: adminProfileId,
+      expectedVersion: 1,
+      decision: "active",
+    })).resolves.toEqual({
+      status: "active",
+      version: 2,
+      updatedAt: now.toISOString(),
+    });
+    expect({ limiterCalls, transactionAttempts }).toEqual({ limiterCalls: 1, transactionAttempts: 2 });
+    await expect(adminState()).resolves.toMatchObject({
+      status: "active",
+      version: 2,
+      auditCount: 1,
+      action: "affiliate.application.active",
     });
   });
 });

@@ -1227,6 +1227,8 @@ export class AffiliateAdminError extends Error {
 
 export type AffiliateAdminMutationTransactionInput = Readonly<{
   actorUserId: string;
+  actorClerkUserId: string;
+  requiredCapability: "growth:manage";
   profileId: string;
   expectedVersion: number;
   targetStatus: "active" | "rejected" | "suspended";
@@ -1845,7 +1847,8 @@ function parseAdminInput(
   if (
     keys.length !== expectedKeys.length ||
     expectedKeys.some((key) => !Object.hasOwn(value, key)) ||
-    !UUID_PATTERN.test(String(value.profileId ?? "")) ||
+    typeof value.profileId !== "string" ||
+    !UUID_PATTERN.test(value.profileId) ||
     !Number.isSafeInteger(value.expectedVersion) ||
     (value.expectedVersion as number) < 1 ||
     typeof value.correlationId !== "string" ||
@@ -1906,6 +1909,8 @@ export function createAffiliateAdminService(dependencies: Readonly<{
     }
     const result = await dependencies.mutateInTransaction(Object.freeze({
       actorUserId: parsed.principal.actorId,
+      actorClerkUserId: parsed.principal.clerkUserId,
+      requiredCapability: "growth:manage" as const,
       profileId: parsed.profileId,
       expectedVersion: parsed.expectedVersion,
       targetStatus: parsed.targetStatus,
@@ -1936,6 +1941,10 @@ function validAdminTransactionInput(
   return (
     isRecord(input) &&
     UUID_PATTERN.test(input.actorUserId) &&
+    typeof input.actorClerkUserId === "string" &&
+    input.actorClerkUserId === input.actorClerkUserId.trim() &&
+    input.actorClerkUserId.length > 0 &&
+    input.requiredCapability === "growth:manage" &&
     UUID_PATTERN.test(input.profileId) &&
     Number.isSafeInteger(input.expectedVersion) &&
     input.expectedVersion > 0 &&
@@ -1955,6 +1964,21 @@ async function mutateAdminWithPostgresClient(
 ): Promise<AffiliateAdminMutationTransactionResult> {
   if (!validAdminTransactionInput(input)) {
     throw new AffiliateAdminError("invalid_input");
+  }
+  const authority = await client.query<{ authorized: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM users u
+       JOIN staff_roles sr ON sr.user_id = u.id
+         AND sr.capability = $3 AND sr.revoked_at IS NULL
+       LEFT JOIN buyer_profiles bp ON bp.user_id = u.id
+       WHERE u.id = $1::uuid AND u.clerk_id = $2
+         AND (bp.status IS NULL OR bp.status <> 'blocked')
+     ) AS authorized`,
+    [input.actorUserId, input.actorClerkUserId, input.requiredCapability],
+  );
+  if (authority.rows[0]?.authorized !== true) {
+    throw new AffiliateAdminError("authorization_denied");
   }
   type CurrentRow = {
     id: string;
