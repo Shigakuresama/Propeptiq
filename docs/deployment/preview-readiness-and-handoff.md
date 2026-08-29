@@ -5,7 +5,9 @@
 The protected Vercel Preview for `feat/propeptiq-lightweight-commerce` is
 published at
 `https://propeptiq-git-feat-propeptiq-lightweight-commerce-sergiosteam.vercel.app`.
-It uses branch-scoped, non-secret Preview settings and clearly labeled synthetic
+The protected growth Preview for `feat/propeptiq-growth-release` is published at
+`https://propeptiq-git-feat-propeptiq-growth-release-sergiosteam.vercel.app`.
+Both use branch-scoped, non-secret Preview settings and clearly labeled synthetic
 catalog fixtures. The Production alias is
 `https://propeptiq-ten.vercel.app`; its non-secret environment is configured for
 the owner catalog with every commerce/provider capability disabled. Production
@@ -49,21 +51,38 @@ PostgreSQL concurrency claim is made. The offline production dependency audit
 used only the local advisory cache and reported zero vulnerabilities; no
 networked audit was run.
 
-The protected Preview URL documented below currently identifies the earlier
-lightweight-commerce branch. It is not evidence that this growth candidate has
-been deployed. The growth branch must receive its own protected Preview status,
-build-log, and browser verification after its reviewed commit is pushed. Until
-that happens, the growth Preview lane is **PENDING**, while the existing
-Production alias remains browse-only with every live/provider capability
-disabled.
+The reviewed growth commit was deployed only to Vercel target `preview` as
+deployment `dpl_BUSW3x5PVxyZ6PdRxRMtPBAYsT3g`; Vercel reported **Ready** and
+assigned both the immutable deployment URL
+`https://propeptiq-h19aci8w7-sergiosteam.vercel.app` and the branch alias above.
+Unauthenticated browser access redirected to Vercel login, proving deployment
+protection remained enabled. Authenticated deployment requests then proved:
+
+- exact health response `{"status":"ok"}` and no Vercel error/HTTP-500 log
+  entries during the verification window;
+- the 56-group owner browse catalog and a clearly labeled `Synthetic demo
+  catalog` product surface, with no catalog price heading;
+- inactive rewards/partner states with no fixture economics, fixed identity,
+  local code, or local-growth sentinel in rendered output; and
+- quote/session POST denial at `403` and unsigned Stripe webhook denial at
+  `400`, with no payment, order, payout, or provider effect.
+
+Fifteen branch-scoped non-secret variables are present for this growth Preview.
+They enable only the synthetic demo catalog and exact owner browse publication;
+`LOCAL_TEST_DRIVER`, auth, database, payments, storage, email, tax, shipping,
+fulfillment, commerce-live, and payments-live modes are all disabled. Generic
+Vercel/Neon integration variables exist at the project level but are ignored
+because `DATABASE_MODE=disabled`. No Production variable was changed.
 
 ## Browse-only boundary
 
 - Preview renders the owner-supplied browse-only catalog only when its exact
   publication ID is configured. The separate commerce catalog remains limited
   to explicitly labeled synthetic demo records.
-- Buyer quote and payment-session creation remain closed with no-store `503`
-  responses. Shipping, tax, and payment-session creation are unavailable.
+- Buyer quote and payment-session creation remain closed before any provider
+  effect. Current unauthenticated growth-Preview probes return `403`; a disabled
+  runtime may otherwise use its documented no-store `503` denial. Shipping,
+  tax, and payment-session creation remain unavailable.
 - Preview is neither live-capable nor local-test-capable. The guarded local
   commerce harness is not available in Preview.
 - This buyer-checkout boundary does not claim that staff or webhook runtimes
@@ -97,6 +116,10 @@ FULFILLMENT_MODE=disabled
 COMMERCE_LIVE_CAPABILITY=disabled
 PAYMENTS_LIVE_CAPABILITY=disabled
 ```
+
+The growth Preview uses the same disabled matrix with branch scope
+`feat/propeptiq-growth-release` and
+`APP_ORIGIN=https://propeptiq-git-feat-propeptiq-growth-release-sergiosteam.vercel.app`.
 
 ### Production browse-only
 

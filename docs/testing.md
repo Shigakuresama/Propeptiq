@@ -99,6 +99,7 @@ The fresh release-candidate results were:
 | Production dependency tree | **PASS — `npm ls --omit=dev --depth=0`** |
 | Offline production dependency audit | **PASS from the local advisory cache — zero vulnerabilities; no network audit was run** |
 | Guarded real-PostgreSQL contention | **NOT RUN — both exact isolation guards were absent; no connection and no PostgreSQL concurrency claim** |
+| Protected growth Preview | **PASS — Vercel target Preview Ready; protection redirect confirmed; authenticated health/content checks passed; checkout/session denied; zero error/HTTP-500 log entries** |
 
 The browser lane covers 375, 768, 1024, and 1440 CSS pixels; keyboard focus;
 reduced motion; minimum targets; 16px explanatory text; progress semantics;
@@ -125,3 +126,14 @@ deployment evidence.
 Local/PGlite/browser/build proof does not establish legal approval, real catalog
 or destination approval, Stripe acceptance, tax/shipping readiness, fulfillment,
 affiliate payout operations, or Production activation.
+
+The protected branch Preview is
+`https://propeptiq-git-feat-propeptiq-growth-release-sergiosteam.vercel.app`.
+Its immutable verified deployment was
+`https://propeptiq-h19aci8w7-sergiosteam.vercel.app`. Browser automation proved
+the Vercel login boundary; Vercel-authenticated deployment requests verified the
+actual protected app without weakening that boundary. The Preview contains no
+synthetic growth identity or active economics: rewards and partner values remain
+inactive until real database policy records exist. It does expose the clearly
+labeled synthetic commerce demo route, while every live/provider capability is
+disabled. This Preview proof is not Production proof.

@@ -364,17 +364,17 @@ type AttributionEnvelopeV1 = Readonly<{
 - Modify: `tests/e2e/public-storefront.spec.ts`, `tests/e2e/task5-account-admin.spec.ts`, `tests/e2e/task6-commerce.spec.ts`
 - Modify: `docs/testing.md`, `docs/deployment/preview-readiness-and-handoff.md`, `docs/deployment/environments-and-recovery.md`
 
-- [ ] Add deterministic local fixtures for one active loyalty policy, customer referral, affiliate application/status, shared set, point ledger, commission ledger, and reversal. Label every fixture `Synthetic local test only`.
-- [ ] Prove public rewards values come from fixtures, referral landing sets only a signed cookie, cart survives sign-in, referral discount is authoritative, points reservation cannot double-spend, and success refresh cannot mint rewards.
-- [ ] Prove active buyer automatic code creation, owner-only ledgers, blocked buyer read-only behavior, affiliate pending/active/suspended states, and no cross-user reads.
-- [ ] Prove one capable MFA admin can activate a policy, decide an affiliate, create a payout batch, and record an external payout reference with audit read-back; non-admin/missing-MFA/missing-capability actors fail.
-- [ ] Prove shared set links reload current facts, omit retired products, preserve only IDs/quantities in cart, and never carry price/claim data in the URL or local storage.
-- [ ] Verify 375, 768, 1024, and 1440px, 200% zoom, keyboard focus, reduced motion, 44px targets, 16px explanatory text, progress semantics, narrow ledger reflow, and no overflow.
-- [ ] Capture 375px and 1440px screenshots for homepage, catalog, rewards, referrals, partner dashboard, shared set, cart, and admin growth policy. Confirm the header logo image remains uncropped in the built preview.
-- [ ] Run `npm test`, `npm run test:integration`, `npm run test:e2e`, `npm run lint`, fresh `npm run typecheck`, `npm run db:generate` twice, `npm run db:check`, `npm run build`, `npx next build --webpack`, artifact scans for both builds, `npm ls --omit=dev --depth=0`, `npm run verify:workspace-boundary`, and `git diff --check`.
-- [ ] Run guarded real-PostgreSQL contention tests only when `TEST_DATABASE_URL` and exact `TEST_DATABASE_CONFIRMATION=isolated-test-database` are present. Otherwise record the lane as not run and make no real-concurrency claim.
-- [ ] Deploy only to an isolated Preview with synthetic identities/data and all live capabilities disabled. Do not activate production growth policies until real commerce data, Stripe acceptance, destination policies, tax/shipping, fulfillment, terms review, unit economics, and payout operations are verified.
-- [ ] Commit `test(e2e): verify growth experience and release gates`, request independent security/design review, and merge through the normal release process only after actionable findings are fixed.
+- [x] Add deterministic local fixtures for one active loyalty policy, customer referral, affiliate application/status, shared set, point ledger, commission ledger, and reversal. Label every fixture `Synthetic local test only`.
+- [x] Prove public rewards values come from fixtures, referral landing sets only a signed cookie, cart survives sign-in, referral discount is authoritative, points reservation cannot double-spend, and success refresh cannot mint rewards.
+- [x] Prove active buyer automatic code creation, owner-only ledgers, blocked buyer read-only behavior, affiliate pending/active/suspended states, and no cross-user reads.
+- [x] Prove one capable MFA admin can activate a policy, decide an affiliate, create a payout batch, and record an external payout reference with audit read-back; non-admin/missing-MFA/missing-capability actors fail.
+- [x] Prove shared set links reload current facts, omit retired products, preserve only IDs/quantities in cart, and never carry price/claim data in the URL or local storage.
+- [x] Verify 375, 768, 1024, and 1440px, 200% zoom, keyboard focus, reduced motion, 44px targets, 16px explanatory text, progress semantics, narrow ledger reflow, and no overflow.
+- [x] Capture 375px and 1440px screenshots for homepage, catalog, rewards, referrals, partner dashboard, shared set, cart, and admin growth policy. Confirm the header logo image remains uncropped in the built preview.
+- [x] Run `npm test`, `npm run test:integration`, `npm run test:e2e`, `npm run lint`, fresh `npm run typecheck`, `npm run db:generate` twice, `npm run db:check`, `npm run build`, `npx next build --webpack`, artifact scans for both builds, `npm ls --omit=dev --depth=0`, `npm run verify:workspace-boundary`, and `git diff --check`.
+- [x] Run guarded real-PostgreSQL contention tests only when `TEST_DATABASE_URL` and exact `TEST_DATABASE_CONFIRMATION=isolated-test-database` are present. Otherwise record the lane as not run and make no real-concurrency claim.
+- [x] Deploy only to an isolated Preview with synthetic identities/data and all live capabilities disabled. Do not activate production growth policies until real commerce data, Stripe acceptance, destination policies, tax/shipping, fulfillment, terms review, unit economics, and payout operations are verified.
+- [x] Commit `test(e2e): verify growth experience and release gates`, request independent security/design review, and merge through the normal release process only after actionable findings are fixed.
 
 **Checkpoint:** Code and preview are release-ready; production activation remains a separate explicit owner action.
 
