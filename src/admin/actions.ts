@@ -1,14 +1,17 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { resourceBySlug, adminGate } from "@/admin/access";
 import {
   activateProduct,
+  activateGrowthPolicy,
   activatePromotion,
   changeBuyerStatus,
   changeStaffCapability,
+  createGrowthPolicyDraft,
   decideReviewRequest,
   publishAttestationVersion,
   publishCoaDocument,
@@ -29,6 +32,8 @@ import {
   supersedeDestinationPolicy,
   supersedeProductPrice,
   type AdminCommandContext,
+  type GrowthPolicyKind,
+  type GrowthPolicyValues,
   type PromotionTargetInput,
 } from "@/admin/admin-service";
 import {
@@ -40,6 +45,7 @@ import { isCanonicalUuid } from "@/commerce/checkout-identity";
 import { createStaffCommerceServerRuntime } from "@/commerce/server-runtime";
 import { isCapability } from "@/domain/authorization";
 import type { BuyerStatus } from "@/domain/eligibility";
+import { assertMutationOrigin } from "@/security/origin";
 
 type TrustedAdmin = Readonly<{
   request: Awaited<ReturnType<typeof getRequestIdentity>>;
@@ -49,6 +55,38 @@ type TrustedAdmin = Readonly<{
 
 async function trustedAdmin(resourceSlug: string): Promise<TrustedAdmin> {
   const request = await getRequestIdentity();
+  const resource = resourceBySlug(resourceSlug);
+  const repositories = getRequestRepositories(request);
+  if (!resource || !repositories || !request.environment.RATE_LIMIT_SECRET) {
+    throw new Error("Admin dependency unavailable");
+  }
+  const gate = adminGate(request, resource);
+  if (!gate.allowed) throw new Error("Admin authorization denied");
+  return {
+    request,
+    repositories,
+    context: {
+      principal: request.principal,
+      identity: request.identity,
+      now: new Date(),
+      correlationId: randomUUID(),
+      rateLimitSecret: request.environment.RATE_LIMIT_SECRET,
+    },
+  };
+}
+
+async function trustedGrowthAdmin(resourceSlug: string): Promise<TrustedAdmin> {
+  const request = await getRequestIdentity();
+  const appOrigin = request.environment.APP_ORIGIN;
+  if (!appOrigin) throw new Error("Admin dependency unavailable");
+  const incomingHeaders = await headers();
+  assertMutationOrigin(
+    new Request(appOrigin, {
+      method: "POST",
+      headers: incomingHeaders,
+    }),
+    { APP_ENV: request.environment.APP_ENV, APP_ORIGIN: appOrigin },
+  );
   const resource = resourceBySlug(resourceSlug);
   const repositories = getRequestRepositories(request);
   if (!resource || !repositories || !request.environment.RATE_LIMIT_SECRET) {
@@ -79,6 +117,82 @@ function integer(formData: FormData, name: string): number {
   const parsed = Number(value(formData, name));
   if (!Number.isSafeInteger(parsed)) throw new Error(`${name} is invalid`);
   return parsed;
+}
+
+function canonicalInteger(formData: FormData, name: string): number {
+  const supplied = value(formData, name);
+  if (!/^(?:0|[1-9]\d*)$/u.test(supplied)) throw new Error(`${name} is invalid`);
+  const parsed = Number(supplied);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`${name} is invalid`);
+  return parsed;
+}
+
+function exactFormFields(formData: FormData, expected: readonly string[]): void {
+  const actual = [...formData.keys()].toSorted();
+  const allowed = [...expected].toSorted();
+  if (
+    actual.length !== allowed.length ||
+    actual.some((name, index) => name !== allowed[index])
+  ) {
+    throw new Error("Growth policy form is malformed");
+  }
+}
+
+const policyValueFields = {
+  loyalty: [
+    "pointsPerDollar",
+    "redemptionMinorPerPoint",
+    "minimumRedemptionPoints",
+    "maximumRedemptionBasisPoints",
+    "expiresAfterDays",
+  ],
+  referral: [
+    "attributionDays",
+    "referredDiscountBasisPoints",
+    "referredDiscountCapMinor",
+    "referrerPointsPerDollar",
+    "referrerRewardCapPoints",
+  ],
+  affiliate: [
+    "attributionDays",
+    "firstOrderCommissionBasisPoints",
+    "reorderCommissionBasisPoints",
+    "reorderWindowDays",
+    "approvalDelayDays",
+    "payoutThresholdMinor",
+    "currency",
+  ],
+} as const satisfies Readonly<Record<GrowthPolicyKind, readonly string[]>>;
+
+function policyValues(formData: FormData, kind: GrowthPolicyKind): GrowthPolicyValues {
+  if (kind === "loyalty") {
+    const expiresAfterDays = value(formData, "expiresAfterDays");
+    return {
+      pointsPerDollar: canonicalInteger(formData, "pointsPerDollar"),
+      redemptionMinorPerPoint: canonicalInteger(formData, "redemptionMinorPerPoint"),
+      minimumRedemptionPoints: canonicalInteger(formData, "minimumRedemptionPoints"),
+      maximumRedemptionBasisPoints: canonicalInteger(formData, "maximumRedemptionBasisPoints"),
+      expiresAfterDays: expiresAfterDays === "" ? null : canonicalInteger(formData, "expiresAfterDays"),
+    };
+  }
+  if (kind === "referral") {
+    return {
+      attributionDays: canonicalInteger(formData, "attributionDays"),
+      referredDiscountBasisPoints: canonicalInteger(formData, "referredDiscountBasisPoints"),
+      referredDiscountCapMinor: canonicalInteger(formData, "referredDiscountCapMinor"),
+      referrerPointsPerDollar: canonicalInteger(formData, "referrerPointsPerDollar"),
+      referrerRewardCapPoints: canonicalInteger(formData, "referrerRewardCapPoints"),
+    };
+  }
+  return {
+    attributionDays: canonicalInteger(formData, "attributionDays"),
+    firstOrderCommissionBasisPoints: canonicalInteger(formData, "firstOrderCommissionBasisPoints"),
+    reorderCommissionBasisPoints: canonicalInteger(formData, "reorderCommissionBasisPoints"),
+    reorderWindowDays: canonicalInteger(formData, "reorderWindowDays"),
+    approvalDelayDays: canonicalInteger(formData, "approvalDelayDays"),
+    payoutThresholdMinor: canonicalInteger(formData, "payoutThresholdMinor"),
+    currency: value(formData, "currency"),
+  };
 }
 
 function optionalValue(formData: FormData, name: string): string | undefined {
@@ -651,4 +765,65 @@ export async function changeStaffCapabilityAction(formData: FormData): Promise<n
       enabled: value(formData, "enabled") === "true",
     });
   });
+}
+
+async function createPolicyDraftAction(
+  kind: GrowthPolicyKind,
+  resource: "loyalty-policies" | "referral-policies" | "affiliate-policies",
+  formData: FormData,
+): Promise<never> {
+  return run(resource, async () => {
+    exactFormFields(formData, ["effectiveAt", ...policyValueFields[kind]]);
+    const values = policyValues(formData, kind);
+    const effectiveAt = value(formData, "effectiveAt");
+    const admin = await trustedGrowthAdmin(resource);
+    await createGrowthPolicyDraft(admin.repositories.adminRepository, admin.context, {
+      kind,
+      policyId: randomUUID(),
+      effectiveAt,
+      values,
+    });
+  });
+}
+
+async function activatePolicyAction(
+  kind: GrowthPolicyKind,
+  resource: "loyalty-policies" | "referral-policies" | "affiliate-policies",
+  formData: FormData,
+): Promise<never> {
+  return run(resource, async () => {
+    exactFormFields(formData, ["policyId", "expectedVersion"]);
+    const policyId = value(formData, "policyId");
+    const expectedVersion = canonicalInteger(formData, "expectedVersion");
+    const admin = await trustedGrowthAdmin(resource);
+    await activateGrowthPolicy(admin.repositories.adminRepository, admin.context, {
+      kind,
+      policyId,
+      expectedVersion,
+    });
+  });
+}
+
+export async function createLoyaltyPolicyDraftAction(formData: FormData): Promise<never> {
+  return createPolicyDraftAction("loyalty", "loyalty-policies", formData);
+}
+
+export async function activateLoyaltyPolicyAction(formData: FormData): Promise<never> {
+  return activatePolicyAction("loyalty", "loyalty-policies", formData);
+}
+
+export async function createReferralPolicyDraftAction(formData: FormData): Promise<never> {
+  return createPolicyDraftAction("referral", "referral-policies", formData);
+}
+
+export async function activateReferralPolicyAction(formData: FormData): Promise<never> {
+  return activatePolicyAction("referral", "referral-policies", formData);
+}
+
+export async function createAffiliatePolicyDraftAction(formData: FormData): Promise<never> {
+  return createPolicyDraftAction("affiliate", "affiliate-policies", formData);
+}
+
+export async function activateAffiliatePolicyAction(formData: FormData): Promise<never> {
+  return activatePolicyAction("affiliate", "affiliate-policies", formData);
 }
