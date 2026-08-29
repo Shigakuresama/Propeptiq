@@ -97,6 +97,9 @@ describe("CheckoutForm", () => {
         quote: {
           status: "ready", reviewRequired: false, reasons: [], currency: "USD",
           subtotalMinor: 4_800, discountMinor: 480, shippingMinor: 500, taxMinor: 321, totalMinor: 5_141,
+          promotionDiscountMinor: 480, referralDiscountMinor: 0,
+          rewardRedemptionPoints: 0, rewardRedemptionMinor: 0,
+          pendingBaseEarnPoints: 86, rewardsBenefitAvailable: true, rewardsUnavailableReason: null,
           lines: [{
             productId: "61000000-0000-4000-8000-000000000001", productName: "Synthetic local test only — Alpha",
             packageForm: "Research vial", quantity: 2, unitAmountMinor: 2_400, subtotalMinor: 4_800,
@@ -259,6 +262,14 @@ describe("CheckoutForm", () => {
       pendingBaseEarnPoints: 74,
       rewardsBenefitAvailable: true,
     }],
+    ["complete rewards without acquisition", {
+      rewardRedemptionPoints: 1_080,
+      rewardRedemptionMinor: 1_080,
+      pendingBaseEarnPoints: 74,
+      rewardsBenefitAvailable: true,
+      rewardsUnavailableReason: null,
+    }],
+    ["missing authoritative breakdown", {}],
     ["arithmetic mismatch", {
       promotionDiscountMinor: 300,
       referralDiscountMinor: 180,
@@ -345,6 +356,9 @@ describe("CheckoutForm", () => {
       quote: {
         status: "review_required", reviewRequired: true, reasons: ["destination_review"], currency: "USD",
         subtotalMinor: 4_800, discountMinor: 480, shippingMinor: 500, taxMinor: 321, totalMinor: 5_141,
+        promotionDiscountMinor: 480, referralDiscountMinor: 0,
+        rewardRedemptionPoints: 0, rewardRedemptionMinor: 0,
+        pendingBaseEarnPoints: 86, rewardsBenefitAvailable: true, rewardsUnavailableReason: null,
         lines: [{
           productId: "61000000-0000-4000-8000-000000000001", productName: "Synthetic local test only — Alpha",
           packageForm: "Research vial", quantity: 2, unitAmountMinor: 2_400, subtotalMinor: 4_800,
@@ -437,6 +451,9 @@ describe("CheckoutForm", () => {
         quote: {
           status: "ready", reviewRequired: false, reasons: [], currency: "USD",
           subtotalMinor: 4_800, discountMinor: 0, shippingMinor: 500, taxMinor: 321, totalMinor: 5_621,
+          promotionDiscountMinor: 0, referralDiscountMinor: 0,
+          rewardRedemptionPoints: 0, rewardRedemptionMinor: 0,
+          pendingBaseEarnPoints: 96, rewardsBenefitAvailable: true, rewardsUnavailableReason: null,
           lines: [{
             productId, productName: "Synthetic local test only — Alpha", packageForm: "Research vial",
             quantity: 2, unitAmountMinor: 2_400, subtotalMinor: 4_800, discountMinor: 0, totalMinor: 4_800,

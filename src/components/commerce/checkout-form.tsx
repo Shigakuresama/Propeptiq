@@ -26,13 +26,13 @@ type SafeQuote = Readonly<{
   shippingMinor: number;
   taxMinor: number;
   totalMinor: number;
-  promotionDiscountMinor?: number;
-  referralDiscountMinor?: number;
-  rewardRedemptionPoints?: number;
-  rewardRedemptionMinor?: number;
-  pendingBaseEarnPoints?: number;
-  rewardsBenefitAvailable?: boolean;
-  rewardsUnavailableReason?: string | null;
+  promotionDiscountMinor: number;
+  referralDiscountMinor: number;
+  rewardRedemptionPoints: number;
+  rewardRedemptionMinor: number;
+  pendingBaseEarnPoints: number;
+  rewardsBenefitAvailable: boolean;
+  rewardsUnavailableReason: string | null;
   lines: readonly Readonly<{
     productId: string;
     productName: string;
@@ -111,8 +111,7 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
   }
   const hasAcquisition = acquisitionKeys.map((key) => Object.hasOwn(value, key));
   const hasRewards = rewardKeys.map((key) => Object.hasOwn(value, key));
-  if (hasAcquisition.some(Boolean) && !hasAcquisition.every(Boolean)) return null;
-  if (hasRewards.some(Boolean) && !hasRewards.every(Boolean)) return null;
+  if (!hasAcquisition.every(Boolean) || !hasRewards.every(Boolean)) return null;
   if (
     (value.status !== "ready" && value.status !== "review_required") ||
     typeof value.reviewRequired !== "boolean" ||
@@ -130,23 +129,19 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     (value.status === "ready" ? value.reasons.length !== 0 : value.reasons.length < 1) ||
     !Array.isArray(value.lines) || value.lines.length < 1 || value.lines.length > 50
   ) return null;
-  if (hasAcquisition.every(Boolean) &&
-    (!safeMoney(value.promotionDiscountMinor) || !safeMoney(value.referralDiscountMinor))) {
+  if (!safeMoney(value.promotionDiscountMinor) || !safeMoney(value.referralDiscountMinor)) {
     return null;
   }
-  if (hasRewards.every(Boolean) &&
-    (!safeMoney(value.rewardRedemptionPoints) ||
-      !safeMoney(value.rewardRedemptionMinor) ||
-      !safeMoney(value.pendingBaseEarnPoints) ||
-      typeof value.rewardsBenefitAvailable !== "boolean" ||
-      (value.rewardsUnavailableReason !== null && !boundedText(value.rewardsUnavailableReason, 80)))) {
+  if (!safeMoney(value.rewardRedemptionPoints) ||
+    !safeMoney(value.rewardRedemptionMinor) ||
+    !safeMoney(value.pendingBaseEarnPoints) ||
+    typeof value.rewardsBenefitAvailable !== "boolean" ||
+    (value.rewardsUnavailableReason !== null && !boundedText(value.rewardsUnavailableReason, 80))) {
     return null;
   }
-  if ((hasAcquisition.every(Boolean) || hasRewards.every(Boolean)) &&
-    (hasAcquisition.every(Boolean) ? value.promotionDiscountMinor as number : 0) +
-      (hasAcquisition.every(Boolean) ? value.referralDiscountMinor as number : 0) +
-      (hasRewards.every(Boolean) ? value.rewardRedemptionMinor as number : 0) !==
-      value.discountMinor) {
+  if ((value.promotionDiscountMinor as number) +
+    (value.referralDiscountMinor as number) +
+    (value.rewardRedemptionMinor as number) !== value.discountMinor) {
     return null;
   }
   const lines: Array<SafeQuote["lines"][number]> = [];
@@ -181,19 +176,6 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     });
   }
   if (lineSubtotal !== value.subtotalMinor || lineDiscount !== value.discountMinor) return null;
-  const growthProjection = {
-    ...(hasAcquisition.every(Boolean) ? {
-      promotionDiscountMinor: value.promotionDiscountMinor as number,
-      referralDiscountMinor: value.referralDiscountMinor as number,
-    } : {}),
-    ...(hasRewards.every(Boolean) ? {
-      rewardRedemptionPoints: value.rewardRedemptionPoints as number,
-      rewardRedemptionMinor: value.rewardRedemptionMinor as number,
-      pendingBaseEarnPoints: value.pendingBaseEarnPoints as number,
-      rewardsBenefitAvailable: value.rewardsBenefitAvailable as boolean,
-      rewardsUnavailableReason: value.rewardsUnavailableReason as string | null,
-    } : {}),
-  };
   return {
     status: value.status,
     reviewRequired: value.reviewRequired,
@@ -204,7 +186,13 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     shippingMinor: value.shippingMinor,
     taxMinor: value.taxMinor,
     totalMinor: value.totalMinor,
-    ...growthProjection,
+    promotionDiscountMinor: value.promotionDiscountMinor,
+    referralDiscountMinor: value.referralDiscountMinor,
+    rewardRedemptionPoints: value.rewardRedemptionPoints,
+    rewardRedemptionMinor: value.rewardRedemptionMinor,
+    pendingBaseEarnPoints: value.pendingBaseEarnPoints,
+    rewardsBenefitAvailable: value.rewardsBenefitAvailable,
+    rewardsUnavailableReason: value.rewardsUnavailableReason,
     lines,
   };
 }
@@ -676,35 +664,25 @@ export function CheckoutForm({
             <MoneyRow label="Merchandise subtotal" amount={money(quoteView.quote.subtotalMinor)} />
             <MoneyRow
               label="Promotion discount"
-              amount={`−${money(
-                quoteView.quote.promotionDiscountMinor ?? quoteView.quote.discountMinor,
-              )}`}
+              amount={`−${money(quoteView.quote.promotionDiscountMinor)}`}
             />
-            {quoteView.quote.referralDiscountMinor !== undefined ? (
-              <MoneyRow
-                label="Referral benefit"
-                amount={`−${money(quoteView.quote.referralDiscountMinor)}`}
-              />
-            ) : null}
-            {quoteView.quote.rewardRedemptionPoints !== undefined &&
-            quoteView.quote.rewardRedemptionMinor !== undefined ? (
-              <MoneyRow
-                label={`Points redemption (${quoteView.quote.rewardRedemptionPoints} points)`}
-                amount={`−${money(quoteView.quote.rewardRedemptionMinor)}`}
-              />
-            ) : null}
+            <MoneyRow
+              label="Referral benefit"
+              amount={`−${money(quoteView.quote.referralDiscountMinor)}`}
+            />
+            <MoneyRow
+              label={`Points redemption (${quoteView.quote.rewardRedemptionPoints} points)`}
+              amount={`−${money(quoteView.quote.rewardRedemptionMinor)}`}
+            />
             <MoneyRow label={syntheticLocal ? "Synthetic local test only shipping" : "Shipping"} amount={money(quoteView.quote.shippingMinor)} />
             <MoneyRow label={syntheticLocal ? "Synthetic local test only tax" : "Tax"} amount={money(quoteView.quote.taxMinor)} />
             <MoneyRow label="Total" amount={money(quoteView.quote.totalMinor)} strong />
           </dl>
-          {quoteView.quote.pendingBaseEarnPoints !== undefined ? (
-            <p className="info-record mt-6 tabular-nums">
-              {quoteView.quote.pendingBaseEarnPoints} points pending after qualifying payment
-            </p>
-          ) : null}
+          <p className="info-record mt-6 tabular-nums">
+            {quoteView.quote.pendingBaseEarnPoints} points pending after qualifying payment
+          </p>
           {quoteView.quote.rewardsBenefitAvailable === false &&
-          quoteView.quote.rewardsUnavailableReason !== null &&
-          quoteView.quote.rewardsUnavailableReason !== undefined ? (
+          quoteView.quote.rewardsUnavailableReason !== null ? (
             <p className="warning-record mt-4">
               Rewards benefit unavailable: {quoteView.quote.rewardsUnavailableReason}
             </p>
