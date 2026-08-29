@@ -55,6 +55,7 @@ function hasOwnerData(snapshot: OwnerGrowthSnapshot): boolean {
     snapshot.referrals.counts.attributed !== 0 ||
     snapshot.referrals.conversions.totalCount !== 0 ||
     snapshot.referrals.rewardPointsTotal !== 0 ||
+    snapshot.sharedSets.totalCount !== 0 ||
     snapshot.affiliate !== null
   );
 }

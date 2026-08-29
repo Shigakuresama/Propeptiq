@@ -77,6 +77,23 @@ const historicalSnapshotWithoutPolicy = Object.freeze({
   }),
 }) satisfies OwnerGrowthSnapshot;
 
+const sharedSetOnlySnapshot = Object.freeze({
+  ...emptySnapshot,
+  sharedSets: Object.freeze({
+    items: Object.freeze([
+      Object.freeze({
+        code: "set_ABCDEFGHIJKLMNOP",
+        label: "Archived owner research set",
+        active: false,
+        itemCount: 2,
+        updatedAt: "2026-08-27T15:00:00.000Z",
+      }),
+    ]),
+    totalCount: 1,
+    page: Object.freeze({ limit: 50, offset: 0, hasMore: false }),
+  }),
+}) satisfies OwnerGrowthSnapshot;
+
 describe("owner growth server read adapter", () => {
   const loadProjection = vi.fn();
   const loadSnapshot = vi.fn();
@@ -213,5 +230,45 @@ describe("owner growth server read adapter", () => {
       },
     });
     expect(loadSnapshot).toHaveBeenCalledWith(ownerId);
+  });
+
+  it("keeps blocked-owner shared-set-only history readable when growth is inactive", async () => {
+    const { createOwnerGrowthReader } = await import("./owner-growth-server");
+    const reader = createOwnerGrowthReader({ loadProjection, loadSnapshot });
+    loadProjection.mockResolvedValueOnce({ status: "inactive" });
+    loadSnapshot.mockResolvedValueOnce(sharedSetOnlySnapshot);
+
+    await expect(reader({ identity, principal: principal("blocked") }, ownerId)).resolves.toEqual({
+      status: "data",
+      access: "blocked_read_capable",
+      verifiedEmail: identity.primaryEmail,
+      snapshot: sharedSetOnlySnapshot,
+      projection: {
+        loyalty: null,
+        referral: null,
+        affiliate: null,
+        terms: { rewards: null, partner: null },
+      },
+    });
+  });
+
+  it("keeps review-owner shared-set-only history readable when policy reads fail", async () => {
+    const { createOwnerGrowthReader } = await import("./owner-growth-server");
+    const reader = createOwnerGrowthReader({ loadProjection, loadSnapshot });
+    loadProjection.mockResolvedValueOnce({ status: "read_error" });
+    loadSnapshot.mockResolvedValueOnce(sharedSetOnlySnapshot);
+
+    await expect(reader({ identity, principal: principal("review") }, ownerId)).resolves.toEqual({
+      status: "data",
+      access: "read_only_owner",
+      verifiedEmail: identity.primaryEmail,
+      snapshot: sharedSetOnlySnapshot,
+      projection: {
+        loyalty: null,
+        referral: null,
+        affiliate: null,
+        terms: { rewards: null, partner: null },
+      },
+    });
   });
 });
