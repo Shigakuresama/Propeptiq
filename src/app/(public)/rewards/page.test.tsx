@@ -211,6 +211,36 @@ describe("public rewards page", () => {
     expect(screen.getByRole("link", { name: "Read current rewards terms" })).toBeVisible();
   });
 
+  it("keeps public rewards available when identity resolution fails", async () => {
+    getRequestIdentityMock.mockRejectedValueOnce(
+      new Error("synthetic identity service failure"),
+    );
+    getPublicGrowthProjectionMock.mockResolvedValue({
+      status: "active",
+      projection: {
+        loyalty: {
+          status: "active",
+          pointsPerDollar: 2,
+          redemptionMinorPerPoint: 1,
+          minimumRedemptionPoints: 500,
+          maximumRedemptionBasisPoints: 2_500,
+          expiresAfterDays: null,
+        },
+        referral: null,
+        affiliate: null,
+        terms: { rewards: { version: 7 }, partner: null },
+      },
+    });
+
+    render(await RewardsPage());
+
+    expect(screen.getByText("Earn 2 points per eligible dollar.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Read current rewards terms" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Create account" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Verify account" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "View your rewards" })).toBeNull();
+  });
+
   it("sends a verified account directly to its private rewards record", async () => {
     getRequestIdentityMock.mockResolvedValueOnce({
       environment: { AUTH_MODE: "test" },

@@ -5,7 +5,7 @@ PROPEPTIQ LABS is a U.S.-only, research-use commerce application. The active pro
 ## V1 experience
 
 - Anonymous visitors may browse the active catalog, see server-backed prices and promotions, and build a local cart.
-- Checkout requires a Managed Neon Auth verified email, age 21+ confirmation, a structured research purpose, and the current versioned research-use attestation.
+- Checkout requires an email verified by Managed Neon Auth, confirmation that the buyer is at least 21 years old, a structured research purpose, and the current versioned research-use attestation.
 - Completing those steps creates an `active` individual buyer without routine staff approval or uploaded identity or organization material.
 - An optional organization-name profile field is descriptive only; V1 has no organization tenancy or membership authorization.
 - Checkout remains server-authoritative for account, attestation, product, destination, inventory, payment-provider enablement, price, discount, tax, and shipping facts.

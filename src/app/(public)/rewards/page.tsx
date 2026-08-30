@@ -20,15 +20,14 @@ export const metadata: Metadata = {
 export default async function RewardsPage() {
   const [result, request] = await Promise.all([
     getPublicGrowthProjection(),
-    getRequestIdentity(),
+    getRequestIdentity().catch(() => null),
   ]);
   const projection = result.status === "active" ? result.projection : null;
   const loyalty = projection?.loyalty?.status === "active" ? projection.loyalty : null;
   const referral = projection?.referral?.status === "active" ? projection.referral : null;
   const available = loyalty !== null || referral !== null;
-  const accountAccessAvailable =
-    available && request.environment.AUTH_MODE !== "disabled";
-  const accountAction = !accountAccessAvailable
+  const accountAction =
+    !available || !request || request.environment.AUTH_MODE === "disabled"
     ? null
     : request.identity?.emailVerifiedAt
       ? { href: "/account/rewards" as const, label: "View your rewards" }

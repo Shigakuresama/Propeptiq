@@ -87,7 +87,7 @@
   --shadow-soft: var(--shadow-soft);
   --shadow-float: var(--shadow-float);
   --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
-  --font-heading: "Newsreader", "Newsreader Fallback", Georgia, serif;
+  --font-heading: Newsreader, "Newsreader Fallback", Georgia, serif;
   --text-display: clamp(3.2rem, 7vw, 6.9rem);
   --text-page: clamp(2.7rem, 5vw, 5rem);
   --text-section: clamp(2rem, 3.5vw, 3.5rem);
@@ -285,7 +285,7 @@ footer a,
 }
 
 .metric-value {
-  font-family: "Newsreader", "Newsreader Fallback", Georgia, serif;
+  font-family: Newsreader, "Newsreader Fallback", Georgia, serif;
   font-size: clamp(2rem, 4vw, 3.5rem);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.025em;
@@ -759,7 +759,7 @@ footer a,
   max-width: 8ch;
   margin: clamp(0.8rem, 2vw, 1.35rem) 0 0;
   color: var(--canvas);
-  font-family: "Newsreader", "Newsreader Fallback", Georgia, serif;
+  font-family: Newsreader, "Newsreader Fallback", Georgia, serif;
   font-size: clamp(4rem, 10vw, 8.5rem);
   font-weight: 450;
   letter-spacing: -0.055em;
@@ -870,8 +870,8 @@ footer a,
   height: 0.52rem;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 0.28rem color-mix(in srgb, currentColor 14%, transparent);
+  background: currentcolor;
+  box-shadow: 0 0 0 0.28rem color-mix(in srgb, currentcolor 14%, transparent);
 }
 
 .rewards-science-scene[data-status="active"] .rewards-signal-dot {
@@ -907,11 +907,11 @@ footer a,
   width: 0.45rem;
   height: 0.45rem;
   border-radius: 50%;
-  background: currentColor;
+  background: currentcolor;
   box-shadow:
-    -12rem -3rem 0 -0.08rem currentColor,
-    -5rem -12rem 0 -0.12rem currentColor,
-    2rem -8rem 0 -0.14rem currentColor;
+    -12rem -3rem 0 -0.08rem currentcolor,
+    -5rem -12rem 0 -0.12rem currentcolor,
+    2rem -8rem 0 -0.14rem currentcolor;
   content: "";
   opacity: 0.58;
 }
@@ -927,7 +927,7 @@ footer a,
 .rewards-science-visual__orbit,
 .rewards-science-visual__assay {
   fill: none;
-  stroke: currentColor;
+  stroke: currentcolor;
   vector-effect: non-scaling-stroke;
 }
 
@@ -957,7 +957,7 @@ footer a,
 
 .rewards-science-visual__node,
 .rewards-science-visual__core {
-  fill: currentColor;
+  fill: currentcolor;
   stroke: none;
 }
 
@@ -1081,7 +1081,7 @@ footer a,
 .rewards-program-card__title {
   margin-top: clamp(2rem, 4vw, 3rem);
   color: var(--ink);
-  font-family: "Newsreader", "Newsreader Fallback", Georgia, serif;
+  font-family: Newsreader, "Newsreader Fallback", Georgia, serif;
   font-size: clamp(2.25rem, 5vw, 3.75rem);
   font-weight: 450;
   letter-spacing: -0.035em;
