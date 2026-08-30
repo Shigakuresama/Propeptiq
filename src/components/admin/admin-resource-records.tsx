@@ -84,7 +84,7 @@ function RecordCard({
 
 function EmptyRecords() {
   return (
-    <li>
+    <li className="lg:col-span-2">
       <RecordPanel className="flex items-start gap-4 p-5 sm:p-6">
         <div className="grid size-10 shrink-0 place-items-center rounded-full border border-border bg-surface-recessed text-accent-readable">
           <ArchiveX aria-hidden="true" className="size-4" />
