@@ -1,7 +1,9 @@
+import { LockKeyhole } from "lucide-react";
 import Link from "next/link";
 
 import { getRequestIdentity } from "@/auth/server";
 import { LocalIdentityEntry } from "@/components/account/identity-entry";
+import { EmptyState } from "@/components/design-system/archive-primitives";
 
 export async function AuthEntry({ kind }: { kind: "sign-in" | "sign-up" }) {
   const request = await getRequestIdentity();
@@ -10,25 +12,29 @@ export async function AuthEntry({ kind }: { kind: "sign-in" | "sign-up" }) {
   }
   if (request.environment.AUTH_MODE === "disabled") {
     return (
-      <section className="record-card mx-auto max-w-2xl">
-        <p className="eyebrow">Account access unavailable</p>
-        <h1 className="mt-5 font-heading text-page leading-[0.95]">
-          {kind === "sign-in" ? "Sign-in is not configured." : "Account creation is not configured."}
-        </h1>
-        <p className="mt-5 text-base leading-7 text-muted-ink">
+      <EmptyState
+        eyebrow="Account access unavailable"
+        headingLevel="h1"
+        icon={LockKeyhole}
+        title={kind === "sign-in" ? "Sign-in is not configured." : "Account creation is not configured."}
+        description={(
+          <>
           The identity service is disabled. No credentials were collected and checkout remains closed.
-        </p>
-        <Link className="record-link mt-7 inline-block min-h-11 py-3" href="/cart">
-          Return to your saved cart
-        </Link>
-      </section>
+          </>
+        )}
+        action={(
+          <Link className="record-link inline-flex min-h-11 items-center" href="/cart">
+            Return to your saved cart
+          </Link>
+        )}
+      />
     );
   }
   const clerk = await import("@clerk/nextjs");
   const Component = kind === "sign-in" ? clerk.SignIn : clerk.SignUp;
   const path = kind === "sign-in" ? "/sign-in" : "/sign-up";
   return (
-    <div className="mx-auto flex max-w-2xl justify-center">
+    <div className="flex min-h-[32rem] justify-center">
       <Component routing="path" path={path} forceRedirectUrl="/checkout" />
     </div>
   );

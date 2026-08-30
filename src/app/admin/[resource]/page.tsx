@@ -8,6 +8,7 @@ import { AdminResourceRecords } from "@/components/admin/admin-resource-records"
 import { CommandResultNotice } from "@/components/admin/command-result-notice";
 import { ResourceCommandPanel, type CommerceCommandOutcome } from "@/components/admin/resource-command-panel";
 import { isCanonicalUuid } from "@/commerce/checkout-identity";
+import { DataLabel } from "@/components/design-system/archive-primitives";
 
 const resultCopy = {
   saved: "The submitted command returned without a domain error. This editable URL status is not authoritative; confirm the resource or audit read-back.",
@@ -48,9 +49,14 @@ export default async function AdminResourcePage({
   if (!isAdminReadResource(resource.slug)) {
     return (
       <section>
-        <p className="eyebrow">Capability · {resource.capability}</p>
-        <h1 className="mt-4 font-heading text-page leading-[0.95]">{resource.label}</h1>
-        <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">{resource.description}</p>
+        <header className="border-b border-border pb-7">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <DataLabel>Capability-scoped resource</DataLabel>
+            <span className="status-pill">{resource.capability}</span>
+          </div>
+          <h1 className="mt-4 font-heading text-page leading-[0.95]">{resource.label}</h1>
+          <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">{resource.description}</p>
+        </header>
         <div className="mt-8"><ResourceCommandPanel resource={resource} snapshot={null} /></div>
       </section>
     );
@@ -80,13 +86,18 @@ export default async function AdminResourcePage({
       : null;
   return (
     <section>
-      <p className="eyebrow">Capability · {resource.capability}</p>
-      <h1 className="mt-4 font-heading text-page leading-[0.95]">
-        {resource.label}
-      </h1>
-      <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">
-        {resource.description}
-      </p>
+      <header className="border-b border-border pb-7">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <DataLabel>Capability-scoped resource</DataLabel>
+          <span className="status-pill">{resource.capability}</span>
+        </div>
+        <h1 className="mt-4 font-heading text-page leading-[0.95]">
+          {resource.label}
+        </h1>
+        <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">
+          {resource.description}
+        </p>
+      </header>
       {result ? (
         <CommandResultNotice
           error={query.result !== "saved"}

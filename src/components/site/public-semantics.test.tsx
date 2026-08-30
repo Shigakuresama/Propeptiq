@@ -27,7 +27,7 @@ describe("public storefront semantics", () => {
     expect(
       screen.getByRole("heading", {
         level: 1,
-        name: "Research materials, documented for laboratory work.",
+        name: "Research materials, documented with greater clarity.",
       }),
     ).toBeInTheDocument();
     expect(
@@ -48,10 +48,22 @@ describe("public storefront semantics", () => {
     expect(catalogExplanation).not.toHaveClass("text-sm");
     expect(screen.getByText("Tirzepatide")).toBeVisible();
     expect(
-      screen.getByRole("link", { name: /view catalog item: tirzepatide/i }),
+      screen.getByRole("link", { name: /open catalog dossier: tirzepatide/i }),
     ).toHaveAttribute("href", `/catalog/items/${browseCatalogProducts[0]!.slug}`);
     expect(document.body).not.toHaveTextContent(/server-provided prices/i);
     expect(screen.queryByText(/apply|researcher approval/i)).toBeNull();
+  });
+
+  it("omits the highlights movement when no approved products are available", () => {
+    render(<PublicHome products={[]} variantCount={0} />);
+
+    expect(screen.getByText("00")).toBeVisible();
+    expect(screen.getByText(/Product families spanning 0 supplied package configurations/iu)).toBeVisible();
+    expect(screen.queryByText("Catalog highlights")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Catalog highlights" })).toBeNull();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Explore the full research catalog." }),
+    ).toBeVisible();
   });
 
   it("renders exactly one ordered four-node Proof Rail in the required order", () => {
@@ -75,7 +87,7 @@ describe("public storefront semantics", () => {
     }
   });
 
-  it("keeps one active program strip and the Proof Rail ahead of catalog highlights", () => {
+  it("keeps conditional programs and editorial movements in the required module order", () => {
     render(
       <PublicHome
         loyaltyPolicy={activeLoyaltyPolicy}
@@ -87,6 +99,27 @@ describe("public storefront semantics", () => {
     expect(screen.getAllByRole("region", { name: "Active rewards program" })).toHaveLength(1);
     const rail = screen.getByRole("list", { name: "Evidence relationship" });
     const highlights = screen.getByText("Catalog highlights");
+    const programs = screen.getByRole("heading", {
+      level: 2,
+      name: "Programs appear only from active policy records.",
+    });
+    const documentation = screen.getByRole("heading", {
+      level: 2,
+      name: "Follow the record, not an unsupported claim.",
+    });
+    const restriction = screen.getByRole("heading", {
+      level: 2,
+      name: "A clear boundary, integrated into the catalog.",
+    });
+    const closingAction = screen.getByRole("heading", {
+      level: 2,
+      name: "Explore the full research catalog.",
+    });
+
     expect(rail.compareDocumentPosition(highlights) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(highlights.compareDocumentPosition(programs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(programs.compareDocumentPosition(documentation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(documentation.compareDocumentPosition(restriction) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(restriction.compareDocumentPosition(closingAction) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

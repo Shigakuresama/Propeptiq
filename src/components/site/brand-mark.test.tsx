@@ -1,28 +1,17 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { BrandLogo, BrandMark } from "./brand-mark";
+import { BrandLogo } from "./brand-mark";
 
 describe("PROPEPTIQ brand artwork", () => {
-  it("uses the supplied transparent logo for the mark and full lockup", () => {
-    const { container } = render(
-      <>
-        <BrandMark />
-        <BrandLogo />
-      </>,
-    );
+  it("uses the supplied transparent full lockup without cropping it into a symbol frame", () => {
+    render(<BrandLogo />);
 
-    const decorativeMark = container.querySelector("img[alt='']");
-    expect(decorativeMark?.getAttribute("src")).toContain(
-      "%2Fbrand%2Fpropeptiq-logo.png",
-    );
-    expect(decorativeMark?.parentElement).not.toHaveClass("rounded-full");
-    expect(decorativeMark?.parentElement).not.toHaveClass("border");
-    expect(decorativeMark?.parentElement).not.toHaveClass("bg-ink");
-    expect(decorativeMark?.parentElement).not.toHaveClass("overflow-hidden");
-    expect(decorativeMark).toHaveClass("object-contain");
-    expect(decorativeMark).not.toHaveClass("object-cover");
-    expect(decorativeMark).not.toHaveClass("scale-[2.1]");
-    expect(screen.getByRole("img", { name: "PROPEPTIQ LABS" })).toBeVisible();
+    const logo = screen.getByRole("img", { name: "PROPEPTIQ LABS" });
+    expect(logo.getAttribute("src")).toContain("%2Fbrand%2Fpropeptiq-logo.png");
+    expect(logo).toHaveClass("object-contain");
+    expect(logo).not.toHaveClass("object-cover");
+    expect(logo.parentElement).toHaveClass("aspect-[3/2]");
+    expect(logo.parentElement).not.toHaveClass("overflow-hidden");
   });
 });

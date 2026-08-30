@@ -330,7 +330,7 @@ test("reduced motion disables transition and animation durations", async ({ page
   const card = page.locator("article.catalog-listing-card").first();
   await card.hover();
   const motion = await page
-    .getByRole("link", { name: "View catalog item: Tirzepatide" })
+    .getByRole("link", { name: "Open catalog dossier: Tirzepatide" })
     .evaluate((element) => ({
       animationDuration: getComputedStyle(element).animationDuration,
       transitionDuration: getComputedStyle(element).transitionDuration,

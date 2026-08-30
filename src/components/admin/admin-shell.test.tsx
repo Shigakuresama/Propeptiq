@@ -17,6 +17,10 @@ describe("Task 8A administration navigation", () => {
     if (!loyalty || !payouts) return;
 
     render(<AdminShell resources={[loyalty, payouts]}><p>Growth administration</p></AdminShell>);
+    const home = screen.getByRole("link", { name: "PROPEPTIQ LABS administration home" });
+    expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("w-24");
+    expect(screen.getByText("Admin operations", { exact: true })).toBeVisible();
+
     await userEvent.click(screen.getByRole("button", { name: "Open administration navigation" }));
 
     const mobileNavigation = screen.getByRole("navigation", { name: "Mobile administration" });

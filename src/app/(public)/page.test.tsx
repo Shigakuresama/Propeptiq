@@ -71,9 +71,12 @@ describe("public home growth projection", () => {
     expect(within(explainer).getByRole("link", { name: "Refer a lab" })).toHaveAttribute("href", "/account/referrals");
     expect(within(explainer).getByRole("link", { name: "Share a research set" })).toHaveAttribute("href", "/research-sets");
     expect(explainer).not.toHaveTextContent(/\$|%|save|member|limited|hurry|popular/iu);
-    const highlights = screen.getByText("Catalog highlights");
+    const evidence = screen.getByRole("heading", {
+      name: "Public records stay linked to their source evidence.",
+    });
     const quality = screen.getByRole("heading", { name: "Follow the record, not an unsupported claim." });
-    expect(highlights.compareDocumentPosition(explainer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Catalog highlights")).toBeNull();
+    expect(evidence.compareDocumentPosition(explainer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(explainer.compareDocumentPosition(quality) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

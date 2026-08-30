@@ -15,10 +15,12 @@ describe("CatalogListingCard", () => {
     expect(within(article).getByRole("heading", { name: product.name })).toBeVisible();
     expect(within(article).getByText("TR5")).toBeVisible();
     expect(within(article).getByText("5mg × 10 vials")).toBeVisible();
+    expect(within(article).getByText("9 supplied configurations")).toBeVisible();
     expect(within(article).getByText("Illustrative product presentation")).toBeVisible();
+    expect(within(article).getByText("Open catalog dossier")).toBeVisible();
     expect(
       within(article).getByRole("link", {
-        name: `View catalog item: ${product.name}`,
+        name: `Open catalog dossier: ${product.name}`,
       }),
     ).toHaveAttribute("href", `/catalog/items/${product.slug}`);
     expect(within(article).queryByRole("button", { name: /add to cart/i })).toBeNull();

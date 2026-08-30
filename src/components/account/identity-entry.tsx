@@ -1,5 +1,6 @@
 import type { LocalActorOption } from "@/auth/local-driver-types";
 import { signInWithFixedActor } from "@/auth/actions";
+import { RecordPanel } from "@/components/design-system/archive-primitives";
 import { Button } from "@/components/ui/button";
 
 export function LocalIdentityEntry({
@@ -10,7 +11,8 @@ export function LocalIdentityEntry({
   kind: "sign-in" | "sign-up";
 }) {
   return (
-    <section className="record-card mx-auto max-w-2xl" aria-labelledby="fixed-identity-heading">
+    <section aria-labelledby="fixed-identity-heading">
+      <RecordPanel className="p-5 sm:p-7">
       <p className="demo-label">Local deterministic test driver</p>
       <h1 id="fixed-identity-heading" className="mt-5 font-heading text-page leading-[0.95]">
         Choose a fixed test identity
@@ -23,7 +25,7 @@ export function LocalIdentityEntry({
         {actors.map((actor, index) => (
           <label
             key={actor.key}
-            className="grid min-h-16 cursor-pointer grid-cols-[1.5rem_1fr] gap-3 rounded-xl border border-border p-4 focus-within:ring-3 focus-within:ring-ring/50"
+            className="grid min-h-16 cursor-pointer grid-cols-[1.5rem_1fr] gap-3 rounded-xl border border-border bg-canvas p-4 transition-colors hover:border-moss focus-within:border-moss focus-within:ring-3 focus-within:ring-ring/50"
           >
             <input
               type="radio"
@@ -49,6 +51,7 @@ export function LocalIdentityEntry({
           ? "Account creation and email delivery are intentionally not simulated."
           : "The return destination is fixed to /checkout and cannot be supplied by the browser."}
       </p>
+      </RecordPanel>
     </section>
   );
 }

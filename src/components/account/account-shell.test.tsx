@@ -31,6 +31,9 @@ describe("AccountShell", () => {
     for (const [name, href] of expectedLinks) {
       expect(within(navigation).getByRole("link", { name })).toHaveAttribute("href", href);
     }
+    const home = screen.getByRole("link", { name: "PROPEPTIQ LABS home" });
+    expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("w-24");
+    expect(screen.getByText("Private records", { exact: true })).toBeVisible();
     expect(navigation.closest("aside")).toHaveClass("hidden", "xl:block");
   });
 

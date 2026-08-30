@@ -10,9 +10,13 @@ describe("CatalogItemDetail", () => {
     const product = findBrowseCatalogProduct("pinealon")!;
     render(<CatalogItemDetail product={product} />);
 
-    expect(screen.getByRole("heading", { level: 1, name: "Pinealon" })).toBeVisible();
-    expect(screen.getByRole("img", { name: product.image.alt })).toBeVisible();
+    const heading = screen.getByRole("heading", { level: 1, name: "Pinealon" });
+    const image = screen.getByRole("img", { name: product.image.alt });
+    expect(heading).toBeVisible();
+    expect(image).toBeVisible();
+    expect(heading.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("Source label: Pinealon10mg")).toBeVisible();
+    expect(screen.getByText("Dossier entries")).toBeVisible();
     expect(screen.getByText("PN5")).toBeVisible();
     expect(screen.getByText("5mg × 10 vials")).toBeVisible();
     expect(screen.getByText("Illustrative product presentation")).toBeVisible();

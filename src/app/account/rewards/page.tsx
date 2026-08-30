@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { Gift } from "lucide-react";
 import Link from "next/link";
 
 import { SIGN_IN_ROUTE } from "@/auth/routes";
+import { DataLabel, EmptyState } from "@/components/design-system/archive-primitives";
 import { RewardLedger } from "@/components/growth/reward-ledger";
 import { RewardsSummary } from "@/components/growth/rewards-summary";
 import { loadOwnerGrowthDashboard } from "@/growth/owner-growth-server";
@@ -34,7 +36,7 @@ export default async function RewardsPage() {
 
   return (
     <div className="max-w-5xl">
-      <p className="eyebrow">Owner growth record</p>
+      <DataLabel>Owner growth record</DataLabel>
       <h1 className="mt-4 font-heading text-page leading-[0.95]">Rewards</h1>
       <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">
         Available and pending balances come from the authenticated owner ledger. Entries are immutable and references are redacted.
@@ -46,9 +48,9 @@ export default async function RewardsPage() {
         </div>
       ) : null}
       {result.status === "inactive" ? (
-        <div className="empty-record mt-8">Rewards are not currently active for this account.</div>
+        <EmptyState className="mt-8" description="No earning, redemption, or ledger action is available until an active server policy applies to this owner." eyebrow="Rewards ledger" icon={Gift} title="Rewards are not currently active for this account." />
       ) : result.snapshot.rewards === null ? (
-        <div className="empty-record mt-8">No reward balance or ledger entries exist for this account.</div>
+        <EmptyState className="mt-8" description="Authoritative balance and immutable ledger entries will appear here when they exist." eyebrow="Rewards ledger" icon={Gift} title="No reward balance or ledger entries exist for this account." />
       ) : (
         <>
           <div className="mt-8"><RewardsSummary rewards={result.snapshot.rewards} /></div>

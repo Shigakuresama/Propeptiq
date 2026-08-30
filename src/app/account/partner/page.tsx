@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { Handshake } from "lucide-react";
 import Link from "next/link";
 
 import { SIGN_IN_ROUTE } from "@/auth/routes";
+import { DataLabel, EmptyState } from "@/components/design-system/archive-primitives";
 import { AffiliateDashboard } from "@/components/growth/affiliate-dashboard";
 import { applyOwnerAffiliateAction } from "@/growth/owner-action-forms";
 import { loadOwnerGrowthDashboard } from "@/growth/owner-growth-server";
@@ -30,14 +32,14 @@ export default async function PartnerPage() {
   }
   return (
     <div className="max-w-5xl">
-      <p className="eyebrow">Owner growth record</p>
+      <DataLabel>Owner growth record</DataLabel>
       <h1 className="mt-4 font-heading text-page leading-[0.95]">Partner</h1>
       <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">
         Apply with one bounded public channel or review your private partner, commission, and payout history.
       </p>
       {result.syntheticLocal === true ? <p className="warning-record mt-6 text-base font-semibold">Synthetic local test only</p> : null}
       {result.status === "inactive" ? (
-        <div className="empty-record mt-8">The partner program is not currently active for this account.</div>
+        <EmptyState className="mt-8" description="Application and payout records remain unavailable until an active server policy enables this owner-facing program." eyebrow="Partner record" icon={Handshake} title="The partner program is not currently active for this account." />
       ) : (
         <div className="mt-8">
           <AffiliateDashboard

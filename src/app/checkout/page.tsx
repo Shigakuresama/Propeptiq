@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { CircleAlert, ClipboardCheck, LockKeyhole } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -11,25 +12,31 @@ import { AccountFactsForm } from "@/components/account/account-facts-form";
 import { AccountShell } from "@/components/account/account-shell";
 import { CheckoutCartStatus } from "@/components/account/checkout-cart-status";
 import { CheckoutForm } from "@/components/commerce/checkout-form";
+import { DataLabel, Notice, RecordPanel } from "@/components/design-system/archive-primitives";
 
 export const metadata: Metadata = { title: "Checkout" };
 
 function ClosedState({ reason }: { reason: string }) {
   const signedOut = reason === "signed_out";
   return (
-    <section className="record-card">
-      <p className="eyebrow">Checkout closed</p>
-      <h1 className="mt-4 font-heading text-page leading-[0.95]">
-        {signedOut ? "Sign in to continue." : "Verified account access is unavailable."}
-      </h1>
-      <p className="mt-5 text-base leading-7 text-muted-ink">
-        {reason === "email_unverified"
-          ? "The primary email is not currently verified. Complete verification with the identity provider before continuing."
-          : reason === "account_unavailable"
-            ? "The account database is disabled or unavailable, so checkout fails closed."
-            : "Your product IDs and quantities remain saved in this browser while you sign in."}
-      </p>
-      {signedOut ? <Link href={SIGN_IN_ROUTE} className="action-primary mt-7 inline-flex min-h-12 items-center rounded-full px-6 font-semibold no-underline">Continue to sign in</Link> : null}
+    <section aria-labelledby="checkout-closed-heading">
+      <RecordPanel className="p-5 sm:p-7">
+        <div className="grid size-11 place-items-center rounded-full border border-border bg-surface-recessed text-accent-readable">
+          <LockKeyhole aria-hidden="true" className="size-5" />
+        </div>
+        <DataLabel className="mt-5">Checkout closed</DataLabel>
+        <h1 id="checkout-closed-heading" className="mt-4 font-heading text-page leading-[0.95]">
+          {signedOut ? "Sign in to continue." : "Verified account access is unavailable."}
+        </h1>
+        <p className="mt-5 text-base leading-7 text-muted-ink">
+          {reason === "email_unverified"
+            ? "The primary email is not currently verified. Complete verification with the identity provider before continuing."
+            : reason === "account_unavailable"
+              ? "The account database is disabled or unavailable, so checkout fails closed."
+              : "Your product IDs and quantities remain saved in this browser while you sign in."}
+        </p>
+        {signedOut ? <Link href={SIGN_IN_ROUTE} className="action-primary mt-7 inline-flex min-h-12 items-center rounded-full px-6 font-semibold no-underline">Continue to sign in</Link> : null}
+      </RecordPanel>
     </section>
   );
 }
@@ -61,26 +68,32 @@ export default async function CheckoutPage() {
     .map((promotion) => ({ id: promotion.id, name: promotion.name })) ?? [];
   return (
     <AccountShell localDriver={request.localDriver !== null}>
-      <div className="mb-10 max-w-3xl">
-        <p className="eyebrow">Verified account gate</p>
-        <h1 className="mt-4 font-heading text-page leading-[0.92]">Checkout readiness</h1>
-        <p className="mt-5 text-base leading-7 text-muted-ink">
-          Account and attestation facts are verified here before current destination, product, promotion, shipping, tax, and payment-session facts are resolved.
-        </p>
-      </div>
+      <header className="mb-10 grid gap-6 border-b border-border pb-8 lg:grid-cols-[1fr_auto] lg:items-end">
+        <div className="max-w-3xl">
+          <DataLabel>Verified account gate</DataLabel>
+          <h1 className="mt-4 font-heading text-page leading-[0.92]">Checkout readiness</h1>
+          <p className="mt-5 text-base leading-7 text-muted-ink">
+            Account and attestation facts are verified here before current destination, product, promotion, shipping, tax, and payment-session facts are resolved.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 text-accent-readable">
+          <ClipboardCheck aria-hidden="true" className="size-5" />
+          <p className="max-w-[24ch] text-sm font-semibold leading-6">Identity → destination → authoritative total</p>
+        </div>
+      </header>
       <div className="account-layout">
         <div className="grid gap-6">
           {browseOnlyPreview ? (
-            <div className="info-record" role="status">
-              <strong>Browse-only Preview.</strong> Shipping, tax, and payment-session creation are unavailable in this Preview. Browse the synthetic catalog without submitting checkout requests.
-            </div>
+            <Notice title="Browse-only Preview">
+              Shipping, tax, and payment-session creation are unavailable in this Preview. Browse the synthetic catalog without submitting checkout requests.
+            </Notice>
           ) : null}
           {reason ? <ClosedState reason={reason} /> : null}
           {!reason && (!repositories || !principal) ? <ClosedState reason="account_unavailable" /> : null}
           {!reason && repositories && principal && !attestation ? (
-            <section className="error-record" role="alert">
+            <Notice icon={CircleAlert} tone="danger" title="Checkout configuration unavailable">
               No single current attestation is available. Account activation and checkout fail closed.
-            </section>
+            </Notice>
           ) : null}
           {!reason && repositories && principal && attestation && account?.status === "blocked" ? (
             <section className="error-record" role="alert">
@@ -96,8 +109,9 @@ export default async function CheckoutPage() {
             </section>
           ) : null}
           {!reason && repositories && principal && attestation && account?.status !== "blocked" && account?.status !== "review" ? (
-            <section className="record-card">
-              <h2 className="font-heading text-3xl">{account ? "Refresh account facts" : "Complete your account"}</h2>
+            <RecordPanel className="p-5 sm:p-7">
+              <DataLabel>Account checkpoint</DataLabel>
+              <h2 className="mt-3 font-heading text-3xl">{account ? "Refresh account facts" : "Complete your account"}</h2>
               <p className="mt-3 text-base leading-7 text-muted-ink">Every required fact is checked again on the server.</p>
               <div className="mt-8">
                 <AccountFactsForm email={request.identity!.primaryEmail!} account={account} attestation={attestation} compact />
@@ -115,7 +129,7 @@ export default async function CheckoutPage() {
                   )}
                 </div>
               ) : null}
-            </section>
+            </RecordPanel>
           ) : null}
           {buyerCheckoutReady ? <CheckoutForm promotions={promotionOptions} syntheticLocal={request.localDriver !== null} /> : null}
         </div>

@@ -1,10 +1,12 @@
 "use client";
 
+import { CircleAlert, ScrollText } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { useCart } from "@/cart/cart-provider";
 import type { CartPreview } from "@/cart/preview-types";
+import { DataLabel, Notice, RecordPanel } from "@/components/design-system/archive-primitives";
 
 export function CheckoutCartStatus() {
   const { items, hydrated } = useCart();
@@ -42,13 +44,21 @@ export function CheckoutCartStatus() {
   const previewError = previewState.key === requestKey && previewState.error;
   const quantity = items.reduce((sum, item) => sum + item.quantity, 0);
   return (
-    <section className="record-card" aria-labelledby="saved-request-heading">
-      <p className="eyebrow">Browser-saved request</p>
-      <h2 id="saved-request-heading" className="mt-3 font-heading text-3xl">{quantity} requested unit{quantity === 1 ? "" : "s"}</h2>
+    <section aria-labelledby="saved-request-heading">
+      <RecordPanel className="p-5 sm:p-6">
+      <div className="flex items-center gap-3">
+        <div className="grid size-10 place-items-center rounded-full border border-moss/25 bg-moss-soft text-accent-readable">
+          <ScrollText aria-hidden="true" className="size-4" />
+        </div>
+        <div>
+          <DataLabel>Browser-saved request</DataLabel>
+          <h2 id="saved-request-heading" className="mt-2 font-heading text-3xl">{quantity} requested unit{quantity === 1 ? "" : "s"}</h2>
+        </div>
+      </div>
       {previewError ? (
-        <p className="error-record mt-5" role="alert">
+        <Notice className="mt-5" icon={CircleAlert} tone="danger" title="Server preview unavailable">
           The authoritative product preview is unavailable. Browser request identifiers below are not verified product facts.
-        </p>
+        </Notice>
       ) : null}
       {items.length > 0 ? (
         <ul className="mt-6 grid gap-3 p-0" aria-label="Saved cart lines">
@@ -77,6 +87,7 @@ export function CheckoutCartStatus() {
         <p className="mt-5 text-base leading-7 text-muted-ink">No request is saved in this browser.</p>
       )}
       <Link href="/cart" className="record-link mt-6 inline-flex min-h-11 items-center">Review cart details</Link>
+      </RecordPanel>
     </section>
   );
 }
