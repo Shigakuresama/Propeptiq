@@ -85,13 +85,26 @@ export type InvoiceProviderEventV1 = ProviderEventCommonV1 &
       | "unknown_restrictive";
   }>;
 
+export type CreditNoteProviderEventV1 = ProviderEventCommonV1 &
+  Readonly<{
+    kind: "credit_note";
+    creditNoteId: string;
+    /** Bound to an invoice, not an order: a credit note carries no metadata of ours. */
+    invoiceId: string;
+    amountMinor: number;
+    currency: string;
+    status: "issued" | "void" | "unknown_restrictive";
+    creditType: "mixed" | "post_payment" | "pre_payment" | "unknown_restrictive";
+  }>;
+
 export type NormalizedProviderEventV1 =
   | IgnoredProviderEventV1
   | CheckoutSessionProviderEventV1
   | RefundProviderEventV1
   | RefundReconciliationProviderEventV1
   | DisputeProviderEventV1
-  | InvoiceProviderEventV1;
+  | InvoiceProviderEventV1
+  | CreditNoteProviderEventV1;
 
 export type ProviderEventNormalizationResultV1 =
   | Readonly<{ status: "normalized"; event: NormalizedProviderEventV1 }>
@@ -118,6 +131,8 @@ const invoiceEventTypes = new Set([
   "invoice.paid",
   "invoice.payment_failed",
 ] as const);
+const creditNoteStatuses = new Set(["issued", "void"] as const);
+const creditNoteTypes = new Set(["mixed", "post_payment", "pre_payment"] as const);
 const invoiceStatuses = new Set([
   "draft",
   "open",
@@ -179,7 +194,8 @@ function isKnownProcessableEventType(eventType: string): boolean {
     refundEventTypes.has(eventType as never) ||
     eventType === "charge.refunded" ||
     disputeEventTypes.has(eventType as never) ||
-    invoiceEventTypes.has(eventType as never)
+    invoiceEventTypes.has(eventType as never) ||
+    eventType === "credit_note.created"
   );
 }
 
@@ -557,6 +573,54 @@ function normalizedInvoice(
   });
 }
 
+function normalizedCreditNote(
+  common: ProviderEventCommonV1,
+  object: Record<string, unknown>,
+): CreditNoteProviderEventV1 | null {
+  const creditNoteId = boundedPrintable(own(object, "id"));
+  const invoiceId = expandableId(own(object, "invoice"));
+  // `total` is the credited amount including tax; `amount` excludes it. The
+  // ledger must reconcile against what the customer was actually credited.
+  const amountMinor = safeMoney(own(object, "total"), false);
+  const normalizedCurrency = currency(own(object, "currency"));
+  const rawStatus = own(object, "status");
+  const rawType = own(object, "type");
+  if (
+    creditNoteId === null ||
+    invoiceId === undefined ||
+    invoiceId === null ||
+    amountMinor === null ||
+    normalizedCurrency === null ||
+    typeof rawStatus !== "string" ||
+    rawStatus.trim().length === 0 ||
+    typeof rawType !== "string" ||
+    rawType.trim().length === 0 ||
+    own(object, "livemode") !== common.livemode
+  ) {
+    return null;
+  }
+  const status = creditNoteStatuses.has(
+    rawStatus as Exclude<CreditNoteProviderEventV1["status"], "unknown_restrictive">,
+  )
+    ? (rawStatus as CreditNoteProviderEventV1["status"])
+    : "unknown_restrictive";
+  const creditType = creditNoteTypes.has(
+    rawType as Exclude<CreditNoteProviderEventV1["creditType"], "unknown_restrictive">,
+  )
+    ? (rawType as CreditNoteProviderEventV1["creditType"])
+    : "unknown_restrictive";
+  return deepFreeze({
+    ...common,
+    kind: "credit_note",
+    creditNoteId,
+    invoiceId,
+    amountMinor,
+    currency: normalizedCurrency,
+    status,
+    creditType,
+  });
+}
+
 export function normalizeStripeProviderEventV1(
   value: unknown,
 ): ProviderEventNormalizationResultV1 {
@@ -576,6 +640,8 @@ export function normalizeStripeProviderEventV1(
     normalized = object === null ? null : normalizedDispute(common, object);
   } else if (invoiceEventTypes.has(common.eventType as never)) {
     normalized = object === null ? null : normalizedInvoice(common, object);
+  } else if (common.eventType === "credit_note.created") {
+    normalized = object === null ? null : normalizedCreditNote(common, object);
   } else {
     normalized = ignored(common);
   }
@@ -739,6 +805,35 @@ function exactEnvelope(value: unknown): NormalizedProviderEventV1 | null {
           amount: own(envelope, "amountMinor"),
           currency: own(envelope, "currency"),
           status: own(envelope, "status"),
+          livemode: common.livemode,
+        },
+      },
+    };
+  } else if (kind === "credit_note") {
+    if (
+      !exactOwnKeys(envelope, [
+        ...COMMON_KEYS,
+        "creditNoteId",
+        "invoiceId",
+        "amountMinor",
+        "currency",
+        "status",
+        "creditType",
+      ])
+    ) return null;
+    raw = {
+      id: common.providerEventId,
+      type: common.eventType,
+      created: Date.parse(common.providerCreatedAt) / 1_000,
+      livemode: common.livemode,
+      data: {
+        object: {
+          id: own(envelope, "creditNoteId"),
+          invoice: own(envelope, "invoiceId"),
+          total: own(envelope, "amountMinor"),
+          currency: own(envelope, "currency"),
+          status: own(envelope, "status"),
+          type: own(envelope, "creditType"),
           livemode: common.livemode,
         },
       },

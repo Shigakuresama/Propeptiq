@@ -15,6 +15,7 @@ import type {
   RefundProviderEventV1,
   RefundReconciliationProviderEventV1,
   InvoiceProviderEventV1,
+  CreditNoteProviderEventV1,
 } from "@/commerce/provider-events";
 import {
   parseKnownProviderEventConflictV1,
@@ -2003,6 +2004,88 @@ async function processRefundEvent(
  * exhaustiveness fence in processStoredEvent will force whoever adds the
  * transition to come through here rather than around it.
  */
+/**
+ * Records a credit note against the order its invoice is bound to.
+ *
+ * Deliberately applies NO order state transition. A credit note is a ledger
+ * fact, not a payment outcome: refunds have their own authority, evidence and
+ * state machine in this repository, and routing a credit note through them
+ * would let an accounting document move fulfilment state.
+ *
+ * What it does do is make the fact durable and attributable. Stripe's own
+ * guidance is that an unhandled credit_note.created silently diverges the
+ * provider's view from the internal ledger; enqueuing it as an effect is how
+ * an external ledger or ERP sync learns about it.
+ *
+ * The order is resolved through order_invoices, and any binding status is
+ * accepted because a credit note legitimately follows an already-paid invoice.
+ */
+async function processCreditNoteEvent(
+  client: ProviderEventSqlClient,
+  row: LockedProviderEventRow,
+  event: CreditNoteProviderEventV1,
+  authority: Readonly<{
+    provider: "stripe";
+    expectedLivemode: boolean;
+    providerScope: string;
+  }>,
+  now: Date,
+  keyedUuid: KeyedUuidGenerator,
+): Promise<ProcessingResult> {
+  if (event.livemode !== authority.expectedLivemode) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "provider_authority_mismatch",
+      keyedUuid,
+    );
+  }
+
+  const bindings = rows<{ orderId: string }>(await client.query(
+    `SELECT order_id::text AS "orderId"
+       FROM order_invoices
+      WHERE provider = $1 AND provider_invoice_id = $2
+      FOR UPDATE`,
+    [authority.provider, event.invoiceId],
+  ));
+  const binding = bindings[0];
+  if (binding === undefined) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "payment_identity_mismatch",
+      keyedUuid,
+    );
+  }
+
+  await client.query(
+    `INSERT INTO downstream_effects
+       (id, order_id, provider_event_id, effect_type, payload,
+        idempotency_key, status, attempt_count, created_at, updated_at)
+     VALUES ($1, $2, $3, 'credit_note_recorded', $4::jsonb, $5,
+             'pending', 0, $6, $6)
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      stableUuid(keyedUuid, `credit-note:${event.creditNoteId}`),
+      binding.orderId,
+      row.id,
+      JSON.stringify({
+        schemaVersion: 1,
+        orderId: binding.orderId,
+        creditNoteId: event.creditNoteId,
+        invoiceId: event.invoiceId,
+        amountMinor: event.amountMinor,
+      }),
+      `credit_note:${event.creditNoteId}`,
+      now,
+    ],
+  );
+
+  return finishProcessed(client, row.id, now);
+}
+
 async function processInvoiceEvent(
   client: ProviderEventSqlClient,
   row: LockedProviderEventRow,
@@ -2648,6 +2731,16 @@ async function processClaimInTransaction(
   }
   if (event.kind === "refund_reconciliation") {
     return processRefundReconciliationEvent(
+      client,
+      row,
+      event,
+      authority,
+      input.now,
+      input.keyedUuid,
+    );
+  }
+  if (event.kind === "credit_note") {
+    return processCreditNoteEvent(
       client,
       row,
       event,

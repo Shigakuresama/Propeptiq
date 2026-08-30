@@ -299,3 +299,67 @@ describe("downstream effect worker tax recording", () => {
     expect(repository.failClaim).not.toHaveBeenCalled();
   });
 });
+
+describe("downstream effect worker settlement and credit note", () => {
+  it("allowlists the exact settlement window delivery", () => {
+    const exact = {
+      effectType: "settlement_window_elapsed",
+      payload: {
+        schemaVersion: 1,
+        orderId,
+        verifiedPaymentEventId: paymentEventId,
+        closesAt: "2026-09-01T12:00:30.000Z",
+      },
+      idempotencyKey: `payment_event:${paymentEventId}:settlement_window_elapsed`,
+    } as const;
+
+    expect(parseAllowlistedDownstreamEffectV1(exact)).toEqual(exact);
+  });
+
+  it("allowlists the exact credit note delivery", () => {
+    const exact = {
+      effectType: "credit_note_recorded",
+      payload: {
+        schemaVersion: 1,
+        orderId,
+        creditNoteId: "cn_synthetic",
+        invoiceId: "in_synthetic",
+        amountMinor: 8_700,
+      },
+      idempotencyKey: "credit_note:cn_synthetic",
+    } as const;
+
+    expect(parseAllowlistedDownstreamEffectV1(exact)).toEqual(exact);
+  });
+
+  it("rejects a settlement delivery with a non-instant close time", () => {
+    expect(
+      parseAllowlistedDownstreamEffectV1({
+        effectType: "settlement_window_elapsed",
+        payload: {
+          schemaVersion: 1,
+          orderId,
+          verifiedPaymentEventId: paymentEventId,
+          closesAt: "soon",
+        },
+        idempotencyKey: `payment_event:${paymentEventId}:settlement_window_elapsed`,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a credit note delivery carrying a negative amount", () => {
+    expect(
+      parseAllowlistedDownstreamEffectV1({
+        effectType: "credit_note_recorded",
+        payload: {
+          schemaVersion: 1,
+          orderId,
+          creditNoteId: "cn_synthetic",
+          invoiceId: "in_synthetic",
+          amountMinor: -1,
+        },
+        idempotencyKey: "credit_note:cn_synthetic",
+      }),
+    ).toBeNull();
+  });
+});

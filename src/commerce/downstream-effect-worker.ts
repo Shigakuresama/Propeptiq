@@ -46,6 +46,28 @@ export type AllowlistedDownstreamEffectV1 =
       idempotencyKey: string;
     }>
   | Readonly<{
+      effectType: "settlement_window_elapsed";
+      payload: Readonly<{
+        schemaVersion: 1;
+        orderId: string;
+        verifiedPaymentEventId: string;
+        /** Instant the ACH reversal window closes. See docs/adr/0006. */
+        closesAt: string;
+      }>;
+      idempotencyKey: string;
+    }>
+  | Readonly<{
+      effectType: "credit_note_recorded";
+      payload: Readonly<{
+        schemaVersion: 1;
+        orderId: string;
+        creditNoteId: string;
+        invoiceId: string;
+        amountMinor: number;
+      }>;
+      idempotencyKey: string;
+    }>
+  | Readonly<{
       effectType: "stripe_tax_transaction";
       payload: Readonly<{
         schemaVersion: 1;
@@ -71,6 +93,8 @@ const externalTypes = new Set([
   "dispute_resolved",
   "fulfillment_handed_off",
   "stripe_tax_transaction",
+  "settlement_window_elapsed",
+  "credit_note_recorded",
 ] as const);
 const BOUNDED_KEY = /^[\x20-\x7e]{1,255}$/u;
 const LEASE_MILLISECONDS = 60_000;
@@ -165,6 +189,67 @@ export function parseAllowlistedDownstreamEffectV1(
         orderId: payload.orderId,
         shipmentId: payload.shipmentId,
         fulfillmentReleaseId: payload.fulfillmentReleaseId,
+      }),
+      idempotencyKey: delivery.idempotencyKey,
+    });
+  }
+  if (delivery.effectType === "settlement_window_elapsed") {
+    if (
+      !exactKeys(payload, [
+        "schemaVersion",
+        "orderId",
+        "verifiedPaymentEventId",
+        "closesAt",
+      ]) ||
+      !isCanonicalUuid(payload.orderId) ||
+      !isCanonicalUuid(payload.verifiedPaymentEventId) ||
+      typeof payload.closesAt !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(payload.closesAt) ||
+      !Number.isFinite(Date.parse(payload.closesAt)) ||
+      delivery.idempotencyKey !==
+        `payment_event:${payload.verifiedPaymentEventId}:settlement_window_elapsed`
+    ) return null;
+    return Object.freeze({
+      effectType: "settlement_window_elapsed",
+      payload: Object.freeze({
+        schemaVersion: 1,
+        orderId: payload.orderId,
+        verifiedPaymentEventId: payload.verifiedPaymentEventId,
+        closesAt: payload.closesAt,
+      }),
+      idempotencyKey: delivery.idempotencyKey,
+    });
+  }
+  if (delivery.effectType === "credit_note_recorded") {
+    if (
+      !exactKeys(payload, [
+        "schemaVersion",
+        "orderId",
+        "creditNoteId",
+        "invoiceId",
+        "amountMinor",
+      ]) ||
+      !isCanonicalUuid(payload.orderId) ||
+      typeof payload.creditNoteId !== "string" ||
+      payload.creditNoteId.trim() !== payload.creditNoteId ||
+      payload.creditNoteId.length === 0 ||
+      typeof payload.invoiceId !== "string" ||
+      payload.invoiceId.trim() !== payload.invoiceId ||
+      payload.invoiceId.length === 0 ||
+      !Number.isSafeInteger(payload.amountMinor) ||
+      (payload.amountMinor as number) < 0 ||
+      delivery.idempotencyKey !== `credit_note:${payload.creditNoteId}`
+    ) return null;
+    return Object.freeze({
+      effectType: "credit_note_recorded",
+      payload: Object.freeze({
+        schemaVersion: 1 as const,
+        orderId: payload.orderId,
+        creditNoteId: payload.creditNoteId,
+        invoiceId: payload.invoiceId,
+        // Number.isSafeInteger is not a type guard over unknown, so the guard
+        // above narrows the value but not its type.
+        amountMinor: payload.amountMinor as number,
       }),
       idempotencyKey: delivery.idempotencyKey,
     });

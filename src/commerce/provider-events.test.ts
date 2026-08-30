@@ -427,7 +427,6 @@ describe("invoice and ACH events are journaled but not yet processable", () => {
   // business effect. Adding a processable kind without matching repository
   // transitions would be strictly worse than this safe default.
   it.each([
-    "credit_note.created",
     "cash_balance.funds_available",
     "customer_cash_balance_transaction.created",
   ])("normalizes %s to an ignored event with no business payload", (type) => {
@@ -537,6 +536,89 @@ describe("invoice provider events", () => {
     );
     expect(result.status).toBe("normalized");
     if (result.status !== "normalized" || result.event.kind !== "invoice") return;
+    expect(result.event.status).toBe("unknown_restrictive");
+  });
+});
+
+describe("credit note provider events", () => {
+  function creditNoteObject(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "cn_synthetic6d",
+      invoice: "in_synthetic6d",
+      amount: 8_000,
+      total: 8_700,
+      currency: "usd",
+      status: "issued",
+      type: "post_payment",
+      livemode: false,
+      ...overrides,
+    };
+  }
+
+  it("normalizes an issued credit note against its invoice", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject()),
+    );
+
+    expect(result).toEqual({
+      status: "normalized",
+      event: {
+        schemaVersion: 1,
+        kind: "credit_note",
+        providerEventId: "evt_synthetic_6e_credit_note_created",
+        eventType: "credit_note.created",
+        providerCreatedAt,
+        livemode: false,
+        creditNoteId: "cn_synthetic6d",
+        invoiceId: "in_synthetic6d",
+        amountMinor: 8_700,
+        currency: "usd",
+        status: "issued",
+        creditType: "post_payment",
+      },
+    });
+  });
+
+  it("round-trips a normalized credit note through the stored parser", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject()),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized") return;
+    expect(parseNormalizedProviderEventV1(result.event)).toEqual(result.event);
+  });
+
+  it("accepts an expanded invoice object as the binding", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject({
+        invoice: { id: "in_synthetic6d", object: "invoice" },
+      })),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized" || result.event.kind !== "credit_note") return;
+    expect(result.event.invoiceId).toBe("in_synthetic6d");
+  });
+
+  it("conflicts a credit note with no invoice binding", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject({ invoice: null })),
+    );
+    expect(result.status).toBe("conflict");
+  });
+
+  it("conflicts a credit note whose livemode contradicts the envelope", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject({ livemode: true })),
+    );
+    expect(result.status).toBe("conflict");
+  });
+
+  it("restricts an unrecognized credit note status rather than trusting it", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject({ status: "weird" })),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized" || result.event.kind !== "credit_note") return;
     expect(result.event.status).toBe("unknown_restrictive");
   });
 });

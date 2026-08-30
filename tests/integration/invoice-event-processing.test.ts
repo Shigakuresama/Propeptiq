@@ -78,6 +78,36 @@ function invoiceNormalization(
   return result as ProcessableProviderEventNormalizationV1;
 }
 
+
+function creditNoteNormalization(
+  providerEventId: string,
+  overrides: Record<string, unknown> = {},
+): ProcessableProviderEventNormalizationV1 {
+  const result = normalizeStripeProviderEventV1({
+    id: providerEventId,
+    type: "credit_note.created",
+    created: providerCreated,
+    livemode: false,
+    data: {
+      object: {
+        id: "cn_synthetic_settlement",
+        invoice: invoiceId,
+        amount: 8_000,
+        total: 8_700,
+        currency: "usd",
+        status: "issued",
+        type: "post_payment",
+        livemode: false,
+        ...overrides,
+      },
+    },
+  });
+  if (result.status !== "normalized") {
+    throw new Error(`expected normalized credit note, got ${result.status}`);
+  }
+  return result as ProcessableProviderEventNormalizationV1;
+}
+
 function repository(settlementWindowBusinessDays?: number) {
   return createProviderEventRepository({
     runSerializableTransaction: (work) =>
@@ -321,5 +351,67 @@ describe("invoice provider event processing", () => {
     );
     expect(effects.rows).toHaveLength(0);
     expect(await orderState()).toBe("paid_pending_settlement");
+  });
+
+  it("records a credit note against the bound order so the ledger cannot drift", async () => {
+    const note = await claim(creditNoteNormalization("evt_cn_1"), "cn1");
+
+    await expect(
+      repository().processClaim({ claim: note, authority: authority(), now }),
+    ).resolves.toEqual({ status: "processed" });
+
+    const effects = await client.query<{
+      effect_type: string;
+      order_id: string;
+      payload: Record<string, unknown>;
+    }>(
+      `SELECT effect_type, order_id::text AS order_id, payload
+         FROM downstream_effects WHERE effect_type = 'credit_note_recorded'`,
+    );
+    expect(effects.rows).toHaveLength(1);
+    const effect = effects.rows[0] as {
+      order_id: string;
+      payload: Record<string, unknown>;
+    };
+    expect(effect.order_id).toBe(ids.order);
+    expect(effect.payload).toMatchObject({
+      schemaVersion: 1,
+      orderId: ids.order,
+      creditNoteId: "cn_synthetic_settlement",
+      amountMinor: 8_700,
+    });
+  });
+
+  it("does not move the order state for a credit note", async () => {
+    const note = await claim(creditNoteNormalization("evt_cn_2"), "cn2");
+    await repository().processClaim({ claim: note, authority: authority(), now });
+
+    // A credit note is a ledger fact, not a payment transition. Refunds have
+    // their own authority and machinery.
+    expect(await orderState()).toBe("checkout_pending");
+  });
+
+  it("refuses a credit note with no durable binding naming that invoice", async () => {
+    await client.exec(`DELETE FROM order_invoices WHERE order_id = '${ids.order}'`);
+    const note = await claim(creditNoteNormalization("evt_cn_3"), "cn3");
+
+    const result = await repository().processClaim({
+      claim: note,
+      authority: authority(),
+      now,
+    });
+    expect(result.status).not.toBe("processed");
+  });
+
+  it("is idempotent across a replayed credit note", async () => {
+    const first = await claim(creditNoteNormalization("evt_cn_r1"), "cnr1");
+    await repository().processClaim({ claim: first, authority: authority(), now });
+    const second = await claim(creditNoteNormalization("evt_cn_r2"), "cnr2");
+    await repository().processClaim({ claim: second, authority: authority(), now });
+
+    const effects = await client.query(
+      `SELECT 1 FROM downstream_effects WHERE effect_type = 'credit_note_recorded'`,
+    );
+    expect(effects.rows).toHaveLength(1);
   });
 });
