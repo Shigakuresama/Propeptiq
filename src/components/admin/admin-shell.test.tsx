@@ -20,6 +20,8 @@ describe("Task 8A administration navigation", () => {
     const home = screen.getByRole("link", { name: "PROPEPTIQ LABS administration home" });
     expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("w-24");
     expect(screen.getByText("Admin operations", { exact: true })).toBeVisible();
+    expect(screen.getByText("Growth administration").closest("[data-motion-surface]"))
+      .toHaveAttribute("data-motion-surface", "admin");
 
     await userEvent.click(screen.getByRole("button", { name: "Open administration navigation" }));
 

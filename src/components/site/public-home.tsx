@@ -12,6 +12,7 @@ import {
 } from "@/components/design-system/archive-primitives";
 import { ProgramStrip } from "@/components/growth/program-strip";
 import { ProofRail } from "@/components/site/proof-rail";
+import { ScienceField } from "@/components/site/science-field";
 import { SectionHeading } from "@/components/site/section-heading";
 import { Button } from "@/components/ui/button";
 import type { LoyaltyPolicy } from "@/domain/rewards";
@@ -40,38 +41,6 @@ const documentationStages = [
     detail: "Public destination, when approved",
   },
 ] as const;
-
-function ResearchLattice() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div
-        className="absolute inset-6 opacity-65 sm:inset-8"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, color-mix(in srgb, var(--rule) 62%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in srgb, var(--rule) 62%, transparent) 1px, transparent 1px)",
-          backgroundSize: "3.75rem 3.75rem",
-        }}
-      />
-      <div className="absolute left-[12%] top-[13%] size-36 rounded-full border border-moss/40 sm:size-48">
-        <span className="absolute inset-[18%] rounded-full border border-border" />
-        <span className="absolute -right-1 top-[44%] size-3 rounded-full border border-ink bg-canvas" />
-      </div>
-      <div className="absolute right-[9%] top-[30%] size-24 rounded-full border border-ink/35 sm:size-32">
-        <span className="absolute inset-[24%] rounded-full bg-moss/15" />
-        <span className="absolute left-[42%] top-[-0.4rem] size-3 rounded-full border border-moss bg-surface-record" />
-      </div>
-      <div className="absolute bottom-[27%] left-[35%] size-28 rounded-full border border-border sm:size-36">
-        <span className="absolute inset-[30%] rounded-full border border-moss/45" />
-      </div>
-      <span className="absolute left-[31%] top-[31%] h-px w-[43%] origin-left rotate-[18deg] bg-moss/55" />
-      <span className="absolute left-[29%] top-[43%] h-px w-[31%] origin-left rotate-[53deg] bg-ink/25" />
-      <span className="absolute right-[24%] top-[48%] h-px w-[28%] origin-right -rotate-[44deg] bg-border" />
-      <span className="absolute left-[29%] top-[30%] size-3 rounded-full border border-ink bg-surface-record" />
-      <span className="absolute right-[26%] top-[46%] size-3 rounded-full border border-moss bg-canvas" />
-      <span className="absolute bottom-[31%] left-[48%] size-3 rounded-full border border-ink bg-surface-record" />
-    </div>
-  );
-}
 
 export function PublicHome({
   loyaltyPolicy = null,
@@ -117,7 +86,7 @@ export function PublicHome({
 
       <section aria-labelledby="home-hero-heading" className="overflow-hidden border-b border-border">
         <SectionShell className="grid gap-8 py-12 sm:gap-10 sm:py-16 lg:grid-cols-[minmax(0,7fr)_minmax(14rem,5fr)] lg:items-stretch lg:py-20 xl:gap-14 xl:py-24">
-          <div className="flex min-w-0 max-w-[54rem] flex-col justify-center lg:py-8">
+          <div className="flex min-w-0 max-w-[54rem] flex-col justify-center lg:py-8" data-motion-sequence="home-hero">
             <DataLabel>Research-use catalog</DataLabel>
             <h1
               aria-label="Research materials, documented with greater clarity."
@@ -146,7 +115,7 @@ export function PublicHome({
           </div>
 
           <RecordPanel className="relative min-h-[26rem] overflow-hidden bg-surface-recessed p-0 shadow-none sm:min-h-[34rem] lg:min-h-[38rem]">
-            <ResearchLattice />
+            <ScienceField className="home-research-lattice" variant="lattice" />
             <div className="relative z-10 flex h-full min-h-[26rem] flex-col justify-between sm:min-h-[34rem] lg:min-h-[38rem]">
               <div className="flex items-start justify-between gap-4 p-6 sm:p-8">
                 <DataLabel>Current catalog</DataLabel>

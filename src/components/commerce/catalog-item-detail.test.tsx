@@ -11,8 +11,11 @@ describe("CatalogItemDetail", () => {
     render(<CatalogItemDetail product={product} />);
 
     const heading = screen.getByRole("heading", { level: 1, name: "Pinealon" });
+    const intro = heading.closest("header");
     const image = screen.getByRole("img", { name: product.image.alt });
     expect(heading).toBeVisible();
+    expect(intro).toHaveAttribute("data-motion-sequence", "dossier-intro");
+    expect(intro?.querySelectorAll("[data-motion-step]")).toHaveLength(4);
     expect(image).toBeVisible();
     expect(heading.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("Source label: Pinealon10mg")).toBeVisible();

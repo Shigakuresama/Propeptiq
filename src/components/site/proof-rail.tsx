@@ -14,11 +14,13 @@ export function ProofRail({ nodes = emptyProof }: { nodes?: readonly PublicProof
     <ol
       aria-label="Evidence relationship"
       className="proof-rail relative grid overflow-hidden rounded-[0.875rem] border border-border bg-surface-record shadow-[var(--shadow-soft)] before:absolute before:bottom-9 before:left-9 before:top-9 before:w-px before:bg-border lg:grid-cols-4 lg:before:bottom-auto lg:before:left-[12.5%] lg:before:right-[12.5%] lg:before:top-10 lg:before:h-px lg:before:w-auto"
+      data-motion-sequence="proof-rail"
     >
       {nodes.map((node, index) => (
         <li
           key={node.label}
           className="relative z-10 grid min-h-32 grid-cols-[2.5rem_minmax(0,1fr)] gap-3 border-b border-border p-4 last:border-b-0 lg:min-h-56 lg:grid-cols-1 lg:grid-rows-[2.5rem_1fr] lg:gap-8 lg:border-b-0 lg:border-r lg:p-6 lg:last:border-r-0"
+          data-motion-step={String(index + 1)}
         >
           <span
             aria-hidden="true"

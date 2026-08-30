@@ -26,24 +26,34 @@ export function CatalogItemDetail({ product }: { product: BrowseCatalogProduct }
         Back to catalog
       </Link>
 
-      <header className="grid gap-8 border-b border-border pb-10 pt-8 sm:pb-12 lg:grid-cols-[minmax(0,8fr)_minmax(14rem,4fr)] lg:items-end">
+      <header
+        className="grid gap-8 border-b border-border pb-10 pt-8 sm:pb-12 lg:grid-cols-[minmax(0,8fr)_minmax(14rem,4fr)] lg:items-end"
+        data-motion-sequence="dossier-intro"
+      >
         <div className="max-w-[68ch]">
-          <DataLabel>Browse-only catalog item</DataLabel>
-          <h1 className="mt-4 text-balance font-heading text-page leading-[1.02] text-ink">
+          <div data-motion-step="1">
+            <DataLabel>Browse-only catalog item</DataLabel>
+          </div>
+          <h1
+            className="mt-4 text-balance font-heading text-page leading-[1.02] text-ink"
+            data-motion-step="2"
+          >
             {product.name}
           </h1>
           {sourceLabelIsDistinct ? (
-            <p className="mt-4 text-base leading-7 text-muted-ink">
+            <p className="mt-4 text-base leading-7 text-muted-ink" data-motion-step="3">
               Source label: {product.sourceName}
             </p>
           ) : null}
         </div>
-        <Metric
-          className="border-l-2 border-moss pl-5"
-          detail="Owner-supplied package configurations"
-          label="Dossier entries"
-          value={product.variants.length}
-        />
+        <div data-motion-step="4">
+          <Metric
+            className="border-l-2 border-moss pl-5"
+            detail="Owner-supplied package configurations"
+            label="Dossier entries"
+            value={product.variants.length}
+          />
+        </div>
       </header>
 
       <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(20rem,5fr)] lg:items-start lg:gap-16">

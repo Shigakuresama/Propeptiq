@@ -21,6 +21,17 @@ const activeLoyaltyPolicy: LoyaltyPolicy = {
 };
 
 describe("public storefront semantics", () => {
+  it("uses the shared decorative science field without adding accessible noise", () => {
+    const { container } = render(
+      <PublicHome products={browseCatalogProducts} variantCount={103} />,
+    );
+
+    const field = container.querySelector("[data-science-field='lattice']");
+    expect(field).toHaveAttribute("aria-hidden", "true");
+    expect(field?.querySelector("svg")).toHaveAttribute("focusable", "false");
+    expect(container.querySelector("[data-motion-sequence='home-hero']")).not.toBeNull();
+  });
+
   it("presents the owner-supplied catalog without inventing commerce facts", () => {
     render(<PublicHome products={browseCatalogProducts} variantCount={103} />);
 
@@ -70,6 +81,7 @@ describe("public storefront semantics", () => {
     render(<ProofRail />);
 
     const rail = screen.getByRole("list", { name: "Evidence relationship" });
+    expect(rail).toHaveAttribute("data-motion-sequence", "proof-rail");
     const stages = within(rail)
       .getAllByRole("listitem")
       .map((item) => within(item).getByRole("heading", { level: 3 }).textContent);
@@ -82,7 +94,8 @@ describe("public storefront semantics", () => {
     ]);
     expect(screen.getAllByRole("list", { name: "Evidence relationship" })).toHaveLength(1);
     expect(within(rail).getAllByRole("listitem")).toHaveLength(4);
-    for (const item of within(rail).getAllByRole("listitem")) {
+    for (const [index, item] of within(rail).getAllByRole("listitem").entries()) {
+      expect(item).toHaveAttribute("data-motion-step", String(index + 1));
       expect(within(item).getByText("No approved public record")).toBeVisible();
     }
   });
