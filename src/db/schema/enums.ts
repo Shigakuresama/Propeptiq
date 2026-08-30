@@ -56,6 +56,7 @@ export const orderStateEnum = pgEnum("order_state", [
   "checkout_pending",
   "payment_failed",
   "paid_pending_fulfillment",
+  "paid_pending_settlement",
   "paid_on_hold",
   "ready_for_fulfillment",
   "fulfillment_in_progress",

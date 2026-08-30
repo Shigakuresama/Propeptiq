@@ -1,0 +1,1 @@
+ALTER TYPE "public"."order_state" ADD VALUE 'paid_pending_settlement' BEFORE 'paid_on_hold';

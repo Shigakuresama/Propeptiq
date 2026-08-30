@@ -16,6 +16,7 @@ export type OrderState =
   | "checkout_pending"
   | "payment_failed"
   | "paid_pending_fulfillment"
+  | "paid_pending_settlement"
   | "paid_on_hold"
   | "ready_for_fulfillment"
   | "fulfillment_in_progress"
@@ -49,6 +50,22 @@ export type OrderEvent =
       source: "verified_provider_event";
       paymentEvidenceId: string;
       reservationDisposition: "active" | "authoritatively_released";
+      /**
+       * Reversible instruments (ACH) hold in paid_pending_settlement until
+       * their settlement window closes. Absent or false preserves the existing
+       * card behaviour exactly. See docs/adr/0006.
+       */
+      settlementRequired?: boolean;
+    }>
+  | Readonly<{
+      type: "settlement_confirmed";
+      source: "verified_provider_event";
+      settlementEvidenceId: string;
+    }>
+  | Readonly<{
+      type: "payment_funding_reversed";
+      source: "verified_provider_event";
+      providerEvidenceId: string;
     }>
   | Readonly<{
       type: "payment_disputed";
@@ -201,6 +218,7 @@ const orderStates = new Set<OrderState>([
   "checkout_pending",
   "payment_failed",
   "paid_pending_fulfillment",
+  "paid_pending_settlement",
   "paid_on_hold",
   "ready_for_fulfillment",
   "fulfillment_in_progress",
@@ -312,7 +330,11 @@ function isValidOrderSnapshot(value: unknown): value is OrderSnapshot {
     );
   }
 
-  if (state === "paid_pending_fulfillment" || state === "paid_on_hold") {
+  if (
+    state === "paid_pending_fulfillment" ||
+    state === "paid_pending_settlement" ||
+    state === "paid_on_hold"
+  ) {
     return (
       isNonBlankString(value.paymentEvidenceId) &&
       value.reviewRequestId === null &&
@@ -579,9 +601,41 @@ export function transitionOrder(
         ["inventory_conflict"],
       );
     }
+    if (event.settlementRequired === true) {
+      // Reversible funds are paid but not releasable. The fulfillment gate
+      // admits only paid_pending_fulfillment, so this state cannot ship.
+      return succeed("paid_pending_settlement", {
+        paymentEvidenceId: event.paymentEvidenceId,
+      });
+    }
     return succeed("paid_pending_fulfillment", {
       paymentEvidenceId: event.paymentEvidenceId,
     });
+  }
+  if (
+    snapshot.state === "paid_pending_settlement" &&
+    event.type === "settlement_confirmed"
+  ) {
+    if (
+      event.source !== "verified_provider_event" ||
+      !isNonBlankString(event.settlementEvidenceId)
+    ) {
+      return fail("missing_payment_evidence");
+    }
+    return succeed("paid_pending_fulfillment", {});
+  }
+  if (
+    snapshot.state === "paid_pending_settlement" &&
+    event.type === "payment_funding_reversed"
+  ) {
+    if (
+      event.source !== "verified_provider_event" ||
+      !isNonBlankString(event.providerEvidenceId)
+    ) {
+      return fail("missing_payment_evidence");
+    }
+    // The funds did not hold, so the order must not keep evidence claiming they did.
+    return succeed("payment_failed", { paymentEvidenceId: null });
   }
   if (
     (snapshot.state === "paid_pending_fulfillment" ||

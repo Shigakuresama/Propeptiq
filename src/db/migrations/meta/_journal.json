@@ -162,6 +162,13 @@
       "when": 1787987668660,
       "tag": "0022_milky_mole_man",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788053477281,
+      "tag": "0023_stiff_lionheart",
+      "breakpoints": true
     }
   ]
 }

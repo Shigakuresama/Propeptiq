@@ -1021,6 +1021,9 @@ async function processCheckoutEvent(
       stableUuid(keyedUuid, `provider-event:${row.id}:payment-verified`);
     const paidOrderStates: readonly OrderState[] = [
       "paid_pending_fulfillment",
+      // Settlement-pending IS paid. Omitting it would make a replayed provider
+      // event conflict on an order that is legitimately paid but not releasable.
+      "paid_pending_settlement",
       "paid_on_hold",
       "ready_for_fulfillment",
       "fulfillment_in_progress",
