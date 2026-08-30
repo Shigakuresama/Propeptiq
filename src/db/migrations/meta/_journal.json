@@ -176,6 +176,13 @@
       "when": 1788056057425,
       "tag": "0024_flaky_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788069727575,
+      "tag": "0025_blushing_pestilence",
+      "breakpoints": true
     }
   ]
 }

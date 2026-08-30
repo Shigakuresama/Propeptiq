@@ -25,6 +25,7 @@ import {
   projectProviderEventAuthorityV1,
   type ProviderEventAuthorityV1,
 } from "@/commerce/stripe-webhook-verifier";
+import { settlementWindowClosesAt } from "@/domain/settlement";
 import {
   transitionOrder,
   transitionPayment,
@@ -2013,6 +2014,7 @@ async function processInvoiceEvent(
   }>,
   now: Date,
   keyedUuid: KeyedUuidGenerator,
+  settlementWindowBusinessDays?: number,
 ): Promise<ProcessingResult> {
   if (event.livemode !== authority.expectedLivemode) {
     return finishBusinessConflict(
@@ -2024,9 +2026,11 @@ async function processInvoiceEvent(
     );
   }
 
-  // Only a paid invoice carries a payment outcome. finalized and
-  // payment_failed are journaled without moving the order.
-  if (event.eventType !== "invoice.paid" || event.status !== "paid") {
+  // invoice.finalized never moves an order. invoice.paid settles it, and
+  // invoice.payment_failed reverses a settlement that has not yet closed.
+  const settles = event.eventType === "invoice.paid" && event.status === "paid";
+  const reverses = event.eventType === "invoice.payment_failed";
+  if (!settles && !reverses) {
     return finishProcessed(client, row.id, now);
   }
 
@@ -2075,6 +2079,68 @@ async function processInvoiceEvent(
       "payment_identity_mismatch",
       keyedUuid,
     );
+  }
+
+  if (reverses) {
+    // ACH funds pulled back before the window closed. This is the case the
+    // whole Option B policy exists to catch: cancel the pending settlement
+    // rather than record a reversal after goods have shipped. docs/adr/0006.
+    //
+    // Only an order still awaiting settlement can be reversed here. One that
+    // already left that state is out of scope for this event and must not be
+    // dragged backwards by a late or spurious failure.
+    if (order.state !== "paid_pending_settlement") {
+      return finishProcessed(client, row.id, now);
+    }
+    // A settlement-pending order carries payment evidence by definition, and
+    // isValidOrderSnapshot requires it. Load the real id rather than null, or
+    // the transition is refused as an invalid snapshot.
+    const evidence = rows<{ id: string }>(await client.query(
+      `SELECT id::text AS id FROM payment_events
+        WHERE order_id = $1::uuid AND event_type = 'payment_verified'
+        ORDER BY occurred_at DESC LIMIT 1`,
+      [order.id],
+    ));
+    const paymentEvidenceId = evidence[0]?.id ?? null;
+    if (paymentEvidenceId === null) {
+      return finishBusinessConflict(
+        client,
+        row,
+        now,
+        "payment_identity_mismatch",
+        keyedUuid,
+      );
+    }
+    const reversal = transitionOrder(
+      {
+        orderId: order.id,
+        state: order.state,
+        paymentEvidenceId,
+        reviewRequestId: null,
+        fulfillmentReleaseVersion: null,
+        lastFulfillmentReleaseVersion: 0,
+        carrierHandoffAt: null,
+      },
+      {
+        type: "payment_funding_reversed",
+        source: "verified_provider_event",
+        providerEvidenceId: event.invoiceId,
+      },
+    );
+    if (!reversal.ok) {
+      return finishBusinessConflict(
+        client,
+        row,
+        now,
+        "order_transition_mismatch",
+        keyedUuid,
+      );
+    }
+    await client.query(
+      `UPDATE orders SET state = $2::order_state, updated_at = $3 WHERE id = $1`,
+      [order.id, reversal.value.snapshot.state, now],
+    );
+    return finishProcessed(client, row.id, now);
   }
 
   const idempotencyKey = `${authority.provider}:invoice:${event.invoiceId}`;
@@ -2142,6 +2208,40 @@ async function processInvoiceEvent(
     `UPDATE orders SET state = $2::order_state, updated_at = $3 WHERE id = $1`,
     [order.id, transition.value.snapshot.state, now],
   );
+
+  // Schedule the release durably rather than in process, so a restart cannot
+  // lose a pending settlement. An unconfigured or invalid window schedules
+  // NOTHING: the order stays held until an operator acts, which is the
+  // fail-closed direction. See docs/adr/0006.
+  const closesAt =
+    settlementWindowBusinessDays === undefined
+      ? null
+      : settlementWindowClosesAt(now, settlementWindowBusinessDays);
+  if (closesAt !== null) {
+    await client.query(
+      `INSERT INTO downstream_effects
+         (id, order_id, provider_event_id, effect_type, payload,
+          idempotency_key, status, attempt_count, available_at,
+          created_at, updated_at)
+       VALUES ($1, $2, $3, 'settlement_window_elapsed', $4::jsonb, $5,
+               'pending', 0, $6, $7, $7)
+       ON CONFLICT (idempotency_key) DO NOTHING`,
+      [
+        stableUuid(keyedUuid, `invoice-settlement:${event.invoiceId}`),
+        order.id,
+        row.id,
+        JSON.stringify({
+          schemaVersion: 1,
+          orderId: order.id,
+          verifiedPaymentEventId: paymentEventId,
+          closesAt: closesAt.toISOString(),
+        }),
+        `payment_event:${paymentEventId}:settlement_window_elapsed`,
+        closesAt,
+        now,
+      ],
+    );
+  }
 
   return finishProcessed(client, row.id, now);
 }
@@ -2442,6 +2542,7 @@ async function processClaimInTransaction(
     authority: ProviderEventAuthorityV1;
     now: Date;
     keyedUuid: KeyedUuidGenerator;
+    settlementWindowBusinessDays?: number;
   }>,
 ): Promise<ProcessingResult> {
   const claim = projectProviderEventClaimV1(input.claim);
@@ -2563,6 +2664,7 @@ async function processClaimInTransaction(
       authority,
       input.now,
       input.keyedUuid,
+      input.settlementWindowBusinessDays,
     );
   }
   if (event.kind === "dispute") {
@@ -2676,6 +2778,12 @@ export function createProviderEventRepository(
   dependencies: Readonly<{
     runSerializableTransaction: ProviderEventTransactionRunner;
     keyedUuid?: KeyedUuidGenerator;
+    /**
+     * Business days a reversible invoice payment is held before release.
+     * Absent means no release is ever scheduled - the order stays in
+     * settlement until an operator acts. See docs/adr/0006.
+     */
+    settlementWindowBusinessDays?: number;
   }>,
 ): ProviderEventRepository {
   return Object.freeze({
@@ -2701,6 +2809,12 @@ export function createProviderEventRepository(
           (client) => processClaimInTransaction(client, {
             ...input,
             keyedUuid: dependencies.keyedUuid!,
+            ...(dependencies.settlementWindowBusinessDays === undefined
+              ? {}
+              : {
+                  settlementWindowBusinessDays:
+                    dependencies.settlementWindowBusinessDays,
+                }),
           }),
           {
             isolationLevel: "serializable",

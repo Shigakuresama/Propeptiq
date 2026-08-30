@@ -1,0 +1,1 @@
+ALTER TABLE "downstream_effects" ADD COLUMN "available_at" timestamp with time zone DEFAULT now() NOT NULL;

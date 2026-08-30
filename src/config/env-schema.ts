@@ -6,6 +6,7 @@ const catalogDemoMode = z.enum(["disabled", "enabled"]);
 const localTestDriver = z.enum(["disabled", "enabled"]);
 const vercelEnvironment = z.enum(["development", "preview", "production"]);
 const nonBlank = z.string().trim().min(1);
+const settlementWindowDays = z.coerce.number().int().min(1).max(90);
 /** Owner-configured Stripe ShippingRate backing the shipping quote port. */
 const stripeShippingRateId = z.string().min(1).refine(
   (value) => value === value.trim() && /^shr_[A-Za-z0-9]{8,64}$/u.test(value),
@@ -65,6 +66,12 @@ const rawServerEnvSchema = z.object({
   STRIPE_SECRET_KEY: nonBlank.optional(),
   STRIPE_WEBHOOK_SECRET: nonBlank.optional(),
   STRIPE_SHIPPING_RATE_ID: stripeShippingRateId.optional(),
+  /**
+   * Business days a reversible (ACH) invoice payment is held before the order
+   * may be released. See docs/adr/0006. Unset means NO release: an absent
+   * window must never degrade into shipping immediately.
+   */
+  INVOICE_SETTLEMENT_WINDOW_DAYS: settlementWindowDays.optional(),
   STRIPE_TAX_CODE: stripeTaxCode.optional(),
   BLOB_READ_WRITE_TOKEN: nonBlank.optional(),
   RESEND_API_KEY: nonBlank.optional(),

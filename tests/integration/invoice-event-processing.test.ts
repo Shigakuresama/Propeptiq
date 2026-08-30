@@ -78,13 +78,16 @@ function invoiceNormalization(
   return result as ProcessableProviderEventNormalizationV1;
 }
 
-function repository() {
+function repository(settlementWindowBusinessDays?: number) {
   return createProviderEventRepository({
     runSerializableTransaction: (work) =>
       client.transaction((transaction) => work({
         query: (text, params = []) => transaction.query(text, [...params]),
       })),
     keyedUuid,
+    ...(settlementWindowBusinessDays === undefined
+      ? {}
+      : { settlementWindowBusinessDays }),
   });
 }
 
@@ -228,5 +231,95 @@ describe("invoice provider event processing", () => {
       `SELECT count(*)::int AS count FROM payment_events WHERE order_id = '${ids.order}'`,
     );
     expect(payments.rows[0]).toEqual({ count: 1 });
+  });
+
+  it("reverses a settlement-pending order when its invoice payment fails", async () => {
+    const paid = await claim(invoiceNormalization("invoice.paid", "evt_rev_paid"), "revpaid");
+    await repository().processClaim({ claim: paid, authority: authority(), now });
+    expect(await orderState()).toBe("paid_pending_settlement");
+
+    // ACH funds pulled back before the window closed. This is the case the
+    // whole Option B policy exists to catch. docs/adr/0006.
+    const failed = await claim(
+      invoiceNormalization("invoice.payment_failed", "evt_rev_failed", {
+        status: "open",
+        amount_paid: 0,
+      }),
+      "revfailed",
+    );
+    await expect(
+      repository().processClaim({ claim: failed, authority: authority(), now }),
+    ).resolves.toEqual({ status: "processed" });
+
+    expect(await orderState()).toBe("payment_failed");
+  });
+
+  it("does not reverse an order that already left settlement", async () => {
+    // An order that was never settlement-pending must not be dragged backwards
+    // by a late or spurious failure event.
+    const failed = await claim(
+      invoiceNormalization("invoice.payment_failed", "evt_rev_nostate", {
+        status: "open",
+        amount_paid: 0,
+      }),
+      "revnostate",
+    );
+    await repository().processClaim({ claim: failed, authority: authority(), now });
+
+    expect(await orderState()).toBe("checkout_pending");
+  });
+
+  it("refuses a reversal with no durable binding naming that invoice", async () => {
+    const paid = await claim(invoiceNormalization("invoice.paid", "evt_rev_p2"), "revp2");
+    await repository().processClaim({ claim: paid, authority: authority(), now });
+    await client.exec(`DELETE FROM order_invoices WHERE order_id = '${ids.order}'`);
+
+    const failed = await claim(
+      invoiceNormalization("invoice.payment_failed", "evt_rev_unbound", {
+        status: "open",
+        amount_paid: 0,
+      }),
+      "revunbound",
+    );
+    const result = await repository().processClaim({
+      claim: failed,
+      authority: authority(),
+      now,
+    });
+
+    expect(result.status).not.toBe("processed");
+    expect(await orderState()).toBe("paid_pending_settlement");
+  });
+
+  it("schedules the settlement window durably when one is configured", async () => {
+    const paid = await claim(invoiceNormalization("invoice.paid", "evt_win_paid"), "winpaid");
+    await repository(5).processClaim({ claim: paid, authority: authority(), now });
+
+    const effects = await client.query<{
+      effect_type: string;
+      available_at: Date;
+      payload: Record<string, unknown>;
+    }>(
+      `SELECT effect_type, available_at, payload FROM downstream_effects
+        WHERE effect_type = 'settlement_window_elapsed'`,
+    );
+    expect(effects.rows).toHaveLength(1);
+    const effect = effects.rows[0] as { available_at: Date };
+    // now is Tue 2026-08-25; five business days lands on Tue 2026-09-01.
+    expect(new Date(effect.available_at).toISOString()).toBe(
+      "2026-09-01T12:00:30.000Z",
+    );
+  });
+
+  it("schedules no release at all when no window is configured", async () => {
+    // An absent window must never degrade into shipping immediately.
+    const paid = await claim(invoiceNormalization("invoice.paid", "evt_nowin"), "nowin");
+    await repository().processClaim({ claim: paid, authority: authority(), now });
+
+    const effects = await client.query(
+      `SELECT 1 FROM downstream_effects WHERE effect_type = 'settlement_window_elapsed'`,
+    );
+    expect(effects.rows).toHaveLength(0);
+    expect(await orderState()).toBe("paid_pending_settlement");
   });
 });
