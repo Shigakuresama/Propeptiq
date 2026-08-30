@@ -222,6 +222,7 @@ footer a,
 
 .site-motion-surface {
   --site-motion-offset: 8px;
+
   animation: site-surface-enter var(--motion-duration-reveal) var(--motion-ease-enter) backwards;
 }
 
@@ -231,6 +232,7 @@ footer a,
 
 .site-motion-surface--minimal {
   --site-motion-offset: 0px;
+
   animation: site-surface-fade var(--motion-duration-micro) var(--motion-ease-enter) backwards;
 }
 
@@ -1444,6 +1446,7 @@ footer a {
 
 ::view-transition-old(.nav-forward) {
   --slide-offset: -30px;
+
   animation:
     var(--duration-exit) ease-in both vt-fade reverse,
     var(--duration-move) ease-in-out both vt-slide reverse;
@@ -1451,6 +1454,7 @@ footer a {
 
 ::view-transition-new(.nav-forward) {
   --slide-offset: 30px;
+
   animation:
     var(--duration-enter) ease-out var(--duration-exit) both vt-fade,
     var(--duration-move) ease-in-out both vt-slide;
@@ -1458,6 +1462,7 @@ footer a {
 
 ::view-transition-old(.nav-back) {
   --slide-offset: 30px;
+
   animation:
     var(--duration-exit) ease-in both vt-fade reverse,
     var(--duration-move) ease-in-out both vt-slide reverse;
@@ -1465,6 +1470,7 @@ footer a {
 
 ::view-transition-new(.nav-back) {
   --slide-offset: -30px;
+
   animation:
     var(--duration-enter) ease-out var(--duration-exit) both vt-fade,
     var(--duration-move) ease-in-out both vt-slide;
