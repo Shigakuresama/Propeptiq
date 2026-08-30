@@ -4,6 +4,8 @@ import { createInvoiceCheckoutOrchestratorV1 } from "@/commerce/invoice-checkout
 import type { InvoiceProviderResultV1 } from "@/commerce/stripe-invoice-provider";
 
 const orderId = "79000000-0000-4000-8000-000000000001";
+const customerId = "cus_synthetic6d";
+const daysUntilDue = 30;
 const productId = "79000000-0000-4000-8000-00000000000a";
 
 function invoiceRequest() {
@@ -64,7 +66,7 @@ describe("createInvoiceCheckoutOrchestratorV1", () => {
   it("issues an invoice and returns its hosted page", async () => {
     const { orchestrator, recordInvoiceOpen } = orchestratorWith(openInvoice());
 
-    expect(await orchestrator.startInvoice({ orderId })).toEqual({
+    expect(await orchestrator.startInvoice({ orderId, customerId, daysUntilDue })).toEqual({
       status: "open",
       orderId,
       hostedInvoiceUrl: "https://invoice.stripe.com/i/acct_x/test_x",
@@ -83,7 +85,7 @@ describe("createInvoiceCheckoutOrchestratorV1", () => {
       reason: "order_not_invoiceable",
     });
 
-    expect(await orchestrator.startInvoice({ orderId })).toEqual({
+    expect(await orchestrator.startInvoice({ orderId, customerId, daysUntilDue })).toEqual({
       status: "ineligible",
       reason: "order_not_invoiceable",
     });
@@ -100,7 +102,7 @@ describe("createInvoiceCheckoutOrchestratorV1", () => {
       },
     );
 
-    expect(await orchestrator.startInvoice({ orderId })).toEqual({
+    expect(await orchestrator.startInvoice({ orderId, customerId, daysUntilDue })).toEqual({
       status: "open",
       orderId,
       hostedInvoiceUrl: "https://invoice.stripe.com/i/acct_x/prior",
@@ -117,7 +119,7 @@ describe("createInvoiceCheckoutOrchestratorV1", () => {
         providerRequestId: "req_x",
       });
 
-    expect(await orchestrator.startInvoice({ orderId })).toEqual({
+    expect(await orchestrator.startInvoice({ orderId, customerId, daysUntilDue })).toEqual({
       status: "unavailable",
       reason: "provider_rejected",
     });
@@ -137,7 +139,7 @@ describe("createInvoiceCheckoutOrchestratorV1", () => {
         knownProviderInvoiceId: "in_maybe",
       });
 
-    expect(await orchestrator.startInvoice({ orderId })).toEqual({
+    expect(await orchestrator.startInvoice({ orderId, customerId, daysUntilDue })).toEqual({
       status: "unknown",
       reason: "provider_transport_unknown",
     });
@@ -155,7 +157,7 @@ describe("createInvoiceCheckoutOrchestratorV1", () => {
       request: { ...invoiceRequest(), orderId: "79000000-0000-4000-8000-000000000999" },
     });
 
-    expect(await orchestrator.startInvoice({ orderId })).toEqual({
+    expect(await orchestrator.startInvoice({ orderId, customerId, daysUntilDue })).toEqual({
       status: "unavailable",
       reason: "order_binding_mismatch",
     });
@@ -172,10 +174,22 @@ describe("createInvoiceCheckoutOrchestratorV1", () => {
       },
     } as InvoiceProviderResultV1);
 
-    expect(await orchestrator.startInvoice({ orderId })).toEqual({
+    expect(await orchestrator.startInvoice({ orderId, customerId, daysUntilDue })).toEqual({
       status: "unavailable",
       reason: "order_binding_mismatch",
     });
     expect(recordInvoiceOpen).not.toHaveBeenCalled();
+  });
+
+  it("passes the billing terms through to the claim unchanged", async () => {
+    const { orchestrator, claimInvoiceAttempt } = orchestratorWith(openInvoice());
+
+    await orchestrator.startInvoice({ orderId, customerId, daysUntilDue });
+
+    expect(claimInvoiceAttempt).toHaveBeenCalledWith({
+      orderId,
+      customerId,
+      daysUntilDue,
+    });
   });
 });

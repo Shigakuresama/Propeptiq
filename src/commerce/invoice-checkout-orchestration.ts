@@ -33,7 +33,16 @@ export type InvoiceCheckoutClaimV1 =
   | Readonly<{ status: "ineligible"; reason: string }>;
 
 export type InvoiceCheckoutPortV1 = Readonly<{
-  claimInvoiceAttempt: (input: Readonly<{ orderId: string }>) => Promise<InvoiceCheckoutClaimV1>;
+  /**
+   * Billing terms are supplied by the caller rather than derived here. Nothing
+   * in the schema maps a buyer to a Stripe customer, and inventing that mapping
+   * would be a product decision about institutional identity, not a detail.
+   */
+  claimInvoiceAttempt: (input: Readonly<{
+    orderId: string;
+    customerId: string;
+    daysUntilDue: number;
+  }>) => Promise<InvoiceCheckoutClaimV1>;
   recordInvoiceOpen: (input: Readonly<{
     orderId: string;
     providerInvoiceId: string;
@@ -65,13 +74,19 @@ export function createInvoiceCheckoutOrchestratorV1(dependencies: Readonly<{
   port: InvoiceCheckoutPortV1;
 }>): Readonly<{
   startInvoice: (
-    input: Readonly<{ orderId: string }>,
+    input: Readonly<{
+      orderId: string;
+      customerId: string;
+      daysUntilDue: number;
+    }>,
   ) => Promise<InvoiceCheckoutResultV1>;
 }> {
   return Object.freeze({
     async startInvoice(input) {
       const claim = await dependencies.port.claimInvoiceAttempt({
         orderId: input.orderId,
+        customerId: input.customerId,
+        daysUntilDue: input.daysUntilDue,
       });
 
       if (claim.status === "ineligible") {
