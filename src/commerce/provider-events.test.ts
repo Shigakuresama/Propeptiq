@@ -427,9 +427,6 @@ describe("invoice and ACH events are journaled but not yet processable", () => {
   // business effect. Adding a processable kind without matching repository
   // transitions would be strictly worse than this safe default.
   it.each([
-    "invoice.finalized",
-    "invoice.paid",
-    "invoice.payment_failed",
     "credit_note.created",
     "cash_balance.funds_available",
     "customer_cash_balance_transaction.created",
@@ -454,5 +451,92 @@ describe("invoice and ACH events are journaled but not yet processable", () => {
         livemode: false,
       },
     });
+  });
+});
+
+describe("invoice provider events", () => {
+  const invoiceOrderId = "76000000-0000-4000-8000-0000000000c1";
+
+  function invoiceObject(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "in_synthetic6d",
+      metadata: { orderId: invoiceOrderId },
+      amount_due: 8_700,
+      amount_paid: 8_700,
+      currency: "usd",
+      status: "paid",
+      collection_method: "send_invoice",
+      livemode: false,
+      ...overrides,
+    };
+  }
+
+  it("normalizes a paid net-terms invoice with its order binding", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject()),
+    );
+
+    expect(result).toEqual({
+      status: "normalized",
+      event: {
+        schemaVersion: 1,
+        kind: "invoice",
+        providerEventId: "evt_synthetic_6e_invoice_paid",
+        eventType: "invoice.paid",
+        providerCreatedAt,
+        livemode: false,
+        invoiceId: "in_synthetic6d",
+        orderId: invoiceOrderId,
+        amountDueMinor: 8_700,
+        amountPaidMinor: 8_700,
+        currency: "usd",
+        status: "paid",
+        collectionMethod: "send_invoice",
+      },
+    });
+  });
+
+  it("round-trips a normalized invoice event through the stored parser", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject()),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized") return;
+    expect(parseNormalizedProviderEventV1(result.event)).toEqual(result.event);
+  });
+
+  it.each(["invoice.finalized", "invoice.payment_failed"])(
+    "normalizes %s as an invoice event",
+    (type) => {
+      const result = normalizeStripeProviderEventV1(
+        stripeEvent(type, invoiceObject({ status: "open", amount_paid: 0 })),
+      );
+      expect(result.status).toBe("normalized");
+      if (result.status !== "normalized") return;
+      expect(result.event.kind).toBe("invoice");
+    },
+  );
+
+  it("conflicts an invoice event whose order binding is missing", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject({ metadata: {} })),
+    );
+    expect(result.status).toBe("conflict");
+  });
+
+  it("conflicts an invoice event whose livemode contradicts the envelope", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject({ livemode: true })),
+    );
+    expect(result.status).toBe("conflict");
+  });
+
+  it("restricts an unrecognized invoice status rather than trusting it", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject({ status: "weird" })),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized" || result.event.kind !== "invoice") return;
+    expect(result.event.status).toBe("unknown_restrictive");
   });
 });

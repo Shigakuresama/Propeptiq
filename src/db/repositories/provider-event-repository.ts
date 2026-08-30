@@ -14,6 +14,7 @@ import type {
   ProviderEventNormalizationResultV1,
   RefundProviderEventV1,
   RefundReconciliationProviderEventV1,
+  InvoiceProviderEventV1,
 } from "@/commerce/provider-events";
 import {
   parseKnownProviderEventConflictV1,
@@ -1983,6 +1984,48 @@ async function processRefundEvent(
   return finishProcessed(client, row.id, now);
 }
 
+/**
+ * Journals a verified net-terms invoice event with its order binding.
+ *
+ * Deliberately applies NO order state transition at this checkpoint. Under the
+ * Option B ACH policy (docs/adr/0006) a paid invoice must move the order to
+ * paid_pending_settlement, not to paid. That transition requires a durable
+ * order-to-invoice binding, and no repository writes one yet: the invoice
+ * orchestrator takes an injected port with no PostgreSQL implementation.
+ *
+ * Acting on metadata.orderId alone would mean trusting a provider-supplied
+ * identifier to move money state with nothing on our side to check it against,
+ * which is exactly what the rest of this repository refuses to do.
+ *
+ * This is still stronger than the previous "ignored" handling: the event is now
+ * typed, its order binding and amounts are validated and journaled, and the
+ * exhaustiveness fence in processStoredEvent will force whoever adds the
+ * transition to come through here rather than around it.
+ */
+async function processInvoiceEvent(
+  client: ProviderEventSqlClient,
+  row: LockedProviderEventRow,
+  event: InvoiceProviderEventV1,
+  authority: Readonly<{
+    provider: "stripe";
+    expectedLivemode: boolean;
+    providerScope: string;
+  }>,
+  now: Date,
+  keyedUuid: KeyedUuidGenerator,
+): Promise<ProcessingResult> {
+  if (event.livemode !== authority.expectedLivemode) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "provider_authority_mismatch",
+      keyedUuid,
+    );
+  }
+  return finishProcessed(client, row.id, now);
+}
+
 async function processRefundReconciliationEvent(
   client: ProviderEventSqlClient,
   row: LockedProviderEventRow,
@@ -2384,6 +2427,16 @@ async function processClaimInTransaction(
   }
   if (event.kind === "refund_reconciliation") {
     return processRefundReconciliationEvent(
+      client,
+      row,
+      event,
+      authority,
+      input.now,
+      input.keyedUuid,
+    );
+  }
+  if (event.kind === "invoice") {
+    return processInvoiceEvent(
       client,
       row,
       event,

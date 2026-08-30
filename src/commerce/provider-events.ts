@@ -64,12 +64,34 @@ export type DisputeProviderEventV1 = ProviderEventCommonV1 &
       | "unknown_restrictive";
   }>;
 
+export type InvoiceProviderEventV1 = ProviderEventCommonV1 &
+  Readonly<{
+    kind: "invoice";
+    invoiceId: string;
+    orderId: string;
+    amountDueMinor: number;
+    amountPaidMinor: number;
+    currency: string;
+    status:
+      | "draft"
+      | "open"
+      | "paid"
+      | "uncollectible"
+      | "void"
+      | "unknown_restrictive";
+    collectionMethod:
+      | "send_invoice"
+      | "charge_automatically"
+      | "unknown_restrictive";
+  }>;
+
 export type NormalizedProviderEventV1 =
   | IgnoredProviderEventV1
   | CheckoutSessionProviderEventV1
   | RefundProviderEventV1
   | RefundReconciliationProviderEventV1
-  | DisputeProviderEventV1;
+  | DisputeProviderEventV1
+  | InvoiceProviderEventV1;
 
 export type ProviderEventNormalizationResultV1 =
   | Readonly<{ status: "normalized"; event: NormalizedProviderEventV1 }>
@@ -90,6 +112,22 @@ const refundEventTypes = new Set([
   "refund.created",
   "refund.updated",
   "refund.failed",
+] as const);
+const invoiceEventTypes = new Set([
+  "invoice.finalized",
+  "invoice.paid",
+  "invoice.payment_failed",
+] as const);
+const invoiceStatuses = new Set([
+  "draft",
+  "open",
+  "paid",
+  "uncollectible",
+  "void",
+] as const);
+const invoiceCollectionMethods = new Set([
+  "send_invoice",
+  "charge_automatically",
 ] as const);
 const disputeEventTypes = new Set([
   "charge.dispute.created",
@@ -140,7 +178,8 @@ function isKnownProcessableEventType(eventType: string): boolean {
     checkoutEventTypes.has(eventType as never) ||
     refundEventTypes.has(eventType as never) ||
     eventType === "charge.refunded" ||
-    disputeEventTypes.has(eventType as never)
+    disputeEventTypes.has(eventType as never) ||
+    invoiceEventTypes.has(eventType as never)
   );
 }
 
@@ -463,6 +502,61 @@ function normalizedDispute(
   });
 }
 
+function normalizedInvoice(
+  common: ProviderEventCommonV1,
+  object: Record<string, unknown>,
+): InvoiceProviderEventV1 | null {
+  const metadata = record(own(object, "metadata"));
+  if (metadata === null) return null;
+  const orderId = canonicalUuid(own(metadata, "orderId"));
+  const invoiceId = boundedPrintable(own(object, "id"));
+  const amountDueMinor = safeMoney(own(object, "amount_due"), false);
+  const amountPaidMinor = safeMoney(own(object, "amount_paid"), false);
+  const normalizedCurrency = currency(own(object, "currency"));
+  const rawStatus = own(object, "status");
+  const rawCollection = own(object, "collection_method");
+  if (
+    orderId === null ||
+    invoiceId === null ||
+    amountDueMinor === null ||
+    amountPaidMinor === null ||
+    normalizedCurrency === null ||
+    typeof rawStatus !== "string" ||
+    rawStatus.trim().length === 0 ||
+    typeof rawCollection !== "string" ||
+    rawCollection.trim().length === 0 ||
+    own(object, "livemode") !== common.livemode
+  ) {
+    return null;
+  }
+  // An unrecognized status or collection method is restricted rather than
+  // trusted. A later Stripe value must never be read as a payment outcome.
+  const status = invoiceStatuses.has(
+    rawStatus as Exclude<InvoiceProviderEventV1["status"], "unknown_restrictive">,
+  )
+    ? (rawStatus as InvoiceProviderEventV1["status"])
+    : "unknown_restrictive";
+  const collectionMethod = invoiceCollectionMethods.has(
+    rawCollection as Exclude<
+      InvoiceProviderEventV1["collectionMethod"],
+      "unknown_restrictive"
+    >,
+  )
+    ? (rawCollection as InvoiceProviderEventV1["collectionMethod"])
+    : "unknown_restrictive";
+  return deepFreeze({
+    ...common,
+    kind: "invoice",
+    invoiceId,
+    orderId,
+    amountDueMinor,
+    amountPaidMinor,
+    currency: normalizedCurrency,
+    status,
+    collectionMethod,
+  });
+}
+
 export function normalizeStripeProviderEventV1(
   value: unknown,
 ): ProviderEventNormalizationResultV1 {
@@ -480,6 +574,8 @@ export function normalizeStripeProviderEventV1(
       object === null ? null : normalizedRefundReconciliation(common, object);
   } else if (disputeEventTypes.has(common.eventType as never)) {
     normalized = object === null ? null : normalizedDispute(common, object);
+  } else if (invoiceEventTypes.has(common.eventType as never)) {
+    normalized = object === null ? null : normalizedInvoice(common, object);
   } else {
     normalized = ignored(common);
   }
@@ -643,6 +739,37 @@ function exactEnvelope(value: unknown): NormalizedProviderEventV1 | null {
           amount: own(envelope, "amountMinor"),
           currency: own(envelope, "currency"),
           status: own(envelope, "status"),
+          livemode: common.livemode,
+        },
+      },
+    };
+  } else if (kind === "invoice") {
+    if (
+      !exactOwnKeys(envelope, [
+        ...COMMON_KEYS,
+        "invoiceId",
+        "orderId",
+        "amountDueMinor",
+        "amountPaidMinor",
+        "currency",
+        "status",
+        "collectionMethod",
+      ])
+    ) return null;
+    raw = {
+      id: common.providerEventId,
+      type: common.eventType,
+      created: Date.parse(common.providerCreatedAt) / 1_000,
+      livemode: common.livemode,
+      data: {
+        object: {
+          id: own(envelope, "invoiceId"),
+          metadata: { orderId: own(envelope, "orderId") },
+          amount_due: own(envelope, "amountDueMinor"),
+          amount_paid: own(envelope, "amountPaidMinor"),
+          currency: own(envelope, "currency"),
+          status: own(envelope, "status"),
+          collection_method: own(envelope, "collectionMethod"),
           livemode: common.livemode,
         },
       },
