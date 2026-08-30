@@ -1,6 +1,6 @@
 # ADR 0002: Individual Identity and Lightweight Authorization
 
-**Status:** Accepted, revised for V1 lightweight commerce on 2026-08-24.
+**Status:** Superseded on 2026-08-30 by ADR 0003. Retained as the historical Clerk decision.
 
 ## Context
 

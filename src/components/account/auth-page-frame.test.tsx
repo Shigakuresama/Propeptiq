@@ -5,11 +5,19 @@ import { AuthPageFrame } from "./auth-page-frame";
 
 describe("AuthPageFrame", () => {
   it.each([
-    ["sign-in" as const, "Sign in", "/sign-in"],
-    ["sign-up" as const, "Create account", "/sign-up"],
+    [
+      "sign-in" as const,
+      "Sign in",
+      "/sign-in?returnTo=%2Faccount%2Forders%2Forder-1",
+    ],
+    [
+      "sign-up" as const,
+      "Create account",
+      "/sign-up?returnTo=%2Faccount%2Forders%2Forder-1",
+    ],
   ])("marks the %s route with the inverse semantic action", (kind, label, href) => {
     render(
-      <AuthPageFrame kind={kind}>
+      <AuthPageFrame kind={kind} returnTo="/account/orders/order-1">
         <h1>Identity entry</h1>
       </AuthPageFrame>,
     );

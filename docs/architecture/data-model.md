@@ -6,7 +6,7 @@
 
 | Record | Purpose and load-bearing fields |
 |---|---|
-| `users` | Internal user ID, unique Clerk ID, email lifecycle state |
+| `users` | Internal user ID, unique external identity ID, email lifecycle state. The executable schema temporarily retains the legacy `clerk_id` SQL column name for compatibility. |
 | `buyer_profiles` | User ID, `active | review | blocked`, age confirmation, structured purpose, optional organization name |
 | `attestations` | Versioned policy text/hash and immutable buyer acceptance |
 | `staff_roles` | Individual user capabilities; no tenant or membership projection |

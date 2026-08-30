@@ -18,6 +18,12 @@ const syntheticRecords: CatalogRecordSet = {
   promotions: [],
   promotionTargets: [],
 };
+const syntheticNeonAuth = {
+  STORAGE_NEON_AUTH_BASE_URL:
+    "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth",
+  NEON_AUTH_COOKIE_SECRET:
+    "synthetic-neon-auth-cookie-secret-at-least-32-characters",
+} as const;
 
 describe("catalog source boundary", () => {
   it("returns a truthfully empty production catalog without loading demo fixtures", async () => {
@@ -57,9 +63,7 @@ describe("catalog source boundary", () => {
       LOCAL_TEST_DRIVER: "disabled",
       LOCAL_TEST_SECRET: "",
       AUTH_MODE: "test",
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
-      CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
-      CLERK_WEBHOOK_SIGNING_SECRET: "",
+      ...syntheticNeonAuth,
       RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
       DATABASE_MODE: "test",
       TEST_DATABASE_URL:

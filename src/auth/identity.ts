@@ -6,6 +6,10 @@ import {
 } from "@/config/env-schema";
 
 export type VerifiedIdentity = Readonly<{
+  /**
+   * Compatibility name retained for the existing database and authorization
+   * contracts. It stores the active external identity provider's user ID.
+   */
   clerkUserId: string;
   primaryEmail: string | null;
   emailVerifiedAt: string | null;
@@ -47,6 +51,12 @@ type ClerkUserProjection = Readonly<{
     verification: Readonly<{ status: string }> | null;
   }>[];
   twoFactorEnabled: boolean;
+}>;
+
+type NeonUserProjection = Readonly<{
+  id: string;
+  email: string;
+  emailVerified: boolean;
 }>;
 
 function isNonBlank(value: unknown): value is string {
@@ -92,8 +102,35 @@ export function projectClerkIdentity(
   });
 }
 
+export function projectNeonIdentity(
+  user: NeonUserProjection | null | undefined,
+  now: Date = new Date(),
+): VerifiedIdentity | null {
+  if (!user || !isNonBlank(user.id)) return null;
+
+  const primaryEmail = isNonBlank(user.email)
+    ? user.email.trim().toLowerCase()
+    : null;
+  const verifiedAt =
+    user.emailVerified === true && Number.isFinite(now.getTime())
+      ? now.toISOString()
+      : null;
+
+  return Object.freeze({
+    // `clerkUserId` is a compatibility field across the existing persistence
+    // boundary. New Neon identities store their Managed Better Auth user ID.
+    clerkUserId: user.id,
+    primaryEmail,
+    emailVerifiedAt: verifiedAt,
+    // Managed Neon Auth's documented Next.js session does not expose a
+    // server-verifiable MFA ceremony. Never infer staff MFA from login alone.
+    mfaConfigured: false,
+    secondFactorCompleted: false,
+  });
+}
+
 export type IdentityLoaders = Readonly<{
-  loadClerkIdentity: () => Promise<VerifiedIdentity | null>;
+  loadExternalIdentity: () => Promise<VerifiedIdentity | null>;
   loadLocalIdentity: () => Promise<VerifiedIdentity | null>;
 }>;
 
@@ -113,7 +150,7 @@ export async function resolveServerIdentity(
     return loaders.loadLocalIdentity();
   }
   if (environment.AUTH_MODE === "disabled") return null;
-  return loaders.loadClerkIdentity();
+  return loaders.loadExternalIdentity();
 }
 
 function signatureFor(actorKey: string, secret: string): string {

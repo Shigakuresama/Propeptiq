@@ -8,6 +8,12 @@ import {
 } from "./fulfillment-context";
 
 const secret = "task6f-fulfillment-secret-at-least-32-characters";
+const syntheticNeonAuth = {
+  STORAGE_NEON_AUTH_BASE_URL:
+    "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth",
+  NEON_AUTH_COOKIE_SECRET:
+    "synthetic-neon-auth-cookie-secret-at-least-32-characters",
+} as const;
 
 describe("opaque fulfillment execution authority", () => {
   it("defaults closed and rejects every incoherent test/live identity", () => {
@@ -47,10 +53,9 @@ describe("opaque fulfillment execution authority", () => {
       APP_ENV: "preview",
       APP_ORIGIN: "https://preview.example.test",
       AUTH_MODE: "test",
+      ...syntheticNeonAuth,
       DATABASE_MODE: "test",
       FULFILLMENT_MODE: "test",
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic",
-      CLERK_SECRET_KEY: "sk_test_synthetic",
       RATE_LIMIT_SECRET: secret,
       TEST_DATABASE_URL: "postgresql://test_user:test_password@127.0.0.1:5432/propeptiq_slice6f_test",
       TEST_DATABASE_CONFIRMATION: "isolated-test-database",
@@ -73,12 +78,12 @@ describe("opaque fulfillment execution authority", () => {
       VERCEL_ENV: "production",
       APP_ORIGIN: "https://commerce.example.test",
       AUTH_MODE: "live",
+      AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
+      ...syntheticNeonAuth,
       DATABASE_MODE: "live",
       FULFILLMENT_MODE: "live",
       PAYMENTS_MODE: "disabled",
       COMMERCE_LIVE_CAPABILITY: "disabled",
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_synthetic",
-      CLERK_SECRET_KEY: "sk_live_synthetic",
       RATE_LIMIT_SECRET: secret,
       DATABASE_URL: "postgresql://live_user:password@db.example.test:5432/commerce",
     });

@@ -6,7 +6,7 @@
 
 **Architecture:** Continue from the canonical Next.js repository. Public visitors may browse products, see prices, use promotions, and build a cart. Checkout requires a lightweight account, age confirmation, structured laboratory-purpose selection, and versioned research-use attestation. Product/destination allowlists, secure payments, truthful claims, inventory, and administrative blocks remain enforced server-side.
 
-**Tech Stack:** Next.js 16, React 19, strict TypeScript, Tailwind, shadcn/Radix, Clerk, Neon PostgreSQL, Drizzle, Stripe Checkout, Vercel Blob, Resend, Vitest, Playwright, and Vercel.
+**Tech Stack:** Next.js 16, React 19, strict TypeScript, Tailwind, shadcn/Radix, Managed Neon Auth, Neon PostgreSQL, Drizzle, Stripe Checkout, Vercel Blob, Resend, Vitest, Playwright, and Vercel.
 
 **Spec:** Revise `docs/product-requirements.md` and supersede the existing strict implementation plan at `docs/superpowers/plans/2026-08-24-propeptiq-labs-platform.md` with this plan.
 
@@ -44,7 +44,7 @@ The two prior tasks were duplicate controllers created from essentially the same
     | "other_laboratory";
   ```
 
-  Clerk email verification plus age 21+, purpose selection, and attestation automatically creates an `active` buyer. No organization documents, identity documents, free-text application, or routine staff approval.
+  Managed Neon Auth email verification plus age 21+, purpose selection, and attestation automatically creates an `active` buyer. No organization documents, identity documents, free-text application, or routine staff approval.
 
 - Replace the nine evidence-heavy checkout gates with:
 
@@ -123,7 +123,7 @@ The two prior tasks were duplicate controllers created from essentially the same
 - [x] Add a development/test catalog adapter containing clearly labeled fixtures; `CATALOG_DEMO_MODE` must hard-fail in production.
 - [x] Keep production catalog data empty until a real manifest is imported.
 - [x] Allow anonymous visitors to view approved products, prices, promotions, and add product IDs/quantities to a local cart.
-- [x] Preserve the cart through Clerk sign-in; never trust locally stored price, discount, inventory, or eligibility data.
+- [x] Preserve the cart through managed sign-in; never trust locally stored price, discount, inventory, or eligibility data.
 - [x] Implement discounts, bundles, subscriptions, loyalty display, and related-product recommendations from server records.
 - [x] Render COA/testing claims only when the active lot contains the corresponding evidence.
 
@@ -131,11 +131,11 @@ The two prior tasks were duplicate controllers created from essentially the same
 
 ### Task 5: Implement Lightweight Accounts and Administration
 
-- [x] At checkout, require Clerk email verification, age confirmation, purpose selector, and the current attestation version.
+- [x] At checkout, require Managed Neon Auth email verification, age confirmation, purpose selector, and the current attestation version.
 - [x] Automatically activate the buyer after successful completion.
 - [x] Build customer account/order history without organization application workflows.
 - [x] Build one-admin CRUD for products, lots, COAs, policy groups, destination rules, promotions, buyer status, review requests, orders, refunds, and shipments.
-- [x] Require Clerk MFA for staff routes but remove per-action reauthentication and dual approval.
+- [x] Require server-verifiable provider MFA evidence for staff routes; keep the Managed Neon Auth production runtime fail-closed until that evidence is available, while removing per-action reauthentication and dual approval.
 - [x] Append concise audit events for catalog publication, destination changes, buyer blocks/reviews, refunds, and shipment actions.
 
 **Validation:** A new customer can become checkout-eligible without staff intervention; blocked/review accounts cannot bypass their status; non-admin users cannot access staff routes.

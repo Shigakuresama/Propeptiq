@@ -694,6 +694,416 @@ footer a,
   accent-color: var(--moss);
 }
 
+.rewards-page {
+  position: relative;
+  overflow: clip;
+  padding-top: clamp(1rem, 3vw, 2.5rem);
+}
+
+.rewards-page::before {
+  position: absolute;
+  z-index: -1;
+  width: min(44rem, 80vw);
+  height: min(44rem, 80vw);
+  top: 22rem;
+  right: -20rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--moss-soft), transparent 68%);
+  content: "";
+  pointer-events: none;
+}
+
+.rewards-hero {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  gap: clamp(2rem, 5vw, 5rem);
+  align-items: center;
+  border: 1px solid rgba(244, 241, 232, 0.16);
+  border-radius: clamp(1rem, 2vw, 1.5rem);
+  background:
+    radial-gradient(circle at 12% 4%, rgba(102, 113, 91, 0.34), transparent 34%),
+    linear-gradient(135deg, #20251e 0%, var(--surface-inverse) 58%, #11140f 100%);
+  box-shadow: 0 28px 80px rgba(23, 25, 21, 0.16);
+  color: var(--canvas);
+  padding: clamp(1.5rem, 5vw, 4.75rem);
+}
+
+.rewards-hero::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(244, 241, 232, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(244, 241, 232, 0.035) 1px, transparent 1px);
+  background-size: 4.5rem 4.5rem;
+  content: "";
+  mask-image: linear-gradient(to right, rgba(0, 0, 0, 0.9), transparent 70%);
+  pointer-events: none;
+}
+
+.rewards-hero__copy {
+  z-index: 1;
+  min-width: 0;
+  animation: rewards-reveal 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rewards-page .data-label,
+.rewards-page .eyebrow {
+  font-size: 1rem;
+}
+
+.rewards-hero__title {
+  max-width: 8ch;
+  margin: clamp(0.8rem, 2vw, 1.35rem) 0 0;
+  color: var(--canvas);
+  font-family: "Newsreader", "Newsreader Fallback", Georgia, serif;
+  font-size: clamp(4rem, 10vw, 8.5rem);
+  font-weight: 450;
+  letter-spacing: -0.055em;
+  line-height: 0.82;
+  text-wrap: balance;
+}
+
+.rewards-hero__lead {
+  max-width: 39rem;
+  margin-top: clamp(1.5rem, 3vw, 2.5rem);
+  color: color-mix(in srgb, var(--canvas) 76%, transparent);
+  font-size: clamp(1.05rem, 2vw, 1.25rem);
+  line-height: 1.65;
+}
+
+.rewards-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.rewards-action {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.75rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 750;
+  text-align: center;
+  text-decoration: none;
+  transition:
+    background-color 200ms ease-out,
+    border-color 200ms ease-out,
+    color 200ms ease-out,
+    transform 200ms ease-out;
+}
+
+.rewards-action:hover {
+  transform: translateY(-2px);
+}
+
+.rewards-action--primary {
+  border-color: var(--canvas);
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+.rewards-action--primary:hover {
+  border-color: color-mix(in srgb, var(--canvas) 86%, var(--moss));
+  background: color-mix(in srgb, var(--canvas) 86%, var(--moss));
+}
+
+.rewards-action--secondary {
+  border-color: rgba(244, 241, 232, 0.34);
+  background: rgba(244, 241, 232, 0.05);
+  color: var(--canvas);
+}
+
+.rewards-action--secondary:hover {
+  border-color: rgba(244, 241, 232, 0.56);
+  background: rgba(244, 241, 232, 0.1);
+}
+
+.rewards-science-scene {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(244, 241, 232, 0.2);
+  border-radius: 1rem;
+  background: rgba(244, 241, 232, 0.055);
+  box-shadow:
+    inset 0 1px 0 rgba(244, 241, 232, 0.08),
+    0 22px 56px rgba(0, 0, 0, 0.18);
+  color: color-mix(in srgb, var(--canvas) 74%, var(--moss));
+  backdrop-filter: blur(12px);
+  animation: rewards-reveal 260ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rewards-science-scene[data-status="inactive"] {
+  color: color-mix(in srgb, var(--canvas) 50%, var(--moss));
+}
+
+.rewards-science-scene[data-status="read_error"] {
+  color: color-mix(in srgb, var(--canvas) 54%, #d7af6b);
+}
+
+.rewards-science-scene__header {
+  display: flex;
+  min-height: 3.5rem;
+  align-items: center;
+  gap: 0.65rem;
+  border-bottom: 1px solid rgba(244, 241, 232, 0.14);
+  padding: 0.85rem 1rem;
+  color: var(--canvas);
+  font-size: 1rem;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.rewards-signal-dot {
+  width: 0.52rem;
+  height: 0.52rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0.28rem color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.rewards-science-scene[data-status="active"] .rewards-signal-dot {
+  color: #b5c8a1;
+}
+
+.rewards-science-scene[data-status="inactive"] .rewards-signal-dot {
+  color: color-mix(in srgb, var(--canvas) 52%, transparent);
+}
+
+.rewards-science-scene[data-status="read_error"] .rewards-signal-dot {
+  color: #d7af6b;
+}
+
+.rewards-scene-index {
+  margin-left: auto;
+  color: color-mix(in srgb, var(--canvas) 48%, transparent);
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+}
+
+.rewards-science-visual {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  aspect-ratio: 31 / 25;
+}
+
+.rewards-science-visual::after {
+  position: absolute;
+  right: 12%;
+  bottom: 8%;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow:
+    -12rem -3rem 0 -0.08rem currentColor,
+    -5rem -12rem 0 -0.12rem currentColor,
+    2rem -8rem 0 -0.14rem currentColor;
+  content: "";
+  opacity: 0.58;
+}
+
+.rewards-science-visual__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: inherit;
+}
+
+.rewards-science-visual__grid,
+.rewards-science-visual__orbit,
+.rewards-science-visual__assay {
+  fill: none;
+  stroke: currentColor;
+  vector-effect: non-scaling-stroke;
+}
+
+.rewards-science-visual__grid {
+  stroke-width: 0.65;
+}
+
+.rewards-science-visual__halo {
+  color: inherit;
+}
+
+.rewards-science-visual__orbit {
+  transform-box: fill-box;
+  transform-origin: center;
+  stroke-width: 1;
+  will-change: transform;
+}
+
+.rewards-science-visual__orbit--outer {
+  animation: rewards-orbit 18s linear infinite;
+}
+
+.rewards-science-visual__orbit--inner {
+  animation: rewards-orbit 24s linear infinite reverse;
+  opacity: 0.7;
+}
+
+.rewards-science-visual__node,
+.rewards-science-visual__core {
+  fill: currentColor;
+  stroke: none;
+}
+
+.rewards-science-visual__assay {
+  stroke-width: 1.15;
+}
+
+.rewards-science-visual__assay > :first-child {
+  opacity: 0.36;
+}
+
+.rewards-science-visual__assay > :nth-child(2) {
+  opacity: 0.72;
+}
+
+.rewards-science-visual__trace {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.rewards-science-scene__records {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-top: 1px solid rgba(244, 241, 232, 0.14);
+  margin: 0;
+  padding: 0.85rem 1rem;
+  list-style: none;
+}
+
+.rewards-science-scene__records li {
+  border: 1px solid rgba(244, 241, 232, 0.19);
+  border-radius: 999px;
+  background: rgba(244, 241, 232, 0.055);
+  color: color-mix(in srgb, var(--canvas) 76%, transparent);
+  padding: 0.42rem 0.7rem;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+}
+
+.rewards-science-scene__note {
+  border-top: 1px solid rgba(244, 241, 232, 0.14);
+  padding: 0.9rem 1rem 1rem;
+  color: color-mix(in srgb, var(--canvas) 67%, transparent);
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+.rewards-synthetic-note {
+  margin-top: 1rem;
+}
+
+.rewards-records {
+  padding-top: clamp(3.5rem, 8vw, 7rem);
+  animation: rewards-reveal 240ms 120ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.rewards-records__intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.8rem 2rem;
+  margin-bottom: 1.5rem;
+}
+
+.rewards-records__description {
+  max-width: 36rem;
+  color: var(--muted-ink);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.rewards-state-panel {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+}
+
+.rewards-state-panel__message {
+  color: var(--muted-ink);
+  font-size: clamp(1.1rem, 2vw, 1.3rem);
+  line-height: 1.6;
+}
+
+.rewards-records__grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.rewards-program-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.rewards-program-card::before {
+  position: absolute;
+  height: 3px;
+  top: -1px;
+  right: -1px;
+  left: -1px;
+  background: linear-gradient(90deg, var(--moss), transparent 76%);
+  content: "";
+}
+
+.rewards-program-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--accent-readable);
+  font-size: 1rem;
+  font-weight: 750;
+  letter-spacing: 0.065em;
+  text-transform: uppercase;
+}
+
+.rewards-program-card__title {
+  margin-top: clamp(2rem, 4vw, 3rem);
+  color: var(--ink);
+  font-family: "Newsreader", "Newsreader Fallback", Georgia, serif;
+  font-size: clamp(2.25rem, 5vw, 3.75rem);
+  font-weight: 450;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+}
+
+.rewards-program-card__primary {
+  margin-top: 1.5rem;
+  color: var(--ink);
+  font-size: clamp(1.05rem, 2vw, 1.2rem);
+  font-weight: 650;
+  line-height: 1.55;
+}
+
+.rewards-program-card__secondary {
+  max-width: 42rem;
+  margin-top: 0.7rem;
+  color: var(--muted-ink);
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
 footer a {
   min-height: 44px;
   align-items: center;
@@ -717,6 +1127,10 @@ footer a {
     grid-template-columns: auto 1fr;
     justify-content: center;
   }
+
+  .rewards-records__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 47.999rem) {
@@ -734,7 +1148,23 @@ footer a {
   }
 }
 
+@media (max-width: 35rem) {
+  .rewards-hero__actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rewards-scene-index {
+    display: none;
+  }
+}
+
 @media (min-width: 80rem) {
+  .rewards-hero {
+    grid-template-columns: minmax(0, 0.9fr) minmax(26rem, 1.1fr);
+    min-height: 39rem;
+  }
+
   .catalog-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
@@ -771,6 +1201,23 @@ footer a {
   }
   to {
     translate: 0;
+  }
+}
+
+@keyframes rewards-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes rewards-orbit {
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -847,6 +1294,18 @@ footer a {
   .record-panel-interactive:hover,
   .record-panel-interactive:focus-within,
   .catalog-listing-card:focus-within {
+    transform: none;
+  }
+
+  .rewards-action:hover {
+    transform: none;
+  }
+
+  .rewards-hero__copy,
+  .rewards-science-scene,
+  .rewards-records,
+  .rewards-science-visual__orbit {
+    animation: none !important;
     transform: none;
   }
 

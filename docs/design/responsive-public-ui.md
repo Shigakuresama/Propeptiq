@@ -19,7 +19,7 @@
 | `/quality-records` | Public approved lot/COA projections and truthful empty/lookup states | Open available record |
 | `/research-use-policy` | Canonical research-use restrictions and purchaser responsibilities | Continue to catalog/cart |
 
-A future `/research-use` route may only redirect to `/research-use-policy`. Account/order routes require authentication. Checkout preserves the anonymous cart through Clerk sign-in and then collects age 21+, structured purpose, and the current versioned attestation.
+A future `/research-use` route may only redirect to `/research-use-policy`. Account/order routes require authentication. Checkout preserves the anonymous cart through Managed Neon Auth sign-in and then collects age 21+, structured purpose, and the current versioned attestation.
 
 The growth routes are `/rewards` (public points/referral explanation with a truthful inactive state), `/partners` (public affiliate overview and application entry), `/account/rewards` (authenticated owner-only points and immutable ledger), `/account/referrals` (active buyer referral code, conversions, rewards, and shared research sets), `/account/partner` (verified owner application or approved dashboard), `/research-sets` (active-buyer neutral set builder), `/sets/[code]` (public read-only server-resolved set), `/rewards/terms`, and `/partners/terms`. Partner Program stays in the account menu and footer.
 

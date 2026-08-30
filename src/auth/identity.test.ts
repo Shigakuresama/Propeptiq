@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import { parseServerEnv, type ServerEnv } from "@/config/env-schema";
 
 import {
+  isVerifiedIdentityAt,
   projectClerkIdentity,
+  projectNeonIdentity,
   resolveServerIdentity,
   signLocalActor,
   verifyLocalActor,
@@ -31,16 +33,16 @@ const verifiedLocalIdentity = {
 
 describe("server identity boundary", () => {
   it("returns no identity in disabled mode without invoking Clerk or local loaders", async () => {
-    const loadClerkIdentity = vi.fn();
+    const loadExternalIdentity = vi.fn();
     const loadLocalIdentity = vi.fn();
 
     await expect(
       resolveServerIdentity(parseServerEnv({}), {
-        loadClerkIdentity,
+        loadExternalIdentity,
         loadLocalIdentity,
       }),
     ).resolves.toBeNull();
-    expect(loadClerkIdentity).not.toHaveBeenCalled();
+    expect(loadExternalIdentity).not.toHaveBeenCalled();
     expect(loadLocalIdentity).not.toHaveBeenCalled();
   });
 
@@ -56,7 +58,7 @@ describe("server identity boundary", () => {
 
     await expect(
       resolveServerIdentity(unsafe, {
-        loadClerkIdentity: vi.fn(),
+        loadExternalIdentity: vi.fn(),
         loadLocalIdentity,
       }),
     ).rejects.toThrow(/local test driver/i);
@@ -80,6 +82,36 @@ describe("server identity boundary", () => {
       mfaConfigured: true,
       secondFactorCompleted: true,
     });
+  });
+
+  it("projects a verified Neon user while keeping staff MFA evidence fail-closed", () => {
+    expect(
+      projectNeonIdentity(
+        {
+          id: "neon-user-verified",
+          email: " Researcher@Example.test ",
+          emailVerified: true,
+        },
+        new Date("2026-08-30T07:00:00.000Z"),
+      ),
+    ).toEqual({
+      clerkUserId: "neon-user-verified",
+      primaryEmail: "researcher@example.test",
+      emailVerifiedAt: "2026-08-30T07:00:00.000Z",
+      mfaConfigured: false,
+      secondFactorCompleted: false,
+    });
+  });
+
+  it("does not mark an unverified Neon email as verified", () => {
+    const identity = projectNeonIdentity({
+      id: "neon-user-unverified",
+      email: "researcher@example.test",
+      emailVerified: false,
+    });
+
+    expect(identity?.emailVerifiedAt).toBeNull();
+    expect(identity && isVerifiedIdentityAt(identity, new Date())).toBe(false);
   });
 
   it.each([null, [3, -1], [3, Number.NaN], [3, Number.POSITIVE_INFINITY]])(

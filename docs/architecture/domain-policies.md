@@ -31,7 +31,7 @@ The six gates are exhaustive for buyer/order commerce eligibility. Tax and shipp
 
 ## Buyer activation
 
-Return `active` when the email is Clerk-verified, age 21+ is confirmed, a valid `ResearchPurpose` is selected, and the current attestation version is accepted. Missing any fact denies activation. Staff action is not an ordinary input.
+Return `active` when the email is provider-verified, age 21+ is confirmed, a valid `ResearchPurpose` is selected, and the current attestation version is accepted. Missing any fact denies activation. Staff action is not an ordinary input.
 
 ## Destination resolution
 

@@ -24,6 +24,7 @@ PROPEPTIQ will adapt the mechanisms, not AminoClub's identity, layouts, assets, 
 - Reduce the desktop hero's visual dominance enough that the catalog or evidence module begins within the first viewport at 1440px. Keep a one-column hero at 375px.
 - Use tabular figures for balances, points, thresholds, and commissions. Never rely on color alone for pending, available, reversed, blocked, or paid states.
 - Use quiet progress indicators and ledger language. Do not use confetti, casino-like animation, fake scarcity, or infantilizing badges.
+- The public Rewards science scene may use a slow decorative orbit of at least 18 seconds when it communicates no program value, cannot receive focus, and stops completely for reduced-motion preferences. Entrance motion remains within the shared 160–260ms envelope.
 - Protect the header brand width at 375px and 200% zoom. The logo image must remain uncropped; the text lockup may shorten to `PROPEPTIQ` only at the existing mobile breakpoint.
 
 ## Information architecture
@@ -44,7 +45,7 @@ Put `Partner Program` in the account menu and footer rather than crowding the de
 | Route | Purpose | Availability |
 |---|---|---|
 | `/rewards` | Plain-language points and referral explanation from the active policy | Public; truthful inactive state when no policy is active |
-| `/partners` | Affiliate overview, terms summary, and application entry | Public; application requires verified Clerk identity |
+| `/partners` | Affiliate overview, terms summary, and application entry | Public; application requires a provider-verified identity |
 | `/account/rewards` | Available/pending points, redemption rules, and immutable ledger | Authenticated owner only |
 | `/account/referrals` | Personal code/link, qualified conversions, rewards, and shared research sets | Active buyer only |
 | `/account/partner` | Affiliate application or approved partner dashboard | Verified account owner only |

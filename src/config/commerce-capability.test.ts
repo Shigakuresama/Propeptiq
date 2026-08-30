@@ -9,17 +9,22 @@ import { parseServerEnv, type ServerEnv } from "./env-schema";
 
 const origin = "https://research.example.test";
 const databaseUrl = "postgresql://synthetic.invalid/database?sslmode=require";
+const neonAuthBaseUrl =
+  "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth";
+const neonAuthCookieSecret =
+  "synthetic-neon-auth-cookie-secret-at-least-32-characters";
 
 const commerceLive = {
   APP_ENV: "production",
   APP_ORIGIN: origin,
   AUTH_MODE: "live",
+  AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
   DATABASE_MODE: "live",
   TAX_MODE: "live",
   SHIPPING_MODE: "live",
   FULFILLMENT_MODE: "live",
-  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_synthetic",
-  CLERK_SECRET_KEY: "sk_live_synthetic",
+  STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+  NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
   RATE_LIMIT_SECRET: "task6-rate-limit-secret-at-least-32-characters",
   DATABASE_URL: databaseUrl,
 } as const;
@@ -164,9 +169,8 @@ describe("commerce capability configuration", () => {
       LOCAL_TEST_DRIVER: "disabled",
       LOCAL_TEST_SECRET: "",
       AUTH_MODE: "test",
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
-      CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
-      CLERK_WEBHOOK_SIGNING_SECRET: "",
+      STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
       RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
       DATABASE_MODE: "test",
       TEST_DATABASE_URL:

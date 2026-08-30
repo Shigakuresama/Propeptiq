@@ -23,7 +23,7 @@
     "verify": "run-s verify:workspace-boundary lint typecheck test build"
   },
   "dependencies": {
-    "@clerk/nextjs": "7.8.1",
+    "@neondatabase/auth": "0.5.0-beta",
     "@neondatabase/serverless": "1.1.0",
     "@opentelemetry/api": "1.9.1",
     "@radix-ui/react-accordion": "1.2.20",

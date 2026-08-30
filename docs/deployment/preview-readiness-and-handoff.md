@@ -275,7 +275,8 @@ pending; the prior Preview/security reviewer approval remains unchanged.
 - payment-provider acceptance and separately authorized live configuration;
 - tax configuration and shipping-service availability;
 - an owned fulfillment/warehouse process and physical/carrier evidence;
-- separately provisioned and isolated identity/database/provider resources;
+- separately verified, environment-isolated identity/database/provider
+  resources and completion of every applicable activation gate;
 - an authorized migration-apply and reconciliation procedure;
 - runtime downstream-effect scheduling/wake-up, a production sink/Resend
   delivery, bounded backoff/dead-letter operations, alerts, structured
@@ -346,7 +347,7 @@ Neither belongs in the commit.
 
 The current authorization covers pushing the reviewed catalog/branding changes,
 merging pull request 2, and verifying its browse-only Production deployment.
-Resource or identity provisioning, migration application, provider
-configuration, and Production commerce-capability activation remain separate,
-unauthorized future actions. Authorization for this browse-only release does not
-authorize any of them.
+Resource provisioning, identity-provider configuration or activation, migration
+application, provider configuration, and Production commerce-capability
+activation remain separate, unauthorized future actions. Authorization for this
+browse-only release does not authorize any of them.

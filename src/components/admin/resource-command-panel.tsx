@@ -1028,7 +1028,7 @@ export function ResourceCommandPanel({
         <CommandForm action={changeBuyerStatusAction} title="Change one buyer status">
           <SelectField label="Buyer" name="buyerReference" options={options} />
           <label><span className="form-label">Status</span><select name="status" className="form-input"><option value="review">Review</option><option value="blocked">Blocked</option><option value="active">Active after current identity re-verification</option></select></label>
-          <p className="info-record">Reactivation loads the target Clerk identity outside database locks, then revalidates the same buyer version and current attestation in a short transaction.</p>
+          <p className="info-record">Reactivation loads the target managed identity outside database locks, then revalidates the same buyer version and current attestation in a short transaction. If the provider cannot supply that verified identity, reactivation remains unavailable.</p>
         </CommandForm>
       ) : <EmptyCommand>No buyer profile is available for a status command.</EmptyCommand>;
     }
