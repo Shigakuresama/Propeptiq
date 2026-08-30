@@ -15,7 +15,7 @@
     "test:postgres:checkout": "vitest run --config vitest.postgres.config.ts",
     "db:generate": "drizzle-kit generate",
     "db:check": "drizzle-kit check",
-    "test:e2e": "playwright test",
+    "test:e2e": "playwright test --config=playwright.config.ts",
     "verify:workspace-boundary": "node scripts/verify-workspace-boundary.mjs",
     "verify:production-artifacts": "node scripts/verify-production-artifacts.mjs",
     "test:artifact-scanner": "node --test scripts/verify-production-artifacts.test.mjs",

@@ -14,7 +14,7 @@ Elevate PROPEPTIQ into a cohesive premium scientific/editorial interface while p
 
 **UI scope:** completed on 2026-08-29.
 
-- Phases A-F were implemented on `ui/refinement-v4`, then transplanted as the exact 58-path UI and regression-test change onto the current squash-merged `main` tree in `ui/refinement-v4-release`.
+- Phases A-F were implemented on `ui/refinement-v4`, then transplanted as the exact 60-path UI, regression-test, and isolated-browser-harness change onto the current squash-merged `main` tree in `ui/refinement-v4-release`.
 - Three independent reviews found no remaining actionable UI, accessibility, authority-boundary, or business-logic defects after their findings were resolved.
 - The optimized Next.js build, production artifact scan, workspace-boundary check, TypeScript check, changed-file lint, and diff check pass.
 - The clean release-branch unit run passes all 1,408 tests across 136 files.
