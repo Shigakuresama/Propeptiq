@@ -18,6 +18,7 @@ const commerceLive = {
   APP_ENV: "production",
   APP_ORIGIN: origin,
   AUTH_MODE: "live",
+  AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
   AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
   DATABASE_MODE: "live",
   TAX_MODE: "live",

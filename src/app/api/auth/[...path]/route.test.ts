@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   environment: {
+    AUTH_EMAIL_DELIVERY_VERIFIED: "verified" as const,
+    AUTH_MODE: "live" as const,
     AUTH_PASSWORD_RESET_SESSION_REVOCATION: undefined as
       | "verified"
       | undefined,
@@ -38,6 +40,8 @@ describe("Managed Neon Auth API proxy route", () => {
     ["POST", ["email-otp", "reset-password"]],
     ["POST", ["email-otp", "passcode"]],
     ["POST", ["forget-password", "email-otp"]],
+    ["POST", ["phone-number", "request-password-reset"]],
+    ["POST", ["phone-number", "reset-password"]],
     ["POST", ["reset-password"]],
     ["GET", ["reset-password", "synthetic-token"]],
   ] as const)(
@@ -70,6 +74,8 @@ describe("Managed Neon Auth API proxy route", () => {
     ["POST", ["email-otp", "reset-password"]],
     ["POST", ["email-otp", "passcode"]],
     ["POST", ["forget-password", "email-otp"]],
+    ["POST", ["phone-number", "request-password-reset"]],
+    ["POST", ["phone-number", "reset-password"]],
     ["POST", ["reset-password"]],
     ["GET", ["reset-password", "synthetic-token"]],
   ] as const)(
@@ -192,18 +198,24 @@ describe("Managed Neon Auth API proxy route", () => {
     });
   });
 
-  it("forwards enabled requests through the unified SDK handler", async () => {
-    const expected = new Response(null, { status: 204 });
-    mocks.post.mockResolvedValue(expected);
-    mocks.getNeonAuth.mockReturnValue({
-      handler: () => ({ POST: mocks.post }),
-    });
-    const request = new Request(
-      "https://example.test/api/auth/sign-in/email",
-      { method: "POST" },
-    );
+  it.each(["sign-in", "sign-up"])(
+    "forwards live %s requests while recovery remains disabled",
+    async (operation) => {
+      const expected = new Response(null, { status: 204 });
+      mocks.post.mockResolvedValue(expected);
+      mocks.getNeonAuth.mockReturnValue({
+        handler: () => ({ POST: mocks.post }),
+      });
+      const request = new Request(
+        `https://example.test/api/auth/${operation}/email`,
+        { method: "POST" },
+      );
+      const enabledContext = {
+        params: Promise.resolve({ path: [operation, "email"] }),
+      };
 
-    await expect(POST(request, context)).resolves.toBe(expected);
-    expect(mocks.post).toHaveBeenCalledWith(request, context);
-  });
+      await expect(POST(request, enabledContext)).resolves.toBe(expected);
+      expect(mocks.post).toHaveBeenCalledWith(request, enabledContext);
+    },
+  );
 });

@@ -108,12 +108,13 @@ Production Managed Neon Auth activation is a separate launch gate. It requires
 independent stable cookie-signing and application rate-limit secrets,
 production-capable custom SMTP with a verified sender, provider-required email
 verification, exact reviewed Preview and Production trusted origins with
-localhost disabled for Production, provider-enforced revocation of every
-pre-existing session after password reset, and a branch-isolated Preview
-lifecycle test covering signup, verification, sign-in, protected-route return,
-sign-out, single-use password recovery, and rejection of pre-reset sessions.
-None of these requirements may be inferred from the presence
-of an external Auth resource or a syntactically valid Auth URL.
+localhost disabled for Production, and a branch-isolated Preview lifecycle test
+covering signup, verification, sign-in, protected-route return, and sign-out.
+Password recovery has an additional gate: provider-enforced revocation of every
+pre-existing session after reset plus a two-session branch test proving single-use
+recovery and rejection of both pre-reset sessions. None of these requirements may
+be inferred from the presence of an external Auth resource, a syntactically valid
+Auth URL, or an operator assertion alone.
 
 ## 10. Acceptance scenarios
 

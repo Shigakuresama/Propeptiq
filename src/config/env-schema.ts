@@ -99,6 +99,7 @@ const rawServerEnvSchema = z.object({
   STORAGE_NEON_AUTH_BASE_URL: neonAuthUrl.optional(),
   NEON_AUTH_BASE_URL: neonAuthUrl.optional(),
   NEON_AUTH_COOKIE_SECRET: generatedSecret.optional(),
+  AUTH_EMAIL_DELIVERY_VERIFIED: z.literal("verified").optional(),
   AUTH_PASSWORD_RESET_SESSION_REVOCATION: z.literal("verified").optional(),
   // Accepted temporarily for rollback compatibility; the runtime no longer
   // reads Clerk credentials when Managed Neon Auth is enabled.
@@ -290,13 +291,13 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
   }
   if (
     env.AUTH_MODE === "live" &&
-    env.AUTH_PASSWORD_RESET_SESSION_REVOCATION !== "verified"
+    env.AUTH_EMAIL_DELIVERY_VERIFIED !== "verified"
   ) {
     context.addIssue({
       code: "custom",
-      path: ["AUTH_PASSWORD_RESET_SESSION_REVOCATION"],
+      path: ["AUTH_EMAIL_DELIVERY_VERIFIED"],
       message:
-        "Live Auth requires verified provider session revocation after password reset",
+        "Live Auth requires verified production email delivery from a custom provider",
     });
   }
   if (

@@ -13,9 +13,10 @@ creation rendered an unavailable state even though the audited external Auth
 resource existed.
 
 The same checkpoint found no configured `revokeSessionsOnPasswordReset` value
-in the branch Auth record. The installed Better Auth implementation defaults
-that option to false, so the presence of password-reset endpoints is not evidence
-that older sessions are invalidated. Password recovery therefore remains closed
+in the branch Auth record. A disposable-branch lifecycle test then created three
+sessions, changed the synthetic user's password, and consumed the reset token,
+but all three sessions remained valid. Adding the undocumented configuration key
+directly on that branch was ignored. Password recovery therefore remains closed
 by default in the application.
 
 The application's authorization boundary is stricter than authentication alone: a buyer requires a provider-verified email, and staff actions require both persisted application capability and current, server-verifiable MFA evidence.
@@ -28,8 +29,8 @@ The existing `users.clerk_id` column and `clerkUserId` application field remain 
 
 Only a Neon session whose user email is provider-verified may project a verified application identity. The current Neon session contract does not expose the evidence required by this application for staff MFA. Neon-backed staff and target-identity operations therefore fail closed; this provider migration does not weaken the MFA requirement.
 
-Production activation is permitted only after all of these gates have recorded
-evidence:
+Normal Production signup, verification, sign-in, and sign-out are permitted only
+after all of these gates have recorded evidence:
 
 - independently generated, stable `NEON_AUTH_COOKIE_SECRET` and
   `RATE_LIMIT_SECRET` values, kept separate and supplied through the deployment
@@ -39,12 +40,16 @@ evidence:
 - provider-required email verification;
 - exact Preview and Production origins on the trusted-domain list, with
   localhost disabled for Production; and
-- provider configuration proven to revoke every existing session for the
-  identity after password reset; and
 - a branch-isolated Preview lifecycle test covering signup, email verification,
-  sign-in, protected-route return, sign-out, single-use password recovery, and
-  rejection of sessions issued before the reset, without any Production
-  identity or data write.
+  sign-in, protected-route return, and sign-out without any Production identity
+  or data write.
+
+Password recovery is a separate capability. It remains unavailable until provider
+configuration is proven to revoke every existing session after reset and a
+two-session branch test proves the reset token is single-use and both old sessions
+are rejected. Server identity reads always bypass signed session-data cache;
+middleware cache reuse is limited to one second, the SDK's shortest supported
+positive TTL.
 
 ## Consequences
 
@@ -59,9 +64,12 @@ evidence:
 - Staff access remains unavailable through Managed Neon Auth until current-session MFA evidence has an explicit, tested projection.
 - The compatibility-named external-ID column is technical debt and must not be interpreted as evidence that Clerk remains the active provider.
 - Shared Neon email delivery is acceptable only for isolated development or preview testing; it is not a production launch configuration.
+- `AUTH_EMAIL_DELIVERY_VERIFIED=verified` is an operator assertion that gates
+  live Auth after custom SMTP and the normal lifecycle are evidenced; it is not
+  evidence by itself.
 - `AUTH_PASSWORD_RESET_SESSION_REVOCATION=verified` is an operator assertion,
-  not proof by itself; retained provider configuration and Preview lifecycle
-  evidence are both required before setting it.
+  not proof by itself; it gates recovery only, and retained provider configuration
+  plus the two-session lifecycle evidence are both required before setting it.
 
 ## Rejected
 

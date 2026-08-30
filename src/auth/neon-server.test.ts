@@ -25,7 +25,7 @@ describe("Managed Neon Auth server configuration", () => {
     expect(mocks.createNeonAuth).not.toHaveBeenCalled();
   });
 
-  it("constructs the unified server SDK with the Vercel-injected URL and stable cookie secret", () => {
+  it("constructs the unified server SDK with fresh-session cache limits", () => {
     const auth = getNeonAuthForEnvironment(
       parseServerEnv({
         APP_ORIGIN: "http://localhost:3000",
@@ -40,7 +40,7 @@ describe("Managed Neon Auth server configuration", () => {
     expect(auth).toEqual({ marker: "managed-auth" });
     expect(mocks.createNeonAuth).toHaveBeenCalledWith({
       baseUrl,
-      cookies: { secret: cookieSecret },
+      cookies: { secret: cookieSecret, sessionDataTtl: 1 },
     });
   });
 });

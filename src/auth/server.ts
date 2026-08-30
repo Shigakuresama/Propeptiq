@@ -97,7 +97,9 @@ async function loadNeonIdentity(
   const { getNeonAuthForEnvironment } = await import("@/auth/neon-server");
   const auth = getNeonAuthForEnvironment(environment);
   if (!auth) return null;
-  const { data: session, error } = await auth.getSession();
+  const { data: session, error } = await auth.getSession({
+    query: { disableCookieCache: "true" },
+  });
   if (error || !session?.user) return null;
   return projectNeonIdentity(session.user);
 }

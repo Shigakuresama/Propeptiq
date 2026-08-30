@@ -35,11 +35,13 @@ Production account creation also remains closed until every Managed Neon Auth
 gate is evidenced: independent stable cookie-signing and application rate-limit
 secrets; production-capable custom SMTP with a verified sender; provider-required
 email verification; reviewed Preview and Production trusted origins with
-localhost disabled for Production; provider configuration that revokes every
-pre-existing session after a password reset; and a branch-isolated Preview
-lifecycle test covering signup, email verification, sign-in, protected-route
-return, sign-out, single-use password recovery, and rejection of sessions issued
-before the reset. An external Auth resource may exist while the application
+localhost disabled for Production; and a branch-isolated Preview lifecycle test
+covering signup, email verification, sign-in, protected-route return, and
+sign-out. `AUTH_EMAIL_DELIVERY_VERIFIED=verified` is an operator assertion for
+that evidence, not evidence by itself. Password recovery is a separate capability
+and remains unavailable until the provider is proven to revoke every pre-existing
+session after a reset and a two-session branch test proves token reuse and both
+old sessions fail. An external Auth resource may exist while the application
 adapter remains disabled; resource availability, adapter activation, internal
 user projection, and buyer activation are separate facts.
 

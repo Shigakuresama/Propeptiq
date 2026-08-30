@@ -334,6 +334,7 @@ describe("parseServerEnv", () => {
       APP_ENV: "production",
       APP_ORIGIN: "https://research.example.test",
       AUTH_MODE: "live",
+      AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
       AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
       DATABASE_MODE: "live",
       PAYMENTS_MODE: "live",
@@ -354,7 +355,7 @@ describe("parseServerEnv", () => {
     expect(env.PAYMENTS_MODE).toBe("live");
   });
 
-  it("keeps live Auth closed without provider session-revocation evidence", () => {
+  it("keeps live Auth closed without verified production email delivery", () => {
     expect(() =>
       parseServerEnv({
         APP_ENV: "production",
@@ -364,7 +365,22 @@ describe("parseServerEnv", () => {
         NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
         RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
       }),
-    ).toThrow(/session revocation after password reset/);
+    ).toThrow(/production email delivery/i);
+  });
+
+  it("permits live Auth without password recovery when production email delivery is verified", () => {
+    const env = parseServerEnv({
+      APP_ENV: "production",
+      APP_ORIGIN: "https://research.example.test",
+      AUTH_MODE: "live",
+      AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
+      STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+      RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
+    });
+
+    expect(env.AUTH_MODE).toBe("live");
+    expect(env.AUTH_PASSWORD_RESET_SESSION_REVOCATION).toBeUndefined();
   });
 
   it("rejects test-mode providers in production", () => {

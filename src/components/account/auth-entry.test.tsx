@@ -95,4 +95,25 @@ describe("AuthEntry", () => {
       "true",
     );
   });
+
+  it("keeps recovery unavailable while normal live identity remains enabled", async () => {
+    mocks.getRequestIdentity.mockResolvedValue({
+      environment: {
+        AUTH_MODE: "live",
+        AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
+        AUTH_PASSWORD_RESET_SESSION_REVOCATION: undefined,
+        LOCAL_TEST_DRIVER: "disabled",
+      },
+      identity: null,
+      principal: null,
+      localDriver: null,
+    });
+
+    render(await AuthEntry({ kind: "sign-in", returnTo: "/account" }));
+
+    expect(screen.getByText("Managed identity form")).toHaveAttribute(
+      "data-password-recovery",
+      "false",
+    );
+  });
 });

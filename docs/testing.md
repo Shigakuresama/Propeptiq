@@ -4,7 +4,7 @@
 
 - **Domain unit tests:** automatic buyer activation, exact gate decisions/reason codes, destination precedence, explicit review snapshots, content/publication policy, price/promotion calculations, order/payment/inventory/refund/fulfillment transitions.
 - **Repository integration tests:** Drizzle queries and constraints against an isolated database, guarded migrations, provider event/hash uniqueness, concurrent inventory/refund/shipment behavior.
-- **Adapter contract tests:** Managed Neon Auth verification projection, uncached post-OTP session confirmation, enumeration-neutral password-reset requests, reset callback/action error handling, allowlisted protected-route return, Stripe raw-body signature verification and idempotency, Blob authorization, and the durable downstream-effect repository/lease-worker factory with visibly injected test sinks.
+- **Adapter contract tests:** Managed Neon Auth verification projection, uncached server identity and post-OTP session confirmation, live Auth without recovery, enumeration-neutral password-reset requests, reset callback/action error handling, allowlisted protected-route return, Stripe raw-body signature verification and idempotency, Blob authorization, and the durable downstream-effect repository/lease-worker factory with visibly injected test sinks.
 - **Component/browser tests:** public catalog/prices/promotions/cart, preserved cart through sign-in, account attestation, own-order authorization, staff MFA/capability denial, read-only success route, safe empty/error states.
 - **Responsive/accessibility tests:** 375px, 768px, 1024px, and 1440px; keyboard-only; visible focus; reduced motion; 200% zoom; no horizontal overflow; accessible navigation sheet and Proof Rail.
 
@@ -21,11 +21,13 @@
 - Unknown reset email, malformed/expired reset token, mismatched replacement passwords, stale OTP session cache, failed sign-out, and external or malformed post-auth return destination.
 - Human/veterinary outcome, dosing, administration, reconstitution, treatment, or misleading overall-impression content.
 
-Unit tests with mocked Auth methods do not prove that a provider reset token is
-single-use or that existing sessions are revoked. Those properties require the
-branch-isolated Preview lifecycle test in the production Auth activation gate:
-use a pre-reset session, complete one reset, prove the same token fails on reuse,
-and prove the pre-reset session is rejected.
+Unit tests with mocked Auth methods prove that recovery remains unavailable while
+its assertion is absent; they do not prove that a provider reset token is
+single-use or that existing sessions are revoked. Those properties require a
+separate branch-isolated recovery lifecycle test: create at least two sessions,
+complete one reset, prove the same token fails on reuse, and prove both pre-reset
+sessions are rejected through uncached provider checks and protected application
+routes. Failure of this recovery lane does not authorize the recovery assertion.
 
 ## Documentation checks
 
