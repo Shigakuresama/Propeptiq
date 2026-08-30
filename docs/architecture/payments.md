@@ -17,6 +17,28 @@ The browser sends product IDs, quantities, destination, and promotion identifier
 
 Any missing or changed fact denies creation. Browser totals, provider redirect parameters, and cached catalog data are ignored.
 
+## Tax and shipping quotes
+
+Tax and shipping are quoted server-side and travel to the provider as ordinary line items. `buildStripeCheckoutRequestV1` appends a `Shipping` and a `Sales tax` line and proves `lines + shipping + tax === totalMinor` before building the request, so `amount_total` remains the exact sum of amounts the server computed.
+
+Stripe Checkout `automatic_tax` is **rejected**, not merely unused. Enabling it would make Stripe compute `amount_total` from an address collected on the hosted page, which surrenders pricing authority to the provider and breaks both the server-recalculates-every-total rule and the session response validator. The buyer must also be shown an accurate tax figure before leaving the site, which `automatic_tax` cannot provide.
+
+- `TaxQuotePort` is implemented against `POST /v1/tax/calculations` (`src/commerce/stripe-tax-provider.ts`). The calculation is made from the validated ship-to address with `address_source: "shipping"`; the server already holds that address, so no address collection is added to the Session and no billing address can decide the rate.
+- `ShippingQuotePort` is implemented against a single owner-configured Stripe `ShippingRate` (`src/commerce/stripe-shipping-provider.ts`). The adapter retrieves exactly one configured `shr_` id and never lists rates and chooses between them: a selection heuristic would make an order total depend on dashboard ordering. An inactive, mispriced, non-fixed-amount, or wrong-livemode rate yields `unavailable` and blocks checkout rather than guessing a price.
+- Both ports fail closed. `configuration_unavailable` marks an owner configuration fault, `unsupported_destination` an out-of-scope address, and `temporarily_unavailable` a transport or response-integrity fault.
+- Stripe Tax calculates nothing in jurisdictions without an active registration; it returns zero tax silently. A zero figure from an unregistered account is not evidence the integration works.
+
+`STRIPE_TAX_CODE` and `STRIPE_SHIPPING_RATE_ID` are optional in `env-schema.ts` and are deliberately absent from `requireFields`, because the synthetic local harness runs `TAX_MODE`/`SHIPPING_MODE` at `test` with no Stripe configuration. Enforcement lives at composition instead: `isPostgresBuyerCheckoutReady` refuses to build a buyer runtime unless every adapter is configured.
+
+## Tax transaction recording
+
+Because tax reaches the provider only as a line item, Stripe never sees the sale as taxed and it does not appear in Stripe Tax reporting. Tax is therefore collected correctly but unfilable unless a transaction is recorded.
+
+- The verified-payment transaction enqueues a `stripe_tax_transaction` downstream effect alongside `payment_verified`, carrying the order id and the calculation id stored on the paying attempt's `tax_quote_reference`. The reference is read from the attempt the event names, not the order's newest attempt, so the calculation always matches the amount charged.
+- A worker drains the effect and calls `POST /v1/tax/transactions/create_from_calculation`, keyed on the order id, which Stripe requires to be unique across all transactions and reversals.
+- Disposition follows the effect repository's convention, in which `claimEffect` re-claims anything not `processed`, so only completion is terminal. A recorded or already-recorded transaction completes. A transient fault asks for a retry. A permanently unrecordable calculation -- an expired one, for instance -- also **completes**, because failing it would loop forever on something that can never succeed; it is journaled for manual reconciliation instead.
+- Calculations expire 90 days after creation.
+
 ## Webhooks and journal
 
 - Verify the provider signature against the raw request body before parsing business fields.
@@ -29,6 +51,22 @@ Any missing or changed fact denies creation. Browser totals, provider redirect p
 ## Refunds
 
 An authorized MFA-authenticated staff user may request a full or partial refund with a reason and idempotency key. The server verifies remaining refundable balance, records the request, calls the provider, and confirms state only from authoritative provider response/event evidence. Concurrent or duplicate requests cannot over-refund.
+
+## Invoicing
+
+Institutional buyers on net terms are served by a separate flow, not a variation of hosted Checkout. `src/commerce/stripe-invoice-provider.ts` creates invoice items, drafts the invoice, and finalizes it, returning the hosted invoice page.
+
+- `collection_method` is `send_invoice` and `auto_advance` is `false`. Nothing in this path may auto-charge a stored payment method.
+- Every idempotency key derives from the order id, at all three steps. A duplicate invoice to an institutional buyer is a procurement incident.
+- The finalized invoice is re-validated before it is trusted: amount due against the server total, exact `invoice.stripe.com` host on the hosted page, livemode, `send_invoice` collection, and metadata naming this order.
+- Line item descriptions are customer-facing surface and must pass the content policy scanner before reaching the adapter. Metadata carries PO number and internal identifiers; metadata does not render on the customer PDF.
+- With `automatic_tax` on an invoice, tax is calculated and locked at **finalization**, not at payment, and the Stripe Tax fee is charged at finalization whether or not the invoice is ever paid.
+
+**Invoice provider events are journaled but not processed.** `invoice.*`, `credit_note.*`, and `cash_balance.*` normalize to `ignored`: signature-verified, recorded, zero business effect. This is deliberate and is pinned by regression tests.
+
+Making them processable requires two things this checkpoint does not have. First, an invoiced-order lifecycle -- nothing currently creates an institutional order. Second, an explicit decision on ACH reversal risk: ACH funds land in the customer cash balance, settle over one to five business days, and can be pulled back after `invoice.paid` as `funding_reversed`. Fulfillment releases on verified payment plus compliance clearance, so releasing on `invoice.paid` accepts reversal exposure on shipped goods, while holding for a settlement window slows institutional fulfillment. That is an unresolved business risk decision and must not be defaulted in code.
+
+The event dispatch in `provider-event-repository.ts` ends in an exhaustiveness fence. A new normalized kind added without an explicit branch is a compile error rather than a silent fall-through into the dispute processor.
 
 ## Success and reconciliation
 

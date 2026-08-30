@@ -8,6 +8,11 @@
   --canvas: #f4f1e8;
   --ink: #171915;
   --moss: #66715b;
+  /* Small uppercase text (.eyebrow, 12px) sits on the --moss-soft tint band,
+     where --moss measures 4.399:1 and fails WCAG AA. This 3%-darker moss
+     measures 4.598:1 on the tint and 4.765:1 on the canvas. --moss itself is
+     unchanged: design-system/MASTER.md names it as the accent colour. */
+  --moss-ink: #636e58;
   --rule: #c9c5b8;
   --warning: #9a6700;
   --danger: #a33a31;
@@ -210,7 +215,7 @@ footer a,
 }
 
 .eyebrow {
-  color: var(--moss);
+  color: var(--moss-ink);
 }
 
 .demo-label {

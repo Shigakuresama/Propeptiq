@@ -4,18 +4,29 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   adminAudit,
+  affiliateAttributions,
+  affiliateCommissionAdjustments,
+  affiliateCommissions,
+  affiliatePayoutCommissions,
+  affiliatePayouts,
+  affiliatePolicies,
+  affiliateProfiles,
   analyticalClaims,
   attestationAcceptances,
   attestationVersions,
   buyerProfiles,
   checkoutAttempts,
-  downstreamEffects,
   coaDocuments,
   destinationPolicies,
+  downstreamEffects,
   fulfillmentReleases,
+  growthTermsAcceptances,
+  growthTermsVersions,
   inventoryEvents,
   inventoryReservations,
   lots,
+  loyaltyPolicies,
+  orderGrowthAttributions,
   orderItems,
   orderPromotionAllocations,
   orderPromotionApplications,
@@ -27,11 +38,21 @@ import {
   products,
   promotionTargets,
   promotions,
-  rateLimitWindows,
   providerEvents,
+  rateLimitWindows,
+  referralAttributions,
+  referralCodes,
+  referralConversions,
+  referralPolicies,
   refunds,
   reviewRequestDestinationPolicies,
   reviewRequests,
+  rewardAccounts,
+  rewardLedgerEntries,
+  rewardRedemptions,
+  sharedResearchSetItems,
+  sharedResearchSetMutations,
+  sharedResearchSets,
   shipments,
   staffRoles,
   users,
@@ -72,6 +93,29 @@ const expectedLeanTables = [
   [downstreamEffects, "downstream_effects"],
   [adminAudit, "admin_audit"],
   [rateLimitWindows, "rate_limit_windows"],
+  // Growth tables from the rewards/referrals plan. Listed explicitly so this
+  // guard still fails on an unintended table or a renamed one.
+  [loyaltyPolicies, "loyalty_policies"],
+  [referralPolicies, "referral_policies"],
+  [affiliatePolicies, "affiliate_policies"],
+  [growthTermsVersions, "growth_terms_versions"],
+  [growthTermsAcceptances, "growth_terms_acceptances"],
+  [rewardAccounts, "reward_accounts"],
+  [rewardLedgerEntries, "reward_ledger_entries"],
+  [rewardRedemptions, "reward_redemptions"],
+  [referralCodes, "referral_codes"],
+  [referralAttributions, "referral_attributions"],
+  [affiliateProfiles, "affiliate_profiles"],
+  [affiliateAttributions, "affiliate_attributions"],
+  [orderGrowthAttributions, "order_growth_attributions"],
+  [referralConversions, "referral_conversions"],
+  [affiliatePayouts, "affiliate_payouts"],
+  [affiliateCommissions, "affiliate_commissions"],
+  [affiliateCommissionAdjustments, "affiliate_commission_adjustments"],
+  [affiliatePayoutCommissions, "affiliate_payout_commissions"],
+  [sharedResearchSets, "shared_research_sets"],
+  [sharedResearchSetMutations, "shared_research_set_mutations"],
+  [sharedResearchSetItems, "shared_research_set_items"],
 ] as const;
 
 const obsoleteTables = [
@@ -958,15 +1002,27 @@ describe("lean database migration", () => {
       ORDER BY table_name, column_name
     `);
 
+    // review_requests.snapshot_hash is the only routine ELIGIBILITY hash.
+    // Everything else here is content-integrity (content_hash, evidence_hash)
+    // or idempotency/replay (request_hash, payload_hash, scope_hash), and none
+    // is read to make an eligibility decision.
     expect(result.rows).toEqual([
+      { table_name: "affiliate_payouts", column_name: "paid_request_hash" },
+      { table_name: "affiliate_payouts", column_name: "request_hash" },
       { table_name: "attestation_versions", column_name: "content_hash" },
       { table_name: "checkout_attempts", column_name: "provider_request_hash" },
       { table_name: "checkout_attempts", column_name: "request_hash" },
       { table_name: "coa_documents", column_name: "evidence_hash" },
+      { table_name: "growth_terms_acceptances", column_name: "content_hash" },
+      { table_name: "growth_terms_versions", column_name: "content_hash" },
       { table_name: "provider_events", column_name: "payload_hash" },
       { table_name: "rate_limit_windows", column_name: "scope_hash" },
       { table_name: "refunds", column_name: "provider_request_hash" },
       { table_name: "review_requests", column_name: "snapshot_hash" },
+      {
+        table_name: "shared_research_set_mutations",
+        column_name: "payload_hash",
+      },
     ]);
   });
 

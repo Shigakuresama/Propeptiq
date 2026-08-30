@@ -171,6 +171,21 @@ describe("Task 8B3 growth policy server actions", () => {
     );
   });
 
+  it("accepts framework-owned Server Action metadata without weakening exact business fields", async () => {
+    const browserForm = draftForm(cases[0]);
+    browserForm.set("$ACTION_ID_framework-owned", "");
+
+    await expect(cases[0].create(browserForm)).rejects.toThrow(
+      "redirect:/admin/loyalty-policies?result=saved",
+    );
+    expect(mocks.createDraft).toHaveBeenCalledOnce();
+    expect(mocks.createDraft).toHaveBeenLastCalledWith(
+      {},
+      expect.any(Object),
+      expect.objectContaining({ kind: "loyalty", values: cases[0].values }),
+    );
+  });
+
   it.each(cases)("rejects browser kind/resource/extra authority for $resource", async (entry) => {
     for (const extra of [
       { kind: entry.kind === "loyalty" ? "referral" : "loyalty" },

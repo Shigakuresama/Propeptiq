@@ -280,6 +280,27 @@ test("detects every exact local growth fixture category without echoing its valu
   }
 });
 
+test("detects the dedicated local growth experience driver and sentinel", (t) => {
+  const workspace = createWorkspace(t);
+  const artifactRoot = join(workspace, "closed-production-output");
+  const sentinel = "LOCAL_GROWTH_EXPERIENCE_TEST_ONLY_PROPEPTIQ_7A91D2";
+
+  writeArtifact(artifactRoot, "server/growth-experience.js", sentinel);
+  writeArtifact(
+    artifactRoot,
+    "server/chunks/src_auth_local-growth-driver_ts_7a91.js",
+    "(()=>{})();",
+  );
+
+  const result = runScanner({ cwd: workspace, artifactRoot });
+  const output = `${result.stdout}${result.stderr}`;
+
+  assert.equal(result.status, 1, output);
+  assert.match(result.stderr, /local growth experience sentinel: 1 match in 1 file/u);
+  assert.match(result.stderr, /local implementation module: 1 match in 1 file/u);
+  assert.equal(output.includes(sentinel), false);
+});
+
 test("detects an active synthetic hosted checkout page and action path", (t) => {
   const workspace = createWorkspace(t);
   const artifactRoot = join(workspace, "closed-production-output");

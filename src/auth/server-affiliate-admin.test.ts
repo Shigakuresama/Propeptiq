@@ -117,11 +117,29 @@ describe("affiliate application request repository composition", () => {
     expect(queries).toHaveLength(4);
   });
 
-  it("exposes a typed fail-closed mutation repository in local deterministic mode", async () => {
+  it("composes the local growth driver's mutation repositories in local deterministic mode", async () => {
+    // Local deterministic mode no longer hardcodes fail-closed stubs here: the
+    // browser harness needs working affiliate admin mutations, so the driver's
+    // own growth repositories are what must be composed. This asserts the
+    // wiring, not the driver's behaviour, and that no database transaction is
+    // opened in local mode.
+    const growth = {
+      affiliateApplicationAdminRepository: {
+        rateLimitStore: { increment: async () => undefined },
+        mutateInTransaction: async () => undefined,
+      },
+      affiliatePayoutAdminRepository: {
+        rateLimitStore: { increment: async () => undefined },
+        createInTransaction: async () => undefined,
+        markPaidInTransaction: async () => undefined,
+      },
+    };
     const localDriver = {
       accountRepository: {},
       adminRepository: {},
       storageVerifier: {},
+      storageWriter: {},
+      growth,
       loadPrincipal: () => request().principal,
       loadAccount: () => null,
       loadCurrentAttestation: () => null,
@@ -130,23 +148,15 @@ describe("affiliate application request repository composition", () => {
       readAdminSnapshot: () => ({ resource: "affiliate-applications", items: [], truncated: false }),
       commerce: { loadSuccess: () => null },
     } as unknown as NonNullable<RequestIdentity["localDriver"]>;
+
     const repositories = getRequestRepositories(request({ localDriver }));
 
-    await expect(repositories?.affiliateApplicationAdminRepository.rateLimitStore.increment({
-      scopeHash: "a".repeat(64),
-      windowStart: mutatedAt,
-      expiresAt: new Date(mutatedAt.getTime() + 60_000),
-    })).rejects.toThrow(/unavailable.*local/i);
-    await expect(repositories?.affiliateApplicationAdminRepository.mutateInTransaction({
-      actorUserId,
-      actorClerkUserId: "clerk-task8-affiliate-admin",
-      requiredCapability: "growth:manage",
-      profileId,
-      expectedVersion: 1,
-      targetStatus: "active",
-      correlationId: "task-8-local-unavailable-correlation",
-      mutatedAt,
-    })).rejects.toThrow(/unavailable.*local/i);
+    expect(repositories?.affiliateApplicationAdminRepository).toBe(
+      growth.affiliateApplicationAdminRepository,
+    );
+    expect(repositories?.affiliatePayoutAdminRepository).toBe(
+      growth.affiliatePayoutAdminRepository,
+    );
     expect(mocks.withRuntimeTransaction).not.toHaveBeenCalled();
   });
 });

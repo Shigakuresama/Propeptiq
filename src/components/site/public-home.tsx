@@ -14,11 +14,13 @@ import { researchRestrictions } from "@/lib/site-content";
 export function PublicHome({
   loyaltyPolicy = null,
   referralPolicy = null,
+  syntheticLocal = false,
   products,
   variantCount,
 }: {
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
+  syntheticLocal?: boolean;
   products: readonly BrowseCatalogProduct[];
   variantCount: number;
 }) {
@@ -44,6 +46,11 @@ export function PublicHome({
 
   return (
     <div>
+      {syntheticLocal ? (
+        <div className="site-container pt-5">
+          <p className="warning-record text-base font-semibold">Synthetic local test only</p>
+        </div>
+      ) : null}
       <ProgramStrip loyaltyPolicy={loyaltyPolicy} />
       <section className="border-b border-border">
         <div className="site-container grid gap-10 py-12 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] lg:items-center lg:py-16">

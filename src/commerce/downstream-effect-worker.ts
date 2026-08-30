@@ -44,6 +44,17 @@ export type AllowlistedDownstreamEffectV1 =
         fulfillmentReleaseId: string;
       }>;
       idempotencyKey: string;
+    }>
+  | Readonly<{
+      effectType: "stripe_tax_transaction";
+      payload: Readonly<{
+        schemaVersion: 1;
+        orderId: string;
+        verifiedPaymentEventId: string;
+        /** Stripe tax calculation id; never a monetary amount. */
+        calculationReference: string;
+      }>;
+      idempotencyKey: string;
     }>;
 
 export type DownstreamEffectSinkV1 = (
@@ -59,6 +70,7 @@ const externalTypes = new Set([
   "dispute_recorded",
   "dispute_resolved",
   "fulfillment_handed_off",
+  "stripe_tax_transaction",
 ] as const);
 const BOUNDED_KEY = /^[\x20-\x7e]{1,255}$/u;
 const LEASE_MILLISECONDS = 60_000;
@@ -153,6 +165,34 @@ export function parseAllowlistedDownstreamEffectV1(
         orderId: payload.orderId,
         shipmentId: payload.shipmentId,
         fulfillmentReleaseId: payload.fulfillmentReleaseId,
+      }),
+      idempotencyKey: delivery.idempotencyKey,
+    });
+  }
+  if (delivery.effectType === "stripe_tax_transaction") {
+    if (
+      !exactKeys(payload, [
+        "schemaVersion",
+        "orderId",
+        "verifiedPaymentEventId",
+        "calculationReference",
+      ]) ||
+      !isCanonicalUuid(payload.orderId) ||
+      !isCanonicalUuid(payload.verifiedPaymentEventId) ||
+      typeof payload.calculationReference !== "string" ||
+      payload.calculationReference.trim() !== payload.calculationReference ||
+      payload.calculationReference.length === 0 ||
+      payload.calculationReference.length > 200 ||
+      delivery.idempotencyKey !==
+        `payment_event:${payload.verifiedPaymentEventId}:stripe_tax_transaction`
+    ) return null;
+    return Object.freeze({
+      effectType: "stripe_tax_transaction",
+      payload: Object.freeze({
+        schemaVersion: 1,
+        orderId: payload.orderId,
+        verifiedPaymentEventId: payload.verifiedPaymentEventId,
+        calculationReference: payload.calculationReference,
       }),
       idempotencyKey: delivery.idempotencyKey,
     });

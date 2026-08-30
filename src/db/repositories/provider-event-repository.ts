@@ -522,6 +522,8 @@ type AttemptRow = Readonly<{
   providerSessionId: string | null;
   providerLivemode: boolean | null;
   providerScope: string | null;
+  taxReady: boolean;
+  taxQuoteReference: string | null;
 }>;
 
 type OrderRow = Readonly<{
@@ -741,7 +743,9 @@ async function discoverCheckoutAttempt(
             provider_request_id AS "providerRequestId",
             provider_session_id AS "providerSessionId",
             provider_livemode AS "providerLivemode",
-            provider_scope AS "providerScope"
+            provider_scope AS "providerScope",
+            tax_ready AS "taxReady",
+            tax_quote_reference AS "taxQuoteReference"
      FROM checkout_attempts
      WHERE id = $1::uuid OR order_id = $2::uuid
      ORDER BY id`,
@@ -861,7 +865,9 @@ async function processCheckoutEvent(
             provider_request_id AS "providerRequestId",
             provider_session_id AS "providerSessionId",
             provider_livemode AS "providerLivemode",
-            provider_scope AS "providerScope"
+            provider_scope AS "providerScope",
+            tax_ready AS "taxReady",
+            tax_quote_reference AS "taxQuoteReference"
      FROM checkout_attempts WHERE id = $1::uuid FOR UPDATE`,
     [event.attemptId],
   ));
@@ -1163,6 +1169,38 @@ async function processCheckoutEvent(
           now,
         ],
       );
+      // Tax is server-computed and sent to the provider as a plain line item, so
+      // the sale never reaches Stripe Tax reporting on its own. Enqueue the
+      // recording here, inside the transaction that verifies payment, so it
+      // inherits the same atomicity and lease-based retry as every other effect.
+      // Read from the exact attempt this event names, already locked above, so
+      // the calculation always matches the amount charged. An order may carry
+      // several attempts, and the order's newest one is not necessarily this
+      // one. A permitted attempt always has tax_ready, but the guard stays so a
+      // non-permitted path can never enqueue a reference-less effect.
+      if (attempt.taxReady && attempt.taxQuoteReference !== null) {
+        await client.query(
+          `INSERT INTO downstream_effects
+             (id, order_id, provider_event_id, effect_type, payload,
+              idempotency_key, status, attempt_count, created_at, updated_at)
+           VALUES ($1, $2, $3, 'stripe_tax_transaction', $4::jsonb, $5,
+                   'pending', 0, $6, $6)
+           ON CONFLICT (idempotency_key) DO NOTHING`,
+          [
+            stableUuid(keyedUuid, `payment-event:${paymentEventId}:tax-effect`),
+            order.id,
+            row.id,
+            JSON.stringify({
+              schemaVersion: 1,
+              orderId: order.id,
+              verifiedPaymentEventId: paymentEventId,
+              calculationReference: attempt.taxQuoteReference,
+            }),
+            `payment_event:${paymentEventId}:stripe_tax_transaction`,
+            now,
+          ],
+        );
+      }
     }
   } else if (event.eventType === "checkout.session.async_payment_failed") {
     if (verifiedPayments.length === 0) {
@@ -1401,7 +1439,9 @@ async function loadAndLockFinancialContext(
             provider_request_id AS "providerRequestId",
             provider_session_id AS "providerSessionId",
             provider_livemode AS "providerLivemode",
-            provider_scope AS "providerScope"
+            provider_scope AS "providerScope",
+            tax_ready AS "taxReady",
+            tax_quote_reference AS "taxQuoteReference"
      FROM checkout_attempts WHERE id = $1::uuid FOR UPDATE`,
     [sourceEvent.attemptId],
   ));
@@ -2349,12 +2389,27 @@ async function processClaimInTransaction(
       input.keyedUuid,
     );
   }
-  return processDisputeEvent(
+  if (event.kind === "dispute") {
+    return processDisputeEvent(
+      client,
+      row,
+      event,
+      authority,
+      input.now,
+      input.keyedUuid,
+    );
+  }
+  // Exhaustiveness fence. Every normalized kind must be dispatched explicitly:
+  // a new kind added to NormalizedProviderEventV1 without a branch here fails
+  // this assignment at compile time instead of silently falling through to the
+  // dispute processor. If one ever reaches here at runtime, refuse to guess.
+  const unhandled: never = event;
+  void unhandled;
+  return finishBusinessConflict(
     client,
     row,
-    event,
-    authority,
     input.now,
+    "stored_event_incoherent",
     input.keyedUuid,
   );
 }

@@ -14,6 +14,7 @@ export default async function HomePage() {
       <PublicHome
         loyaltyPolicy={growth.status === "active" ? growth.projection.loyalty : null}
         referralPolicy={growth.status === "active" ? growth.projection.referral : null}
+        syntheticLocal={growth.syntheticLocal === true}
         products={catalog.products}
         variantCount={catalog.variantCount}
       />

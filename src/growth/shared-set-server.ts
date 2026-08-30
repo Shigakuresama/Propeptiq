@@ -46,6 +46,14 @@ export async function loadPublicSharedSet(code: string) {
   try {
     const environment = readServerEnv();
     if (environment.DATABASE_MODE === "disabled") {
+      if (environment.LOCAL_TEST_DRIVER === "enabled") {
+        const request = await getRequestIdentity();
+        if (request.localDriver !== null) {
+          return request.localDriver.growth.resolvePublicSharedSet(code) as Awaited<
+            ReturnType<ReturnType<typeof createSharedSetService>["resolvePublicSet"]>
+          >;
+        }
+      }
       return Object.freeze({ status: "unavailable" as const });
     }
     return await readService(environment).resolvePublicSet(code);
@@ -63,7 +71,7 @@ export async function loadOwnerSharedSetWorkspace() {
       principal === null ||
       principal.clerkUserId !== request.identity.clerkUserId ||
       principal.buyerStatus !== "active" ||
-      request.environment.DATABASE_MODE === "disabled"
+      (request.environment.DATABASE_MODE === "disabled" && request.localDriver === null)
     ) {
       return Object.freeze({ status: "unavailable" as const });
     }
@@ -74,6 +82,21 @@ export async function loadOwnerSharedSetWorkspace() {
     });
     if (!authorization.allowed) {
       return Object.freeze({ status: "unavailable" as const });
+    }
+    if (request.localDriver !== null) {
+      return request.localDriver.growth.ownerSharedSetWorkspace(principal.actorId) as Readonly<{
+        status: "available";
+        products: readonly Readonly<{ id: string; name: string; packageForm: string }>[];
+        sets: readonly Readonly<{
+          code: string;
+          label: string;
+          active: boolean;
+          itemCount: number;
+          updatedAt: string;
+          items: readonly Readonly<{ productId: string; quantity: number }>[];
+        }>[];
+        syntheticLocal?: true;
+      }>;
     }
     const [sets, catalog] = await Promise.all([
       readService(request.environment).listOwnerSets({

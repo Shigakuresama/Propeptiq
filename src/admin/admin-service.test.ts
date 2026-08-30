@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import type { VerifiedIdentity } from "@/auth/identity";
@@ -11,6 +13,7 @@ import {
   changeStaffCapability,
   decideReviewRequest,
   publishAttestationVersion,
+  importCoaFromManifest,
   publishCoaDocument,
   requestRefundIntent,
   savePendingShipmentMetadata,
@@ -575,5 +578,70 @@ describe("Task 5 admin mutation services", () => {
         enabled: true,
       }),
     ).rejects.toThrow(/capability/i);
+  });
+});
+
+describe("importCoaFromManifest", () => {
+  const body = new TextEncoder().encode("manifest-declared-coa-bytes");
+  const hash = createHash("sha256").update(body).digest("hex");
+
+  function storage() {
+    const store = new Map<string, string>();
+    return {
+      store,
+      storageWriter: {
+        mode: "test" as const,
+        write: async ({ storageKey, body: written }: { storageKey: string; body: Uint8Array }) => {
+          store.set(storageKey, createHash("sha256").update(written).digest("hex"));
+        },
+      },
+      storageVerifier: {
+        mode: "test" as const,
+        verify: async (storageKey: string) => {
+          const found = store.get(storageKey);
+          return found ? { exists: true, sha256: found } : { exists: false, sha256: null };
+        },
+      },
+    };
+  }
+
+  it("stores the object and records the draft with one audit", async () => {
+    const { repository, state } = createRepository();
+    const { store, storageWriter, storageVerifier } = storage();
+
+    const result = await importCoaFromManifest(
+      repository,
+      context("coa-import-1"),
+      { storageWriter, storageVerifier },
+      { lotId: "lot-a", storageKey: "private/coa-new.pdf", evidenceHash: hash, body },
+    );
+
+    expect(result).toMatchObject({ id: "coa-a", ingest: { status: "written" } });
+    expect(store.get("private/coa-new.pdf")).toBe(hash);
+    expect(state.audits.map((event) => event.action)).toEqual([
+      "catalog.coa.imported",
+    ]);
+  });
+
+  it("records no draft and no audit when the bytes contradict the manifest", async () => {
+    const { repository, state } = createRepository();
+    const { store, storageWriter, storageVerifier } = storage();
+
+    await expect(
+      importCoaFromManifest(
+        repository,
+        context("coa-import-2"),
+        { storageWriter, storageVerifier },
+        {
+          lotId: "lot-a",
+          storageKey: "private/coa-new.pdf",
+          evidenceHash: "a".repeat(64),
+          body,
+        },
+      ),
+    ).rejects.toThrow(/digest does not match the manifest/i);
+
+    expect(store.size).toBe(0);
+    expect(state.audits).toEqual([]);
   });
 });

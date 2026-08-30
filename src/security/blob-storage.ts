@@ -4,9 +4,7 @@ import { createHash } from "node:crypto";
 
 import type { ServerEnv } from "@/config/env-schema";
 
-import type { StorageVerifier } from "./storage";
-
-const maxCoaBytes = 25 * 1024 * 1024;
+import { maxCoaBytes, type StorageVerifier, type StorageWriter } from "./storage";
 
 export function createRuntimeStorageVerifier(
   environment: ServerEnv,
@@ -51,6 +49,37 @@ export function createRuntimeStorageVerifier(
         reader.releaseLock();
       }
       return { exists: true, sha256: hash.digest("hex") };
+    },
+  };
+}
+
+export function createRuntimeStorageWriter(
+  environment: ServerEnv,
+): StorageWriter {
+  if (environment.STORAGE_MODE === "disabled") {
+    return {
+      mode: "disabled",
+      async write() {
+        throw new Error("Storage writes are disabled");
+      },
+    };
+  }
+  const token = environment.BLOB_READ_WRITE_TOKEN;
+  if (!token) throw new Error("Storage writer configuration is incomplete");
+  return {
+    mode: environment.STORAGE_MODE,
+    async write({ storageKey, body, contentType }) {
+      const { put } = await import("@vercel/blob");
+      await put(storageKey, Buffer.from(body), {
+        access: "private",
+        contentType,
+        // The manifest owns the key, so it must be stored verbatim, and an
+        // existing object is never replaced here. ingestCoaObject decides
+        // whether a key is safe to write before calling this.
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        token,
+      });
     },
   };
 }

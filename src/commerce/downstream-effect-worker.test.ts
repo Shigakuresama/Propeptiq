@@ -239,3 +239,63 @@ describe("downstream effect worker", () => {
     ]);
   });
 });
+
+describe("downstream effect worker tax recording", () => {
+  const calculationReference = "taxcalc_synthetic6d";
+
+  function exactTaxDelivery() {
+    return {
+      effectType: "stripe_tax_transaction",
+      payload: {
+        schemaVersion: 1,
+        orderId,
+        verifiedPaymentEventId: paymentEventId,
+        calculationReference,
+      },
+      idempotencyKey: `payment_event:${paymentEventId}:stripe_tax_transaction`,
+    } as const;
+  }
+
+  it("allowlists the exact tax recording delivery", () => {
+    expect(parseAllowlistedDownstreamEffectV1(exactTaxDelivery())).toEqual(
+      exactTaxDelivery(),
+    );
+  });
+
+  it("rejects a tax delivery carrying a blank calculation reference", () => {
+    expect(
+      parseAllowlistedDownstreamEffectV1({
+        ...exactTaxDelivery(),
+        payload: { ...exactTaxDelivery().payload, calculationReference: "  " },
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects a tax delivery carrying an unexpected extra field", () => {
+    expect(
+      parseAllowlistedDownstreamEffectV1({
+        ...exactTaxDelivery(),
+        payload: { ...exactTaxDelivery().payload, amountMinor: 321 },
+      }),
+    ).toBeNull();
+  });
+
+  it("delivers a claimed tax effect to the sink and completes it", async () => {
+    const { repository, claim } = fakeRepository(exactTaxDelivery());
+    const sink = vi.fn(async () => {});
+    const worker = createDownstreamEffectWorkerV1({
+      repository,
+      sink,
+      wakeDependencies: vi.fn(),
+      clock: () => now,
+      leaseToken: () => "lease_synthetic_tax",
+    });
+
+    await expect(worker.runEffect(effectId)).resolves.toEqual({
+      status: "processed",
+    });
+    expect(sink).toHaveBeenCalledWith(exactTaxDelivery());
+    expect(repository.completeClaim).toHaveBeenCalledWith(claim, { now });
+    expect(repository.failClaim).not.toHaveBeenCalled();
+  });
+});

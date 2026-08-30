@@ -636,7 +636,7 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       attempt_status: "completed",
       provider_session_id: providerSessionId,
       payments: 1,
-      effects: 2,
+      effects: 3,
       wakes: 1,
       incidents: 0,
     });
@@ -656,6 +656,16 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
           reason: "payment_verified",
         },
         idempotency_key: `payment_event:${verifiedPaymentEventId}:payment_verified`,
+      },
+      {
+        effect_type: "stripe_tax_transaction",
+        payload: {
+          schemaVersion: 1,
+          orderId: ids.order,
+          verifiedPaymentEventId,
+          calculationReference: "tax_6e",
+        },
+        idempotency_key: `payment_event:${verifiedPaymentEventId}:stripe_tax_transaction`,
       },
       {
         effect_type: "wake_provider_dependencies",
@@ -768,7 +778,7 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       inbox_status: "processed",
       attempts: 2,
       payments: 1,
-      effects: 2,
+      effects: 3,
     });
   });
 
@@ -1033,7 +1043,7 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       (SELECT state FROM orders WHERE id = '${ids.order}') AS order_state`);
     expect(state.rows[0]).toEqual({
       payments: 1,
-      effects: 2,
+      effects: 3,
       order_state: "paid_pending_fulfillment",
     });
   });
@@ -1071,7 +1081,7 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       order_state: "fulfillment_in_progress",
       reservation_state: "consumed",
       payments: 1,
-      effects: 2,
+      effects: 3,
     });
   });
 
@@ -1126,7 +1136,7 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       attempt_status: "completed",
       verified: 1,
       failures: 0,
-      effects: 2,
+      effects: 3,
     });
   });
 
@@ -1304,7 +1314,7 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
         inbox_status: "conflict",
         order_state: "paid_pending_fulfillment",
         payments: 1,
-        effects: 2,
+        effects: 3,
       });
   });
 

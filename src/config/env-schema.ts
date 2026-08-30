@@ -6,6 +6,16 @@ const catalogDemoMode = z.enum(["disabled", "enabled"]);
 const localTestDriver = z.enum(["disabled", "enabled"]);
 const vercelEnvironment = z.enum(["development", "preview", "production"]);
 const nonBlank = z.string().trim().min(1);
+/** Owner-configured Stripe ShippingRate backing the shipping quote port. */
+const stripeShippingRateId = z.string().min(1).refine(
+  (value) => value === value.trim() && /^shr_[A-Za-z0-9]{8,64}$/u.test(value),
+  { message: "Expected a Stripe shr_ shipping rate ID" },
+);
+/** Stripe Tax product tax code; general tangible goods for physical catalog items. */
+const stripeTaxCode = z.string().min(1).refine(
+  (value) => value === value.trim() && /^txcd_[0-9]{8}$/u.test(value),
+  { message: "Expected a Stripe txcd_ tax code" },
+);
 const stripeAccountId = z.string().min(1).refine(
   (value) =>
     value === value.trim() && /^acct_[A-Za-z0-9]{8,64}$/u.test(value),
@@ -54,6 +64,8 @@ const rawServerEnvSchema = z.object({
   STRIPE_ACCOUNT_ID: stripeAccountId.optional(),
   STRIPE_SECRET_KEY: nonBlank.optional(),
   STRIPE_WEBHOOK_SECRET: nonBlank.optional(),
+  STRIPE_SHIPPING_RATE_ID: stripeShippingRateId.optional(),
+  STRIPE_TAX_CODE: stripeTaxCode.optional(),
   BLOB_READ_WRITE_TOKEN: nonBlank.optional(),
   RESEND_API_KEY: nonBlank.optional(),
   RESEND_FROM: nonBlank.pipe(z.email()).optional(),

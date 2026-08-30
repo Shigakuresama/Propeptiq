@@ -419,3 +419,40 @@ describe("NormalizedProviderEventV1", () => {
     })).toBeNull();
   });
 });
+
+describe("invoice and ACH events are journaled but not yet processable", () => {
+  // Invoicing is enqueued in Stripe by src/commerce/stripe-invoice-provider.ts,
+  // but no order-state semantics exist for an invoiced sale yet. Until they do,
+  // these events must normalize to "ignored": verified and journaled, with zero
+  // business effect. Adding a processable kind without matching repository
+  // transitions would be strictly worse than this safe default.
+  it.each([
+    "invoice.finalized",
+    "invoice.paid",
+    "invoice.payment_failed",
+    "credit_note.created",
+    "cash_balance.funds_available",
+    "customer_cash_balance_transaction.created",
+  ])("normalizes %s to an ignored event with no business payload", (type) => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent(type, {
+        id: "in_synthetic6d",
+        amount_due: 8_700,
+        currency: "usd",
+        status: "paid",
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "normalized",
+      event: {
+        schemaVersion: 1,
+        kind: "ignored",
+        providerEventId: `evt_synthetic_6e_${type.replaceAll(".", "_")}`,
+        eventType: type,
+        providerCreatedAt,
+        livemode: false,
+      },
+    });
+  });
+});

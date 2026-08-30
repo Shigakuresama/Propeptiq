@@ -6,6 +6,7 @@ These runbooks operate the lightweight commerce model:
 - `failed-orders.md`: checkout/payment/order failures and inventory release.
 - `refunds-reconciliation.md`: idempotent refunds and provider reconciliation.
 - `incidents-and-recovery.md`: containment, recovery, credential response, and immutable-journal preservation.
+- `production-cutover.md`: provider provisioning, the reserved migration boundary, COA manifest ingest, and capability activation.
 
 ## Shared rules
 

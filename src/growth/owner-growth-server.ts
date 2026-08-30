@@ -37,15 +37,16 @@ type OwnerGrowthPolicyProjection = Readonly<{
 }>;
 
 export type OwnerGrowthReadResult =
-  | Readonly<{ status: "denied" }>
-  | Readonly<{ status: "read_error" }>
-  | Readonly<{ status: "inactive"; access: OwnerAccess; verifiedEmail: string }>
+  | Readonly<{ status: "denied"; syntheticLocal?: true }>
+  | Readonly<{ status: "read_error"; syntheticLocal?: true }>
+  | Readonly<{ status: "inactive"; access: OwnerAccess; verifiedEmail: string; syntheticLocal?: true }>
   | Readonly<{
       status: "empty" | "data";
       access: OwnerAccess;
       verifiedEmail: string;
       snapshot: OwnerGrowthSnapshot;
       projection: OwnerGrowthPolicyProjection;
+      syntheticLocal?: true;
     }>;
 
 function hasOwnerData(snapshot: OwnerGrowthSnapshot): boolean {
@@ -164,6 +165,14 @@ export async function loadOwnerGrowthDashboard(): Promise<OwnerGrowthReadResult>
   try {
     const request = await getRequestIdentity();
     const ownerUserId = request.principal?.actorId ?? "";
+    if (request.localDriver !== null) {
+      const result = await createOwnerGrowthReader({
+        loadProjection: async () => request.localDriver!.growth.publicProjection(),
+        loadSnapshot: async (requestedOwnerUserId) =>
+          request.localDriver!.growth.ownerSnapshot(requestedOwnerUserId),
+      })(request, ownerUserId);
+      return Object.freeze({ ...result, syntheticLocal: true });
+    }
     const now = new Date();
     const repository = createPostgresGrowthReadRepository((work, options) =>
       withRuntimeTransaction(

@@ -1,5 +1,17 @@
 export type StorageVerificationMode = "disabled" | "test" | "live";
 
+/** Largest COA object this system will read back or ingest. */
+export const maxCoaBytes = 25 * 1024 * 1024;
+
+export type StorageWriter = Readonly<{
+  mode: StorageVerificationMode;
+  write: (input: Readonly<{
+    storageKey: string;
+    body: Uint8Array;
+    contentType: string;
+  }>) => Promise<void>;
+}>;
+
 export type StorageVerifier = Readonly<{
   mode: StorageVerificationMode;
   verify: (storageKey: string) => Promise<Readonly<{

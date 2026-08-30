@@ -20,7 +20,12 @@ import {
   createRateLimitScope,
   type RateLimitStore,
 } from "@/security/rate-limit";
-import { verifyCoaForPublication, type StorageVerifier } from "@/security/storage";
+import { ingestCoaObject } from "@/security/coa-ingest";
+import {
+  verifyCoaForPublication,
+  type StorageVerifier,
+  type StorageWriter,
+} from "@/security/storage";
 
 export type AdminCommandContext = Readonly<{
   principal: Principal | null;
@@ -1784,6 +1789,65 @@ export async function saveCoaDraft(
     });
     await tx.appendAudit(audit(principal, context, input.coaDocumentId ? "catalog.coa.draft_updated" : "catalog.coa.draft_created", "coa_document", result.id, { active: result.active, public: result.public }));
     return result;
+  });
+}
+
+/**
+ * Bring one manifest-declared COA into private storage and record its draft.
+ *
+ * Authorization is checked before anything is stored, and the object must be
+ * present and hash-matched before a draft row is written, so a recorded COA can
+ * never point at evidence the store does not actually hold.
+ */
+export async function importCoaFromManifest(
+  repository: AdminRepository,
+  context: AdminCommandContext,
+  dependencies: Readonly<{
+    storageWriter: StorageWriter;
+    storageVerifier: StorageVerifier;
+  }>,
+  input: Readonly<{
+    lotId: string;
+    storageKey: string;
+    evidenceHash: string;
+    issuedAt?: string;
+    body: Uint8Array;
+    contentType?: string;
+  }>,
+) {
+  const principal = await authorizeAndLimit(repository, context, "catalog.publish");
+  const lotId = requireId(input.lotId, "Lot ID");
+  const storageKey = bounded(input.storageKey, "Private storage key", 500);
+  const issuedAt = parseOptionalInstant(input.issuedAt, "COA issued at");
+  if (issuedAt && issuedAt.getTime() > context.now.getTime()) {
+    throw new Error("COA issued at cannot be in the future");
+  }
+
+  const ingest = await ingestCoaObject(
+    dependencies.storageWriter,
+    dependencies.storageVerifier,
+    { lotId, storageKey, evidenceHash: input.evidenceHash },
+    input.body,
+    input.contentType,
+  );
+
+  return authorizedTransaction(repository, context, principal, "catalog.publish", async (tx) => {
+    const result = await tx.saveCoaDraft({
+      coaDocumentId: null,
+      lotId,
+      storageKey,
+      evidenceHash: ingest.sha256,
+      issuedAt: issuedAt?.toISOString() ?? null,
+      expectedStorageKey: null,
+      expectedEvidenceHash: null,
+    });
+    await tx.appendAudit(
+      audit(principal, context, "catalog.coa.imported", "coa_document", result.id, {
+        active: result.active,
+        public: result.public,
+      }),
+    );
+    return { ...result, ingest };
   });
 }
 

@@ -39,6 +39,7 @@ export default async function RewardsPage() {
       <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">
         Available and pending balances come from the authenticated owner ledger. Entries are immutable and references are redacted.
       </p>
+      {result.syntheticLocal === true ? <p className="warning-record mt-6 text-base font-semibold">Synthetic local test only</p> : null}
       {result.access === "blocked_read_capable" ? (
         <div className="error-record mt-7" role="status">
           This blocked account remains able to read its own reward history. Growth mutations remain unavailable.

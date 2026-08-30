@@ -309,6 +309,55 @@ describe("commerce server composition", () => {
     await expect(runtime!.markShipmentDelivered(targets.fulfillmentOrderId)).resolves.toEqual({ status: "already_delivered" });
   });
 
+  const postgresBuyerEnvironment = {
+    ...localEnvironment,
+    APP_ORIGIN: "https://test.example.com",
+    LOCAL_TEST_DRIVER: "disabled",
+    CATALOG_DEMO_MODE: "disabled",
+    AUTH_MODE: "test",
+    DATABASE_MODE: "test",
+    TEST_DATABASE_URL: "postgresql://buyer-runtime.invalid/test",
+    PAYMENTS_MODE: "test",
+    STRIPE_SECRET_KEY: "sk_test_buyer_runtime_offline_configuration",
+    STRIPE_WEBHOOK_SECRET: "whsec_buyer_runtime_offline_configuration",
+    STRIPE_ACCOUNT_ID: "acct_BuyerRuntime01",
+    STRIPE_SHIPPING_RATE_ID: "shr_BuyerRuntime01",
+    STRIPE_TAX_CODE: "txcd_99999999",
+  } satisfies ServerEnv;
+
+  function postgresBuyerRequest(overrides: Partial<ServerEnv> = {}) {
+    const request = requestForActor("non_admin");
+    return {
+      ...request,
+      environment: { ...postgresBuyerEnvironment, ...overrides } as ServerEnv,
+      localDriver: null,
+    };
+  }
+
+  it("assembles the typed PostgreSQL/Stripe buyer checkout runtime without performing a provider call", async () => {
+    const runtime = await createCheckoutServerRuntime(postgresBuyerRequest());
+
+    expect(runtime).not.toBeNull();
+    expect(runtime!.buyerUserId).toBe(requestForActor("non_admin").principal!.actorId);
+    expect(typeof runtime!.quoteCheckout).toBe("function");
+    expect(typeof runtime!.startSession).toBe("function");
+  });
+
+  it.each([
+    ["a missing shipping rate", { STRIPE_SHIPPING_RATE_ID: undefined }],
+    ["a missing tax code", { STRIPE_TAX_CODE: undefined }],
+    ["a missing Stripe secret", { STRIPE_SECRET_KEY: undefined }],
+    ["a missing Stripe account", { STRIPE_ACCOUNT_ID: undefined }],
+    ["payments disabled", { PAYMENTS_MODE: "disabled" as const }],
+    ["the database disabled", { DATABASE_MODE: "disabled" as const }],
+    ["tax disabled", { TAX_MODE: "disabled" as const }],
+    ["shipping disabled", { SHIPPING_MODE: "disabled" as const }],
+  ])("fails closed on %s", async (_label, overrides) => {
+    await expect(
+      createCheckoutServerRuntime(postgresBuyerRequest(overrides as Partial<ServerEnv>)),
+    ).resolves.toBeNull();
+  });
+
   it("assembles the typed PostgreSQL/Stripe staff runtime without performing a provider call", async () => {
     const request = requestForActor("admin");
     const environment = {
