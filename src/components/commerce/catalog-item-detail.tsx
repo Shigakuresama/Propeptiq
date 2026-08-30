@@ -1,8 +1,14 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, FileText } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 
 import type { BrowseCatalogProduct } from "@/catalog/browse-catalog";
+import {
+  DataLabel,
+  Metric,
+  Notice,
+  RecordPanel,
+} from "@/components/design-system/archive-primitives";
 
 export function CatalogItemDetail({ product }: { product: BrowseCatalogProduct }) {
   const sourceLabelIsDistinct =
@@ -20,8 +26,28 @@ export function CatalogItemDetail({ product }: { product: BrowseCatalogProduct }
         Back to catalog
       </Link>
 
-      <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(20rem,5fr)] lg:items-start lg:gap-16">
-        <div className="catalog-detail-image" data-category={product.category}>
+      <header className="grid gap-8 border-b border-border pb-10 pt-8 sm:pb-12 lg:grid-cols-[minmax(0,8fr)_minmax(14rem,4fr)] lg:items-end">
+        <div className="max-w-[68ch]">
+          <DataLabel>Browse-only catalog item</DataLabel>
+          <h1 className="mt-4 text-balance font-heading text-page leading-[1.02] text-ink">
+            {product.name}
+          </h1>
+          {sourceLabelIsDistinct ? (
+            <p className="mt-4 text-base leading-7 text-muted-ink">
+              Source label: {product.sourceName}
+            </p>
+          ) : null}
+        </div>
+        <Metric
+          className="border-l-2 border-moss pl-5"
+          detail="Owner-supplied package configurations"
+          label="Dossier entries"
+          value={product.variants.length}
+        />
+      </header>
+
+      <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(20rem,5fr)] lg:items-start lg:gap-16">
+        <figure className="catalog-detail-image" data-category={product.category}>
           <Image
             alt={product.image.alt}
             className="object-cover"
@@ -30,28 +56,28 @@ export function CatalogItemDetail({ product }: { product: BrowseCatalogProduct }
             sizes="(min-width: 1024px) 55vw, calc(100vw - 2rem)"
             src={product.image.src}
           />
-          <p className="catalog-image-disclosure">Illustrative product presentation</p>
-        </div>
+          <figcaption className="catalog-image-disclosure">
+            Illustrative product presentation
+          </figcaption>
+        </figure>
 
-        <div>
-          <p className="eyebrow">Browse-only catalog item</p>
-          <h1 className="mt-5 text-balance font-heading text-page leading-[1.02] text-ink">
-            {product.name}
-          </h1>
-          {sourceLabelIsDistinct ? (
-            <p className="mt-4 text-sm leading-6 text-muted-ink">
-              Source label: {product.sourceName}
-            </p>
-          ) : null}
-
-          <section aria-labelledby="catalog-variants-heading" className="mt-10">
-            <h2 id="catalog-variants-heading" className="font-heading text-3xl text-ink">
+        <section aria-labelledby="catalog-variants-heading">
+          <DataLabel>Configuration index</DataLabel>
+          <h2 id="catalog-variants-heading" className="mt-3 font-heading text-3xl text-ink">
               Supplied configurations
-            </h2>
-            <ul className="mt-5 divide-y divide-border border-y border-border">
+          </h2>
+          <RecordPanel className="mt-6 overflow-hidden p-0">
+            <div
+              aria-hidden="true"
+              className="hidden grid-cols-[minmax(5rem,auto)_1fr] gap-6 border-b border-border bg-surface-recessed px-5 py-3 sm:grid"
+            >
+              <span className="data-label">Code</span>
+              <span className="data-label">Supplied configuration</span>
+            </div>
+            <ol className="divide-y divide-border">
               {product.variants.map((variant) => (
                 <li
-                  className="grid gap-1 py-4 sm:grid-cols-[minmax(5rem,auto)_1fr] sm:gap-6"
+                  className="grid gap-1 px-5 py-4 sm:grid-cols-[minmax(5rem,auto)_1fr] sm:gap-6"
                   key={`${product.slug}-${variant.code}-${variant.packageForm}`}
                 >
                   <span className="font-semibold tabular-nums text-ink">{variant.code}</span>
@@ -63,14 +89,16 @@ export function CatalogItemDetail({ product }: { product: BrowseCatalogProduct }
                   ) : null}
                 </li>
               ))}
-            </ul>
-          </section>
-
-          <p className="info-record mt-8 text-sm">
-            This browse-only entry reproduces the supplied product name, code, and package configuration. Availability, quality records, and purchasing are not represented.
-          </p>
-        </div>
+            </ol>
+          </RecordPanel>
+        </section>
       </div>
+
+      <Notice className="mt-10" icon={FileText} title="Publication scope">
+        This browse-only entry reproduces the supplied product name, code, and package
+        configuration. Availability, quality records, pricing, and purchasing are not
+        represented.
+      </Notice>
     </article>
   );
 }

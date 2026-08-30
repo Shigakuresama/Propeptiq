@@ -79,6 +79,9 @@ describe("Task 8C1A3 reward adjustment resource UI", () => {
     </>);
 
     expect(screen.getByText(/no reward accounts are available/i)).toBeVisible();
+    expect(
+      screen.getByText("No records are available for this capability-scoped view.").closest("li"),
+    ).toHaveClass("lg:col-span-2");
     expect(screen.queryByRole("form")).toBeNull();
     expect(screen.queryByText(/synthetic local test only/i)).toBeNull();
     expect(screen.queryByText(/available points.*\d/iu)).toBeNull();

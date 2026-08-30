@@ -2,13 +2,33 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { forwardRef, type ComponentProps } from "react";
 
-export function ShellNavLink({ href, children }: { href: string; children: React.ReactNode }) {
+import { cn } from "@/lib/utils";
+
+type ShellNavLinkProps = Omit<ComponentProps<typeof Link>, "href"> & {
+  href: string;
+};
+
+export const ShellNavLink = forwardRef<HTMLAnchorElement, ShellNavLinkProps>(function ShellNavLink({
+  href,
+  children,
+  className,
+  ...props
+}, ref) {
   const pathname = usePathname();
-  const current = pathname === href || (href !== "/account" && pathname.startsWith(`${href}/`));
+  const current =
+    pathname === href ||
+    (href !== "/" && href !== "/account" && Boolean(pathname?.startsWith(`${href}/`)));
   return (
-    <Link href={href as never} className="shell-nav-link" aria-current={current ? "page" : undefined}>
+    <Link
+      {...props}
+      ref={ref}
+      href={href as never}
+      className={cn("shell-nav-link", className)}
+      aria-current={current ? "page" : undefined}
+    >
       {children}
     </Link>
   );
-}
+});

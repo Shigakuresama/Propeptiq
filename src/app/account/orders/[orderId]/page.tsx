@@ -1,7 +1,10 @@
+import { ArrowLeft } from "lucide-react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { orderAccessReason } from "@/account/access";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
+import { DataLabel, RecordPanel } from "@/components/design-system/archive-primitives";
 
 function money(amount: number, currency: string) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amount / 100);
@@ -17,21 +20,34 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
   if (!order) notFound();
   return (
     <article className="max-w-4xl">
-      <p className="eyebrow">Owner-only order</p>
+      <Link href="/account/orders" className="record-link inline-flex min-h-11 items-center gap-2">
+        <ArrowLeft aria-hidden="true" className="size-4" />
+        Order history
+      </Link>
+      <DataLabel className="mt-6">Owner-only order</DataLabel>
       <h1 className="mt-4 break-all font-heading text-page leading-[0.95]">Order {order.id}</h1>
-      <dl className="record-card mt-8 grid gap-5 sm:grid-cols-2">
-        <div><dt className="eyebrow">State</dt><dd className="mt-2 text-xl capitalize">{order.state.replaceAll("_", " ")}</dd></div>
-        <div><dt className="eyebrow">Total</dt><dd className="mt-2 text-xl tabular-nums">{money(order.totalMinor, order.currency)}</dd></div>
-        <div><dt className="eyebrow">Destination state</dt><dd className="mt-2 text-xl">{order.destinationStateCode}</dd></div>
-        <div><dt className="eyebrow">Created</dt><dd className="mt-2 text-xl">{new Date(order.createdAt).toLocaleDateString("en-US")}</dd></div>
-        <div><dt className="eyebrow">Payment</dt><dd className="mt-2 text-xl capitalize">{order.paymentState.replaceAll("_", " ")}</dd></div>
-        <div><dt className="eyebrow">Refund</dt><dd className="mt-2 text-xl capitalize">{order.refundState}</dd></div>
-        <div><dt className="eyebrow">Fulfillment hold</dt><dd className="mt-2 text-xl capitalize">{order.holdState}</dd></div>
-        <div><dt className="eyebrow">Release</dt><dd className="mt-2 text-xl capitalize">{order.releaseState}</dd></div>
-        <div><dt className="eyebrow">Shipment</dt><dd className="mt-2 text-xl capitalize">{order.shipmentState.replaceAll("_", " ")}</dd></div>
-      </dl>
+      <RecordPanel className="mt-8 overflow-hidden">
+        <dl className="grid sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            ["State", order.state.replaceAll("_", " ")],
+            ["Total", money(order.totalMinor, order.currency)],
+            ["Destination state", order.destinationStateCode],
+            ["Created", new Date(order.createdAt).toLocaleDateString("en-US")],
+            ["Payment", order.paymentState.replaceAll("_", " ")],
+            ["Refund", order.refundState],
+            ["Fulfillment hold", order.holdState],
+            ["Release", order.releaseState],
+            ["Shipment", order.shipmentState.replaceAll("_", " ")],
+          ].map(([label, value]) => (
+            <div className="border-b border-border p-5 sm:border-r last:border-b-0 lg:[&:nth-last-child(-n+3)]:border-b-0" key={label}>
+              <dt className="data-label">{label}</dt>
+              <dd className="mt-3 break-words text-lg font-semibold capitalize tabular-nums">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </RecordPanel>
       <h2 className="mt-10 font-heading text-3xl">Order items</h2>
-      <ul className="mt-5 grid gap-4 p-0">{order.items.map((item) => <li key={item.id} className="record-card"><p className="font-heading text-2xl">{item.productName}</p><p className="mt-2 text-base text-muted-ink">{item.packageForm}</p><p className="mt-4 tabular-nums">{item.quantity} × {money(item.unitAmountMinor, order.currency)} · {money(item.totalMinor, order.currency)}</p></li>)}</ul>
+      <ul className="mt-5 grid gap-4 p-0">{order.items.map((item) => <li key={item.id}><RecordPanel className="grid gap-4 p-5 sm:grid-cols-[1fr_auto] sm:items-end sm:p-6"><div><p className="font-heading text-2xl">{item.productName}</p><p className="mt-2 text-base text-muted-ink">{item.packageForm}</p></div><p className="tabular-nums sm:text-right">{item.quantity} × {money(item.unitAmountMinor, order.currency)} · {money(item.totalMinor, order.currency)}</p></RecordPanel></li>)}</ul>
     </article>
   );
 }

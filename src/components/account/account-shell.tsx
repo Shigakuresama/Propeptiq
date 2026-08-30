@@ -1,9 +1,10 @@
-import { Menu } from "lucide-react";
+import { LockKeyhole, Menu } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { signOutLocalActor } from "@/auth/actions";
-import { BrandMark } from "@/components/site/brand-mark";
+import { DataLabel, RecordPanel } from "@/components/design-system/archive-primitives";
+import { BrandLogo } from "@/components/site/brand-mark";
 import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
 import { ShellNavLink } from "@/components/site/shell-nav-link";
 import { Button } from "@/components/ui/button";
@@ -45,11 +46,20 @@ export function AccountShell({
     <div className="min-h-svh">
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <ResearchRestrictionBar />
-      <header className="border-b border-border bg-canvas">
+      <header className="border-b border-border bg-canvas/95">
         <div className="site-container flex min-h-20 items-center gap-4">
-          <Link href="/" className="flex min-h-11 items-center gap-3 rounded-full px-1 font-semibold tracking-[0.08em]">
-            <BrandMark /> <span>PROPEPTIQ LABS</span>
-          </Link>
+          <div className="flex min-w-0 items-center gap-3">
+            <Link
+              href="/"
+              aria-label="PROPEPTIQ LABS home"
+              className="flex min-h-11 shrink-0 items-center rounded-lg bg-ink px-1.5 no-underline"
+            >
+              <BrandLogo className="w-24" decorative />
+            </Link>
+            <span className="hidden text-xs font-semibold uppercase tracking-[0.12em] text-accent-readable sm:block">
+              Private records
+            </span>
+          </div>
           <Sheet>
             <SheetTrigger asChild>
               <Button type="button" variant="outline" size="icon" className="ml-auto size-11 xl:hidden" aria-label="Open account navigation">
@@ -68,17 +78,27 @@ export function AccountShell({
           </Sheet>
         </div>
       </header>
-      <div className="site-container xl:grid xl:grid-cols-[15rem_minmax(0,1fr)] xl:gap-10">
+      <div className="site-container xl:grid xl:grid-cols-[16rem_minmax(0,1fr)] xl:gap-10">
         <aside className="hidden xl:block">
           <div className="sticky top-8 py-16">
-            <p className="eyebrow px-4">Account</p>
-            <nav aria-label="Account" className="mt-4 grid gap-1"><NavLinks /></nav>
+            <RecordPanel className="p-3">
+              <div className="border-b border-border px-3 pb-4 pt-2">
+                <div className="flex items-center gap-2 text-accent-readable">
+                  <LockKeyhole aria-hidden="true" className="size-4" />
+                  <DataLabel>Account workspace</DataLabel>
+                </div>
+                <p className="mt-2 text-sm leading-6 text-muted-ink">
+                  Owner-scoped records and commerce steps.
+                </p>
+              </div>
+              <nav aria-label="Account" className="mt-3 grid gap-1"><NavLinks /></nav>
+            </RecordPanel>
           </div>
         </aside>
         <div className="min-w-0">
           <main id="main-content" tabIndex={-1} className="py-10 sm:py-16">{children}</main>
           {localDriver ? (
-            <form action={signOutLocalActor} className="pb-10">
+            <form action={signOutLocalActor} className="border-t border-border py-8">
               <Button type="submit" variant="outline" className="min-h-11">End fixed test session</Button>
             </form>
           ) : null}

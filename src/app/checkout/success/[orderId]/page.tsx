@@ -6,6 +6,7 @@ import { orderAccessReason } from "@/account/access";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
 import type { CheckoutSuccessReadModel } from "@/commerce/checkout-success-read";
 import { AccountShell } from "@/components/account/account-shell";
+import { DataLabel, RecordPanel } from "@/components/design-system/archive-primitives";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -63,7 +64,7 @@ export default async function CheckoutSuccessPage({
   return (
     <AccountShell localDriver={request.localDriver !== null}>
       <article className="mx-auto max-w-5xl">
-        <p className="eyebrow">Owner-only order record</p>
+        <DataLabel>Owner-only order record</DataLabel>
         {request.localDriver !== null ? (
           <p className="warning-record mt-5 font-semibold">Synthetic local test only</p>
         ) : null}
@@ -79,27 +80,31 @@ export default async function CheckoutSuccessPage({
           <p className="mt-3 text-base leading-7">{payment.detail}</p>
         </section>
 
-        <dl className="record-card mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          <div><dt className="eyebrow">Order</dt><dd className="mt-2 break-all text-base">{order.orderId}</dd></div>
-          <div><dt className="eyebrow">Order state</dt><dd className="mt-2 text-xl capitalize">{statusLabel(order.state)}</dd></div>
-          <div><dt className="eyebrow">Total</dt><dd className="mt-2 text-xl font-semibold tabular-nums">{money(order.totalMinor)}</dd></div>
-          <div><dt className="eyebrow">Refund</dt><dd className="mt-2 text-xl capitalize">{statusLabel(order.refundState)}</dd></div>
-          <div><dt className="eyebrow">Hold</dt><dd className="mt-2 text-xl capitalize">{statusLabel(order.holdState)}</dd></div>
-          <div><dt className="eyebrow">Shipment</dt><dd className="mt-2 text-xl capitalize">{statusLabel(order.shipmentState)}</dd></div>
-        </dl>
+        <RecordPanel className="mt-6 overflow-hidden">
+          <dl className="grid sm:grid-cols-2 lg:grid-cols-3">
+            <div className="border-b border-border p-5 lg:border-r"><dt className="data-label">Order</dt><dd className="mt-3 break-all text-base">{order.orderId}</dd></div>
+            <div className="border-b border-border p-5 sm:border-l lg:border-l-0 lg:border-r"><dt className="data-label">Order state</dt><dd className="mt-3 text-lg font-semibold capitalize">{statusLabel(order.state)}</dd></div>
+            <div className="border-b border-border p-5 lg:border-r"><dt className="data-label">Total</dt><dd className="mt-3 text-lg font-semibold tabular-nums">{money(order.totalMinor)}</dd></div>
+            <div className="border-b border-border p-5 sm:border-l lg:border-l-0 lg:border-r"><dt className="data-label">Refund</dt><dd className="mt-3 text-lg font-semibold capitalize">{statusLabel(order.refundState)}</dd></div>
+            <div className="border-b border-border p-5 lg:border-b-0 lg:border-r"><dt className="data-label">Hold</dt><dd className="mt-3 text-lg font-semibold capitalize">{statusLabel(order.holdState)}</dd></div>
+            <div className="p-5 sm:border-l lg:border-l-0"><dt className="data-label">Shipment</dt><dd className="mt-3 text-lg font-semibold capitalize">{statusLabel(order.shipmentState)}</dd></div>
+          </dl>
+        </RecordPanel>
 
         <section className="mt-10" aria-labelledby="success-items-heading">
           <h2 id="success-items-heading" className="font-heading text-3xl">Order items</h2>
           <ul className="mt-5 grid gap-4 p-0">
             {order.items.map((item) => (
-              <li key={item.id} className="record-card grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                <div>
-                  <h3 className="font-heading text-2xl">{item.productName}</h3>
-                  <p className="mt-2 text-base text-muted-ink">{item.packageForm}</p>
-                </div>
-                <p className="tabular-nums sm:text-right">
-                  {item.quantity} × {money(item.unitAmountMinor)} · {money(item.totalMinor)}
-                </p>
+              <li key={item.id}>
+                <RecordPanel className="grid gap-3 p-5 sm:grid-cols-[1fr_auto] sm:items-end sm:p-6">
+                  <div>
+                    <h3 className="font-heading text-2xl">{item.productName}</h3>
+                    <p className="mt-2 text-base text-muted-ink">{item.packageForm}</p>
+                  </div>
+                  <p className="tabular-nums sm:text-right">
+                    {item.quantity} × {money(item.unitAmountMinor)} · {money(item.totalMinor)}
+                  </p>
+                </RecordPanel>
               </li>
             ))}
           </ul>

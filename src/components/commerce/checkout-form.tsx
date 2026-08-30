@@ -10,6 +10,7 @@ import {
 } from "@/cart/preview-presentation";
 import { canContinueFromPreview, type CartPreview } from "@/cart/preview-types";
 import { isCanonicalUuid } from "@/commerce/checkout-identity";
+import { DataLabel, RecordPanel } from "@/components/design-system/archive-primitives";
 import { Button } from "@/components/ui/button";
 
 type PromotionOption = Readonly<{ id: string; name: string }>;
@@ -521,8 +522,9 @@ export function CheckoutForm({
     ? null
     : rewardsUnavailableCopy(quoteView.quote.rewardsUnavailableReason);
   return (
-    <section className="record-card" aria-labelledby="checkout-form-heading">
-      <p className="eyebrow">Authoritative checkout</p>
+    <section aria-labelledby="checkout-form-heading">
+      <RecordPanel className="p-5 sm:p-7">
+      <DataLabel>Authoritative checkout</DataLabel>
       <h2 id="checkout-form-heading" className="mt-3 font-heading text-3xl">Destination and totals</h2>
       <p className="mt-3 text-base leading-7 text-muted-ink">
         Product IDs and quantities come from your browser-saved cart. The server reloads every price, discount, availability, destination, shipping, and tax fact.
@@ -588,64 +590,77 @@ export function CheckoutForm({
       ) : null}
 
       <form ref={formRef} className="mt-8 grid gap-6" onSubmit={submitQuote} noValidate>
-        <div className="grid gap-5 sm:grid-cols-2">
-          <Field id="recipientName" label="Recipient name" error={errors.recipientName}>
-            <input id="recipientName" name="recipientName" className="form-input" autoComplete="name" maxLength={120} required aria-required="true" value={destination.recipientName} aria-invalid={Boolean(errors.recipientName)} aria-describedby={errors.recipientName ? "recipientName-error" : undefined} onChange={(event) => updateField("recipientName", event.currentTarget.value)} />
-          </Field>
-          <Field id="countryCode" label="Country">
-            <input id="countryCode" name="countryCode" className="form-input" value="United States (US)" readOnly />
-          </Field>
-        </div>
-        <Field id="line1" label="Address line 1" error={errors.line1}>
-          <input id="line1" name="line1" className="form-input" autoComplete="address-line1" maxLength={120} required aria-required="true" value={destination.line1} aria-invalid={Boolean(errors.line1)} aria-describedby={errors.line1 ? "line1-error" : undefined} onChange={(event) => updateField("line1", event.currentTarget.value)} />
-        </Field>
-        <Field id="line2" label="Address line 2 (optional)">
-          <input id="line2" name="line2" className="form-input" autoComplete="address-line2" maxLength={120} value={destination.line2} onChange={(event) => updateField("line2", event.currentTarget.value)} />
-        </Field>
-        <div className="grid gap-5 sm:grid-cols-3">
-          <Field id="city" label="City" error={errors.city}>
-            <input id="city" name="city" className="form-input" autoComplete="address-level2" maxLength={100} required aria-required="true" value={destination.city} aria-invalid={Boolean(errors.city)} aria-describedby={errors.city ? "city-error" : undefined} onChange={(event) => updateField("city", event.currentTarget.value)} />
-          </Field>
-          <Field id="stateCode" label="State or district" error={errors.stateCode}>
-            <select id="stateCode" name="stateCode" className="form-input" autoComplete="address-level1" required aria-required="true" value={destination.stateCode} aria-invalid={Boolean(errors.stateCode)} aria-describedby={errors.stateCode ? "stateCode-error" : undefined} onChange={(event) => updateField("stateCode", event.currentTarget.value)}>
-              <option value="">Select</option>
-              {stateCodes.map((state) => <option key={state} value={state}>{state}</option>)}
-            </select>
-          </Field>
-          <Field id="postalCode" label="Postal code" error={errors.postalCode}>
-            <input id="postalCode" name="postalCode" className="form-input" autoComplete="postal-code" inputMode="numeric" maxLength={10} required aria-required="true" value={destination.postalCode} aria-invalid={Boolean(errors.postalCode)} aria-describedby={errors.postalCode ? "postalCode-error" : undefined} onChange={(event) => updateField("postalCode", event.currentTarget.value)} />
-          </Field>
-        </div>
-        <Field id="promotionId" label="Promotion (optional)">
-          <select id="promotionId" name="promotionId" className="form-input" value={promotionId} onChange={(event) => {
-            setPromotionId(event.currentTarget.value);
-            setQuoteView(null);
-            setFeedback(null);
-          }}>
-            <option value="">No promotion</option>
-            {promotions.map((promotion) => <option key={promotion.id} value={promotion.id}>{promotion.name}</option>)}
-          </select>
-        </Field>
-        <Field
-          id="rewardRedemptionPoints"
-          label="Points to redeem (optional)"
-          error={errors.rewardRedemptionPoints}
-        >
-          <input
-            id="rewardRedemptionPoints"
-            name="rewardRedemptionPoints"
-            className="form-input"
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={Number.MAX_SAFE_INTEGER}
-            step={1}
-            value={rewardRedemptionPoints}
-            aria-invalid={Boolean(errors.rewardRedemptionPoints)}
-            aria-describedby={errors.rewardRedemptionPoints ? "rewardRedemptionPoints-error" : undefined}
-            onChange={(event) => updateRewardRedemptionPoints(event.currentTarget.value)}
-          />
-        </Field>
+        <section className="record-panel-recessed p-4 sm:p-5" aria-labelledby="destination-fields-heading">
+          <DataLabel>01 / Destination</DataLabel>
+          <h3 id="destination-fields-heading" className="mt-3 font-heading text-2xl">Research delivery destination</h3>
+          <p className="mt-2 text-base leading-7 text-muted-ink">Required destination facts are checked against current server policy when the quote is requested.</p>
+          <div className="mt-6 grid gap-6">
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field id="recipientName" label="Recipient name" error={errors.recipientName}>
+                <input id="recipientName" name="recipientName" className="form-input" autoComplete="name" maxLength={120} required aria-required="true" value={destination.recipientName} aria-invalid={Boolean(errors.recipientName)} aria-describedby={errors.recipientName ? "recipientName-error" : undefined} onChange={(event) => updateField("recipientName", event.currentTarget.value)} />
+              </Field>
+              <Field id="countryCode" label="Country">
+                <input id="countryCode" name="countryCode" className="form-input" value="United States (US)" readOnly />
+              </Field>
+            </div>
+            <Field id="line1" label="Address line 1" error={errors.line1}>
+              <input id="line1" name="line1" className="form-input" autoComplete="address-line1" maxLength={120} required aria-required="true" value={destination.line1} aria-invalid={Boolean(errors.line1)} aria-describedby={errors.line1 ? "line1-error" : undefined} onChange={(event) => updateField("line1", event.currentTarget.value)} />
+            </Field>
+            <Field id="line2" label="Address line 2 (optional)">
+              <input id="line2" name="line2" className="form-input" autoComplete="address-line2" maxLength={120} value={destination.line2} onChange={(event) => updateField("line2", event.currentTarget.value)} />
+            </Field>
+            <div className="grid gap-5 sm:grid-cols-3">
+              <Field id="city" label="City" error={errors.city}>
+                <input id="city" name="city" className="form-input" autoComplete="address-level2" maxLength={100} required aria-required="true" value={destination.city} aria-invalid={Boolean(errors.city)} aria-describedby={errors.city ? "city-error" : undefined} onChange={(event) => updateField("city", event.currentTarget.value)} />
+              </Field>
+              <Field id="stateCode" label="State or district" error={errors.stateCode}>
+                <select id="stateCode" name="stateCode" className="form-input" autoComplete="address-level1" required aria-required="true" value={destination.stateCode} aria-invalid={Boolean(errors.stateCode)} aria-describedby={errors.stateCode ? "stateCode-error" : undefined} onChange={(event) => updateField("stateCode", event.currentTarget.value)}>
+                  <option value="">Select</option>
+                  {stateCodes.map((state) => <option key={state} value={state}>{state}</option>)}
+                </select>
+              </Field>
+              <Field id="postalCode" label="Postal code" error={errors.postalCode}>
+                <input id="postalCode" name="postalCode" className="form-input" autoComplete="postal-code" inputMode="numeric" maxLength={10} required aria-required="true" value={destination.postalCode} aria-invalid={Boolean(errors.postalCode)} aria-describedby={errors.postalCode ? "postalCode-error" : undefined} onChange={(event) => updateField("postalCode", event.currentTarget.value)} />
+              </Field>
+            </div>
+          </div>
+        </section>
+        <section className="record-panel-recessed p-4 sm:p-5" aria-labelledby="benefit-fields-heading">
+          <DataLabel>02 / Optional benefits</DataLabel>
+          <h3 id="benefit-fields-heading" className="mt-3 font-heading text-2xl">Promotion and points</h3>
+          <div className="mt-6 grid gap-6 sm:grid-cols-2">
+            <Field id="promotionId" label="Promotion (optional)">
+              <select id="promotionId" name="promotionId" className="form-input" value={promotionId} onChange={(event) => {
+                setPromotionId(event.currentTarget.value);
+                setQuoteView(null);
+                setFeedback(null);
+              }}>
+                <option value="">No promotion</option>
+                {promotions.map((promotion) => <option key={promotion.id} value={promotion.id}>{promotion.name}</option>)}
+              </select>
+            </Field>
+            <Field
+              id="rewardRedemptionPoints"
+              label="Points to redeem (optional)"
+              error={errors.rewardRedemptionPoints}
+            >
+              <input
+                id="rewardRedemptionPoints"
+                name="rewardRedemptionPoints"
+                className="form-input"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={Number.MAX_SAFE_INTEGER}
+                step={1}
+                value={rewardRedemptionPoints}
+                aria-invalid={Boolean(errors.rewardRedemptionPoints)}
+                aria-describedby={errors.rewardRedemptionPoints ? "rewardRedemptionPoints-error" : undefined}
+                onChange={(event) => updateRewardRedemptionPoints(event.currentTarget.value)}
+              />
+            </Field>
+          </div>
+        </section>
         {errors.items ? <p id="items-error" className="error-record text-base" role="alert">{errors.items}</p> : null}
         <Button type="submit" className="action-primary min-h-12 w-full sm:w-auto" disabled={busy !== null || items.length === 0 || !previewCanContinue}>
           {busy === "quote" ? "Getting authoritative quote…" : "Get authoritative quote"}
@@ -665,8 +680,8 @@ export function CheckoutForm({
       ) : null}
 
       {quoteView?.fingerprint === fingerprint ? (
-        <section className="mt-8 border-t border-border pt-8" aria-labelledby="authoritative-total-heading">
-          <p className="eyebrow">Current server result</p>
+        <section className="record-panel-recessed mt-8 p-5 sm:p-6" aria-labelledby="authoritative-total-heading">
+          <DataLabel>Current server result</DataLabel>
           <h3 id="authoritative-total-heading" className="mt-3 font-heading text-3xl">Authoritative total</h3>
           <ul className="mt-5 grid gap-3 p-0">
             {quoteView.quote.lines.map((line) => (
@@ -715,6 +730,7 @@ export function CheckoutForm({
           )}
         </section>
       ) : null}
+      </RecordPanel>
     </section>
   );
 }

@@ -21,7 +21,7 @@ Use a calm archival/editorial system: off-white canvas, near-black ink, restrain
 - Public navigation is Catalog, Quality Records, Rewards, and Research-Use Policy. Partner Program belongs in the account menu and footer; cart and account actions remain in the header.
 - New routes are `/rewards`, `/partners`, `/account/rewards`, `/account/referrals`, `/account/partner`, `/research-sets`, `/sets/[code]`, `/rewards/terms`, and `/partners/terms`, with access and truthful inactive states defined by the binding growth design.
 - The homepage order is research-use restriction bar; optional active-promotion strip only with a real end time; editorial hero; Proof Rail; admin-curated catalog highlights; the compact Earn points / Refer a lab / Share a research set explainer; and quality-record callout. Omit inactive commerce or growth modules rather than inventing values.
-- The owner-supplied browse-only PDF catalog remains price-free and non-purchasable. It may expose the 53 exact-name cards and all 103 owner-supplied variants in browse-only publication mode; active production database products may expose server-recorded price, package form, promotion, evidence, and growth actions.
+- The owner-supplied browse-only PDF catalog remains price-free and non-purchasable. The current validated publication exposes 56 exact-name cards and all 103 owner-supplied variants in browse-only publication mode; active production database products may expose server-recorded price, package form, promotion, evidence, and growth actions.
 - V1 proposed production records begin as `draft` and remain invisible until the owner validates margin impact and activates them. Points are `100 points = $1.00`, earn `2 points per $1.00` of eligible net merchandise spend, redeem from `500 points` (`$5.00`) up to `25%` of the post-promotion merchandise subtotal, and do not expire. Points exclude tax, shipping, refunded amounts, ordinary discounts, referral discounts, and redeemed points; they cannot be purchased, transferred, redeemed for cash, or used for tax or shipping.
 - Customer referral attribution is `30 days`, last eligible referral click; the referred customer's first eligible order receives `10%` off capped at `$25.00`; the referrer earns `5 points per $1.00` of eligible net merchandise capped at `2,500 points`; and the reward becomes available after delivery. Each active buyer receives one stable, revocable code automatically, with one referral reward per new buyer. Self-referrals, duplicate buyer accounts, refunds, and chargebacks are ineligible.
 - Cash affiliates use `30 days` last eligible affiliate click attribution, `10%` first eligible order commission, and `5%` reorder commission for `180 days` after the first qualified order. Commission is eligible for approval `30 days` after delivery, remains reversible for verified refunds or chargebacks, has a `$50.00` minimum payout, and is batched monthly outside the app. Cash affiliates require verified identity and one administrator approval; production records begin as `draft`.
@@ -47,10 +47,13 @@ Pattern research used the official [AminoClub homepage](https://www.aminoclub.co
 | Ink `#171915` | Primary text and dark surfaces |
 | Moss `#66715B` | Restrained accents and focus-adjacent emphasis |
 | Rule `#C9C5B8` | Dividers and record boundaries |
+| Record surface `#F8F5EC` | Primary cards and document panels |
+| Recessed surface `#EEEADF` | Quiet grouped controls and secondary record regions |
+| Readable accent `#56604D` | Small labels on canvas or moss-tinted surfaces |
 | Warning `#9A6700` | Review state with text/icon |
 | Danger `#A33A31` | Blocked/error state with text/icon |
 
-Use Newsreader 500–600 for editorial headings and Geist Sans for body/interface text. Body text is at least 16px, headings wrap without hyphenation, and numeric records use tabular figures.
+Use Newsreader 500–600 for editorial headings and Geist Sans for body/interface text. Body text is at least 16px, headings wrap without hyphenation, and numeric records use tabular figures. Moss remains the visual accent; use the darker readable-accent token for small text on tinted surfaces. Public, account, and admin navigation share one visible `aria-current` treatment.
 
 ## Proof Rail
 

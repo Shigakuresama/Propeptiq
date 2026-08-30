@@ -1,6 +1,8 @@
+import { ArchiveX } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { AdminReadSnapshot, SafePromotionConfiguration } from "@/admin/admin-read";
+import { DataLabel, RecordPanel } from "@/components/design-system/archive-primitives";
 
 type Fact = readonly [label: string, value: ReactNode];
 
@@ -61,27 +63,37 @@ function RecordCard({
   facts: readonly Fact[];
 }) {
   return (
-    <li className="record-card min-w-0">
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <h2 className="min-w-0 break-words font-heading text-2xl">{title}</h2>
-        {status ? <span className="status-pill capitalize">{status.replaceAll("_", " ")}</span> : null}
-      </div>
-      <dl className="mt-5 grid gap-3 text-base sm:grid-cols-2">
-        {facts.map(([label, value]) => (
-          <div className="min-w-0" key={label}>
-            <dt className="text-sm font-semibold uppercase tracking-[0.12em] text-muted-ink">{label}</dt>
-            <dd className="mt-1 min-w-0 break-words text-ink">{value}</dd>
-          </div>
-        ))}
-      </dl>
+    <li className="min-w-0">
+      <RecordPanel className="min-w-0 p-4 sm:p-5">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+          <h3 className="min-w-0 break-words font-heading text-2xl leading-tight">{title}</h3>
+          {status ? <span className="status-pill shrink-0 capitalize">{status.replaceAll("_", " ")}</span> : null}
+        </div>
+        <dl className="mt-4 grid gap-x-5 text-base sm:grid-cols-2">
+          {facts.map(([label, value]) => (
+            <div className="min-w-0 border-t border-border py-3" key={label}>
+              <dt className="data-label">{label}</dt>
+              <dd className="mt-1.5 min-w-0 break-words leading-6 text-ink">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      </RecordPanel>
     </li>
   );
 }
 
 function EmptyRecords() {
   return (
-    <li className="empty-record">
-      No records are available for this capability-scoped view.
+    <li className="lg:col-span-2">
+      <RecordPanel className="flex items-start gap-4 p-5 sm:p-6">
+        <div className="grid size-10 shrink-0 place-items-center rounded-full border border-border bg-surface-recessed text-accent-readable">
+          <ArchiveX aria-hidden="true" className="size-4" />
+        </div>
+        <div>
+          <DataLabel>Authoritative read-back</DataLabel>
+          <p className="mt-2 text-base leading-7 text-muted-ink">No records are available for this capability-scoped view.</p>
+        </div>
+      </RecordPanel>
     </li>
   );
 }
@@ -442,12 +454,12 @@ export function AdminResourceRecords({ snapshot }: { snapshot: AdminReadSnapshot
 
   return (
     <section className="mt-10" aria-labelledby="authoritative-records-heading">
-      <p className="eyebrow">Authoritative read-back</p>
+      <DataLabel>Authoritative read-back</DataLabel>
       <h2 id="authoritative-records-heading" className="mt-3 font-heading text-3xl">
         Current records
       </h2>
       <ul
-        className="mt-6 grid gap-4 p-0 lg:grid-cols-2"
+        className="mt-6 grid gap-3 p-0 lg:grid-cols-2"
         aria-label={snapshot.resource === "audit" ? "Redacted audit history" : listLabel}
       >
         {empty ?? records}

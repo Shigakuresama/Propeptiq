@@ -5,8 +5,9 @@ import Link from "next/link";
 
 import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { useCart } from "@/cart/cart-provider";
-import { BrandMark } from "@/components/site/brand-mark";
+import { BrandLogo } from "@/components/site/brand-mark";
 import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
+import { ShellNavLink } from "@/components/site/shell-nav-link";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -34,24 +35,24 @@ export function SiteHeader() {
           <Link
             href="/"
             aria-label={`${siteName} home`}
-            className="group flex min-h-11 min-w-11 items-center gap-2.5 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-canvas"
+            className="group flex min-h-11 shrink-0 items-center rounded-lg bg-ink px-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-canvas"
           >
-            <BrandMark className="transition-transform duration-200 ease-out group-hover:rotate-12 motion-reduce:transform-none" />
-            <span className="truncate text-[0.7rem] font-semibold tracking-[0.11em] text-ink sm:text-[0.78rem]">
-              <span className="sm:hidden">PROPEPTIQ</span>
-              <span className="hidden sm:inline">{siteName}</span>
-            </span>
+            <BrandLogo
+              className="w-24 transition-transform duration-200 ease-out group-hover:-translate-y-0.5 motion-reduce:transform-none sm:w-28"
+              decorative
+              priority
+            />
           </Link>
 
           <nav aria-label="Primary" className="ml-auto hidden items-center gap-1 xl:flex">
             {publicNavigation.map((item) => (
-              <Link
+              <ShellNavLink
                 key={item.href}
                 href={item.href}
-                className="rounded-full px-3 py-3 text-sm font-medium text-muted-ink transition-colors duration-200 hover:bg-moss-soft/60 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="px-3 py-3 text-sm text-muted-ink hover:bg-moss-soft/60 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {item.label}
-              </Link>
+              </ShellNavLink>
             ))}
           </nav>
 
@@ -90,11 +91,11 @@ export function SiteHeader() {
               className="w-[min(24rem,calc(100vw-1rem))] border-border bg-canvas p-0"
             >
               <SheetHeader className="border-b border-border px-6 pb-5 pt-6 text-left">
-                <div className="flex items-center gap-3 pr-10">
-                  <BrandMark />
-                  <SheetTitle className="font-sans text-xs font-semibold tracking-[0.11em]">
-                    {siteName}
-                  </SheetTitle>
+                <div className="flex items-center pr-10">
+                  <span className="rounded-lg bg-ink px-1.5">
+                    <BrandLogo className="w-28" decorative />
+                  </span>
+                  <SheetTitle className="sr-only">{siteName}</SheetTitle>
                 </div>
                 <SheetDescription className="pt-4 leading-6 text-muted-ink">
                   {researchRestrictions[0]} {researchRestrictions[1]}
@@ -103,12 +104,12 @@ export function SiteHeader() {
               <nav aria-label="Mobile primary" className="flex flex-col px-3 py-4">
                 {publicNavigation.map((item) => (
                   <SheetClose asChild key={item.href}>
-                    <Link
+                    <ShellNavLink
                       href={item.href}
-                      className="flex min-h-12 items-center rounded-xl px-3 py-3 font-medium text-ink transition-colors duration-200 hover:bg-moss-soft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex min-h-12 rounded-xl px-3 py-3 text-ink hover:bg-moss-soft/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {item.label}
-                    </Link>
+                    </ShellNavLink>
                   </SheetClose>
                 ))}
                 <SheetClose asChild>

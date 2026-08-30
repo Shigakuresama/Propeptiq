@@ -1,6 +1,6 @@
 "use client";
 
-import { Minus, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, CircleAlert, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -15,6 +15,7 @@ import {
   type CartPreviewItem,
   canContinueFromPreview,
 } from "@/cart/preview-types";
+import { DataLabel, EmptyState, Notice, RecordPanel } from "@/components/design-system/archive-primitives";
 import { Button } from "@/components/ui/button";
 
 function formatMoney(amountMinor: number, currency: string): string {
@@ -130,33 +131,43 @@ export function CartView({
 
   if (items.length === 0) {
     return (
-      <section className="empty-record">
-        <h2 className="font-heading text-section text-ink">Your cart is empty.</h2>
-        <p className="mt-4 max-w-[60ch] leading-7 text-muted-ink">
+      <EmptyState
+        description={(
+          <>
           Add an active catalog record to create a local request. Prices and availability
           will be reloaded from the server.
-        </p>
-        <Button asChild className="action-primary mt-7">
-          <Link href="/catalog">Continue to catalog</Link>
-        </Button>
-      </section>
+          </>
+        )}
+        eyebrow="Saved request"
+        icon={ShoppingBag}
+        title="Your cart is empty."
+        action={(
+          <Button asChild className="action-primary">
+            <Link href="/catalog">Continue to catalog</Link>
+          </Button>
+        )}
+      />
     );
   }
 
   return (
     <div className="cart-layout">
       <section aria-labelledby="cart-items-heading">
-        <div className="flex items-end justify-between gap-4 border-b border-border pb-5">
-          <h2 id="cart-items-heading" className="font-heading text-3xl text-ink">
-            Requested records
-          </h2>
-          <Button type="button" variant="ghost" className="min-h-11" onClick={clearCart}>
-            Clear cart
-          </Button>
-        </div>
+        <RecordPanel className="overflow-hidden">
+          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border p-5 sm:p-6">
+            <div>
+              <DataLabel>Local cart</DataLabel>
+              <h2 id="cart-items-heading" className="mt-2 font-heading text-3xl text-ink">
+                Requested records
+              </h2>
+            </div>
+            <Button type="button" variant="ghost" className="min-h-11" onClick={clearCart}>
+              Clear cart
+            </Button>
+          </div>
 
         {error ? (
-          <div className="error-record mt-6 text-base leading-7" role="alert">
+          <Notice className="mx-5 mt-5 text-base sm:mx-6" icon={CircleAlert} tone="danger" title="Server preview unavailable">
             <p>The authoritative cart preview is unavailable. Retry before continuing.</p>
             <Button
               type="button"
@@ -166,24 +177,34 @@ export function CartView({
             >
               Retry current cart facts
             </Button>
-          </div>
+          </Notice>
         ) : null}
         {loading ? (
-          <div className="cart-loading mt-6" aria-label="Refreshing authoritative cart preview" />
+          <div className="cart-loading mx-5 mt-5 sm:mx-6" aria-label="Refreshing authoritative cart preview" />
         ) : null}
 
-        <ul className="divide-y divide-border" aria-live="polite">
+        <ul className="divide-y divide-border px-5 sm:px-6" aria-live="polite">
           {displayedItems.map((item) => {
             const label = item.name ?? item.productId;
             return (
-              <li className="py-7" key={item.productId}>
+              <li className="py-6" key={item.productId}>
                 <div className="grid gap-5 sm:grid-cols-[1fr_auto] sm:items-start">
-                  <div>
-                    <p className="font-heading text-2xl text-ink">{label}</p>
+                  <div className="min-w-0">
+                    <DataLabel>Catalog record</DataLabel>
+                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
+                      <p className="min-w-0 break-words font-heading text-2xl text-ink">{label}</p>
+                      {!loading && preview ? (
+                        <span className="status-pill">
+                          {item.available ? "Server confirmed" : "Unavailable"}
+                        </span>
+                      ) : !loading ? (
+                        <span className="status-pill">Not verified</span>
+                      ) : null}
+                    </div>
                     {item.packageForm ? (
                       <p className="mt-2 text-base text-muted-ink">{item.packageForm}</p>
                     ) : null}
-                    {!loading && !item.available ? (
+                    {!loading && preview && !item.available ? (
                       <p className="mt-3 text-base font-semibold text-danger">
                         This requested record or quantity is no longer available.
                       </p>
@@ -253,52 +274,52 @@ export function CartView({
             );
           })}
         </ul>
+        </RecordPanel>
       </section>
 
       <aside className="cart-summary" aria-labelledby="cart-summary-heading">
-        <p className="eyebrow">Server preview</p>
+        <DataLabel>Server preview</DataLabel>
         <h2 id="cart-summary-heading" className="mt-3 font-heading text-3xl text-ink">
           Order summary
         </h2>
-        <dl className="mt-7 space-y-3 border-y border-border py-5 text-base">
-          <div className="flex justify-between gap-5">
+        <dl className="mt-7 divide-y divide-border border-y border-border text-base">
+          <div className="flex justify-between gap-5 py-3">
             <dt>Merchandise subtotal</dt>
-            <dd className="tabular-nums">
+            <dd className="text-right font-semibold tabular-nums">
               {preview?.currency
                 ? formatMoney(preview.subtotalMinor, preview.currency)
                 : "Unavailable"}
             </dd>
           </div>
-          <div className="flex justify-between gap-5">
+          <div className="flex justify-between gap-5 py-3">
             <dt>Promotion</dt>
-            <dd>Calculated at checkout</dd>
+            <dd className="text-right">Calculated at checkout</dd>
           </div>
-          <div className="flex justify-between gap-5">
+          <div className="flex justify-between gap-5 py-3">
             <dt>Referral benefit</dt>
-            <dd>Available after checkout quote</dd>
+            <dd className="text-right">Available after checkout quote</dd>
           </div>
-          <div className="flex justify-between gap-5">
+          <div className="flex justify-between gap-5 py-3">
             <dt>Points redemption</dt>
-            <dd>Available after checkout quote</dd>
+            <dd className="text-right">Available after checkout quote</dd>
           </div>
-          <div className="flex justify-between gap-5">
+          <div className="flex justify-between gap-5 py-3">
             <dt>Tax</dt>
-            <dd>Not yet calculated</dd>
+            <dd className="text-right">Not yet calculated</dd>
           </div>
-          <div className="flex justify-between gap-5">
+          <div className="flex justify-between gap-5 py-3">
             <dt>Shipping</dt>
-            <dd>Not yet calculated</dd>
+            <dd className="text-right">Not yet calculated</dd>
           </div>
-          <div className="flex justify-between gap-5 border-t border-border pt-3 font-semibold">
+          <div className="flex justify-between gap-5 py-4 font-semibold">
             <dt>Total</dt>
-            <dd>Available after checkout quote</dd>
+            <dd className="text-right">Available after checkout quote</dd>
           </div>
         </dl>
 
         {preview?.requiresAcknowledgement ? (
-          <div className="warning-record mt-6">
-            <p className="font-semibold">Cart facts changed or became unavailable.</p>
-            <p className="mt-2 text-base leading-7">
+          <Notice className="mt-6" icon={AlertTriangle} tone="warning" title="Cart facts changed or became unavailable">
+            <p>
               Requested IDs and quantities were preserved. Review the server facts before continuing.
             </p>
             {preview.items.every((item) => item.available) ? (
@@ -311,7 +332,7 @@ export function CartView({
                 Acknowledge server changes
               </Button>
             ) : null}
-          </div>
+          </Notice>
         ) : null}
 
         {checkoutIntent ? (

@@ -74,6 +74,11 @@ describe("database-backed product page rewards", () => {
     );
 
     expect(screen.getByText("Earn 112 points")).toBeVisible();
+    expect(
+      screen.getByText(
+        "No linked analytical statements are available for public display on this record. No pending evidence state is inferred.",
+      ),
+    ).toBeVisible();
   });
 
   it.each(["inactive", "read_error"] as const)(

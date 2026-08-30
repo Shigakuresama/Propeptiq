@@ -115,6 +115,8 @@ describe("CartView", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("The authoritative cart preview is unavailable.");
     expect(alert).toHaveClass("text-base");
+    expect(screen.getByText("Not verified")).toBeVisible();
+    expect(screen.queryByText("This requested record or quantity is no longer available.")).toBeNull();
     const retry = screen.getByRole("button", { name: "Retry current cart facts" });
     expect(retry).toHaveClass("min-h-11");
     expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeDisabled();

@@ -84,7 +84,9 @@ test("allows an owner to read its order but denies cross-owner and malformed ord
 test("keeps a blocked customer read-only while retaining own account and order reads", async ({ page }) => {
   await signInAs(page, "Fixed blocked customer");
   await page.goto("/account");
-  await expect(page.getByText(/Blocked:/)).toBeVisible();
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Account changes are blocked" }),
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: /Update account facts/i })).toHaveCount(0);
   await page.goto("/account/orders");
   await expect(page.getByText("Order local-order-blocked", { exact: true })).toBeVisible();
