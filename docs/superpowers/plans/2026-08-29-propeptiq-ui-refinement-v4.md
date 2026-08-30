@@ -14,13 +14,14 @@ Elevate PROPEPTIQ into a cohesive premium scientific/editorial interface while p
 
 **UI scope:** completed on 2026-08-29.
 
-- Phases A-F were implemented on `ui/refinement-v4`, then transplanted as the exact 60-path UI, regression-test, and isolated-browser-harness change onto the current squash-merged `main` tree in `ui/refinement-v4-release`.
+- Phases A-F were implemented on `ui/refinement-v4`, then transplanted as the exact 62-path UI, regression-test, and isolated-browser-harness change onto the current squash-merged `main` tree in `ui/refinement-v4-release`.
 - Three independent reviews found no remaining actionable UI, accessibility, authority-boundary, or business-logic defects after their findings were resolved.
 - The optimized Next.js build, production artifact scan, workspace-boundary check, TypeScript check, changed-file lint, and diff check pass.
 - The clean release-branch unit run passes all 1,408 tests across 136 files.
 - Independent pre-merge review found one remaining full-lockup-in-a-symbol-frame issue in private shell branding; the account, administration, authentication, and mobile navigation surfaces now use the full lockup at a legible width without duplicated brand text.
 - Repository-wide lint and TypeScript checks pass on the current-main release branch.
 - Browser verification found no serious or critical Axe findings, no horizontal overflow at the binding widths, a working mobile Sheet close path, and a single functional empty-result reset. The unconfigured production runtime remains truthfully fail-closed with zero published catalog records.
+- The release browser runner keeps the fixed closed-world local origin, rejects duplicate discovery locations, starts a fresh bounded server for at most four tests, isolates explicitly tagged broad contract cases, and merges every batch into complete HTML and JSON evidence.
 
 ## Phase A — audit and baseline
 

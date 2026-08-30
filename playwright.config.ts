@@ -1,16 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
-import { fileURLToPath } from "node:url";
 
-const port = Number(process.env.PLAYWRIGHT_PORT ?? "4631");
-const projectRoot = fileURLToPath(new URL(".", import.meta.url));
-
-if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-  throw new Error("PLAYWRIGHT_PORT must be an integer between 1 and 65535.");
-}
+const port = 4631;
 
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 120_000,
+  expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
@@ -30,7 +25,6 @@ export default defineConfig({
   ],
   webServer: {
     command: `npm run dev -- --hostname 127.0.0.1 --port ${port}`,
-    cwd: projectRoot,
     url: `http://127.0.0.1:${port}`,
     reuseExistingServer: false,
     timeout: 120_000,
