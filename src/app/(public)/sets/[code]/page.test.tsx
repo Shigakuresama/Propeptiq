@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CartProvider } from "@/cart/cart-provider";
@@ -9,6 +10,11 @@ const { loadPublicSharedSetMock } = vi.hoisted(() => ({
 
 vi.mock("@/growth/shared-set-server", () => ({
   loadPublicSharedSet: loadPublicSharedSetMock,
+}));
+vi.mock("@/components/site/page-transition", () => ({
+  PageTransition: ({ children }: { children: ReactNode }) => (
+    <div data-motion-surface="public">{children}</div>
+  ),
 }));
 
 import SharedSetPage from "./page";
@@ -44,6 +50,7 @@ describe("public shared research set page", () => {
     );
 
     expect(markup).toContain("Analytical reference set");
+    expect(markup).toContain('data-motion-surface="public"');
     expect(markup).toContain("Reference A");
     expect(markup).toContain("One saved product is no longer available");
     expect(markup).toContain("Add set to cart");
@@ -60,6 +67,7 @@ describe("public shared research set page", () => {
     }));
 
     expect(markup).toContain("Research set unavailable");
+    expect(markup).toContain('data-motion-surface="public"');
     expect(markup).not.toMatch(/missing|inactive|invalid|owner/iu);
   });
 });

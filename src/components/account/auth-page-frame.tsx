@@ -10,6 +10,7 @@ import {
 import { DataLabel } from "@/components/design-system/archive-primitives";
 import { BrandLogo } from "@/components/site/brand-mark";
 import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
+import { ScienceField } from "@/components/site/science-field";
 
 const accessCopy = {
   "sign-in": {
@@ -45,20 +46,22 @@ export function AuthPageFrame({
       <ResearchRestrictionBar />
       <main
         id="main-content"
-        className="site-container py-8 sm:py-12 lg:py-16"
+        className="site-container site-motion-surface site-motion-surface--quiet py-8 sm:py-12 lg:py-16"
+        data-motion-surface="auth"
         tabIndex={-1}
       >
         <div className="grid overflow-hidden rounded-[1.25rem] border border-border bg-surface-record shadow-[var(--shadow-soft)] lg:min-h-[42rem] lg:grid-cols-[minmax(18rem,0.8fr)_minmax(0,1.2fr)]">
-          <section className="flex min-h-[24rem] flex-col bg-ink p-6 text-canvas sm:p-9 lg:min-h-0 lg:p-12">
+          <section className="relative isolate flex min-h-[24rem] flex-col overflow-hidden bg-ink p-6 text-canvas sm:p-9 lg:min-h-0 lg:p-12">
+            <ScienceField className="auth-science-field" tone="inverse" variant="trace" />
             <Link
               href="/"
               aria-label="PROPEPTIQ LABS home"
-              className="inline-flex min-h-11 w-fit items-center rounded-xl border border-canvas/20 px-2 text-canvas no-underline transition-colors hover:border-canvas/45 hover:bg-canvas/5"
+              className="relative z-10 inline-flex min-h-11 w-fit items-center rounded-xl border border-canvas/20 px-2 text-canvas no-underline transition-colors hover:border-canvas/45 hover:bg-canvas/5"
             >
               <BrandLogo className="w-28" decorative />
             </Link>
 
-            <div className="my-auto py-10">
+            <div className="relative z-10 my-auto py-10" data-motion-sequence="auth-intro">
               <p className="text-xs font-bold uppercase tracking-[0.12em] text-canvas/70">
                 {copy.eyebrow}
               </p>
@@ -70,7 +73,7 @@ export function AuthPageFrame({
               </p>
             </div>
 
-            <ul className="grid gap-3 border-t border-canvas/15 pt-6 text-sm leading-6 text-canvas/75 sm:grid-cols-3 lg:grid-cols-1">
+            <ul className="relative z-10 grid gap-3 border-t border-canvas/15 pt-6 text-sm leading-6 text-canvas/75 sm:grid-cols-3 lg:grid-cols-1">
               <li className="flex gap-3">
                 <LockKeyhole aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-canvas" />
                 <span>Owner-scoped records remain private.</span>

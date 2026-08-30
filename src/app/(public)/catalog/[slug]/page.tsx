@@ -66,14 +66,24 @@ export default async function ProductPage({ params }: ProductPageProps) {
           Back to catalog
         </Link>
 
-        <header className="border-b border-border pb-10 pt-8 sm:pb-12">
-          <DataLabel>Public catalog dossier</DataLabel>
-          <ProductTitleTransition productId={product.id}>
-            <h1 className="mt-4 max-w-[18ch] text-balance font-heading text-page leading-[1.02] text-ink">
-              {product.name}
-            </h1>
-          </ProductTitleTransition>
-          <p className="mt-5 max-w-[62ch] text-lg leading-8 text-muted-ink">
+        <header
+          className="border-b border-border pb-10 pt-8 sm:pb-12"
+          data-motion-sequence="dossier-intro"
+        >
+          <div data-motion-step="1">
+            <DataLabel>Public catalog dossier</DataLabel>
+          </div>
+          <div data-motion-step="2">
+            <ProductTitleTransition productId={product.id}>
+              <h1 className="mt-4 max-w-[18ch] text-balance font-heading text-page leading-[1.02] text-ink">
+                {product.name}
+              </h1>
+            </ProductTitleTransition>
+          </div>
+          <p
+            className="mt-5 max-w-[62ch] text-lg leading-8 text-muted-ink"
+            data-motion-step="3"
+          >
             {product.packageForm}
           </p>
         </header>

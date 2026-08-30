@@ -35,6 +35,8 @@ describe("AccountShell", () => {
     expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("w-24");
     expect(screen.getByText("Private records", { exact: true })).toBeVisible();
     expect(navigation.closest("aside")).toHaveClass("hidden", "xl:block");
+    expect(screen.getByText("Owner content").closest("[data-motion-surface]"))
+      .toHaveAttribute("data-motion-surface", "private");
   });
 
   it("keeps every account and commerce destination in the through-1024 sheet", async () => {

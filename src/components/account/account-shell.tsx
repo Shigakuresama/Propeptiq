@@ -101,7 +101,14 @@ export function AccountShell({
           </div>
         </aside>
         <div className="min-w-0">
-          <main id="main-content" tabIndex={-1} className="py-10 sm:py-16">{children}</main>
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className="site-motion-surface site-motion-surface--quiet py-10 sm:py-16"
+            data-motion-surface="private"
+          >
+            {children}
+          </main>
           {localDriver ? (
             <form action={signOutLocalActor} className="border-t border-border py-8">
               <Button type="submit" variant="outline" className="min-h-11">End fixed test session</Button>

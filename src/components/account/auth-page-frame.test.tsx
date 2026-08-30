@@ -16,7 +16,7 @@ describe("AuthPageFrame", () => {
       "/sign-up?returnTo=%2Faccount%2Forders%2Forder-1",
     ],
   ])("marks the %s route with the inverse semantic action", (kind, label, href) => {
-    render(
+    const { container } = render(
       <AuthPageFrame kind={kind} returnTo="/account/orders/order-1">
         <h1>Identity entry</h1>
       </AuthPageFrame>,
@@ -30,5 +30,8 @@ describe("AuthPageFrame", () => {
     const home = screen.getByRole("link", { name: "PROPEPTIQ LABS home" });
     expect(home).toHaveAttribute("href", "/");
     expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("w-28");
+    expect(screen.getByRole("main")).toHaveAttribute("data-motion-surface", "auth");
+    const field = container.querySelector("[data-science-field='trace']");
+    expect(field).toHaveAttribute("aria-hidden", "true");
   });
 });

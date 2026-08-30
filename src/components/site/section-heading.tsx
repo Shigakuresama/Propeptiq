@@ -15,16 +15,23 @@ export function SectionHeading({
   id?: string;
 }) {
   return (
-    <div className={cn("max-w-[72ch]", className)}>
-      <DataLabel>{eyebrow}</DataLabel>
+    <div
+      className={cn("max-w-[72ch]", className)}
+      data-motion-sequence="section-heading"
+    >
+      <div data-motion-step="1"><DataLabel>{eyebrow}</DataLabel></div>
       <h2
         className="mt-4 max-w-[24ch] break-words text-balance font-heading text-section leading-[1.06] tracking-[-0.015em] text-ink"
+        data-motion-step="2"
         id={id}
       >
         {title}
       </h2>
       {description ? (
-        <p className="mt-5 max-w-[64ch] text-pretty text-base leading-7 text-muted-ink">
+        <p
+          className="mt-5 max-w-[64ch] text-pretty text-base leading-7 text-muted-ink"
+          data-motion-step="3"
+        >
           {description}
         </p>
       ) : null}

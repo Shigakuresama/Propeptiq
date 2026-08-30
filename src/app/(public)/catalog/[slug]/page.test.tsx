@@ -74,6 +74,9 @@ describe("database-backed product page rewards", () => {
     );
 
     expect(screen.getByText("Earn 112 points")).toBeVisible();
+    const intro = screen.getByRole("heading", { level: 1, name: product.name }).closest("header");
+    expect(intro).toHaveAttribute("data-motion-sequence", "dossier-intro");
+    expect(intro?.querySelectorAll("[data-motion-step]")).toHaveLength(3);
     expect(
       screen.getByText(
         "No linked analytical statements are available for public display on this record. No pending evidence state is inferred.",

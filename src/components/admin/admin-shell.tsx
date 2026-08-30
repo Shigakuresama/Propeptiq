@@ -57,7 +57,14 @@ export function AdminShell({ children, resources }: { children: ReactNode; resou
             <nav aria-label="Administration" className="mt-3 grid gap-1">{resources.map((resource) => <ShellNavLink href={`/admin/${resource.slug}`} key={resource.slug}>{resource.label}</ShellNavLink>)}</nav>
           </RecordPanel>
         </aside>
-        <main id="main-content" tabIndex={-1} className="min-w-0">{children}</main>
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className="site-motion-surface site-motion-surface--minimal min-w-0"
+          data-motion-surface="admin"
+        >
+          {children}
+        </main>
       </div>
     </div>
   );

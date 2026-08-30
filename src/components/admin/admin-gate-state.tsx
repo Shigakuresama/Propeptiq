@@ -25,7 +25,12 @@ export function AdminGateState({ gate, inline = false }: { gate: Exclude<AdminGa
     );
   }
   return (
-    <main id="main-content" className="site-container py-16" tabIndex={-1}>
+    <main
+      id="main-content"
+      className="site-container site-motion-surface site-motion-surface--minimal py-16"
+      data-motion-surface="admin"
+      tabIndex={-1}
+    >
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <section className="error-record mx-auto max-w-3xl" role="alert">
         <p className="eyebrow">Administration closed</p>

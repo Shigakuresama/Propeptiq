@@ -15,7 +15,9 @@ export function PageTransition({ children }: { children: ReactNode }) {
       }}
       default="none"
     >
-      <div>{children}</div>
+      <div className="site-motion-surface" data-motion-surface="public">
+        {children}
+      </div>
     </ViewTransition>
   );
 }
