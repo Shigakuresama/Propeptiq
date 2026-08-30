@@ -2023,6 +2023,126 @@ async function processInvoiceEvent(
       keyedUuid,
     );
   }
+
+  // Only a paid invoice carries a payment outcome. finalized and
+  // payment_failed are journaled without moving the order.
+  if (event.eventType !== "invoice.paid" || event.status !== "paid") {
+    return finishProcessed(client, row.id, now);
+  }
+
+  // Resolve the order from OUR durable binding, never from the provider's
+  // metadata.orderId. An invoice we did not issue must not move money state.
+  const bindings = rows<{ orderId: string }>(await client.query(
+    `SELECT order_id::text AS "orderId"
+       FROM order_invoices
+      WHERE provider = $1 AND provider_invoice_id = $2 AND status = 'open'
+      FOR UPDATE`,
+    [authority.provider, event.invoiceId],
+  ));
+  const binding = bindings[0];
+  if (binding === undefined || binding.orderId !== event.orderId) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "payment_identity_mismatch",
+      keyedUuid,
+    );
+  }
+
+  const orders = rows<{ id: string; state: OrderState; currency: string }>(
+    await client.query(
+      `SELECT id::text AS id, state, currency
+         FROM orders WHERE id = $1::uuid FOR UPDATE`,
+      [binding.orderId],
+    ),
+  );
+  const order = orders[0];
+  if (order === undefined) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "payment_identity_mismatch",
+      keyedUuid,
+    );
+  }
+  if (event.currency !== order.currency.toLowerCase()) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "payment_identity_mismatch",
+      keyedUuid,
+    );
+  }
+
+  const idempotencyKey = `${authority.provider}:invoice:${event.invoiceId}`;
+  const existing = rows<{ id: string }>(await client.query(
+    `SELECT id::text AS id FROM payment_events
+      WHERE idempotency_key = $1 FOR UPDATE`,
+    [idempotencyKey],
+  ));
+  if (existing.length > 0) {
+    // A replayed invoice.paid is idempotent success, not a second payment.
+    return finishProcessed(client, row.id, now);
+  }
+
+  const paymentEventId = stableUuid(
+    keyedUuid,
+    `invoice-payment:${event.invoiceId}`,
+  );
+  // settlementRequired routes to paid_pending_settlement rather than a
+  // releasable state: ACH funds can still be pulled back. docs/adr/0006.
+  const transition = transitionOrder(
+    {
+      orderId: order.id,
+      state: order.state,
+      paymentEvidenceId: null,
+      reviewRequestId: null,
+      fulfillmentReleaseVersion: null,
+      lastFulfillmentReleaseVersion: 0,
+      carrierHandoffAt: null,
+    },
+    {
+      type: "payment_verified",
+      source: "verified_provider_event",
+      paymentEvidenceId: paymentEventId,
+      reservationDisposition: "active",
+      settlementRequired: true,
+    },
+  );
+  if (!transition.ok) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "order_transition_mismatch",
+      keyedUuid,
+    );
+  }
+
+  await client.query(
+    `INSERT INTO payment_events
+       (id, provider_event_id, order_id, event_type, provider_payment_id,
+        idempotency_key, amount_minor, currency, occurred_at)
+     VALUES ($1, $2, $3, 'payment_verified', $4, $5, $6, $7, $8)`,
+    [
+      paymentEventId,
+      row.id,
+      order.id,
+      event.invoiceId,
+      idempotencyKey,
+      event.amountPaidMinor,
+      order.currency,
+      event.providerCreatedAt,
+    ],
+  );
+  await client.query(
+    `UPDATE orders SET state = $2::order_state, updated_at = $3 WHERE id = $1`,
+    [order.id, transition.value.snapshot.state, now],
+  );
+
   return finishProcessed(client, row.id, now);
 }
 
