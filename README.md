@@ -5,7 +5,7 @@ PROPEPTIQ LABS is a U.S.-only, research-use commerce application. The active pro
 ## V1 experience
 
 - Anonymous visitors may browse the active catalog, see server-backed prices and promotions, and build a local cart.
-- Checkout requires a Clerk-verified email, age 21+ confirmation, a structured research purpose, and the current versioned research-use attestation.
+- Checkout requires an email verified by Managed Neon Auth, confirmation that the buyer is at least 21 years old, a structured research purpose, and the current versioned research-use attestation.
 - Completing those steps creates an `active` individual buyer without routine staff approval or uploaded identity or organization material.
 - An optional organization-name profile field is descriptive only; V1 has no organization tenancy or membership authorization.
 - Checkout remains server-authoritative for account, attestation, product, destination, inventory, payment-provider enablement, price, discount, tax, and shipping facts.
@@ -30,6 +30,18 @@ These sources do not decide whether any PROPEPTIQ SKU or destination is lawful o
 ## External launch inputs
 
 Production commerce fails closed until owners supply and verify qualified legal review, a real catalog manifest, a counsel-approved state allowlist, tax configuration, shipping-service configuration, an operating fulfillment process, and payment-provider acceptance. These are external inputs, not application approval workflows or fabricated database records.
+
+Production account creation also remains closed until every Managed Neon Auth
+gate is evidenced: independent stable cookie-signing and application rate-limit
+secrets; production-capable custom SMTP with a verified sender; provider-required
+email verification; reviewed Preview and Production trusted origins with
+localhost disabled for Production; provider configuration that revokes every
+pre-existing session after a password reset; and a branch-isolated Preview
+lifecycle test covering signup, email verification, sign-in, protected-route
+return, sign-out, single-use password recovery, and rejection of sessions issued
+before the reset. An external Auth resource may exist while the application
+adapter remains disabled; resource availability, adapter activation, internal
+user projection, and buyer activation are separate facts.
 
 ## Local verification
 

@@ -7,13 +7,9 @@ import { readServerEnv } from "@/env";
 
 export async function RuntimeAuthProvider({ children }: { children: ReactNode }) {
   await connection();
-  const environment = readServerEnv();
-  if (
-    environment.AUTH_MODE === "disabled" ||
-    environment.LOCAL_TEST_DRIVER === "enabled"
-  ) {
-    return children;
-  }
-  const { ClerkProvider } = await import("@clerk/nextjs");
-  return <ClerkProvider>{children}</ClerkProvider>;
+  // Validate deployment configuration at the same boundary as the previous
+  // provider wrapper. Managed Neon Auth uses server actions and HTTP-only
+  // cookies, so no client-side context provider is required here.
+  readServerEnv();
+  return children;
 }

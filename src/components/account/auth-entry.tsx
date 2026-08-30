@@ -3,9 +3,16 @@ import Link from "next/link";
 
 import { getRequestIdentity } from "@/auth/server";
 import { LocalIdentityEntry } from "@/components/account/identity-entry";
+import { ManagedAuthForm } from "@/components/account/managed-auth-form";
 import { EmptyState } from "@/components/design-system/archive-primitives";
 
-export async function AuthEntry({ kind }: { kind: "sign-in" | "sign-up" }) {
+export async function AuthEntry({
+  kind,
+  returnTo,
+}: {
+  kind: "sign-in" | "sign-up";
+  returnTo: string;
+}) {
   const request = await getRequestIdentity();
   if (request.environment.LOCAL_TEST_DRIVER === "enabled" && request.localDriver) {
     return <LocalIdentityEntry actors={request.localDriver.actorOptions} kind={kind} />;
@@ -30,12 +37,19 @@ export async function AuthEntry({ kind }: { kind: "sign-in" | "sign-up" }) {
       />
     );
   }
-  const clerk = await import("@clerk/nextjs");
-  const Component = kind === "sign-in" ? clerk.SignIn : clerk.SignUp;
-  const path = kind === "sign-in" ? "/sign-in" : "/sign-up";
   return (
-    <div className="flex min-h-[32rem] justify-center">
-      <Component routing="path" path={path} forceRedirectUrl="/checkout" />
-    </div>
+    <ManagedAuthForm
+      initialVerificationEmail={
+        request.identity?.emailVerifiedAt === null
+          ? request.identity.primaryEmail ?? undefined
+          : undefined
+      }
+      kind={kind}
+      passwordRecoveryAvailable={
+        request.environment.AUTH_PASSWORD_RESET_SESSION_REVOCATION ===
+        "verified"
+      }
+      returnTo={returnTo}
+    />
   );
 }

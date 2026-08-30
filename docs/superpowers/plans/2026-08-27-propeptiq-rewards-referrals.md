@@ -6,7 +6,7 @@
 
 **Architecture:** Preserve the completed lightweight-commerce architecture and add a bounded `growth` domain. Versioned database policies own every visible rate, threshold, attribution window, and program state. Immutable ledgers and idempotent lifecycle handlers own points and commissions. Public links carry opaque codes only; checkout reloads attribution, policy, balance, product, price, promotion, destination, and inventory facts on the server. Customer referrals are automatic for active buyers; cash affiliate approval and payout recording require an MFA-authenticated administrator.
 
-**Tech Stack:** Next.js 16, React 19, strict TypeScript, Tailwind, shadcn/Radix, Clerk, Neon PostgreSQL, Drizzle, Stripe Checkout, Vitest, PGlite, Playwright, and Vercel.
+**Tech Stack:** Next.js 16, React 19, strict TypeScript, Tailwind, shadcn/Radix, Managed Neon Auth, Neon PostgreSQL, Drizzle, Stripe Checkout, Vitest, PGlite, Playwright, and Vercel.
 
 **Spec:** [`docs/design/rewards-referrals-growth-experience.md`](../../design/rewards-referrals-growth-experience.md)
 
@@ -206,7 +206,7 @@ type AttributionEnvelopeV1 = Readonly<{
 - [ ] Write failing transaction tests proving every ledger append and balance-projection update commit together; an injected ledger or projection failure rolls back both.
 - [ ] Write failing idempotency tests for repeated provider events, shipment transitions, referral qualification, reversals, redemption reservation, and payout marking.
 - [ ] Write failing owner-read tests proving a user can read only their reward account, ledger, referral summary, sets, affiliate profile, commissions, and payouts.
-- [ ] Write failing privacy tests proving partner/referral read models never expose referred email, Clerk ID, shipping address, product lines, payment identifiers, raw IP, or raw cookie payload.
+- [ ] Write failing privacy tests proving partner/referral read models never expose referred email, external identity-provider ID, shipping address, product lines, payment identifiers, raw IP, or raw cookie payload.
 - [ ] Implement serializable repository methods with bounded retry using `src/db/serializable-retry.ts`.
 - [ ] Return compact read models with available/pending points, USD equivalent, minimum-redemption progress, conversion counts, commission totals by state, and redacted references.
 - [ ] Run `npm run test:integration -- --run tests/integration/growth-repository.test.ts`, `npm run typecheck`, and `git diff --check`.

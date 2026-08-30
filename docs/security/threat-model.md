@@ -6,7 +6,7 @@
 
 Protect identities, buyer status, attestations, addresses, authoritative catalog/prices/promotions, destination rules, inventory, provider events, payment/refund journals, review snapshots, fulfillment records, rewards balances, referral and affiliate attribution, commission and payout records, versioned growth terms, audit events, secrets, and approved COA objects.
 
-The browser, Clerk, Stripe, email, object storage, databases, staff devices, and fulfillment operation are separate trust boundaries. Browser data and provider redirects are untrusted. Signed identity/payment messages are verified server-side and remain subject to application policy.
+The browser, Managed Neon Auth, Stripe, email, object storage, databases, staff devices, and fulfillment operation are separate trust boundaries. Browser data and provider redirects are untrusted. Identity sessions and signed payment messages are verified server-side and remain subject to application policy.
 
 ## Primary threats and controls
 
@@ -18,6 +18,7 @@ The browser, Clerk, Stripe, email, object storage, databases, staff devices, and
 | Destination fail-open | Exact product/state → policy-group/state → unavailable; territories unavailable; denial tests |
 | Broken object authorization | Principal-bound repositories, own-order checks, opaque identifiers as defense-in-depth, negative tests |
 | Staff account takeover | Current MFA and least capability for staff routes/refunds/fulfillment; session-response procedures; database-backed limits on implemented mutation paths; operational alerts remain unimplemented |
+| Stolen session surviving password recovery | Recovery disabled by default; provider-enforced revocation of every pre-reset session; single-use reset token; branch-isolated lifecycle proof before the operator verification flag or live Auth is enabled |
 | Price/promotion tampering | Server reload and integer-money calculation, order version references, hosted collection |
 | Referral or affiliate forgery/enumeration | Opaque codes, signed environment-bound 30-day first-party attribution cookies, exact-origin mutation checks, privacy-minimal per-caller HMAC rate limiting, server-side status lookup, self-referral denial, and uniform invalid/inactive responses |
 | Duplicate growth value | One referral-or-affiliate attribution per order, exact policy/version snapshots, immutable idempotency keys and request hashes, provider/refund/shipment lifecycle facts, uniqueness constraints, and transactional ledger writes |
@@ -32,7 +33,7 @@ The browser, Clerk, Stripe, email, object storage, databases, staff devices, and
 
 ## Authorization model
 
-V1 users are individual Clerk principals. Optional organization name is never an authorization scope. Public reads expose only active public projections. Buyer mutations require authentication and resource ownership. Staff mutations require explicit application capability and current MFA. One capable administrator may publish; the security objective is authenticated, authorized, auditable action—not multiple actors.
+V1 users are individual Managed Neon Auth principals. Optional organization name is never an authorization scope. Public reads expose only active public projections. Buyer mutations require a provider-verified identity and resource ownership. Staff mutations require explicit application capability and current server-verifiable MFA; the Managed Neon Auth adapter denies staff access until that evidence is available. One capable administrator may publish; the security objective is authenticated, authorized, auditable action—not multiple actors.
 
 ## Review and denial
 

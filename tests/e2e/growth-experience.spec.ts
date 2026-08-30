@@ -356,6 +356,24 @@ test("keeps growth routes responsive, keyboard-visible, reduced-motion-safe, and
 
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/rewards");
+  expect(await page.locator([
+    ".rewards-page .data-label",
+    ".rewards-action",
+    ".rewards-science-scene__header",
+    ".rewards-science-scene__records li",
+    ".rewards-program-card__meta",
+  ].join(", ")).evaluateAll((elements) => elements.every((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize) >= 16
+  ))).toBe(true);
+  expect(await page.locator([
+    ".rewards-hero__copy",
+    ".rewards-science-scene",
+    ".rewards-records",
+    ".rewards-science-visual__orbit",
+  ].join(", ")).evaluateAll((elements) => elements.every((element) => {
+    const styles = getComputedStyle(element);
+    return styles.animationName === "none" && styles.transform === "none";
+  }))).toBe(true);
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to main content" })).toBeFocused();
   expect(await page.evaluate(() => {
@@ -370,6 +388,20 @@ test("keeps growth routes responsive, keyboard-visible, reduced-motion-safe, and
     const box = target.getBoundingClientRect();
     return box.width >= 44 && box.height >= 44;
   }))).toBe(true);
+
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.goto("/rewards");
+  await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+  expect(await page.locator([
+    "#rewards-heading",
+    ".rewards-hero__actions",
+    ".rewards-science-scene",
+    ".rewards-records",
+  ].join(", ")).evaluateAll((elements) => elements.every((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.right <= window.innerWidth + 1;
+  }))).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
 
   await signInAs(page, "Fixed growth owner");
   await page.setViewportSize({ width: 375, height: 812 });

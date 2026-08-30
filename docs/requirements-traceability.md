@@ -4,7 +4,7 @@
 
 | ID | Binding requirement | Contract | Planned verification |
 |---|---|---|---|
-| ACC-01 | Clerk email verification + age 21+ + purpose + current attestation automatically yields an `active` individual buyer | `product-requirements.md`, authentication ADR | Domain and browser tests |
+| ACC-01 | Provider-verified email + age 21+ + purpose + current attestation automatically yields an `active` individual buyer | `product-requirements.md`, authentication ADR | Domain and browser tests |
 | ACC-02 | Optional organization name is profile text, never tenancy or membership scope | Authentication architecture, data model | Authorization negative tests |
 | DST-01 | Exact product/state → active policy-group/state → unavailable; territories unavailable | Jurisdiction policy, domain policies | Resolution table tests |
 | REV-01 | Review only for buyer `review` or destination `review`; immutable exact snapshot; changes invalidate | Domain policies, compliance-holds runbook | Snapshot mutation tests |

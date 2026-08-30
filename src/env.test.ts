@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { parseServerEnv } from "@/config/env-schema";
+import {
+  parseServerEnv,
+  resolveNeonAuthBaseUrl,
+} from "@/config/env-schema";
+
+const neonAuthBaseUrl =
+  "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth";
+const neonAuthCookieSecret =
+  "synthetic-neon-auth-cookie-secret-at-least-32-characters";
 
 const exactPreviewInput = {
   APP_ENV: "preview",
@@ -10,9 +18,9 @@ const exactPreviewInput = {
   LOCAL_TEST_DRIVER: "disabled",
   LOCAL_TEST_SECRET: "",
   AUTH_MODE: "test",
-  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
-  CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
-  CLERK_WEBHOOK_SIGNING_SECRET: "",
+  AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
+  STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+  NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
   RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
   DATABASE_MODE: "test",
   TEST_DATABASE_URL:
@@ -97,8 +105,8 @@ describe("parseServerEnv", () => {
       FULFILLMENT_MODE: "disabled",
       COMMERCE_LIVE_CAPABILITY: "disabled",
       PAYMENTS_LIVE_CAPABILITY: "disabled",
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
-      CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
+      STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
       RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
       TEST_DATABASE_URL:
         "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
@@ -108,7 +116,7 @@ describe("parseServerEnv", () => {
       STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
     });
     expect(env.LOCAL_TEST_SECRET).toBeUndefined();
-    expect(env.CLERK_WEBHOOK_SIGNING_SECRET).toBeUndefined();
+    expect(resolveNeonAuthBaseUrl(env)).toBe(neonAuthBaseUrl);
     expect(env.DATABASE_URL).toBeUndefined();
     expect(env.DATABASE_MIGRATION_URL).toBeUndefined();
   });
@@ -129,8 +137,8 @@ describe("parseServerEnv", () => {
       "AUTH_MODE",
       {
         AUTH_MODE: "test",
-        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_production_denial",
-        CLERK_SECRET_KEY: "sk_test_synthetic_task7_production_denial",
+        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+        NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
         RATE_LIMIT_SECRET: "synthetic-task7-production-rate-limit-secret-0001",
       },
     ],
@@ -304,7 +312,7 @@ describe("parseServerEnv", () => {
   });
 
   it.each([
-    ["AUTH_MODE", "live", "CLERK_SECRET_KEY"],
+    ["AUTH_MODE", "live", "STORAGE_NEON_AUTH_BASE_URL"],
     ["DATABASE_MODE", "live", "DATABASE_URL"],
     ["STORAGE_MODE", "live", "BLOB_READ_WRITE_TOKEN"],
     ["EMAIL_MODE", "live", "RESEND_API_KEY"],
@@ -326,12 +334,13 @@ describe("parseServerEnv", () => {
       APP_ENV: "production",
       APP_ORIGIN: "https://research.example.test",
       AUTH_MODE: "live",
+      AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
       DATABASE_MODE: "live",
       PAYMENTS_MODE: "live",
       STORAGE_MODE: "live",
       EMAIL_MODE: "live",
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_synthetic",
-      CLERK_SECRET_KEY: "sk_live_synthetic",
+      STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
       RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
       DATABASE_URL: "postgresql://synthetic.invalid/database?sslmode=require",
       STRIPE_ACCOUNT_ID: "acct_synthetic123",
@@ -343,6 +352,19 @@ describe("parseServerEnv", () => {
     });
 
     expect(env.PAYMENTS_MODE).toBe("live");
+  });
+
+  it("keeps live Auth closed without provider session-revocation evidence", () => {
+    expect(() =>
+      parseServerEnv({
+        APP_ENV: "production",
+        APP_ORIGIN: "https://research.example.test",
+        AUTH_MODE: "live",
+        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+        NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+        RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
+      }),
+    ).toThrow(/session revocation after password reset/);
   });
 
   it("rejects test-mode providers in production", () => {
@@ -400,8 +422,8 @@ describe("parseServerEnv", () => {
     expect(() =>
       parseServerEnv({
         AUTH_MODE: "test",
-        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic",
-        CLERK_SECRET_KEY: "sk_test_synthetic",
+        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+        NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
       }),
     ).toThrow(/RATE_LIMIT_SECRET/);
 
@@ -409,6 +431,107 @@ describe("parseServerEnv", () => {
       parseServerEnv({
         LOCAL_TEST_DRIVER: "enabled",
         LOCAL_TEST_SECRET: "task5-local-driver-secret-at-least-32-chars",
+      }),
+    ).toThrow(/RATE_LIMIT_SECRET/);
+  });
+
+  it("maps the Vercel-injected Neon Auth URL before the documented fallback", () => {
+    const storageConfigured = parseServerEnv({
+      APP_ORIGIN: "http://localhost:3000",
+      AUTH_MODE: "test",
+      STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+      RATE_LIMIT_SECRET: "synthetic-rate-limit-secret-at-least-32-characters",
+    });
+    expect(resolveNeonAuthBaseUrl(storageConfigured)).toBe(neonAuthBaseUrl);
+
+    const fallbackConfigured = parseServerEnv({
+      APP_ORIGIN: "http://localhost:3000",
+      AUTH_MODE: "test",
+      NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+      RATE_LIMIT_SECRET: "synthetic-rate-limit-secret-at-least-32-characters",
+    });
+    expect(resolveNeonAuthBaseUrl(fallbackConfigured)).toBe(neonAuthBaseUrl);
+  });
+
+  it("requires an explicit application origin whenever Managed Neon Auth is enabled", () => {
+    expect(() =>
+      parseServerEnv({
+        AUTH_MODE: "test",
+        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+        NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+        RATE_LIMIT_SECRET:
+          "synthetic-rate-limit-secret-at-least-32-characters",
+      }),
+    ).toThrow(/APP_ORIGIN/);
+  });
+
+  it("rejects short cookie secrets and conflicting Neon Auth URL aliases", () => {
+    expect(() =>
+      parseServerEnv({
+        AUTH_MODE: "test",
+        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+        NEON_AUTH_COOKIE_SECRET: "short",
+        RATE_LIMIT_SECRET: "synthetic-rate-limit-secret-at-least-32-characters",
+      }),
+    ).toThrow(/NEON_AUTH_COOKIE_SECRET/);
+
+    expect(() =>
+      parseServerEnv({
+        AUTH_MODE: "test",
+        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+        NEON_AUTH_BASE_URL:
+          "https://ep-other.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth",
+        NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+        RATE_LIMIT_SECRET: "synthetic-rate-limit-secret-at-least-32-characters",
+      }),
+    ).toThrow(/aliases must agree/);
+  });
+
+  it.each([
+    ["whitespace only", " ".repeat(64)],
+    ["surrounding whitespace", ` ${neonAuthCookieSecret} `],
+    ["one repeated character", "a".repeat(64)],
+    ["repeated short pattern", "abcd".repeat(16)],
+  ])("rejects a %s Managed Neon Auth cookie secret without reflecting it", (_label, candidate) => {
+    let error: unknown;
+
+    try {
+      parseServerEnv({
+        AUTH_MODE: "test",
+        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+        NEON_AUTH_COOKIE_SECRET: candidate,
+        RATE_LIMIT_SECRET: "synthetic-rate-limit-secret-at-least-32-characters",
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toMatch(/NEON_AUTH_COOKIE_SECRET/);
+    expect(message).not.toContain(candidate);
+  });
+
+  it("requires independent generated Auth cookie and rate-limit secrets", () => {
+    const sharedSecret =
+      "synthetic-shared-generated-secret-material-0123456789";
+    expect(() =>
+      parseServerEnv({
+        AUTH_MODE: "test",
+        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+        NEON_AUTH_COOKIE_SECRET: sharedSecret,
+        RATE_LIMIT_SECRET: sharedSecret,
+      }),
+    ).toThrow(/Auth cookie and rate-limit secrets must be independent/);
+
+    expect(() =>
+      parseServerEnv({
+        AUTH_MODE: "test",
+        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
+        NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+        RATE_LIMIT_SECRET: " ".repeat(64),
       }),
     ).toThrow(/RATE_LIMIT_SECRET/);
   });

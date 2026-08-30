@@ -23,11 +23,12 @@ These sources do not establish that any PROPEPTIQ SKU is legal in any jurisdicti
 
 ## Identity and authorization
 
-- Clerk Next.js quickstart: https://clerk.com/docs/getting-started/quickstart
-- Clerk sign-in/MFA options: https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options
-- Clerk reverification for sensitive actions: https://clerk.com/docs/guides/secure/reverification
-- Clerk Organizations overview: https://clerk.com/docs/guides/organizations/overview
-- Clerk roles and permissions: https://clerk.com/docs/guides/organizations/control-access/roles-and-permissions
+- Managed Neon Auth Next.js server SDK: https://neon.com/docs/auth/reference/nextjs-server
+- Managed Neon Auth SDK migration and explicit cookie configuration: https://neon.com/docs/auth/migrate/from-auth-v0.1
+- Managed Neon Auth production checklist: https://neon.com/docs/auth/production-checklist
+- Managed Neon Auth email verification: https://neon.com/docs/auth/guides/email-verification
+- Managed Neon Auth email OTP: https://neon.com/docs/auth/guides/plugins/email-otp
+- Managed Neon Auth trusted domains: https://neon.com/docs/auth/guides/configure-domains
 
 ## Database, storage, delivery, and observability
 

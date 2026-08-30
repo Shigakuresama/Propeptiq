@@ -2,7 +2,11 @@ import { ArrowLeft, LockKeyhole, RefreshCw, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { SIGN_IN_ROUTE } from "@/auth/routes";
+import {
+  authRouteWithDestination,
+  SIGN_IN_ROUTE,
+  SIGN_UP_ROUTE,
+} from "@/auth/routes";
 import { DataLabel } from "@/components/design-system/archive-primitives";
 import { BrandLogo } from "@/components/site/brand-mark";
 import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
@@ -22,14 +26,14 @@ const accessCopy = {
   },
 } as const;
 
-const SIGN_UP_ROUTE = "/sign-up/" as const;
-
 export function AuthPageFrame({
   children,
   kind,
+  returnTo,
 }: {
   children: ReactNode;
   kind: keyof typeof accessCopy;
+  returnTo: string;
 }) {
   const copy = accessCopy[kind];
 
@@ -93,14 +97,14 @@ export function AuthPageFrame({
               </Link>
               <nav className="flex rounded-full border border-border bg-surface-recessed p-1" aria-label="Account access options">
                 <Link
-                  href={SIGN_IN_ROUTE}
+                  href={authRouteWithDestination(SIGN_IN_ROUTE, returnTo)}
                   aria-current={kind === "sign-in" ? "page" : undefined}
                   className={`min-h-11 rounded-full px-4 py-2.5 text-sm font-semibold no-underline ${kind === "sign-in" ? "action-primary" : "action-secondary"}`}
                 >
                   Sign in
                 </Link>
                 <Link
-                  href={SIGN_UP_ROUTE}
+                  href={authRouteWithDestination(SIGN_UP_ROUTE, returnTo)}
                   aria-current={kind === "sign-up" ? "page" : undefined}
                   className={`min-h-11 rounded-full px-4 py-2.5 text-sm font-semibold no-underline ${kind === "sign-up" ? "action-primary" : "action-secondary"}`}
                 >

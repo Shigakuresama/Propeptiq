@@ -64,4 +64,21 @@ describe("AccountShell", () => {
       expect(link).toHaveClass("shell-nav-link");
     }
   });
+
+  it("shows managed sign-out only when managed authentication is enabled", () => {
+    const { rerender } = render(
+      <AccountShell authEnabled localDriver={false}>
+        <p>Owner content</p>
+      </AccountShell>,
+    );
+
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
+
+    rerender(
+      <AccountShell localDriver={false}>
+        <p>Owner content</p>
+      </AccountShell>,
+    );
+    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
+  });
 });

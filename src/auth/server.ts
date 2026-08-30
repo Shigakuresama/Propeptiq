@@ -41,7 +41,7 @@ import type { StorageVerifier } from "@/security/storage";
 
 import {
   isVerifiedIdentityAt,
-  projectClerkIdentity,
+  projectNeonIdentity,
   resolveServerIdentity,
   type VerifiedIdentity,
 } from "./identity";
@@ -91,20 +91,15 @@ async function loadLocalDriver(environment: ServerEnv): Promise<LocalTestDriver>
   return localDriverModule.getLocalTestDriver();
 }
 
-async function loadClerkIdentity(): Promise<VerifiedIdentity | null> {
-  const [{ auth, currentUser }] = await Promise.all([
-    import("@clerk/nextjs/server"),
-  ]);
-  const authResult = await auth();
-  if (!authResult.userId) return null;
-  const user = await currentUser();
-  return projectClerkIdentity(
-    {
-      userId: authResult.userId,
-      factorVerificationAge: authResult.factorVerificationAge,
-    },
-    user,
-  );
+async function loadNeonIdentity(
+  environment: ServerEnv,
+): Promise<VerifiedIdentity | null> {
+  const { getNeonAuthForEnvironment } = await import("@/auth/neon-server");
+  const auth = getNeonAuthForEnvironment(environment);
+  if (!auth) return null;
+  const { data: session, error } = await auth.getSession();
+  if (error || !session?.user) return null;
+  return projectNeonIdentity(session.user);
 }
 
 export async function getRequestIdentity(): Promise<RequestIdentity> {
@@ -112,7 +107,7 @@ export async function getRequestIdentity(): Promise<RequestIdentity> {
   const environment = readServerEnv();
   let localDriver: LocalTestDriver | null = null;
   const identity = await resolveServerIdentity(environment, {
-    loadClerkIdentity,
+    loadExternalIdentity: () => loadNeonIdentity(environment),
     async loadLocalIdentity() {
       localDriver = await loadLocalDriver(environment);
       const signedActor = (await cookies()).get(LOCAL_ACTOR_COOKIE)?.value;
@@ -296,19 +291,15 @@ export function getRequestRepositories(
 
 export async function loadTargetVerifiedIdentity(
   request: RequestIdentity,
-  clerkUserId: string,
-  referenceTime: Date,
+  _clerkUserId: string,
+  _referenceTime: Date,
 ): Promise<VerifiedIdentity | null> {
   if (request.localDriver) {
-    return request.localDriver.loadIdentityByClerkId(clerkUserId);
+    return request.localDriver.loadIdentityByClerkId(_clerkUserId);
   }
-  if (request.environment.AUTH_MODE === "disabled") return null;
-  const { clerkClient } = await import("@clerk/nextjs/server");
-  const client = await clerkClient();
-  const user = await client.users.getUser(clerkUserId);
-  return projectClerkIdentity(
-    { userId: clerkUserId, factorVerificationAge: null },
-    user,
-    referenceTime,
-  );
+  void _referenceTime;
+  // Do not map Neon's provider-admin role onto application staff authority.
+  // Managed Neon Auth does not currently expose the server-verifiable MFA
+  // evidence this application requires for staff target-identity operations.
+  return null;
 }

@@ -2,7 +2,10 @@ import { LockKeyhole, Menu } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { signOutLocalActor } from "@/auth/actions";
+import {
+  signOutLocalActor,
+} from "@/auth/actions";
+import { ManagedSignOutForm } from "@/components/account/managed-sign-out-form";
 import { DataLabel, RecordPanel } from "@/components/design-system/archive-primitives";
 import { BrandLogo } from "@/components/site/brand-mark";
 import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
@@ -37,9 +40,11 @@ function NavLinks() {
 
 export function AccountShell({
   children,
+  authEnabled = false,
   localDriver,
 }: {
   children: ReactNode;
+  authEnabled?: boolean;
   localDriver: boolean;
 }) {
   return (
@@ -101,6 +106,8 @@ export function AccountShell({
             <form action={signOutLocalActor} className="border-t border-border py-8">
               <Button type="submit" variant="outline" className="min-h-11">End fixed test session</Button>
             </form>
+          ) : authEnabled ? (
+            <ManagedSignOutForm className="border-t border-border py-8" />
           ) : null}
         </div>
       </div>

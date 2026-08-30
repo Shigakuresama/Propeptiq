@@ -4,8 +4,11 @@
 
 This table records both the required target topology and the current safe
 publication boundary. A protected browse-only Preview and a browse-only
-Production alias exist, but neither provisions identity, database, payment,
-storage, email, tax, shipping, fulfillment, or payout providers.
+Production alias exist, but neither activates the application's identity,
+database, payment, storage, email, tax, shipping, fulfillment, or payout
+adapters. Application environment settings do not prove whether an external
+provider resource has been provisioned independently; resource availability and
+application activation are separate facts.
 
 | Environment | Target data and providers | Current allowed use |
 |---|---|---|
@@ -32,6 +35,34 @@ method. Code defaults and local fixtures are not active policy records and must
 never be promoted into Production data.
 
 These are deployment inputs and owner evidence, not database approval workflows. Missing catalog/destination inputs keep affected products unavailable; missing tax/shipping/provider inputs deny checkout; missing fulfillment readiness prevents release.
+
+Managed Neon Auth production activation additionally requires all of the
+following, with evidence retained for the exact deployment target:
+
+- separate, independently generated, stable cookie-signing and application
+  rate-limit secrets stored outside the repository;
+- production-capable custom SMTP configured in Managed Neon Auth with a verified
+  sender;
+- provider-required email verification;
+- reviewed exact Preview and Production trusted origins, with localhost disabled
+  for Production; and
+- provider configuration that revokes every pre-existing identity session after
+  a password reset; and
+- a branch-isolated Preview lifecycle test covering signup, email verification,
+  sign-in, protected-route return, sign-out, single-use password recovery, and
+  rejection of sessions issued before the reset, without a Production identity
+  or data write.
+
+The environment assertion
+`AUTH_PASSWORD_RESET_SESSION_REVOCATION=verified` keeps recovery and live Auth
+closed by default. It may be set only after the provider setting and Preview
+lifecycle evidence are retained; the value is not evidence on its own.
+
+Provider signup, application user projection, and `active` buyer creation are
+three distinct transitions. A verified provider session may project an internal
+user only when the Auth and database adapters are enabled; age, structured
+purpose, and current attestation acceptance are still required before the buyer
+profile becomes `active`.
 
 ## Promotion and migration
 

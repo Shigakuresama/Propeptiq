@@ -6,12 +6,64 @@ const catalogDemoMode = z.enum(["disabled", "enabled"]);
 const localTestDriver = z.enum(["disabled", "enabled"]);
 const vercelEnvironment = z.enum(["development", "preview", "production"]);
 const nonBlank = z.string().trim().min(1);
+
+function isRepeatedShortPattern(value: string): boolean {
+  const maximumPatternLength = Math.min(16, Math.floor(value.length / 2));
+
+  for (
+    let patternLength = 1;
+    patternLength <= maximumPatternLength;
+    patternLength += 1
+  ) {
+    if (value.length % patternLength !== 0) {
+      continue;
+    }
+
+    let repeated = true;
+    for (let index = patternLength; index < value.length; index += 1) {
+      if (value[index] !== value[index % patternLength]) {
+        repeated = false;
+        break;
+      }
+    }
+
+    if (repeated) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+const generatedSecret = z
+  .string()
+  .min(32)
+  .refine(
+    (value) => value === value.trim() && !/\s/u.test(value),
+    { message: "Expected a whitespace-free generated secret" },
+  )
+  .refine(
+    (value) => new Set(value).size >= 8 && !isRepeatedShortPattern(value),
+    { message: "Expected generated secret material with sufficient variation" },
+  );
 const stripeAccountId = z.string().min(1).refine(
   (value) =>
     value === value.trim() && /^acct_[A-Za-z0-9]{8,64}$/u.test(value),
   { message: "Expected a Stripe acct_ account ID" },
 );
 const urlValue = nonBlank.pipe(z.url());
+const neonAuthUrl = urlValue.refine(
+  (value) => {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    return (
+      url.protocol === "https:" &&
+      hostname.endsWith(".neon.tech") &&
+      hostname.includes(".neonauth.")
+    );
+  },
+  { message: "Expected a secure Managed Neon Auth URL" },
+);
 const postgresUrl = urlValue.refine(
   (value) => {
     if (!URL.canParse(value)) {
@@ -31,7 +83,7 @@ const rawServerEnvSchema = z.object({
   BROWSE_CATALOG_PUBLICATION: nonBlank.optional(),
   LOCAL_TEST_DRIVER: localTestDriver.default("disabled"),
   LOCAL_TEST_SECRET: z.string().min(32).optional(),
-  RATE_LIMIT_SECRET: z.string().min(32).optional(),
+  RATE_LIMIT_SECRET: generatedSecret.optional(),
   VERCEL_ENV: vercelEnvironment.optional(),
   VERCEL_TARGET_ENV: nonBlank.optional(),
   AUTH_MODE: capabilityMode.default("disabled"),
@@ -44,6 +96,12 @@ const rawServerEnvSchema = z.object({
   TAX_MODE: capabilityMode.default("disabled"),
   SHIPPING_MODE: capabilityMode.default("disabled"),
   FULFILLMENT_MODE: capabilityMode.default("disabled"),
+  STORAGE_NEON_AUTH_BASE_URL: neonAuthUrl.optional(),
+  NEON_AUTH_BASE_URL: neonAuthUrl.optional(),
+  NEON_AUTH_COOKIE_SECRET: generatedSecret.optional(),
+  AUTH_PASSWORD_RESET_SESSION_REVOCATION: z.literal("verified").optional(),
+  // Accepted temporarily for rollback compatibility; the runtime no longer
+  // reads Clerk credentials when Managed Neon Auth is enabled.
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: nonBlank.optional(),
   CLERK_SECRET_KEY: nonBlank.optional(),
   CLERK_WEBHOOK_SIGNING_SECRET: nonBlank.optional(),
@@ -219,10 +277,50 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
     });
   }
 
-  requireFields(env, context, "AUTH_MODE", [
-    "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
-    "CLERK_SECRET_KEY",
-  ]);
+  if (env.AUTH_MODE !== "disabled") {
+    if (!env.STORAGE_NEON_AUTH_BASE_URL && !env.NEON_AUTH_BASE_URL) {
+      addRequiredIssue(context, "STORAGE_NEON_AUTH_BASE_URL", "AUTH_MODE");
+    }
+    if (!env.NEON_AUTH_COOKIE_SECRET) {
+      addRequiredIssue(context, "NEON_AUTH_COOKIE_SECRET", "AUTH_MODE");
+    }
+    if (!env.APP_ORIGIN) {
+      addRequiredIssue(context, "APP_ORIGIN", "AUTH_MODE");
+    }
+  }
+  if (
+    env.AUTH_MODE === "live" &&
+    env.AUTH_PASSWORD_RESET_SESSION_REVOCATION !== "verified"
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["AUTH_PASSWORD_RESET_SESSION_REVOCATION"],
+      message:
+        "Live Auth requires verified provider session revocation after password reset",
+    });
+  }
+  if (
+    env.STORAGE_NEON_AUTH_BASE_URL &&
+    env.NEON_AUTH_BASE_URL &&
+    env.STORAGE_NEON_AUTH_BASE_URL !== env.NEON_AUTH_BASE_URL
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["NEON_AUTH_BASE_URL"],
+      message: "Neon Auth base URL aliases must agree",
+    });
+  }
+  if (
+    env.NEON_AUTH_COOKIE_SECRET &&
+    env.RATE_LIMIT_SECRET &&
+    env.NEON_AUTH_COOKIE_SECRET === env.RATE_LIMIT_SECRET
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["RATE_LIMIT_SECRET"],
+      message: "Auth cookie and rate-limit secrets must be independent",
+    });
+  }
   if (env.DATABASE_MODE === "test") {
     requireFields(env, context, "DATABASE_MODE", [
       "TEST_DATABASE_URL",
@@ -249,7 +347,11 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
   requireFields(env, context, "STORAGE_MODE", ["BLOB_READ_WRITE_TOKEN"]);
   requireFields(env, context, "EMAIL_MODE", ["RESEND_API_KEY", "RESEND_FROM"]);
 
-  if ((env.APP_ENV !== "local" || productionDeployment) && !env.APP_ORIGIN) {
+  if (
+    (env.APP_ENV !== "local" || productionDeployment) &&
+    !env.APP_ORIGIN &&
+    env.AUTH_MODE === "disabled"
+  ) {
     addRequiredIssue(context, "APP_ORIGIN", "AUTH_MODE");
   }
 
@@ -285,40 +387,6 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
         code: "custom",
         path: [modeKey],
         message: `${modeKey}=live requires APP_ENV=production`,
-      });
-    }
-  }
-
-  if (env.AUTH_MODE === "test") {
-    if (!env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith("pk_test_")) {
-      context.addIssue({
-        code: "custom",
-        path: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"],
-        message: "AUTH_MODE=test requires a Clerk test publishable key",
-      });
-    }
-    if (!env.CLERK_SECRET_KEY?.startsWith("sk_test_")) {
-      context.addIssue({
-        code: "custom",
-        path: ["CLERK_SECRET_KEY"],
-        message: "AUTH_MODE=test requires a Clerk test secret key",
-      });
-    }
-  }
-
-  if (env.AUTH_MODE === "live") {
-    if (!env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.startsWith("pk_live_")) {
-      context.addIssue({
-        code: "custom",
-        path: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"],
-        message: "AUTH_MODE=live requires a Clerk live publishable key",
-      });
-    }
-    if (!env.CLERK_SECRET_KEY?.startsWith("sk_live_")) {
-      context.addIssue({
-        code: "custom",
-        path: ["CLERK_SECRET_KEY"],
-        message: "AUTH_MODE=live requires a Clerk live secret key",
       });
     }
   }
@@ -404,4 +472,21 @@ export function parseServerEnv(
   }
 
   return result.data;
+}
+
+/**
+ * Vercel's Neon integration prefixes storage-managed variables. Local and
+ * non-Vercel deployments may use the official unprefixed SDK name instead.
+ */
+export function resolveNeonAuthBaseUrl(
+  environment: Pick<
+    ServerEnv,
+    "STORAGE_NEON_AUTH_BASE_URL" | "NEON_AUTH_BASE_URL"
+  >,
+): string | null {
+  return (
+    environment.STORAGE_NEON_AUTH_BASE_URL ??
+    environment.NEON_AUTH_BASE_URL ??
+    null
+  );
 }

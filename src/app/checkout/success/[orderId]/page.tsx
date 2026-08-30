@@ -62,7 +62,10 @@ export default async function CheckoutSuccessPage({
   const payment = paymentCopy(order.paymentState);
 
   return (
-    <AccountShell localDriver={request.localDriver !== null}>
+    <AccountShell
+      authEnabled={request.environment.AUTH_MODE !== "disabled"}
+      localDriver={request.localDriver !== null}
+    >
       <article className="mx-auto max-w-5xl">
         <DataLabel>Owner-only order record</DataLabel>
         {request.localDriver !== null ? (

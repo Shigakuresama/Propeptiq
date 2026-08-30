@@ -1,21 +1,24 @@
-import { clerkMiddleware } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 
+import { getNeonAuthForEnvironment } from "@/auth/neon-server";
+import { authRouteWithDestination, SIGN_IN_ROUTE } from "@/auth/routes";
 import { parseServerEnv } from "@/config/env-schema";
 
-const realClerkProxy = clerkMiddleware();
-
-export default function proxy(request: NextRequest, event: Parameters<typeof realClerkProxy>[1]) {
+export default function proxy(request: NextRequest) {
   const environment = parseServerEnv(process.env);
-  if (
-    environment.AUTH_MODE === "disabled" ||
-    environment.LOCAL_TEST_DRIVER === "enabled"
-  ) {
-    return;
-  }
-  return realClerkProxy(request, event);
+  const auth = getNeonAuthForEnvironment(environment);
+  if (!auth) return;
+  const returnTo = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+  return auth.middleware({
+    loginUrl: authRouteWithDestination(SIGN_IN_ROUTE, returnTo),
+  })(request);
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  matcher: [
+    "/account/:path*",
+    "/admin/:path*",
+    "/checkout/:path*",
+    "/research-sets/:path*",
+  ],
 };

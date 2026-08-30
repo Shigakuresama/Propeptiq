@@ -2,7 +2,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 const { getRequestIdentityMock } = vi.hoisted(() => ({
-  getRequestIdentityMock: vi.fn().mockResolvedValue({ localDriver: null }),
+  getRequestIdentityMock: vi.fn().mockResolvedValue({
+    environment: { AUTH_MODE: "test" },
+    localDriver: null,
+  }),
 }));
 
 vi.mock("@/auth/server", () => ({

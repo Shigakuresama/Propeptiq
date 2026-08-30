@@ -9,6 +9,12 @@ import {
 
 const buyerUserId = "73000000-0000-4000-8000-000000000001";
 const now = new Date("2026-08-25T12:00:00.000Z");
+const syntheticNeonAuth = {
+  STORAGE_NEON_AUTH_BASE_URL:
+    "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth",
+  NEON_AUTH_COOKIE_SECRET:
+    "synthetic-neon-auth-cookie-secret-at-least-32-characters",
+} as const;
 const identity = Object.freeze({
   clerkUserId: "user_synthetic_6d",
   primaryEmail: "Synthetic.Buyer@Example.Test",
@@ -217,13 +223,13 @@ describe("trusted provider execution context", () => {
       APP_ENV: "production",
       APP_ORIGIN: "https://commerce.synthetic.example",
       AUTH_MODE: "live",
+      AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
+      ...syntheticNeonAuth,
       DATABASE_MODE: "live",
       PAYMENTS_MODE: "live",
       TAX_MODE: "live",
       SHIPPING_MODE: "live",
       FULFILLMENT_MODE: "live",
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_live_synthetic",
-      CLERK_SECRET_KEY: "sk_live_synthetic",
       RATE_LIMIT_SECRET: "task6d-rate-limit-at-least-32-characters",
       DATABASE_URL: "postgresql://synthetic.invalid/database?sslmode=require",
       STRIPE_ACCOUNT_ID: "acct_synthetic123",

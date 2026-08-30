@@ -67,7 +67,10 @@ export default async function CheckoutPage() {
     .filter((promotion) => promotion.kind === "discount")
     .map((promotion) => ({ id: promotion.id, name: promotion.name })) ?? [];
   return (
-    <AccountShell localDriver={request.localDriver !== null}>
+    <AccountShell
+      authEnabled={request.environment.AUTH_MODE !== "disabled"}
+      localDriver={request.localDriver !== null}
+    >
       <header className="mb-10 grid gap-6 border-b border-border pb-8 lg:grid-cols-[1fr_auto] lg:items-end">
         <div className="max-w-3xl">
           <DataLabel>Verified account gate</DataLabel>

@@ -10,6 +10,12 @@ import { parseServerEnv, type ServerEnv } from "@/config/env-schema";
 import { createAttributionCookie } from "@/growth/attribution-cookie";
 
 const origin = "http://127.0.0.1:4631";
+const syntheticNeonAuth = {
+  STORAGE_NEON_AUTH_BASE_URL:
+    "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth",
+  NEON_AUTH_COOKIE_SECRET:
+    "synthetic-neon-auth-cookie-secret-at-least-32-characters",
+} as const;
 const localEnvironment = {
   APP_ENV: "local",
   APP_ORIGIN: origin,
@@ -40,9 +46,7 @@ const previewEnvironment = parseServerEnv({
   LOCAL_TEST_DRIVER: "disabled",
   LOCAL_TEST_SECRET: "",
   AUTH_MODE: "test",
-  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_synthetic_task7_preview",
-  CLERK_SECRET_KEY: "sk_test_synthetic_task7_preview",
-  CLERK_WEBHOOK_SIGNING_SECRET: "",
+  ...syntheticNeonAuth,
   RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
   DATABASE_MODE: "test",
   TEST_DATABASE_URL:
@@ -317,6 +321,7 @@ describe("commerce server composition", () => {
       LOCAL_TEST_DRIVER: "disabled",
       CATALOG_DEMO_MODE: "disabled",
       AUTH_MODE: "test",
+      ...syntheticNeonAuth,
       DATABASE_MODE: "test",
       TEST_DATABASE_URL: "postgresql://slice6g.invalid/test",
       PAYMENTS_MODE: "test",

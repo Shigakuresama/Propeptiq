@@ -5,5 +5,12 @@ import { AccountShell } from "@/components/account/account-shell";
 
 export default async function AccountLayout({ children }: { children: ReactNode }) {
   const request = await getRequestIdentity();
-  return <AccountShell localDriver={request.localDriver !== null}>{children}</AccountShell>;
+  return (
+    <AccountShell
+      authEnabled={request.environment.AUTH_MODE !== "disabled"}
+      localDriver={request.localDriver !== null}
+    >
+      {children}
+    </AccountShell>
+  );
 }
