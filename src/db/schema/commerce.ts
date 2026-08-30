@@ -289,6 +289,54 @@ export const orderPromotionAllocations = pgTable("order_promotion_allocations", 
   check("order_promotion_allocations_discount_nonnegative", safeNonnegativeMoney(table.allocatedDiscountMinor)),
 ]);
 
+/**
+ * Durable binding between an order and the Stripe invoice issued for it.
+ *
+ * One order carries at most one invoice: `orderId` is the primary key, so a
+ * repeat issue attempt cannot bill an institutional buyer twice. The provider
+ * invoice id is separately unique, so the same invoice cannot be bound to two
+ * orders. Together these are what let an inbound invoice provider event be
+ * resolved to an order from OUR record rather than from provider-supplied
+ * metadata. See docs/adr/0006.
+ */
+export const orderInvoices = pgTable("order_invoices", {
+  orderId: uuid("order_id").primaryKey().references(() => orders.id, { onDelete: "restrict" }),
+  provider: text("provider").notNull(),
+  providerInvoiceId: text("provider_invoice_id"),
+  hostedInvoiceUrl: text("hosted_invoice_url"),
+  amountDueMinor: integer("amount_due_minor"),
+  status: text("status").default("pending").notNull(),
+  evidenceCode: text("evidence_code"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (table) => [
+  unique("order_invoices_provider_invoice_unique").on(table.provider, table.providerInvoiceId),
+  check("order_invoices_provider", sql`${table.provider} = 'stripe'`),
+  check(
+    "order_invoices_status",
+    sql`${table.status} in ('pending','open','unavailable','unknown')`,
+  ),
+  // An open invoice must carry a complete provider binding; anything else must
+  // not claim one. This is what stops a half-written row reading as billable.
+  check(
+    "order_invoices_open_coherent",
+    sql`(${table.status} = 'open'
+          and ${table.providerInvoiceId} is not null and ${nonblank(table.providerInvoiceId)}
+          and ${table.hostedInvoiceUrl} is not null and ${nonblank(table.hostedInvoiceUrl)}
+          and ${table.amountDueMinor} is not null and ${table.amountDueMinor} >= 0)
+        or (${table.status} <> 'open'
+          and ${table.hostedInvoiceUrl} is null
+          and ${table.amountDueMinor} is null)`,
+  ),
+  check(
+    "order_invoices_evidence_coherent",
+    sql`(${table.status} in ('unavailable','unknown') and ${table.evidenceCode} is not null
+          and ${nonblank(table.evidenceCode)})
+        or (${table.status} not in ('unavailable','unknown') and ${table.evidenceCode} is null)`,
+  ),
+  check("order_invoices_timestamps", sql`${table.updatedAt} >= ${table.createdAt}`),
+]);
+
 export const orderShippingAddresses = pgTable("order_shipping_addresses", {
   orderId: uuid("order_id").primaryKey().references(() => orders.id, { onDelete: "cascade" }),
   recipientName: text("recipient_name").notNull(),

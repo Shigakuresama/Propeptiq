@@ -169,6 +169,13 @@
       "when": 1788053477281,
       "tag": "0023_stiff_lionheart",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788056057425,
+      "tag": "0024_flaky_miracleman",
+      "breakpoints": true
     }
   ]
 }
