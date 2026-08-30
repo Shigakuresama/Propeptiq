@@ -25,6 +25,8 @@ function isPasswordRecoveryPath(path: readonly string[]): boolean {
     route === "/email-otp/reset-password" ||
     route === "/email-otp/passcode" ||
     route === "/forget-password/email-otp" ||
+    route === "/phone-number/request-password-reset" ||
+    route === "/phone-number/reset-password" ||
     route === "/reset-password" ||
     route.startsWith("/reset-password/")
   );

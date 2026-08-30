@@ -65,11 +65,11 @@ async function requestVerificationCode(
   const environment = readServerEnv();
   const auth = await loadManagedAuth(environment);
   if (!auth) return false;
-  const { error } = await auth.emailOtp.sendVerificationOtp({
+  const { data, error } = await auth.emailOtp.sendVerificationOtp({
     email,
     type: "email-verification",
   });
-  return !error;
+  return !error && data?.success === true;
 }
 
 function verificationState(
@@ -190,11 +190,11 @@ export async function verifyEmailOtp(
 
   const destination = resolveAuthDestination(formData.get("returnTo"));
   try {
-    const { error } = await auth.emailOtp.verifyEmail({
+    const { data, error } = await auth.emailOtp.verifyEmail({
       email: email.data,
       otp: otp.data,
     });
-    if (error) {
+    if (error || data?.status !== true) {
       return verificationState(email.data, "That code could not be verified. Request a new code and try again.");
     }
     const sessionResult = await auth.getSession({

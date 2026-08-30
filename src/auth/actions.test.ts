@@ -29,10 +29,11 @@ const mocks = vi.hoisted(() => {
     verifyEmail,
     environment: {
       APP_ORIGIN: "https://propeptiq.example.test" as string | undefined,
+      AUTH_EMAIL_DELIVERY_VERIFIED: "verified" as const,
       AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified" as
         | "verified"
         | undefined,
-      AUTH_MODE: "test",
+      AUTH_MODE: "test" as "test" | "live",
     },
   };
 });
@@ -68,6 +69,7 @@ describe("Managed Neon Auth actions", () => {
     vi.clearAllMocks();
     mocks.environment.APP_ORIGIN = "https://propeptiq.example.test";
     mocks.environment.AUTH_PASSWORD_RESET_SESSION_REVOCATION = "verified";
+    mocks.environment.AUTH_MODE = "test";
   });
 
   it("rejects invalid signup input before calling the identity provider", async () => {
@@ -158,6 +160,32 @@ describe("Managed Neon Auth actions", () => {
     expect(state.message).toMatch(/could not be sent/i);
   });
 
+  it("does not claim a code was sent when the provider reports an unsuccessful OTP request", async () => {
+    mocks.signUpEmail.mockResolvedValue({
+      data: {
+        user: {
+          id: "neon-user",
+          email: "researcher@example.test",
+          emailVerified: false,
+        },
+      },
+      error: null,
+    });
+    mocks.sendVerificationOtp.mockResolvedValue({
+      data: { success: false },
+      error: null,
+    });
+    const formData = new FormData();
+    formData.set("name", "Researcher");
+    formData.set("email", "researcher@example.test");
+    formData.set("password", "research-password");
+
+    const state = await signUpWithEmail(initialState, formData);
+
+    expect(state.status).toBe("verification");
+    expect(state.message).toMatch(/could not be sent/i);
+  });
+
   it("redirects a provider-confirmed verified signup without sending an OTP", async () => {
     mocks.signUpEmail.mockResolvedValue({
       data: {
@@ -190,6 +218,27 @@ describe("Managed Neon Auth actions", () => {
       email: "researcher@example.test",
     });
     expect(mocks.verifyEmail).not.toHaveBeenCalled();
+  });
+
+  it("does not accept an OTP when the provider reports an unsuccessful verification", async () => {
+    mocks.verifyEmail.mockResolvedValue({ data: { status: false }, error: null });
+    mocks.getSession.mockResolvedValue({
+      data: {
+        user: { emailVerified: true },
+        session: { id: "session-id" },
+      },
+      error: null,
+    });
+    const formData = new FormData();
+    formData.set("email", "researcher@example.test");
+    formData.set("otp", "123456");
+
+    await expect(verifyEmailOtp(initialState, formData)).resolves.toEqual({
+      status: "verification",
+      email: "researcher@example.test",
+      message: "That code could not be verified. Request a new code and try again.",
+    });
+    expect(mocks.getSession).not.toHaveBeenCalled();
   });
 
   it("redirects a server-confirmed verified OTP session to checkout", async () => {
@@ -286,6 +335,7 @@ describe("Managed Neon Auth actions", () => {
   });
 
   it("keeps password recovery closed until provider session revocation is evidenced", async () => {
+    mocks.environment.AUTH_MODE = "live";
     mocks.environment.AUTH_PASSWORD_RESET_SESSION_REVOCATION = undefined;
     const formData = new FormData();
     formData.set("email", "researcher@example.test");

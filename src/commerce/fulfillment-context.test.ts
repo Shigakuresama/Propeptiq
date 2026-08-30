@@ -78,6 +78,7 @@ describe("opaque fulfillment execution authority", () => {
       VERCEL_ENV: "production",
       APP_ORIGIN: "https://commerce.example.test",
       AUTH_MODE: "live",
+      AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
       AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
       ...syntheticNeonAuth,
       DATABASE_MODE: "live",

@@ -46,7 +46,7 @@ export function getNeonAuthForEnvironment(
 
   const auth = createNeonAuth({
     baseUrl,
-    cookies: { secret: cookieSecret },
+    cookies: { secret: cookieSecret, sessionDataTtl: 1 },
   });
   cachedAuth = Object.freeze({ baseUrl, cookieSecret, auth });
   return auth;

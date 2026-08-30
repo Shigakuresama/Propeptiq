@@ -46,17 +46,28 @@ following, with evidence retained for the exact deployment target:
 - provider-required email verification;
 - reviewed exact Preview and Production trusted origins, with localhost disabled
   for Production; and
-- provider configuration that revokes every pre-existing identity session after
-  a password reset; and
 - a branch-isolated Preview lifecycle test covering signup, email verification,
-  sign-in, protected-route return, sign-out, single-use password recovery, and
-  rejection of sessions issued before the reset, without a Production identity
-  or data write.
+  sign-in, protected-route return, and sign-out without a Production identity or
+  data write.
 
-The environment assertion
-`AUTH_PASSWORD_RESET_SESSION_REVOCATION=verified` keeps recovery and live Auth
-closed by default. It may be set only after the provider setting and Preview
-lifecycle evidence are retained; the value is not evidence on its own.
+Password recovery is independently closed until provider configuration is proven
+to revoke every pre-existing identity session after reset and a two-session branch
+test proves the reset token is single-use and both old sessions are rejected.
+Normal signup, verification, sign-in, and sign-out do not expose recovery while
+this evidence is absent.
+
+The environment assertion `AUTH_EMAIL_DELIVERY_VERIFIED=verified` keeps live Auth
+closed until the normal production email and lifecycle evidence is retained. The
+separate `AUTH_PASSWORD_RESET_SESSION_REVOCATION=verified` assertion keeps only
+recovery closed. Neither value is evidence on its own.
+
+The 2026-08-30 disposable-branch test changed a synthetic password and consumed
+its reset token but left all three pre-reset sessions valid. Adding an undocumented
+`revokeSessionsOnPasswordReset` project-config key on that branch did not change
+the result. Therefore the recovery assertion must remain unset until Neon exposes
+and documents a working provider setting. Server identity reads bypass the SDK's
+signed session-data cache, and middleware cache reuse is limited to the SDK's
+shortest supported positive TTL (one second).
 
 Provider signup, application user projection, and `active` buyer creation are
 three distinct transitions. A verified provider session may project an internal
