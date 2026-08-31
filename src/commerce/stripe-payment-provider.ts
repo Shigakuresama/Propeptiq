@@ -369,6 +369,25 @@ function exactExpandedProduct(
   );
 }
 
+const stripeDecimalPrototype = Object.getPrototypeOf(Stripe.Decimal.zero);
+
+function exactWholeMinorDecimal(raw: unknown, expectedMinor: number): boolean {
+  if (raw === null || raw === undefined) return true;
+  if (
+    typeof raw !== "object" ||
+    Object.getPrototypeOf(raw) !== stripeDecimalPrototype
+  ) {
+    return false;
+  }
+  try {
+    const serialized = (raw as Stripe.Decimal).toString();
+    return /^(?:0|[1-9]\d*)$/u.test(serialized) &&
+      BigInt(serialized) === BigInt(expectedMinor);
+  } catch {
+    return false;
+  }
+}
+
 function exactConfiguredPrice(
   raw: unknown,
   expected: StripeProviderBindingSnapshotV2["lines"][number],
@@ -385,9 +404,11 @@ function exactConfiguredPrice(
     price.billing_scheme === "per_unit" &&
     price.custom_unit_amount === null &&
     price.tiers_mode === null &&
+    (price.transform_quantity === null || price.transform_quantity === undefined) &&
     Number.isSafeInteger(price.unit_amount) &&
     (price.unit_amount as number) > 0 &&
     price.unit_amount === expected.baseUnitMinor &&
+    exactWholeMinorDecimal(price.unit_amount_decimal, expected.baseUnitMinor) &&
     price.currency === expected.currency.toLowerCase() &&
     price.livemode === expectedLivemode &&
     exactExpandedProduct(

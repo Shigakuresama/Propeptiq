@@ -1,3 +1,4 @@
+import Stripe from "stripe";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -210,7 +211,7 @@ function rawPrice(overrides: Record<string, unknown> = {}) {
     transform_quantity: null,
     type: "one_time",
     unit_amount: 2_000,
-    unit_amount_decimal: "2000",
+    unit_amount_decimal: Stripe.Decimal.from("2000"),
     product: {
       id: "prod_synthetic_alpha",
       object: "product",
@@ -299,6 +300,57 @@ describe("Stripe owner-account binding verifier test double", () => {
         status: "unavailable",
       });
       expect(sdk.prices.retrieve).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects a Price that transforms quantity before billing", async () => {
+    const { sdk, verifier } = setupBindingVerifier();
+    sdk.prices.retrieve.mockResolvedValueOnce(rawPrice({
+      transform_quantity: { divide_by: 2, round: "up" },
+    }));
+
+    await expect(verifier.verifyBindings(syntheticBindingSnapshot())).resolves.toEqual({
+      status: "unavailable",
+    });
+  });
+
+  it("rejects a fractional decimal amount even when the integer amount matches", async () => {
+    const { sdk, verifier } = setupBindingVerifier();
+    sdk.prices.retrieve.mockResolvedValueOnce(rawPrice({
+      unit_amount_decimal: Stripe.Decimal.from("2000.5"),
+    }));
+
+    await expect(verifier.verifyBindings(syntheticBindingSnapshot())).resolves.toEqual({
+      status: "unavailable",
+    });
+  });
+
+  it("rejects a whole decimal amount that differs from the integer amount", async () => {
+    const { sdk, verifier } = setupBindingVerifier();
+    sdk.prices.retrieve.mockResolvedValueOnce(rawPrice({
+      unit_amount_decimal: Stripe.Decimal.from("2001"),
+    }));
+
+    await expect(verifier.verifyBindings(syntheticBindingSnapshot())).resolves.toEqual({
+      status: "unavailable",
+    });
+  });
+
+  it("accepts absent, null, or exactly equal whole-minor decimal amounts", async () => {
+    const absentDecimal = rawPrice();
+    Reflect.deleteProperty(absentDecimal, "unit_amount_decimal");
+    const acceptedPrices = [
+      absentDecimal,
+      rawPrice({ unit_amount_decimal: null }),
+      rawPrice({ unit_amount_decimal: Stripe.Decimal.from("2000.000000000000") }),
+    ];
+
+    for (const price of acceptedPrices) {
+      const { sdk, verifier } = setupBindingVerifier();
+      sdk.prices.retrieve.mockResolvedValueOnce(price);
+      await expect(verifier.verifyBindings(syntheticBindingSnapshot())).resolves.toEqual({
+        status: "verified",
+      });
     }
   });
 
