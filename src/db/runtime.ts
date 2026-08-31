@@ -3,6 +3,7 @@ import "server-only";
 import type { PoolClient, QueryResultRow } from "pg";
 
 import type { ServerEnv } from "@/config/env-schema";
+import { preparePostgresConnectionUrl } from "@/db/postgres-connection-url";
 
 export type RuntimeDatabaseClient = Readonly<{
   query: <T extends QueryResultRow>(
@@ -29,7 +30,7 @@ function databaseUrl(environment: ServerEnv): string {
 }
 
 async function getPool(environment: ServerEnv): Promise<import("pg").Pool> {
-  const url = databaseUrl(environment);
+  const url = preparePostgresConnectionUrl(databaseUrl(environment));
   if (poolPromise && poolUrl !== url) {
     throw new Error("Runtime database target changed after initialization");
   }

@@ -5,7 +5,7 @@ PROPEPTIQ LABS is a U.S.-only, research-use commerce application. The active pro
 ## V1 experience
 
 - Anonymous visitors may browse the active catalog, see server-backed prices and promotions, and build a local cart.
-- Checkout requires an email verified by Managed Neon Auth, confirmation that the buyer is at least 21 years old, a structured research purpose, and the current versioned research-use attestation.
+- Checkout requires an email verified by application-owned Better Auth backed by Neon PostgreSQL, confirmation that the buyer is at least 21 years old, a structured research purpose, and the current versioned research-use attestation.
 - Completing those steps creates an `active` individual buyer without routine staff approval or uploaded identity or organization material.
 - An optional organization-name profile field is descriptive only; V1 has no organization tenancy or membership authorization.
 - Checkout remains server-authoritative for account, attestation, product, destination, inventory, payment-provider enablement, price, discount, tax, and shipping facts.
@@ -31,19 +31,18 @@ These sources do not decide whether any PROPEPTIQ SKU or destination is lawful o
 
 Production commerce fails closed until owners supply and verify qualified legal review, a real catalog manifest, a counsel-approved state allowlist, tax configuration, shipping-service configuration, an operating fulfillment process, and payment-provider acceptance. These are external inputs, not application approval workflows or fabricated database records.
 
-Production account creation also remains closed until every Managed Neon Auth
-gate is evidenced: independent stable cookie-signing and application rate-limit
-secrets; production-capable custom SMTP with a verified sender; provider-required
-email verification; reviewed Preview and Production trusted origins with
-localhost disabled for Production; and a branch-isolated Preview lifecycle test
-covering signup, email verification, sign-in, protected-route return, and
-sign-out. `AUTH_EMAIL_DELIVERY_VERIFIED=verified` is an operator assertion for
-that evidence, not evidence by itself. Password recovery is a separate capability
-and remains unavailable until the provider is proven to revoke every pre-existing
-session after a reset and a two-session branch test proves token reuse and both
-old sessions fail. An external Auth resource may exist while the application
-adapter remains disabled; resource availability, adapter activation, internal
-user projection, and buyer activation are separate facts.
+Production account creation also remains closed until every Better Auth gate is
+evidenced: independent stable Better Auth and application rate-limit secrets;
+the exact Neon PostgreSQL target; verified Resend delivery; required email
+verification; the dedicated Auth rate-limit support schema; reviewed Preview
+and Production origins; and a branch-isolated
+Preview lifecycle test covering signup, email verification, sign-in,
+protected-route return, and sign-out. `AUTH_EMAIL_DELIVERY_VERIFIED=verified` is
+an operator assertion for that evidence, not evidence by itself. Password
+recovery is a separate capability and remains unavailable until the exact
+deployment proves that a reset token is single-use and both pre-existing test
+sessions fail. Application deployment, Auth activation, internal user
+projection, and buyer activation are separate facts.
 
 ## Local verification
 

@@ -37,7 +37,7 @@ These six gates are the buyer/order commerce-eligibility decision. Tax configura
 
 - Provider-verified email plus age 21+, one `ResearchPurpose`, and acceptance of the current versioned research-use attestation automatically creates an `active` buyer.
 - Do not request organization documents, identity documents, a free-text application, or routine staff action.
-- V1 buyers are individual Managed Neon Auth users. `organizationName` is optional profile text only; it creates no tenant, membership, role, or authorization boundary.
+- V1 buyers are individual application-owned Better Auth users persisted in Neon PostgreSQL. `organizationName` is optional profile text only; it creates no tenant, membership, role, or authorization boundary.
 - `blocked` denies checkout. `review` is the only buyer status that triggers explicit review.
 - Customer account/order routes require authentication. MFA is required for staff routes, refunds, and fulfillment actions, not ordinary customer operations.
 
@@ -104,17 +104,17 @@ These statements do not establish the legality of a SKU or destination and do no
 
 The following remain unresolved until supplied and verified by their accountable external owners: qualified legal review; real catalog manifest; counsel-approved state allowlist; tax configuration; shipping-service configuration; fulfillment process; and payment-provider acceptance. The application fails closed when an input is absent. It does not fabricate the input or model it as a multi-stage application workflow.
 
-Production Managed Neon Auth activation is a separate launch gate. It requires
-independent stable cookie-signing and application rate-limit secrets,
-production-capable custom SMTP with a verified sender, provider-required email
-verification, exact reviewed Preview and Production trusted origins with
-localhost disabled for Production, and a branch-isolated Preview lifecycle test
+Production Better Auth activation is a separate launch gate. It requires
+independent stable Better Auth and application rate-limit secrets, the exact Neon
+database target, the dedicated Auth rate-limit support schema, verified Resend
+delivery, required email verification, exact Preview and Production origins,
+and a branch-isolated Preview lifecycle test
 covering signup, verification, sign-in, protected-route return, and sign-out.
-Password recovery has an additional gate: provider-enforced revocation of every
-pre-existing session after reset plus a two-session branch test proving single-use
-recovery and rejection of both pre-reset sessions. None of these requirements may
-be inferred from the presence of an external Auth resource, a syntactically valid
-Auth URL, or an operator assertion alone.
+Password recovery has an additional gate: code-enforced revocation of every
+pre-existing session after reset plus a two-session branch test proving
+single-use recovery and rejection of both pre-reset sessions. None of these
+requirements may be inferred from a syntactically valid environment variable,
+external Auth resource, or operator assertion alone.
 
 ## 10. Acceptance scenarios
 

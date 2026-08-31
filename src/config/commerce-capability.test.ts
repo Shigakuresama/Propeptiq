@@ -9,10 +9,8 @@ import { parseServerEnv, type ServerEnv } from "./env-schema";
 
 const origin = "https://research.example.test";
 const databaseUrl = "postgresql://synthetic.invalid/database?sslmode=require";
-const neonAuthBaseUrl =
-  "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth";
-const neonAuthCookieSecret =
-  "synthetic-neon-auth-cookie-secret-at-least-32-characters";
+const betterAuthSecret =
+  "synthetic-better-auth-secret-material-0123456789ABCDEF";
 
 const commerceLive = {
   APP_ENV: "production",
@@ -20,12 +18,14 @@ const commerceLive = {
   AUTH_MODE: "live",
   AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
   AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
+  BETTER_AUTH_SECRET: betterAuthSecret,
   DATABASE_MODE: "live",
+  EMAIL_MODE: "live",
+  RESEND_API_KEY: "re_synthetic_auth_live",
+  RESEND_FROM: "accounts@example.test",
   TAX_MODE: "live",
   SHIPPING_MODE: "live",
   FULFILLMENT_MODE: "live",
-  STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
-  NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
   RATE_LIMIT_SECRET: "task6-rate-limit-secret-at-least-32-characters",
   DATABASE_URL: databaseUrl,
 } as const;
@@ -102,6 +102,7 @@ describe("commerce capability configuration", () => {
     for (const dependency of [
       "AUTH_MODE",
       "DATABASE_MODE",
+      "EMAIL_MODE",
       "TAX_MODE",
       "SHIPPING_MODE",
       "FULFILLMENT_MODE",
@@ -134,13 +135,14 @@ describe("commerce capability configuration", () => {
     });
     expect(isLiveCheckoutEnvironmentConfigured(configured)).toBe(true);
     expect(configured.STORAGE_MODE).toBe("disabled");
-    expect(configured.EMAIL_MODE).toBe("disabled");
+    expect(configured.EMAIL_MODE).toBe("live");
 
     for (const key of [
       "COMMERCE_LIVE_CAPABILITY",
       "PAYMENTS_LIVE_CAPABILITY",
       "AUTH_MODE",
       "DATABASE_MODE",
+      "EMAIL_MODE",
       "PAYMENTS_MODE",
       "TAX_MODE",
       "SHIPPING_MODE",
@@ -170,8 +172,7 @@ describe("commerce capability configuration", () => {
       LOCAL_TEST_DRIVER: "disabled",
       LOCAL_TEST_SECRET: "",
       AUTH_MODE: "test",
-      STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
-      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+      BETTER_AUTH_SECRET: betterAuthSecret,
       RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
       DATABASE_MODE: "test",
       TEST_DATABASE_URL:
@@ -184,7 +185,9 @@ describe("commerce capability configuration", () => {
       STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
       STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
       STORAGE_MODE: "disabled",
-      EMAIL_MODE: "disabled",
+      EMAIL_MODE: "test",
+      RESEND_API_KEY: "re_synthetic_auth_test",
+      RESEND_FROM: "accounts@example.test",
       TAX_MODE: "disabled",
       SHIPPING_MODE: "disabled",
       FULFILLMENT_MODE: "disabled",

@@ -8,11 +8,11 @@ import {
 } from "./fulfillment-context";
 
 const secret = "task6f-fulfillment-secret-at-least-32-characters";
-const syntheticNeonAuth = {
-  STORAGE_NEON_AUTH_BASE_URL:
-    "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth",
-  NEON_AUTH_COOKIE_SECRET:
-    "synthetic-neon-auth-cookie-secret-at-least-32-characters",
+const syntheticBetterAuth = {
+  BETTER_AUTH_SECRET:
+    "synthetic-better-auth-secret-material-0123456789ABCDEF",
+  RESEND_API_KEY: "re_synthetic_auth_test",
+  RESEND_FROM: "accounts@example.test",
 } as const;
 
 describe("opaque fulfillment execution authority", () => {
@@ -53,8 +53,9 @@ describe("opaque fulfillment execution authority", () => {
       APP_ENV: "preview",
       APP_ORIGIN: "https://preview.example.test",
       AUTH_MODE: "test",
-      ...syntheticNeonAuth,
+      ...syntheticBetterAuth,
       DATABASE_MODE: "test",
+      EMAIL_MODE: "test",
       FULFILLMENT_MODE: "test",
       RATE_LIMIT_SECRET: secret,
       TEST_DATABASE_URL: "postgresql://test_user:test_password@127.0.0.1:5432/propeptiq_slice6f_test",
@@ -80,8 +81,9 @@ describe("opaque fulfillment execution authority", () => {
       AUTH_MODE: "live",
       AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
       AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
-      ...syntheticNeonAuth,
+      ...syntheticBetterAuth,
       DATABASE_MODE: "live",
+      EMAIL_MODE: "live",
       FULFILLMENT_MODE: "live",
       PAYMENTS_MODE: "disabled",
       COMMERCE_LIVE_CAPABILITY: "disabled",

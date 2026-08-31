@@ -1,6 +1,6 @@
 # ADR 0003: Managed Neon Auth for Customer Identity
 
-**Status:** Accepted for application integration on 2026-08-30; production activation remains gated.
+**Status:** Superseded on 2026-08-30 by ADR 0004. Retained as the historical Managed Neon Auth decision and failed-revocation evidence.
 
 ## Context
 

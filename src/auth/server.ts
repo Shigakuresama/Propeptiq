@@ -1,6 +1,6 @@
 import "server-only";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { connection } from "next/server";
 
 import type { AccountSummary, OrderDetail, OrderSummary } from "@/account/account-read";
@@ -41,7 +41,7 @@ import type { StorageVerifier } from "@/security/storage";
 
 import {
   isVerifiedIdentityAt,
-  projectNeonIdentity,
+  projectBetterAuthIdentity,
   resolveServerIdentity,
   type VerifiedIdentity,
 } from "./identity";
@@ -91,17 +91,19 @@ async function loadLocalDriver(environment: ServerEnv): Promise<LocalTestDriver>
   return localDriverModule.getLocalTestDriver();
 }
 
-async function loadNeonIdentity(
+async function loadBetterAuthIdentity(
   environment: ServerEnv,
 ): Promise<VerifiedIdentity | null> {
-  const { getNeonAuthForEnvironment } = await import("@/auth/neon-server");
-  const auth = getNeonAuthForEnvironment(environment);
+  const { getBetterAuthForEnvironment } = await import(
+    "@/auth/better-auth-server"
+  );
+  const auth = getBetterAuthForEnvironment(environment);
   if (!auth) return null;
-  const { data: session, error } = await auth.getSession({
-    query: { disableCookieCache: "true" },
+  const session = await auth.api.getSession({
+    headers: await headers(),
   });
-  if (error || !session?.user) return null;
-  return projectNeonIdentity(session.user);
+  if (!session?.user) return null;
+  return projectBetterAuthIdentity(session.user);
 }
 
 export async function getRequestIdentity(): Promise<RequestIdentity> {
@@ -109,7 +111,7 @@ export async function getRequestIdentity(): Promise<RequestIdentity> {
   const environment = readServerEnv();
   let localDriver: LocalTestDriver | null = null;
   const identity = await resolveServerIdentity(environment, {
-    loadExternalIdentity: () => loadNeonIdentity(environment),
+    loadExternalIdentity: () => loadBetterAuthIdentity(environment),
     async loadLocalIdentity() {
       localDriver = await loadLocalDriver(environment);
       const signedActor = (await cookies()).get(LOCAL_ACTOR_COOKIE)?.value;
@@ -300,8 +302,8 @@ export async function loadTargetVerifiedIdentity(
     return request.localDriver.loadIdentityByClerkId(_clerkUserId);
   }
   void _referenceTime;
-  // Do not map Neon's provider-admin role onto application staff authority.
-  // Managed Neon Auth does not currently expose the server-verifiable MFA
+  // Do not map an identity-provider role onto application staff authority.
+  // The current Better Auth configuration does not expose server-verifiable MFA
   // evidence this application requires for staff target-identity operations.
   return null;
 }

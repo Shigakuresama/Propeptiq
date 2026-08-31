@@ -14,11 +14,11 @@ export function createPostgresRateLimitStore(
     async increment(window) {
       const result = await client.query<{ count: number }>(
         `
-          INSERT INTO rate_limit_windows
+          INSERT INTO public.rate_limit_windows
             (scope_hash, window_start, count, expires_at)
           VALUES ($1, $2::timestamptz, 1, $3::timestamptz)
           ON CONFLICT (scope_hash, window_start) DO UPDATE
-          SET count = rate_limit_windows.count + 1,
+          SET count = public.rate_limit_windows.count + 1,
               expires_at = EXCLUDED.expires_at
           RETURNING count
         `,

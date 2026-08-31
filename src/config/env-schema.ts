@@ -99,10 +99,11 @@ const rawServerEnvSchema = z.object({
   STORAGE_NEON_AUTH_BASE_URL: neonAuthUrl.optional(),
   NEON_AUTH_BASE_URL: neonAuthUrl.optional(),
   NEON_AUTH_COOKIE_SECRET: generatedSecret.optional(),
+  BETTER_AUTH_SECRET: generatedSecret.optional(),
   AUTH_EMAIL_DELIVERY_VERIFIED: z.literal("verified").optional(),
   AUTH_PASSWORD_RESET_SESSION_REVOCATION: z.literal("verified").optional(),
-  // Accepted temporarily for rollback compatibility; the runtime no longer
-  // reads Clerk credentials when Managed Neon Auth is enabled.
+  // Accepted temporarily for rollback compatibility; the application-owned
+  // Better Auth runtime does not read Clerk credentials.
   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: nonBlank.optional(),
   CLERK_SECRET_KEY: nonBlank.optional(),
   CLERK_WEBHOOK_SIGNING_SECRET: nonBlank.optional(),
@@ -279,14 +280,25 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
   }
 
   if (env.AUTH_MODE !== "disabled") {
-    if (!env.STORAGE_NEON_AUTH_BASE_URL && !env.NEON_AUTH_BASE_URL) {
-      addRequiredIssue(context, "STORAGE_NEON_AUTH_BASE_URL", "AUTH_MODE");
-    }
-    if (!env.NEON_AUTH_COOKIE_SECRET) {
-      addRequiredIssue(context, "NEON_AUTH_COOKIE_SECRET", "AUTH_MODE");
+    if (!env.BETTER_AUTH_SECRET) {
+      addRequiredIssue(context, "BETTER_AUTH_SECRET", "AUTH_MODE");
     }
     if (!env.APP_ORIGIN) {
       addRequiredIssue(context, "APP_ORIGIN", "AUTH_MODE");
+    }
+    if (env.DATABASE_MODE !== env.AUTH_MODE) {
+      context.addIssue({
+        code: "custom",
+        path: ["DATABASE_MODE"],
+        message: `AUTH_MODE=${env.AUTH_MODE} requires DATABASE_MODE=${env.AUTH_MODE}`,
+      });
+    }
+    if (env.EMAIL_MODE !== env.AUTH_MODE) {
+      context.addIssue({
+        code: "custom",
+        path: ["EMAIL_MODE"],
+        message: `AUTH_MODE=${env.AUTH_MODE} requires EMAIL_MODE=${env.AUTH_MODE}`,
+      });
     }
   }
   if (
@@ -309,6 +321,17 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
       code: "custom",
       path: ["NEON_AUTH_BASE_URL"],
       message: "Neon Auth base URL aliases must agree",
+    });
+  }
+  if (
+    env.BETTER_AUTH_SECRET &&
+    env.RATE_LIMIT_SECRET &&
+    env.BETTER_AUTH_SECRET === env.RATE_LIMIT_SECRET
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["RATE_LIMIT_SECRET"],
+      message: "Better Auth and rate-limit secrets must be independent",
     });
   }
   if (
@@ -354,6 +377,24 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
     env.AUTH_MODE === "disabled"
   ) {
     addRequiredIssue(context, "APP_ORIGIN", "AUTH_MODE");
+  }
+
+  if (env.APP_ORIGIN) {
+    const configuredOrigin = new URL(env.APP_ORIGIN);
+    if (
+      configuredOrigin.username ||
+      configuredOrigin.password ||
+      configuredOrigin.pathname !== "/" ||
+      configuredOrigin.search ||
+      configuredOrigin.hash
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["APP_ORIGIN"],
+        message:
+          "APP_ORIGIN must be an origin without credentials, path, query, or fragment",
+      });
+    }
   }
 
   if ((env.APP_ENV !== "local" || productionDeployment) && env.APP_ORIGIN) {

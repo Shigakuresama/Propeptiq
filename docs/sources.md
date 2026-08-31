@@ -1,6 +1,6 @@
 # Primary Source Register
 
-**Checked:** 2026-08-24. Vendor and regulatory sources are time-sensitive and must be rechecked before production activation.
+**Checked:** 2026-08-30. Vendor and regulatory sources are time-sensitive and must be rechecked before production activation.
 
 ## Payments and peptide eligibility
 
@@ -23,16 +23,20 @@ These sources do not establish that any PROPEPTIQ SKU is legal in any jurisdicti
 
 ## Identity and authorization
 
-- Managed Neon Auth Next.js server SDK: https://neon.com/docs/auth/reference/nextjs-server
-- Managed Neon Auth SDK migration and explicit cookie configuration: https://neon.com/docs/auth/migrate/from-auth-v0.1
-- Managed Neon Auth production checklist: https://neon.com/docs/auth/production-checklist
-- Managed Neon Auth email verification: https://neon.com/docs/auth/guides/email-verification
-- Managed Neon Auth email OTP: https://neon.com/docs/auth/guides/plugins/email-otp
-- Managed Neon Auth trusted domains: https://neon.com/docs/auth/guides/configure-domains
+- Better Auth 1.6 Next.js integration and server-action cookies: https://better-auth.com/docs/1.6/integrations/next
+- Better Auth email/password and reset-session revocation: https://better-auth.com/docs/1.6/authentication/email-password
+- Better Auth email OTP: https://better-auth.com/docs/1.6/plugins/email-otp
+- Better Auth session management: https://better-auth.com/docs/1.6/concepts/session-management
+- Better Auth PostgreSQL and non-default `search_path`: https://better-auth.com/docs/1.6/adapters/postgresql
+- Better Auth 1.7 guided migration requirements: https://better-auth.com/docs/1.6/guides/1-7-upgrade-guide
+- Neon branchable Auth data in the branch-local `neon_auth` schema: https://neon.com/docs/changelog/2025-12-12
+- Managed Neon Auth Next.js server SDK, retained for the bounded rollback window: https://neon.com/docs/auth/reference/nextjs-server
 
 ## Database, storage, delivery, and observability
 
 - Neon serverless driver: https://neon.com/docs/serverless/serverless-driver
+- Neon direct connections for persistent `search_path` and PgBouncer limits: https://neon.com/docs/connect/connection-pooling
+- Neon unsupported startup parameters on pooled connections: https://neon.com/docs/connect/connection-errors
 - Neon branching/backups overview: https://neon.com/docs/introduction/branching
 - Drizzle migrations: https://orm.drizzle.team/docs/migrations
 - Vercel Blob security/private storage: https://vercel.com/docs/vercel-blob/security
