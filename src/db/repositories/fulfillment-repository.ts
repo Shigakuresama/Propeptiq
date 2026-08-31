@@ -264,6 +264,7 @@ type LockedFacts = Readonly<{
   lots: readonly LotRow[];
   review: ExactReviewDecision | null;
   finalReviewHashMatches: boolean;
+  reviewAuthorizationValid: boolean;
 }>;
 
 const fiveMinutesMs = 5 * 60 * 1000;
@@ -1437,14 +1438,12 @@ async function loadLockedFacts(
   const authorizationMode = attempt === null
     ? null
     : reviewAuthorizationMode(attempt.reviewAuthorizationMode);
-  if (discovered.attemptId !== null && (
+  const reviewAuthorizationValid = discovered.attemptId === null || !(
     authorizationMode === null ||
     authorizationMode !== reviewAuthorizationMode(discovered.reviewAuthorizationMode) ||
     (authorizationMode === "bound" && lockedBinding === null) ||
     (authorizationMode === "none" && lockedBinding !== null)
-  )) {
-    return Object.freeze({ status: "conflict" });
-  }
+  );
   if (
     (lockedBinding === null) !== (discovered.reviewBinding === null) ||
     (lockedBinding !== null && discovered.reviewBinding !== null &&
@@ -1536,6 +1535,7 @@ async function loadLockedFacts(
       lots,
       review,
       finalReviewHashMatches,
+      reviewAuthorizationValid,
     }),
   });
 }
@@ -1836,6 +1836,9 @@ export function createFulfillmentRepository(input: Readonly<{
       );
       if (loaded.status !== "ok") return loaded;
       const { facts, buyerStatus } = loaded;
+      if (!facts.reviewAuthorizationValid) {
+        return Object.freeze({ status: "conflict" });
+      }
       if (facts.order.state === "paid_pending_fulfillment") {
         return Object.freeze({ status: "already_clear" });
       }
@@ -1891,6 +1894,9 @@ export function createFulfillmentRepository(input: Readonly<{
             ? "already_handed_off"
             : "conflict",
         });
+      }
+      if (!facts.reviewAuthorizationValid) {
+        return Object.freeze({ status: "conflict" });
       }
       if (!paidStates.has(facts.order.state)) {
         return Object.freeze({ status: "ineligible" });
@@ -2144,6 +2150,12 @@ export function createFulfillmentRepository(input: Readonly<{
       );
       if (loaded.status !== "ok") return loaded;
       const { facts } = loaded;
+      if (
+        !facts.reviewAuthorizationValid &&
+        !(await exactTerminalReplay(client, facts, input.keyedUuid))
+      ) {
+        return Object.freeze({ status: "conflict" });
+      }
       if (
         facts.order.state !== "fulfilled" ||
         facts.shipment === null ||

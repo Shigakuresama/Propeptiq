@@ -370,6 +370,17 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
     `)).rows).toEqual([{ releases: 0, effects: 0, shipment: "pending" }]);
   }
 
+  async function setMigrationEraAuthorizationMode(): Promise<void> {
+    await client.exec(`
+      ALTER TABLE checkout_attempts
+        DISABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+      UPDATE checkout_attempts SET review_authorization_mode = NULL
+      WHERE id = '${ids.attempt}';
+      ALTER TABLE checkout_attempts
+        ENABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+    `);
+  }
+
   it("returns before authorization and preserves a byte-equivalent authority snapshot for disabled or forged context", async () => {
     const repository = setup();
     for (const executionContext of [
@@ -810,6 +821,71 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
     await client.exec(`DELETE FROM downstream_effects`);
     await expect(repository.handoff(command())).resolves.toEqual({ status: "conflict" });
     expect((await client.query(`SELECT count(*)::int AS count FROM downstream_effects`)).rows).toEqual([{ count: 0 }]);
+  });
+
+  it("replays a proven historical handoff with a migration-era null authorization mode", async () => {
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    await setMigrationEraAuthorizationMode();
+    const before = await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `);
+    await expect(repository.handoff(command())).resolves.toEqual({
+      status: "already_handed_off",
+    });
+    expect((await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `)).rows).toEqual(before.rows);
+  });
+
+  it("allows the exact exception transition after a proven null-mode handoff", async () => {
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    const before = await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `);
+    await setMigrationEraAuthorizationMode();
+    await expect(repository.transitionShipment({
+      ...command(), action: "record_exception",
+    })).resolves.toEqual({ status: "exception" });
+    expect((await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `)).rows).toEqual(before.rows);
+  });
+
+  it("allows the exact delivered transition after a proven null-mode handoff", async () => {
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    const before = await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `);
+    await setMigrationEraAuthorizationMode();
+    await expect(repository.transitionShipment({
+      ...command(), action: "deliver",
+    })).resolves.toEqual({ status: "delivered" });
+    expect((await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `)).rows).toEqual(before.rows);
+  });
+
+  it("rejects null-mode terminal text without an exact durable handoff tuple", async () => {
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    await setMigrationEraAuthorizationMode();
+    await client.exec(`
+      DELETE FROM downstream_effects
+      WHERE order_id = '${ids.order}' AND effect_type = 'fulfillment_handed_off';
+    `);
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expect(repository.transitionShipment({
+      ...command(), action: "deliver",
+    })).resolves.toEqual({ status: "conflict" });
   });
 
   it("replays the immutable historical review binding after current buyer review status drifts", async () => {
