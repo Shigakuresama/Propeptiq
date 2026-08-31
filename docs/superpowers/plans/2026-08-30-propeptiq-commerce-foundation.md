@@ -651,40 +651,50 @@ git commit -m "feat(checkout): revalidate variant pricing server side"
 - Modify: `src/commerce/provider-checkout-orchestration.ts`
 - Modify: `src/commerce/stripe-payment-provider.ts`
 - Modify: `src/commerce/server-runtime.ts`
+- Modify: `src/commerce/checkout-ports.ts`
+- Modify: `src/commerce/payment-provider.ts`
+- Modify: `src/db/repositories/provider-session-repository.ts`
+- Modify: `src/auth/local-commerce-driver.ts`
+- Modify: `src/db/schema/commerce.ts`
+- Add: a generated additive migration for provider request schema V2
 - Test: `src/commerce/provider-contracts.test.ts`
 - Test: `src/commerce/provider-checkout-orchestration.test.ts`
 - Test: `src/commerce/stripe-payment-provider.test.ts`
+- Test: `src/commerce/server-runtime.test.ts`
+- Test: `tests/integration/provider-session-repository.test.ts`
 
 **Interfaces:**
 
 - Consumes: authoritative prepared variant lines from Task 5
-- Produces: one inline Stripe line per internal variant line, server-only mapping verification, and unchanged webhook reconciliation
+- Produces: a variant-keyed provider request schema V2, one inline Stripe merchandise line per internal variant line, strict server-only mapping verification, explicit V1 legacy replay, and unchanged webhook/refund reconciliation
 
 - [ ] **Step 1: Write failing provider contract tests**
 
 ```ts
-expect(buildStripeCheckoutRequestV1(prepared)).toMatchObject({
-  allowPromotionCodes: false,
-  lineItems: [{
+expect(buildStripeCheckoutRequestV2(prepared)).toMatchObject({
+  allow_promotion_codes: false,
+  line_items: [{
     quantity: 1,
-    priceData: {
+    price_data: {
       currency: "usd",
-      unitAmount: 1838,
-      productData: { name: "Fixture Product — 5 mg test fixture — Qty 2" },
+      unit_amount: 1838,
+      product: "prod_synthetic_variant_fixture",
     },
   }],
 });
 ```
 
-Assert that the request never contains a client-supplied Price ID, the line metadata contains safe internal variant/quantity/pricing-version references, and WINTER30 is not also passed as a Stripe discount or promotion-code field.
+Assert that two distinct variants sharing one product remain two deterministic lines, duplicate variant IDs fail, and reversing input order produces a byte-identical request/hash. The request never contains a client-supplied Price ID, never sends `line_items[].price`, never creates merchandise through `product_data`, and never sends WINTER30 as a Stripe discount or customer promotion-code field.
 
-Add adapter tests that fail closed for a missing, inactive, wrong-account/mode, wrong-currency, or wrong-base-amount configured Stripe Price mapping. Use Stripe test doubles only; do not call an account in unit tests.
+Merchandise uses the validated existing `price_data.product`. Its Checkout-visible name comes from the owner-configured Stripe Product. Variant/SKU/requested-quantity/price-version/mapping facts remain in the application's durable internal request/order snapshot, not Stripe line metadata. Preserve existing bounded Session and PaymentIntent metadata (`orderId`, `attemptId`) without adding Price/Product IDs, secrets, or unnecessary PII.
+
+Add lazy adapter tests using Stripe test doubles only. On the same owner-account SDK context used for Session creation, call `accounts.retrieveCurrent()` and `prices.retrieve(configuredPriceId, { expand: ["product"] })`; do not invent Connect routing. Fail closed for a missing/404/transport-failed Price, wrong Price ID, inactive/recurring/tiered/custom/decimal-only Price, null/non-positive/unsafe/wrong amount, wrong account/mode/currency/Product, deleted/inactive Product, or malformed/future response. Runtime assembly itself must make no network call and no raw Stripe response/error may be persisted or logged.
 
 - [ ] **Step 2: Run focused provider tests and verify failures**
 
 Run: `npm test -- src/commerce/provider-contracts.test.ts src/commerce/provider-checkout-orchestration.test.ts src/commerce/stripe-payment-provider.test.ts`
 
-Expected: FAIL because the provider contract lacks variant mapping and explicit automatic-promotion suppression.
+Expected: FAIL because V1 is product-keyed, two variants of one product collide, provider mappings are not remotely verified, and automatic-promotion suppression is not explicit.
 
 - [ ] **Step 3: Preserve inline line totals and verify mappings server-side**
 
@@ -693,24 +703,40 @@ export type StripeVariantLine = Readonly<{
   variantId: string;
   productId: string;
   sku: string;
+  productName: string;
   variantLabel: string;
   requestedQuantity: number;
   netLineMinor: number;
   baseUnitMinor: number;
   currency: "USD";
+  priceBookId: string;
+  priceVersion: number;
+  stripeProductId: string;
   stripePriceId: string;
 }>;
 ```
 
-Keep Stripe `quantity: 1` and use the complete server-calculated `netLineMinor` as inline `unit_amount`. This preserves the repository’s existing reconciliation and the contract’s round-unit-once-then-multiply result. Treat the configured Stripe Price as an activation/reconciliation mapping: retrieve it on the configured server account, require active status, matching currency and authoritative base amount, and never use it to calculate the discounted line.
+De-duplicate and sort canonical lines by `variantId`; `productId` is a relationship fact, never line identity. Join `netLineMinor` from the final allocated `plan.totals.lines.totalMinor`, after referral/reward allocation. Keep Stripe `quantity: 1` and use that complete server-calculated amount as inline `unit_amount`. Treat the configured Stripe Price as an activation/reconciliation mapping only: its exact active one-time/per-unit positive integer amount must equal the authoritative base unit amount, its currency/mode/account must match, and its expanded active Product must equal `stripeProductId`.
 
-Do not enable `allow_promotion_codes` and do not attach a Stripe `discounts` entry for WINTER30. Preserve safe checkout URL normalization, provider idempotency, durable unknown-outcome handling, raw-body signature verification, and provider-event authority.
+Preserve positive-only server-authoritative `Shipping` and `Sales tax` as their existing synthetic inline `product_data` component lines. Do not enable `automatic_tax`, Stripe shipping options, adjustable quantity, `discounts`, or customer promotion codes. Prove both zero and nonzero shipping/tax totals reconcile exactly.
+
+Introduce provider request schema V2 for new canonical attempts and preserve an explicit V1 product-keyed compatibility path for already-persisted legacy/null-variant attempts. Never reinterpret V1 as V2. Generate an additive schema migration if the current coherence constraint permits only V1; do not apply it to a shared database.
+
+Use this state ordering:
+
+1. A fresh canonical attempt verifies account/Price bindings before preparation, reservation, durable attempt creation, or Session creation. Any deterministic mismatch or verifier transport/SDK failure returns a safe unavailable/retryable result with zero commercial side effects.
+2. After successful verification, prepare/recheck/reserve and create with the exact persisted request/hash/idempotency key. Definite create rejection follows the existing release path; create uncertainty becomes `provider_unknown` and retains the reservation.
+3. A durable attempt with a known Session ID bypasses mutable current Price verification and retrieves/validates the exact Session.
+4. A durable unknown/no-session attempt re-verifies only before another idempotent create. Verification failure leaves it `provider_unknown` with its reservation.
+5. Preserve safe checkout URL normalization, `maxNetworkRetries: 0`, context/CAS fences, raw-body signature verification, verified paid-event authority, refund reconciliation, and unchanged order/attempt correlation.
 
 - [ ] **Step 4: Run provider and webhook regression tests**
 
-Run: `npm test -- src/commerce/provider-contracts.test.ts src/commerce/provider-checkout-orchestration.test.ts src/commerce/stripe-payment-provider.test.ts src/commerce/stripe-webhook-verifier.test.ts src/commerce/provider-event-service.test.ts`
+Run: `npm test -- src/commerce/provider-contracts.test.ts src/commerce/provider-checkout-orchestration.test.ts src/commerce/stripe-payment-provider.test.ts src/commerce/server-runtime.test.ts src/commerce/local-payment-provider.test.ts src/commerce/provider-context.test.ts src/commerce/stripe-webhook-verifier.test.ts src/commerce/webhook-http.test.ts src/commerce/provider-event-service.test.ts src/app/api/webhooks/stripe/route.test.ts`
 
-Expected: PASS.
+Run: `npm run test:integration -- tests/integration/provider-session-repository.test.ts tests/integration/provider-event-repository.test.ts tests/integration/provider-event-processing.test.ts`
+
+Expected: PASS, including V1 legacy replay, V2 two-variant durable replay, verifier-before-write ordering, known/unknown Session state transitions, exact `amount_total`, paid-event fulfillment, and refund-event reconciliation.
 
 - [ ] **Step 5: Run the Phase 1 gate**
 
@@ -725,7 +751,9 @@ npm run test:integration
 npm run build
 ```
 
-Expected: every executed command passes. Do not report the guarded PostgreSQL lane, E2E suite, or live Stripe behavior unless each was actually run under its required environment and passed.
+Then execute the complete Task 6 offline checkpoint matrix in `docs/testing.md` against the same unchanged candidate, including full synthetic E2E, privacy/security, workspace-boundary, artifact-scanner, isolated type-generation/typecheck, production-disabled Turbopack and Webpack build/artifact scans, migration reproducibility hashes, and final Git inventory. Follow its inherited `.next` preservation protocol exactly.
+
+Expected: every required executed command passes. A skipped or unavailable lane is not a pass and must be reported exactly. Do not report the guarded PostgreSQL lane or any live Stripe behavior unless its required guards/environment were actually present and the command passed. Unit test doubles do not establish live account/provider approval.
 
 - [ ] **Step 6: Independent review and authorized commit**
 
