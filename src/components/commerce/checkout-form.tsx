@@ -562,7 +562,7 @@ export function CheckoutForm({
       {currentPreview?.requiresAcknowledgement ? (
         <section className="warning-record mt-6 text-base leading-7" aria-labelledby="preview-change-heading">
           <h3 id="preview-change-heading" className="font-semibold">Server preview changed or became unavailable.</h3>
-          <p className="mt-2">Your requested product IDs and quantities were not replaced. Review the current server facts before checkout.</p>
+          <p className="mt-2">Your requested variant identifiers and quantities were not replaced. Review the current server facts before checkout.</p>
           {previewState.changes.length ? (
             <ul className="mt-3 list-disc space-y-2 pl-5">
               {previewState.changes.map((change) => <li key={change}>{change}</li>)}

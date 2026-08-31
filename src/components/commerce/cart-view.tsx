@@ -26,8 +26,10 @@ function formatMoney(amountMinor: number, currency: string): string {
 
 export function CartView({
   checkoutIntent,
+  navigate = (url) => window.location.assign(url),
 }: {
   checkoutIntent: string | null;
+  navigate?: (url: string) => void;
 }) {
   const {
     items,
@@ -124,7 +126,7 @@ export function CartView({
   function beginCheckoutHandoff() {
     const handoff = prepareCheckoutHandoff(window.localStorage, items);
     setHandoffMessage(`Saving ${handoff.itemCount} requested unit${handoff.itemCount === 1 ? "" : "s"} for checkout.`);
-    window.location.assign(handoff.returnTo);
+    navigate(handoff.returnTo);
   }
 
   if (!hydrated) {
