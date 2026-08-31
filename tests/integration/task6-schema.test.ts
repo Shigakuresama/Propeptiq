@@ -386,6 +386,84 @@ describe("Task 6 schema boundary", () => {
     ).rejects.toThrow(/order_items_price_variant_fk/);
   });
 
+  it("rejects a same-product reservation whose canonical item and lot variants differ", async () => {
+    client = await createMigratedPglite();
+    await insertTask6Fixture(client);
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${variantFixture.variantA}', '${fixture.product}', 'TASK6-VARIANT-A',
+         'Task 6 variant A', 5, 'mg', 1, 'active'),
+        ('${variantFixture.variantB}', '${fixture.product}', 'TASK6-VARIANT-B',
+         'Task 6 variant B', 10, 'mg', 1, 'active');
+      UPDATE product_prices
+      SET variant_id = '${variantFixture.variantA}'
+      WHERE id = '${fixture.price}';
+      UPDATE order_items
+      SET variant_id = '${variantFixture.variantA}'
+      WHERE id = '${fixture.item1}';
+      UPDATE lots
+      SET variant_id = '${variantFixture.variantB}'
+      WHERE id = '${fixture.lot}';
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO inventory_reservations
+        (checkout_attempt_id, idempotency_key, order_id, order_item_id,
+         product_id, variant_id, lot_id, quantity_reserved,
+         quantity_remaining, state, expires_at)
+       VALUES ('${fixture.attempt1}', 'task6-cross-variant-reservation',
+         '${fixture.order1}', '${fixture.item1}', '${fixture.product}',
+         '${variantFixture.variantA}', '${fixture.lot}', 1, 1, 'active',
+         now() + interval '1 hour')`,
+    );
+  });
+
+  it("refuses to backfill a populated mixed reservation variant identity", async () => {
+    client = new PGliteClient();
+    for (let migration = 0; migration <= 30; migration += 1) {
+      await applyMigration(client, migration);
+    }
+    await insertTask6Fixture(client);
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${variantFixture.variantA}', '${fixture.product}', 'TASK6-MIGRATION-A',
+         'Task 6 migration variant A', 5, 'mg', 1, 'active'),
+        ('${variantFixture.variantB}', '${fixture.product}', 'TASK6-MIGRATION-B',
+         'Task 6 migration variant B', 10, 'mg', 1, 'active');
+      UPDATE product_prices
+      SET variant_id = '${variantFixture.variantA}'
+      WHERE id = '${fixture.price}';
+      UPDATE order_items
+      SET variant_id = '${variantFixture.variantA}'
+      WHERE id = '${fixture.item1}';
+      UPDATE lots
+      SET variant_id = '${variantFixture.variantB}'
+      WHERE id = '${fixture.lot}';
+      INSERT INTO inventory_reservations
+        (id, checkout_attempt_id, idempotency_key, order_id, order_item_id,
+         product_id, lot_id, quantity_reserved, quantity_remaining, state, expires_at)
+      VALUES ('${fixture.reservation1}', '${fixture.attempt1}',
+        'task6-migration-cross-variant', '${fixture.order1}', '${fixture.item1}',
+        '${fixture.product}', '${fixture.lot}', 1, 1, 'active',
+        now() + interval '1 hour');
+    `);
+
+    await expect(applyMigration(client, 31)).rejects.toThrow(
+      /inventory reservation variant reconciliation required/i,
+    );
+    const variants = await client.query<{ variant_id: string | null }>(
+      `SELECT variant_id::text FROM inventory_reservations WHERE id = '${fixture.reservation1}'`,
+    );
+    expect(variants.rows).toEqual([{ variant_id: null }]);
+  });
+
   it("rejects a WINTER30 campaign with any percentage other than 3000 basis points", async () => {
     client = await createMigratedPglite();
 

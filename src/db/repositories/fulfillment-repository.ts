@@ -197,6 +197,7 @@ type ReservationRow = Readonly<{
   orderId: string;
   orderItemId: string;
   productId: string;
+  variantId: string | null;
   lotId: string;
   quantityReserved: number | string;
   quantityRemaining: number | string;
@@ -206,6 +207,7 @@ type ReservationRow = Readonly<{
 type LotRow = Readonly<{
   id: string;
   productId: string;
+  variantId: string | null;
   availableQuantity: number | string;
   status: string;
   expiresAt: Date | string | null;
@@ -1048,7 +1050,8 @@ async function lockReservations(
             checkout_attempt_id::text AS "checkoutAttemptId",
             order_id::text AS "orderId",
             order_item_id::text AS "orderItemId",
-            product_id::text AS "productId", lot_id::text AS "lotId",
+            product_id::text AS "productId", variant_id::text AS "variantId",
+            lot_id::text AS "lotId",
             quantity_reserved AS "quantityReserved",
             quantity_remaining AS "quantityRemaining", state
      FROM inventory_reservations WHERE order_id = $1::uuid
@@ -1066,6 +1069,7 @@ async function lockLots(
   if (ids.length === 0) return Object.freeze([]);
   const result = await client.query<LotRow>(
     `SELECT id::text AS id, product_id::text AS "productId",
+            variant_id::text AS "variantId",
             available_quantity AS "availableQuantity", status,
             expires_at AS "expiresAt"
      FROM lots WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
@@ -1321,6 +1325,7 @@ function reservationsComplete(facts: LockedFacts): boolean {
         reservation.checkoutAttemptId !== facts.payment.attempt.id ||
         reservation.orderId !== facts.order.id ||
         reservation.productId !== item.productId ||
+        reservation.variantId !== item.variantId ||
         reservation.state !== "active" ||
         reserved === null ||
         reserved <= 0 ||
@@ -1348,6 +1353,7 @@ function lotsAvailable(facts: LockedFacts, now: Date): boolean {
     return (
       lot !== undefined &&
       lot.productId === reservation.productId &&
+      lot.variantId === reservation.variantId &&
       lot.status === "released" &&
       (safeInteger(lot.availableQuantity) ?? -1) >= 0 &&
       (expiry === null || new Date(expiry).getTime() > now.getTime())
@@ -1691,6 +1697,7 @@ async function exactTerminalReplay(
   }
   if (facts.reservations.length === 0) return false;
   const lotById = new Map(facts.lots.map((row) => [row.id, row]));
+  const itemById = new Map(facts.catalog.items.map((row) => [row.id, row]));
   const events = await client.query<{
     id: string;
     idempotencyKey: string;
@@ -1720,10 +1727,14 @@ async function exactTerminalReplay(
       (candidate) => candidate.reservationId === reservation.id,
     );
     const lot = lotById.get(reservation.lotId);
+    const item = itemById.get(reservation.orderItemId);
     const balanceAfter = safeInteger(event?.balanceAfter);
     if (
       reservation.state !== "consumed" ||
       safeInteger(reservation.quantityRemaining) !== 0 ||
+      item === undefined ||
+      item.variantId !== reservation.variantId ||
+      reservation.variantId !== lot?.variantId ||
       quantity === null ||
       event === undefined ||
       event.id !== keyedUuid(`inventory-consume:${reservation.id}`) ||

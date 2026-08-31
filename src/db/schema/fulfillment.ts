@@ -208,6 +208,7 @@ export const inventoryReservations = pgTable(
     orderId: uuid("order_id").notNull(),
     orderItemId: uuid("order_item_id").notNull(),
     productId: uuid("product_id").notNull(),
+    variantId: uuid("variant_id"),
     lotId: uuid("lot_id").notNull(),
     quantityReserved: integer("quantity_reserved").notNull(),
     quantityRemaining: integer("quantity_remaining").notNull(),
@@ -226,11 +227,21 @@ export const inventoryReservations = pgTable(
     unique("inventory_reservations_item_lot_unique").on(table.orderItemId, table.lotId),
     unique("inventory_reservations_idempotency_unique").on(table.idempotencyKey),
     foreignKey({
+      columns: [table.orderItemId, table.orderId, table.productId, table.variantId],
+      foreignColumns: [orderItems.id, orderItems.orderId, orderItems.productId, orderItems.variantId],
+      name: "inventory_reservations_item_order_product_variant_fk",
+    }).onDelete("restrict"),
+    foreignKey({
       columns: [table.orderItemId, table.orderId, table.productId],
       foreignColumns: [orderItems.id, orderItems.orderId, orderItems.productId],
       name: "inventory_reservations_item_order_product_fk",
     }).onDelete("restrict"),
     foreignKey({ columns: [table.checkoutAttemptId, table.orderId], foreignColumns: [checkoutAttempts.id, checkoutAttempts.orderId], name: "inventory_reservations_attempt_order_fk" }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.lotId, table.productId, table.variantId],
+      foreignColumns: [lots.id, lots.productId, lots.variantId],
+      name: "inventory_reservations_lot_product_variant_fk",
+    }).onDelete("restrict"),
     foreignKey({
       columns: [table.lotId, table.productId],
       foreignColumns: [lots.id, lots.productId],

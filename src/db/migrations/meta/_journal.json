@@ -218,6 +218,13 @@
       "when": 1788167018498,
       "tag": "0030_task6-provider-request-v2",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788179594517,
+      "tag": "0031_phase1-reservation-variant-identity",
+      "breakpoints": true
     }
   ]
 }

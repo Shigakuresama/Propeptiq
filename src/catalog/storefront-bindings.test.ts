@@ -56,4 +56,24 @@ describe("parseStorefrontBindings", () => {
     delete withoutCanonicalFacts.packageQuantity;
     expect(() => parseStorefrontBindings({ ...approved, variants: [withoutCanonicalFacts] })).toThrow();
   });
+
+  it.each([
+    ["zero active price", { baseUnitMinor: 0 }],
+    ["unavailable availability", { availability: "unavailable" }],
+    ["missing Stripe Price mapping", { stripePriceId: null }],
+    ["missing Stripe Product mapping", { stripeProductId: null }],
+  ] as const)("rejects an active canonical variant with %s", (_label, override) => {
+    expect(() => parseStorefrontBindings({
+      ...approved,
+      variants: [{
+        ...approved.variants[0],
+        baseUnitMinor: 1_000,
+        priceStatus: "active",
+        availability: "available",
+        stripeProductId: "prod_test_fixture",
+        stripePriceId: "price_test_fixture",
+        ...override,
+      }],
+    })).toThrow();
+  });
 });

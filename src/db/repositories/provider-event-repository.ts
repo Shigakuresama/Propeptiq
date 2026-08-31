@@ -550,10 +550,20 @@ type PaymentRow = Readonly<{
 
 type ReservationRow = Readonly<{
   id: string;
+  variantId: string | null;
+  orderItemVariantId: string | null;
+  lotVariantId: string | null;
   state: "active" | "released" | "expired" | "consumed";
   quantityReserved: number | string;
   quantityRemaining: number | string;
 }>;
+
+function reservationVariantIdentityIsCoherent(reservation: ReservationRow): boolean {
+  return reservation.orderItemVariantId === null
+    ? reservation.variantId === null && reservation.lotVariantId === null
+    : reservation.variantId === reservation.orderItemVariantId &&
+      reservation.lotVariantId === reservation.orderItemVariantId;
+}
 
 function safeNonnegativeInteger(value: unknown): number | null {
   const converted = Number(value);
@@ -901,10 +911,16 @@ async function processCheckoutEvent(
     ],
   ));
   const reservations = rows<ReservationRow>(await client.query(
-    `SELECT id::text AS id, state, quantity_reserved AS "quantityReserved",
-            quantity_remaining AS "quantityRemaining"
-     FROM inventory_reservations
-     WHERE checkout_attempt_id = $1::uuid ORDER BY id FOR UPDATE`,
+    `SELECT reservation.id::text AS id, reservation.variant_id::text AS "variantId",
+            item.variant_id::text AS "orderItemVariantId",
+            lot.variant_id::text AS "lotVariantId", reservation.state,
+            reservation.quantity_reserved AS "quantityReserved",
+            reservation.quantity_remaining AS "quantityRemaining"
+     FROM inventory_reservations reservation
+     JOIN order_items item ON item.id = reservation.order_item_id
+     JOIN lots lot ON lot.id = reservation.lot_id
+     WHERE reservation.checkout_attempt_id = $1::uuid
+     ORDER BY reservation.id FOR UPDATE OF reservation, item, lot`,
     [event.attemptId],
   ));
   if (
@@ -982,7 +998,9 @@ async function processCheckoutEvent(
   }
   const exactVerifiedPayment =
     matchingPayment !== undefined && matchingPaymentIsCoherent;
-  const reservationStateIsKnown = allActive || allReleased || allConsumed;
+  const reservationStateIsKnown =
+    reservations.every(reservationVariantIdentityIsCoherent) &&
+    (allActive || allReleased || allConsumed);
   if (order.state === "cancelled" && allActive) {
     return finishBusinessConflict(
       client,

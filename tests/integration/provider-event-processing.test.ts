@@ -625,6 +625,14 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
       [ids.variant, ids.item],
     );
     await client.query(
+      "UPDATE lots SET variant_id = $1::uuid WHERE id = $2::uuid",
+      [ids.variant, ids.lot],
+    );
+    await client.query(
+      "UPDATE inventory_reservations SET variant_id = $1::uuid WHERE id = $2::uuid",
+      [ids.variant, ids.reservation],
+    );
+    await client.query(
       `UPDATE checkout_attempts
        SET provider_request_schema_version = 2,
            provider_binding_snapshot = $1::jsonb
@@ -673,6 +681,69 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
         refund_journals: 1,
         binding_snapshot: providerBindingSnapshot,
       });
+  });
+
+  it("conflicts a canonical paid event when its reservation lacks the exact variant identity", async () => {
+    const providerBindingSnapshot = {
+      schemaVersion: 2,
+      lines: [{
+        variantId: ids.variant,
+        productId: ids.product,
+        sku: "SYNTH-V2-MISSING-RESERVATION",
+        productName: "Synthetic Product",
+        variantLabel: "5 mg",
+        requestedQuantity: 1,
+        netLineMinor: 2_000,
+        baseUnitMinor: 2_000,
+        currency: "USD",
+        priceBookId: ids.price,
+        priceVersion: 1,
+        stripeProductId: "prod_synthetic_v2",
+        stripePriceId: "price_synthetic_v2",
+      }],
+    } as const;
+    await client.query(
+      `INSERT INTO product_variants
+         (id, product_id, sku, label, package_quantity, status,
+          stripe_product_id, stripe_price_id)
+       VALUES ($1::uuid, $2::uuid, 'SYNTH-V2-MISSING-RESERVATION', '5 mg',
+          1, 'active', 'prod_synthetic_v2', 'price_synthetic_v2')`,
+      [ids.variant, ids.product],
+    );
+    await client.query(
+      "UPDATE product_prices SET variant_id = $1::uuid WHERE id = $2::uuid",
+      [ids.variant, ids.price],
+    );
+    await client.query(
+      "UPDATE order_items SET variant_id = $1::uuid WHERE id = $2::uuid",
+      [ids.variant, ids.item],
+    );
+    await client.query(
+      "UPDATE lots SET variant_id = $1::uuid WHERE id = $2::uuid",
+      [ids.variant, ids.lot],
+    );
+    await client.query(
+      `UPDATE checkout_attempts
+       SET provider_request_schema_version = 2,
+           provider_binding_snapshot = $1::jsonb
+       WHERE id = $2::uuid`,
+      [JSON.stringify(providerBindingSnapshot), ids.attempt],
+    );
+
+    const paid = await claim(
+      checkoutNormalization(
+        "checkout.session.completed",
+        "evt_synthetic_6e_missing_reservation_variant",
+      ),
+      "missing-reservation-variant",
+    );
+    await expect(repository().processClaim({ claim: paid, authority: authority(), now }))
+      .resolves.toEqual({ status: "conflict" });
+    expect((await client.query(`SELECT
+      (SELECT state FROM orders WHERE id = '${ids.order}') AS order_state,
+      (SELECT count(*)::int FROM payment_events) AS payments,
+      (SELECT count(*)::int FROM downstream_effects) AS effects`)).rows[0])
+      .toEqual({ order_state: "checkout_pending", payments: 0, effects: 0 });
   });
 
   it("verifies paid active inventory, journals once, and enqueues exact payment plus wake effects", async () => {

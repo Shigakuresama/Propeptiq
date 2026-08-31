@@ -208,6 +208,11 @@ export const lots = pgTable(
   },
   (table) => [
     unique("lots_id_product_unique").on(table.id, table.productId),
+    unique("lots_id_product_variant_unique").on(
+      table.id,
+      table.productId,
+      table.variantId,
+    ),
     foreignKey({
       columns: [table.variantId, table.productId],
       foreignColumns: [productVariants.id, productVariants.productId],

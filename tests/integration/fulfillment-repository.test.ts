@@ -45,6 +45,8 @@ const ids = {
   disputeEvent: "81000000-0000-4000-8000-000000000030",
   review: "81000000-0000-4000-8000-000000000031",
   newerAttestation: "81000000-0000-4000-8000-000000000032",
+  variantA: "81000000-0000-4000-8000-000000000033",
+  variantB: "81000000-0000-4000-8000-000000000034",
 } as const;
 
 const now = new Date("2026-08-26T12:00:00.000Z");
@@ -378,6 +380,43 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
       WHERE id = '${ids.attempt}';
       ALTER TABLE checkout_attempts
         ENABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+    `);
+  }
+
+  async function setCanonicalReservationVariantIdentities(): Promise<void> {
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${ids.variantA}', '${ids.productA}', 'FULFILLMENT-VARIANT-A',
+         'Fulfillment variant A', 5, 'mg', 1, 'active'),
+        ('${ids.variantB}', '${ids.productB}', 'FULFILLMENT-VARIANT-B',
+         'Fulfillment variant B', 10, 'mg', 1, 'active');
+      UPDATE product_prices
+      SET variant_id = CASE id
+        WHEN '${ids.priceA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END
+      WHERE id IN ('${ids.priceA}', '${ids.priceB}');
+      UPDATE order_items
+      SET variant_id = CASE id
+        WHEN '${ids.itemA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END
+      WHERE id IN ('${ids.itemA}', '${ids.itemB}');
+      UPDATE lots
+      SET variant_id = CASE product_id
+        WHEN '${ids.productA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END
+      WHERE id IN ('${ids.lotA1}', '${ids.lotA2}', '${ids.lotB}');
+      UPDATE inventory_reservations
+      SET variant_id = CASE product_id
+        WHEN '${ids.productA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END
+      WHERE id IN ('${ids.reservationA1}', '${ids.reservationA2}', '${ids.reservationB}');
     `);
   }
 
@@ -799,6 +838,52 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
     ]) {
       expect(instant.toISOString()).toBe(now.toISOString());
     }
+  });
+
+  it("hands off a canonical reservation tuple only when every variant identity is exact", async () => {
+    await setCanonicalReservationVariantIdentities();
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "handed_off" });
+    expect((await client.query(`SELECT
+      (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+      (SELECT count(*)::int FROM inventory_events WHERE event_type = 'consume') AS consumes,
+      (SELECT count(*)::int FROM inventory_reservations
+       WHERE variant_id IS NOT NULL AND state = 'consumed') AS canonical_consumed`)).rows[0])
+      .toEqual({ releases: 1, consumes: 3, canonical_consumed: 3 });
+  });
+
+  it("rejects canonical fulfillment when a reservation omits its exact variant identity", async () => {
+    await setCanonicalReservationVariantIdentities();
+    await client.exec(`UPDATE inventory_reservations
+      SET variant_id = NULL
+      WHERE id = '${ids.reservationA1}'`);
+    await expect(setup().handoff(command())).resolves.toEqual({
+      status: "held",
+      reasons: expect.arrayContaining([
+        "inventory_reservation_missing",
+        "reserved_lot_unavailable",
+      ]),
+    });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("rejects terminal replay when a consumed canonical reservation loses its variant identity", async () => {
+    await setCanonicalReservationVariantIdentities();
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    const before = await client.query(`SELECT
+      (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+      (SELECT count(*)::int FROM inventory_events WHERE event_type = 'consume') AS consumes,
+      (SELECT count(*)::int FROM downstream_effects
+       WHERE effect_type = 'fulfillment_handed_off') AS effects`);
+    await client.exec(`UPDATE inventory_reservations
+      SET variant_id = NULL
+      WHERE id = '${ids.reservationA1}'`);
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "conflict" });
+    expect((await client.query(`SELECT
+      (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+      (SELECT count(*)::int FROM inventory_events WHERE event_type = 'consume') AS consumes,
+      (SELECT count(*)::int FROM downstream_effects
+       WHERE effect_type = 'fulfillment_handed_off') AS effects`)).rows).toEqual(before.rows);
   });
 
   it("accepts only a complete terminal handoff replay and never repairs a partial tuple", async () => {

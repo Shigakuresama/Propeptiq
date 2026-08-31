@@ -168,6 +168,10 @@ const activePromotion = (overrides: Partial<StorefrontPromotion> = {}): Storefro
 });
 
 describe("promotion intervals", () => {
+  it("keeps an enabled promotion with no time bounds active", () => {
+    expect(isStorefrontPromotionActive(activePromotion(), new Date("2026-08-30T08:00:00.000Z"))).toBe(true);
+  });
+
   it("uses an inclusive start and exclusive end", () => {
     const promotion = {
       enabled: true,

@@ -356,6 +356,7 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       productId: string;
       remainingVariant: number;
       remainingLegacy: number;
+      reservationVariantId: string | null;
       promotionId: string;
       reservationCount: number;
     }>(`
@@ -366,6 +367,8 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
           WHERE order_id = oi.order_id) AS "promotionId",
         (SELECT count(*)::int FROM inventory_reservations
           WHERE order_id = oi.order_id) AS "reservationCount"
+        ,(SELECT variant_id::text FROM inventory_reservations
+          WHERE order_id = oi.order_id) AS "reservationVariantId"
       FROM order_items oi
       WHERE oi.order_id = '${sessionQuote.plan.identity.orderId}'
     `);
@@ -374,6 +377,7 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       productId: ids.productA,
       remainingVariant: 3,
       remainingLegacy: 1,
+      reservationVariantId: ids.variantA,
       promotionId: ids.variantPromotion,
       reservationCount: 1,
     });

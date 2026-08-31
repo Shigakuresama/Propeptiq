@@ -2363,11 +2363,11 @@ async function reserveInventory(
       await client.query(
         `INSERT INTO inventory_reservations
           (id, checkout_attempt_id, idempotency_key, order_id, order_item_id,
-           product_id, lot_id, quantity_reserved, quantity_remaining, state,
+           product_id, variant_id, lot_id, quantity_reserved, quantity_remaining, state,
            expires_at, created_at, updated_at)
          VALUES
-          ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid, $7::uuid,
-           $8, $8, 'active', $9::timestamptz, $10::timestamptz, $10::timestamptz)`,
+          ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid, $7::uuid, $8::uuid,
+           $9, $9, 'active', $10::timestamptz, $11::timestamptz, $11::timestamptz)`,
         [
           reservationId,
           plan.identity.attemptId,
@@ -2375,6 +2375,7 @@ async function reserveInventory(
           plan.identity.orderId,
           orderItemId,
           fact.productId,
+          variantId,
           lot.id,
           allocation,
           providerPreparation.providerExpiresAt,
