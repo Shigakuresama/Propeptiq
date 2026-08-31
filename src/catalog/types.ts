@@ -93,6 +93,11 @@ export type CatalogPromotionTargetRecord = {
   policyGroupId: string | null;
 };
 
+export type CatalogPromotionVariantTargetRecord = {
+  promotionId: string;
+  variantId: string;
+};
+
 export type CatalogRecordSet = {
   source: CatalogSource;
   products: readonly CatalogProductRecord[];

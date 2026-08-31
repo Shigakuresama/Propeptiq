@@ -9,27 +9,34 @@ import { cn } from "@/lib/utils";
 export function AddToCartButton({
   variantId,
   productName,
+  quantity = 1,
+  canAdd = variantId !== null,
+  disabledReason = variantId === null ? "Choose a variant before adding this item." : undefined,
   className,
 }: {
   variantId: string | null;
   productName: string;
+  quantity?: number;
+  canAdd?: boolean;
+  disabledReason?: string;
   className?: string;
 }) {
   const { addVariant } = useCart();
-  const unavailable = variantId === null;
+  const unavailable = variantId === null || !canAdd;
 
   return (
     <Button
       type="button"
       className={cn("action-primary", className)}
-      aria-label={unavailable ? `${productName} requires variant selection` : `Add ${productName} to cart`}
+      aria-label={unavailable ? `${productName} unavailable` : `Add ${productName} to cart`}
+      title={unavailable ? disabledReason : undefined}
       disabled={unavailable}
       onClick={() => {
-        if (variantId !== null) addVariant(variantId);
+        if (variantId !== null && canAdd) addVariant(variantId, quantity);
       }}
     >
       <ShoppingBag aria-hidden="true" />
-      {unavailable ? "Variant selection unavailable" : "Add to cart"}
+      {unavailable ? (disabledReason ?? "Unavailable") : "Add to cart"}
     </Button>
   );
 }

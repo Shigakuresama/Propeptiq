@@ -1,18 +1,31 @@
+"use client";
+
 import { ArrowRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
+import { canAddPublicVariant, selectCardVariant, type PricePresentationMode, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import { AddToCartButton } from "./add-to-cart-button";
+import { ProductPrice } from "./product-price";
+import { VariantAddTrigger } from "./quick-add-variant-sheet";
 
 const CARD_VARIANT_LIMIT = 3;
 
 export function CatalogListingCard({
   product,
   priority = false,
+  pricing,
+  pricingMode,
 }: {
   product: PublicStorefrontProduct;
   priority?: boolean;
+  pricing?: PublicStorefrontPricingContext;
+  pricingMode?: PricePresentationMode;
 }) {
+  const mode = pricing?.mode ?? pricingMode ?? "local";
+  const pricingContext = pricing ?? { mode, evaluatedAt: new Date(0).toISOString(), automaticPromotions: [] };
+  const selectedVariant = product.kind === "canonical" ? selectCardVariant(product) : null;
   const headingId = `catalog-${product.slug}`;
   const visibleConfigurations = product.displayConfigurations.slice(0, CARD_VARIANT_LIMIT);
   const remainingConfigurationCount =
@@ -32,6 +45,7 @@ export function CatalogListingCard({
           sizes="(min-width: 1280px) 28vw, (min-width: 768px) 45vw, calc(100vw - 2rem)"
           src={product.image.src}
         />
+        {selectedVariant && pricingContext.automaticPromotions.length > 0 ? <span className="absolute left-3 top-3 rounded-full bg-moss px-3 py-1 text-xs font-semibold text-white" aria-label="Promotion available">SALE</span> : null}
         <p className="catalog-image-disclosure">Illustrative product presentation</p>
       </div>
 
@@ -62,6 +76,10 @@ export function CatalogListingCard({
             {remainingConfigurationCount === 1 ? "" : "s"}
           </p>
         ) : null}
+
+        {product.kind === "canonical" && selectedVariant ? <div className="mt-5"><p className="text-sm text-muted-ink">{product.variants.length > 1 ? `From ${selectedVariant.amount?.value ?? selectedVariant.label} ${selectedVariant.amount?.unit ?? ""}` : selectedVariant.label}</p><ProductPrice productId={product.id} variant={selectedVariant} pricing={pricingContext} /></div> : <p className="mt-5 text-sm font-medium text-muted-ink">Pricing coming soon</p>}
+
+        {product.kind === "canonical" ? (product.variants.length > 1 ? <VariantAddTrigger product={product} mode={mode} /> : selectedVariant ? <AddToCartButton variantId={selectedVariant.id} productName={product.name} canAdd={canAddPublicVariant(selectedVariant, mode)} disabledReason="This product is not currently available for cart testing." className="mt-5 min-h-11" /> : null) : null}
 
         <Link
           aria-label={`View catalog item: ${product.name}`}

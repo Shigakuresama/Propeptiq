@@ -6,6 +6,7 @@ import type {
   CatalogProductRecord,
   CatalogPromotionRecord,
   CatalogPromotionTargetRecord,
+  CatalogPromotionVariantTargetRecord,
   CatalogRecordSet,
 } from "./types";
 
@@ -38,14 +39,23 @@ export type DatabaseCatalogPriceRecord = CatalogPriceRecord &
   }>;
 export type DatabaseCatalogLotRecord = CatalogLotRecord &
   Readonly<{ variantId: string | null }>;
+export type DatabaseCatalogPromotionRecord = Omit<CatalogPromotionRecord, "campaignKey" | "enabled" | "timezone" | "applicationMode" | "scope"> & Readonly<{
+  campaignKey: string | null;
+  enabled: boolean;
+  timezone: string | null;
+  applicationMode: "automatic" | "code_required" | null;
+  scope: "sitewide" | "products" | "variants" | null;
+}>;
 export type DatabaseCatalogRecordSet = Omit<
   CatalogRecordSet,
-  "prices" | "lots"
+  "prices" | "lots" | "promotions"
 > &
   Readonly<{
     variants: readonly DatabaseCatalogVariantRecord[];
     prices: readonly DatabaseCatalogPriceRecord[];
     lots: readonly DatabaseCatalogLotRecord[];
+    promotions: readonly DatabaseCatalogPromotionRecord[];
+    promotionVariantTargets?: readonly CatalogPromotionVariantTargetRecord[];
   }>;
 type RawVariant = Omit<
   DatabaseCatalogVariantRecord,
@@ -70,7 +80,7 @@ type RawCoa = Omit<CatalogCoaRecord, "issuedAt"> & {
   issuedAt: Date | string | null;
 };
 type RawClaim = CatalogClaimRecord;
-type RawPromotion = Omit<CatalogPromotionRecord, "amountMinor" | "startsAt" | "endsAt"> & {
+type RawPromotion = Omit<DatabaseCatalogPromotionRecord, "amountMinor" | "startsAt" | "endsAt"> & {
   campaignKey: string | null;
   enabled: boolean;
   timezone: string | null;
@@ -166,6 +176,11 @@ export async function loadDatabaseCatalogRecords(
     FROM promotion_targets
     ORDER BY promotion_id, target_kind, COALESCE(product_id, policy_group_id)::text
   `);
+  const promotionVariantTargets = await database.query<CatalogPromotionVariantTargetRecord>(`
+    SELECT promotion_id::text AS "promotionId", variant_id::text AS "variantId"
+    FROM promotion_variant_targets
+    ORDER BY promotion_id, variant_id
+  `);
 
   return Object.freeze({
     source: "production",
@@ -205,5 +220,6 @@ export async function loadDatabaseCatalogRecords(
       endsAt: toOptionalIso(promotion.endsAt),
     })),
     promotionTargets: promotionTargets.rows,
+    promotionVariantTargets: promotionVariantTargets.rows,
   });
 }
