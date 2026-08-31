@@ -196,6 +196,7 @@ function setup(reviewRequired = false) {
       reviewRequired: false,
       hasReservations: true,
       quoteSnapshot,
+      pricingRevision: null,
     })),
     loadFacts: vi.fn(async () => ({
       ok: true as const,

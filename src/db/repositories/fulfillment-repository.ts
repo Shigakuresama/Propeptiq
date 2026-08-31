@@ -162,6 +162,7 @@ type ItemRow = Readonly<{
   id: string;
   orderId: string;
   productId: string;
+  variantId: string | null;
   quantity: number | string;
   productStatus: string;
   policyGroupId: string;
@@ -213,13 +214,14 @@ type LockedCatalog = Readonly<{
   items: readonly ItemRow[];
   address: AddressRow | null;
   promotionIds: readonly string[];
+  reviewCartSnapshots: readonly unknown[];
   policies: readonly PolicyRow[];
 }>;
 
 type Discovery = Readonly<{
   order: OrderRow;
   attemptId: string | null;
-  reviewInput: ReviewSnapshotHashInput | null;
+  reviewInputs: readonly ReviewSnapshotHashInput[];
   reviewNeeded: boolean;
 }>;
 
@@ -373,7 +375,8 @@ async function readCatalog(
   }
   const itemRows = await client.query<ItemRow>(
     `SELECT oi.id::text AS id, oi.order_id::text AS "orderId",
-            oi.product_id::text AS "productId", oi.quantity,
+            oi.product_id::text AS "productId",
+            oi.variant_id::text AS "variantId", oi.quantity,
             p.status AS "productStatus",
             p.policy_group_id::text AS "policyGroupId",
             pg.active AS "policyGroupActive"
@@ -402,6 +405,13 @@ async function readCatalog(
      ORDER BY promotion_id${lock ? " FOR UPDATE" : ""}`,
     [orderId],
   );
+  const reviewRows = await client.query<{ cartSnapshot: unknown }>(
+    `SELECT cart_snapshot AS "cartSnapshot"
+     FROM review_requests
+     WHERE order_id = $1::uuid
+     ORDER BY id${lock ? " FOR UPDATE" : ""}`,
+    [orderId],
+  );
   const policies = await client.query<PolicyRow>(
     `SELECT id::text AS id, scope_kind AS "scopeKind",
             product_id::text AS "productId",
@@ -426,6 +436,9 @@ async function readCatalog(
       addressRows.rows.length === 1 ? addressRows.rows[0]! : null,
     promotionIds: Object.freeze(
       promotionRows.rows.map((row) => row.promotionId),
+    ),
+    reviewCartSnapshots: Object.freeze(
+      reviewRows.rows.map((row) => row.cartSnapshot),
     ),
     policies: Object.freeze(policies.rows),
   });
@@ -458,20 +471,118 @@ function destinationForItem(
   });
 }
 
-function makeReviewInput(
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function canonicalReviewCart(
+  value: unknown,
+  catalogItems: readonly ItemRow[],
+): Readonly<{
+  items: readonly Readonly<{ variantId: string; quantity: number }>[];
+  automaticPromotions: readonly Readonly<{ id: string; version: number }>[];
+}> | null {
+  const cartKeys = new Set([
+    "schemaVersion",
+    "kind",
+    "items",
+    "automaticPromotions",
+  ]);
+  if (
+    !plainRecord(value) ||
+    value.schemaVersion !== 2 ||
+    value.kind !== "canonical_variant" ||
+    !Array.isArray(value.items) ||
+    !Array.isArray(value.automaticPromotions) ||
+    Reflect.ownKeys(value).length !== cartKeys.size ||
+    Reflect.ownKeys(value).some(
+      (key) => typeof key !== "string" || !cartKeys.has(key),
+    )
+  ) {
+    return null;
+  }
+  const expected = new Map(
+    catalogItems.map((item) => [item.variantId, safeInteger(item.quantity)]),
+  );
+  if (
+    expected.size !== catalogItems.length ||
+    [...expected].some(
+      ([variantId, quantity]) =>
+        variantId === null || quantity === null || quantity <= 0,
+    )
+  ) {
+    return null;
+  }
+  const seenItems = new Set<string>();
+  const items: Array<Readonly<{ variantId: string; quantity: number }>> = [];
+  for (const item of value.items) {
+    if (
+      !plainRecord(item) ||
+      Reflect.ownKeys(item).length !== 2 ||
+      !Object.hasOwn(item, "variantId") ||
+      !Object.hasOwn(item, "quantity") ||
+      !isCanonicalUuid(item.variantId) ||
+      !Number.isSafeInteger(item.quantity) ||
+      (item.quantity as number) <= 0 ||
+      seenItems.has(item.variantId) ||
+      expected.get(item.variantId) !== item.quantity
+    ) {
+      return null;
+    }
+    seenItems.add(item.variantId);
+    items.push(Object.freeze({
+      variantId: item.variantId,
+      quantity: item.quantity as number,
+    }));
+  }
+  if (seenItems.size !== expected.size) {
+    return null;
+  }
+  const seenPromotions = new Set<string>();
+  const automaticPromotions: Array<Readonly<{ id: string; version: number }>> = [];
+  for (const promotion of value.automaticPromotions) {
+    if (
+      !plainRecord(promotion) ||
+      Reflect.ownKeys(promotion).length !== 2 ||
+      !Object.hasOwn(promotion, "id") ||
+      !Object.hasOwn(promotion, "version") ||
+      !boundedText(promotion.id) ||
+      !Number.isSafeInteger(promotion.version) ||
+      (promotion.version as number) <= 0 ||
+      seenPromotions.has(promotion.id)
+    ) {
+      return null;
+    }
+    seenPromotions.add(promotion.id);
+    automaticPromotions.push(Object.freeze({
+      id: promotion.id,
+      version: promotion.version as number,
+    }));
+  }
+  return Object.freeze({
+    items: Object.freeze(items),
+    automaticPromotions: Object.freeze(automaticPromotions),
+  });
+}
+
+function makeReviewInputs(
   order: OrderRow,
   buyerStatus: BuyerStatus,
   historicalVersionId: string,
   catalog: LockedCatalog,
-): ReviewSnapshotHashInput | null {
-  if (catalog.items.length === 0 || catalog.address === null) return null;
-  const items = catalog.items.map((item) => {
+): readonly ReviewSnapshotHashInput[] {
+  if (catalog.items.length === 0 || catalog.address === null) return [];
+  const legacyItems = catalog.items.map((item) => {
     const quantity = safeInteger(item.quantity);
     return quantity === null || quantity <= 0
       ? null
       : Object.freeze({ productId: item.productId, quantity });
   });
-  if (items.some((item) => item === null)) return null;
+  if (legacyItems.some((item) => item === null)) return [];
   const reviewPolicies = catalog.items
     .map((item) =>
       destinationForItem(item, order.destinationStateCode, catalog.policies),
@@ -484,16 +595,12 @@ function makeReviewInput(
       id: resolution.ruleId!,
       version: resolution.ruleVersion!,
     }));
-  return Object.freeze({
+  const shared = {
     orderId: order.id,
     buyerUserId: order.buyerUserId,
     buyerStatus,
     acceptedAttestationVersionId: historicalVersionId,
     currentAttestationVersionId: historicalVersionId,
-    items: Object.freeze(
-      items as readonly Readonly<{ productId: string; quantity: number }>[],
-    ),
-    promotionIds: catalog.promotionIds,
     destination: Object.freeze({
       recipientName: catalog.address.recipientName,
       line1: catalog.address.addressLine1,
@@ -504,7 +611,30 @@ function makeReviewInput(
       countryCode: catalog.address.country as "US",
     }),
     reviewPolicies: Object.freeze(reviewPolicies),
-  });
+  } as const;
+  const variantCount = catalog.items.filter(
+    (item) => item.variantId !== null,
+  ).length;
+  if (variantCount === 0) {
+    return Object.freeze([Object.freeze({
+      ...shared,
+      items: Object.freeze(
+        legacyItems as readonly Readonly<{ productId: string; quantity: number }>[],
+      ),
+      promotionIds: catalog.promotionIds,
+    })]);
+  }
+  if (variantCount !== catalog.items.length) return [];
+  return Object.freeze(
+    catalog.reviewCartSnapshots
+      .map((snapshot) => canonicalReviewCart(snapshot, catalog.items))
+      .filter((snapshot) => snapshot !== null)
+      .map((snapshot) => Object.freeze({
+        ...shared,
+        items: snapshot.items,
+        automaticPromotions: snapshot.automaticPromotions,
+      })),
+  );
 }
 
 async function preflight(
@@ -535,7 +665,7 @@ async function preflight(
     now,
     false,
   );
-  const reviewInput = makeReviewInput(
+  const reviewInputs = makeReviewInputs(
     order,
     profile.rows[0]!.status,
     historical.rows[0]!.attestationVersionId,
@@ -543,11 +673,18 @@ async function preflight(
   );
   const reviewNeeded =
     profile.rows[0]!.status === "review" ||
-    (reviewInput?.reviewPolicies.length ?? 0) > 0;
+    catalog.items.some(
+      (item) =>
+        destinationForItem(
+          item,
+          order.destinationStateCode,
+          catalog.policies,
+        ).status === "review",
+    );
   return Object.freeze({
     order,
     attemptId: await readAttemptDiscovery(client, order.id),
-    reviewInput,
+    reviewInputs,
     reviewNeeded,
   });
 }
@@ -1116,16 +1253,21 @@ async function loadLockedFacts(
     return Object.freeze({ status: "conflict" });
   }
   let review: ExactReviewDecision | null = null;
+  let resolvedReviewInput: ReviewSnapshotHashInput | null = null;
   if (discovered.reviewNeeded) {
-    if (discovered.reviewInput === null) {
+    if (discovered.reviewInputs.length === 0) {
       return Object.freeze({ status: "conflict" });
     }
-    review = await resolveReview(
-      client,
-      discovered.reviewInput,
-      sha256,
-      { lock: true },
-    );
+    for (const candidate of discovered.reviewInputs) {
+      const decision = await resolveReview(client, candidate, sha256, {
+        lock: true,
+      });
+      if (decision !== null) {
+        if (review !== null) return Object.freeze({ status: "conflict" });
+        review = decision;
+        resolvedReviewInput = candidate;
+      }
+    }
   }
   const payments = await lockPayments(client, order.id);
   const refunds = await lockRefunds(client, order.id);
@@ -1147,12 +1289,18 @@ async function loadLockedFacts(
     payment,
     payments,
   );
-  const finalReviewInput = makeReviewInput(
+  const finalReviewInputs = makeReviewInputs(
     order,
     buyerStatus,
     historical.attestationVersionId,
     catalog,
   );
+  const finalReviewInput = resolvedReviewInput === null
+    ? null
+    : finalReviewInputs.find(
+        (candidate) =>
+          canonicalJson(candidate) === canonicalJson(resolvedReviewInput),
+      ) ?? null;
   const finalReviewHash = finalReviewInput === null
     ? null
     : await hashReviewSnapshot(finalReviewInput, sha256);
@@ -1160,8 +1308,8 @@ async function loadLockedFacts(
     review === null
       ? !discovered.reviewNeeded
       : finalReviewHash === review.reviewSnapshotHash &&
-        discovered.reviewInput !== null &&
-        canonicalJson(finalReviewInput) === canonicalJson(discovered.reviewInput);
+        resolvedReviewInput !== null &&
+        canonicalJson(finalReviewInput) === canonicalJson(resolvedReviewInput);
   return Object.freeze({
     status: "ok" as const,
     buyerStatus,

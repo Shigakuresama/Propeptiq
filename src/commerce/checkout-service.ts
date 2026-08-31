@@ -208,6 +208,7 @@ export type StoredCheckoutAttempt = Readonly<{
   reviewRequired: boolean;
   hasReservations: boolean;
   quoteSnapshot: BrowserCheckoutQuote | null;
+  pricingRevision: string | null;
 }>;
 
 export type CheckoutLoadedResult = Readonly<{
@@ -217,6 +218,7 @@ export type CheckoutLoadedResult = Readonly<{
   attemptStatus: CheckoutAttemptStatus;
   orderState: OrderState;
   quoteSnapshot: BrowserCheckoutQuote | null;
+  pricingRevision: string | null;
 }>;
 
 export type FactLoadResult =
@@ -358,6 +360,10 @@ export type AuthoritativeVariantCheckoutPlanData = Readonly<{
   factsHash: string;
   facts: AuthoritativeVariantCheckoutFacts;
   effectiveLines: readonly AuthoritativeVariantLinePrice[];
+  activeAutomaticPromotions: readonly Readonly<{
+    id: string;
+    version: number;
+  }>[];
   reviewSnapshotHash: string | null;
   exactReview: ExactReviewDecision | null;
   decision: CheckoutDecision;
@@ -456,6 +462,7 @@ export function projectLoadedCheckoutAttempt(
     attemptStatus: attempt.status,
     orderState: attempt.orderState,
     quoteSnapshot: attempt.quoteSnapshot,
+    pricingRevision: attempt.pricingRevision,
   });
 }
 
@@ -763,6 +770,36 @@ function variantUnavailableReason(
   return null;
 }
 
+export function canonicalActiveAutomaticPromotionIdentities(
+  facts: AuthoritativeVariantCheckoutFacts,
+  request: CheckoutQuoteRequest,
+  at: Date,
+): readonly Readonly<{ id: string; version: number }>[] {
+  const requestedVariants = new Set(request.items.map((item) => item.variantId));
+  const identities = facts.automaticPromotions.flatMap((promotion) => {
+    if (
+      promotion.applicationMode !== "automatic" ||
+      !isStorefrontPromotionActive(promotion, at) ||
+      !facts.items.some((item) =>
+        requestedVariants.has(item.variantId) &&
+        promotionApplies(promotion, {
+          variantId: item.variantId,
+          productId: item.productId,
+        }),
+      )
+    ) return [];
+    return [{ id: promotion.id, version: promotion.version }];
+  });
+  return Object.freeze(
+    [...new Map(identities.map((identity) => [
+      `${identity.id}:${identity.version}`,
+      Object.freeze(identity),
+    ])).values()].toSorted((left, right) =>
+      left.id.localeCompare(right.id) || left.version - right.version,
+    ),
+  );
+}
+
 function safeVariantCart(
   facts: AuthoritativeVariantCheckoutFacts,
   request: CheckoutQuoteRequest,
@@ -1017,13 +1054,10 @@ export function createCheckoutService(dependencies: Readonly<{
         stripePriceId: fact.stripePriceId!,
       });
     });
-    const activePromotionIdentities = [...new Map(
-      priced.flatMap((line) => line.activePromotions).map((promotion) => [
-        `${promotion.id}:${promotion.version}`,
-        { id: promotion.id, version: promotion.version },
-      ]),
-    ).values()].toSorted((left, right) =>
-      left.id.localeCompare(right.id) || left.version - right.version,
+    const activePromotionIdentities = canonicalActiveAutomaticPromotionIdentities(
+      facts,
+      request,
+      authoritativeAt,
     );
     const reviewNeeded = facts.buyer.acceptedAttestationVersionId !== null &&
       facts.buyer.acceptedAttestationVersionId === facts.buyer.currentAttestationVersionId &&
@@ -1340,6 +1374,7 @@ export function createCheckoutService(dependencies: Readonly<{
       factsHash,
       facts,
       effectiveLines: Object.freeze(effectiveLines),
+      activeAutomaticPromotions: Object.freeze(activePromotionIdentities),
       reviewSnapshotHash,
       exactReview,
       decision,

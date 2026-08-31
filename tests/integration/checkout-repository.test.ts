@@ -9,6 +9,7 @@ import {
   createPostgresCheckoutRepository,
   resolveExactReviewRequest,
 } from "@/db/repositories/checkout-repository";
+import { createFulfillmentRepository } from "@/db/repositories/fulfillment-repository";
 
 import { createMigratedPglite } from "./helpers/pglite";
 
@@ -39,6 +40,13 @@ const ids = {
   variantPromotion: "30000000-0000-4000-8000-000000000024",
   variantPromotionTarget: "30000000-0000-4000-8000-000000000025",
   variantB: "30000000-0000-4000-8000-000000000026",
+  losingVariantPromotion: "30000000-0000-4000-8000-000000000027",
+  groupB: "30000000-0000-4000-8000-000000000028",
+  crossedVariantB: "10000000-0000-4000-8000-000000000029",
+  crossedVariantPriceB: "30000000-0000-4000-8000-000000000030",
+  crossedVariantLotB: "30000000-0000-4000-8000-000000000031",
+  unrelatedVariantPromotion: "30000000-0000-4000-8000-000000000032",
+  unrelatedVariantPromotionTarget: "30000000-0000-4000-8000-000000000033",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -136,6 +144,7 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       generator?: (label: string) => string;
       failTransactions?: number;
       transactionSql?: string[];
+      transactionQueries?: Array<{ sql: string; params: readonly unknown[] }>;
     }> = {},
   ) {
     let transactionAttempts = 0;
@@ -154,6 +163,10 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
           work({
             query: (sql, params = []) => {
               options.transactionSql?.push(sql.replace(/\s+/g, " ").trim());
+              options.transactionQueries?.push({
+                sql: sql.replace(/\s+/g, " ").trim(),
+                params: [...params],
+              });
               return transaction.query(sql, [...params]);
             },
           }),
@@ -364,11 +377,560 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       reservationCount: 1,
     });
     expect(transactionSql.some((sql) =>
-      sql.includes("FROM product_variants") && sql.includes("FOR UPDATE OF v, p, g"),
+      sql.includes("FROM product_variants") && sql.includes("ORDER BY v.id FOR UPDATE"),
     )).toBe(true);
     expect(transactionSql.some((sql) =>
       sql.includes("FROM lots") && sql.includes("variant_id = ANY") && sql.includes("FOR UPDATE"),
     )).toBe(true);
+  });
+
+  it("locks globally ordered parents before crossed variant, price, and lot identities", async () => {
+    await seedCheckoutReadyVariant();
+    await client.exec(`
+      INSERT INTO product_policy_groups (id, slug, name, active)
+      VALUES ('${ids.groupB}', 'synthetic-crossed-group-b',
+              'Synthetic crossed group B', true);
+      UPDATE products SET policy_group_id = '${ids.groupB}'
+      WHERE id = '${ids.productB}';
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status, stripe_product_id, stripe_price_id,
+         updated_at)
+      VALUES ('${ids.crossedVariantB}', '${ids.productB}', 'CROSSED-B-5MG',
+        'Crossed B 5 mg fixture', 5, 'mg', 1, 'active',
+        'prod_crossed_b', 'price_crossed_b', '2026-08-24T00:00:00.000Z');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.crossedVariantPriceB}', '${ids.productB}',
+        '${ids.crossedVariantB}', 1, 'active', 4000, 'USD',
+        '2026-08-01T00:00:00.000Z');
+      INSERT INTO lots
+        (id, product_id, variant_id, supplier_name, supplier_lot_code,
+         received_quantity, available_quantity, status, expires_at, updated_at)
+      VALUES ('${ids.crossedVariantLotB}', '${ids.productB}',
+        '${ids.crossedVariantB}', 'Synthetic supplier', 'CROSSED-B-LOT',
+        5, 5, 'released', '2026-12-01T00:00:00.000Z',
+        '2026-08-24T00:00:00.000Z');
+    `);
+    const transactionQueries: Array<{
+      sql: string;
+      params: readonly unknown[];
+    }> = [];
+    const { service } = setup({ transactionQueries });
+    const key = "30000000-0000-4000-8000-000000000133";
+    const crossedRequest = {
+      ...variantRequest,
+      items: [
+        { variantId: ids.variantA, quantity: 1 },
+        { variantId: ids.crossedVariantB, quantity: 1 },
+      ],
+    } as const;
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: crossedRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected crossed quote");
+    }
+    const acknowledged = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...crossedRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (acknowledged.status !== "quoted") throw new Error("expected acknowledged");
+    await expect(service.prepare(acknowledged.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${acknowledged.plan.identity.attemptId}`,
+      providerRequestHash: "6".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "crossed.parents@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    })).resolves.toMatchObject({ status: "prepared" });
+
+    const productLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM products p WHERE p\.id = ANY\([^)]*\) ORDER BY p\.id FOR UPDATE/iu.test(sql),
+    );
+    const groupLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM product_policy_groups g WHERE g\.id = ANY\([^)]*\) ORDER BY g\.id FOR UPDATE/iu.test(sql),
+    );
+    const variantLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM product_variants v WHERE v\.id = ANY\([^)]*\) ORDER BY v\.id FOR UPDATE/iu.test(sql),
+    );
+    const priceLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM product_prices[\s\S]*FOR UPDATE/iu.test(sql),
+    );
+    const lotLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM lots[\s\S]*variant_id = ANY[\s\S]*FOR UPDATE/iu.test(sql),
+    );
+    expect(transactionQueries[productLockIndex]?.params[0]).toEqual([
+      ids.productA,
+      ids.productB,
+    ]);
+    expect(transactionQueries[groupLockIndex]?.params[0]).toEqual([
+      ids.group,
+      ids.groupB,
+    ]);
+    expect(transactionQueries[variantLockIndex]?.params[0]).toEqual([
+      ids.crossedVariantB,
+      ids.variantA,
+    ]);
+    expect(productLockIndex).toBeGreaterThanOrEqual(0);
+    expect(groupLockIndex).toBeGreaterThan(productLockIndex);
+    expect(variantLockIndex).toBeGreaterThan(groupLockIndex);
+    expect(priceLockIndex).toBeGreaterThan(variantLockIndex);
+    expect(lotLockIndex).toBeGreaterThan(priceLockIndex);
+  });
+
+  it("locks only promotion candidates scoped to the cart under the serializable predicate read", async () => {
+    await seedCheckoutReadyVariant();
+    await client.exec(`
+      DELETE FROM promotions WHERE id = '${ids.variantPromotion}';
+      INSERT INTO promotions
+        (id, code, version, name, kind, status, basis_points, configuration,
+         starts_at, ends_at, campaign_key, enabled, timezone,
+         application_mode, scope)
+      VALUES
+        ('${ids.variantPromotion}', 'VARIANT-A-20', 1, 'Variant A offer',
+         'discount', 'active', 2000, '{}'::jsonb, NULL, NULL, 'variant-a-20',
+         true, 'America/Los_Angeles', 'automatic', 'products'),
+        ('${ids.unrelatedVariantPromotion}', 'VARIANT-B-40', 1,
+         'Unrelated variant B offer', 'discount', 'active', 4000,
+         '{}'::jsonb, NULL, NULL, 'variant-b-40', true,
+         'America/Los_Angeles', 'automatic', 'products');
+      INSERT INTO promotion_targets
+        (id, promotion_id, target_kind, product_id)
+      VALUES
+        ('${ids.variantPromotionTarget}', '${ids.variantPromotion}', 'product',
+         '${ids.productA}'),
+        ('${ids.unrelatedVariantPromotionTarget}',
+         '${ids.unrelatedVariantPromotion}', 'product', '${ids.productB}');
+    `);
+    const transactionQueries: Array<{
+      sql: string;
+      params: readonly unknown[];
+    }> = [];
+    const { service } = setup({ transactionQueries });
+    const key = "30000000-0000-4000-8000-000000000134";
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected scoped promotion quote");
+    }
+    const acknowledged = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (acknowledged.status !== "quoted") throw new Error("expected acknowledged");
+    await expect(service.prepare(acknowledged.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${acknowledged.plan.identity.attemptId}`,
+      providerRequestHash: "5".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "scoped.promotions@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    })).resolves.toMatchObject({ status: "prepared" });
+
+    const promotionLock = transactionQueries.find(({ sql }) =>
+      /FROM promotions p[\s\S]*FOR UPDATE OF p/iu.test(sql),
+    );
+    expect(promotionLock?.sql).toMatch(/EXISTS[\s\S]*promotion_targets/iu);
+    expect(promotionLock?.params).toEqual([
+      [ids.productA],
+      [ids.group],
+      [ids.variantA],
+      now.toISOString(),
+    ]);
+    expect(transactionQueries.some(({ sql }) =>
+      /FROM promotions[\s\S]*application_mode = 'automatic'[\s\S]*ORDER BY campaign_key, version, id FOR UPDATE$/iu.test(sql),
+    )).toBe(false);
+    if (acknowledged.plan.kind !== "canonical_variant") {
+      throw new Error("expected canonical plan");
+    }
+    expect(acknowledged.plan.activeAutomaticPromotions).toEqual([
+      { id: "variant-a-20", version: 1 },
+    ]);
+  });
+
+  it.each([
+    {
+      label: "another automatic promotion wins",
+      quantity: 2,
+      keepWinter30: true,
+    },
+    {
+      label: "the quantity tier wins",
+      quantity: 10,
+      keepWinter30: false,
+    },
+  ])("retains a losing applicable promotion through locked review recheck when $label", async ({ quantity, keepWinter30 }) => {
+    await seedCheckoutReadyVariant();
+    await client.exec(`
+      UPDATE lots SET received_quantity = 20, available_quantity = 20
+      WHERE id = '${ids.variantLotA}';
+      ${keepWinter30 ? "" : `DELETE FROM promotions WHERE id = '${ids.variantPromotion}';`}
+      INSERT INTO promotions
+        (id, code, version, name, kind, status, basis_points, configuration,
+         starts_at, ends_at, campaign_key, enabled, timezone,
+         application_mode, scope)
+      VALUES ('${ids.losingVariantPromotion}', 'SPRING20', 2,
+        'Synthetic losing spring offer', 'discount', 'active', 2000,
+        '{}'::jsonb, NULL, NULL, 'spring20', true,
+        'America/Los_Angeles', 'automatic', 'sitewide');
+      UPDATE buyer_profiles SET status = 'review'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    const { service } = setup();
+    const key = keepWinter30
+      ? "30000000-0000-4000-8000-000000000128"
+      : "30000000-0000-4000-8000-000000000129";
+    const quote = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: {
+        ...variantRequest,
+        items: [{ variantId: ids.variantA, quantity }],
+      },
+    });
+    if (quote.status !== "quoted") throw new Error("expected canonical review quote");
+
+    const prepared = await service.prepare(quote.plan, null);
+
+    expect(prepared).toMatchObject({ status: "review_required" });
+    const review = await client.query<{ cartSnapshot: unknown }>(
+      `SELECT cart_snapshot AS "cartSnapshot" FROM review_requests
+       WHERE order_id = $1::uuid`,
+      [quote.plan.identity.orderId],
+    );
+    expect(review.rows[0]?.cartSnapshot).toEqual({
+      schemaVersion: 2,
+      kind: "canonical_variant",
+      items: [{ variantId: ids.variantA, quantity }],
+      automaticPromotions: keepWinter30
+        ? [
+            { id: "spring20", version: 2 },
+            { id: "winter30", version: 1 },
+          ]
+        : [{ id: "spring20", version: 2 }],
+    });
+  });
+
+  it("carries exact canonical variant and automatic-promotion review identity through payment and fulfillment", async () => {
+    await seedCheckoutReadyVariant();
+    await client.exec(`
+      INSERT INTO promotions
+        (id, code, version, name, kind, status, basis_points, configuration,
+         starts_at, ends_at, campaign_key, enabled, timezone,
+         application_mode, scope)
+      VALUES ('${ids.losingVariantPromotion}', 'SPRING20', 2,
+        'Synthetic losing spring offer', 'discount', 'active', 2000,
+        '{}'::jsonb, NULL, NULL, 'spring20', true,
+        'America/Los_Angeles', 'automatic', 'sitewide');
+      UPDATE buyer_profiles SET status = 'review'
+      WHERE user_id = '${ids.buyer}';
+      INSERT INTO staff_roles
+        (user_id, capability, granted_by_user_id, grant_correlation_id)
+      VALUES ('${ids.buyer2}', 'fulfillment:release:consume', '${ids.buyer2}',
+              'canonical-review-fulfillment-task5');
+    `);
+    const { service } = setup();
+    const key = "30000000-0000-4000-8000-000000000132";
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical review quote");
+    }
+    const review = await service.prepare(quoted.plan, null);
+    if (review.status !== "review_required" || review.reviewRequestId === null) {
+      throw new Error("expected canonical review request");
+    }
+    await client.query(
+      `UPDATE review_requests
+       SET outcome = 'approved', decided_by_user_id = $2::uuid,
+           decided_at = $3::timestamptz, covers_buyer_review = true
+       WHERE id = $1::uuid`,
+      [review.reviewRequestId, ids.buyer2, now.toISOString()],
+    );
+    const approved = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: {
+        ...variantRequest,
+        pricingRevision: quoted.pricingRevision,
+      },
+    });
+    if (approved.status !== "quoted") throw new Error("expected approved quote");
+    const prepared = await service.prepare(approved.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${approved.plan.identity.attemptId}`,
+      providerRequestHash: "9".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "canonical.fulfillment@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    });
+    if (prepared.status !== "prepared") throw new Error("expected prepared");
+    const order = await client.query<{ totalMinor: number }>(
+      `SELECT total_minor AS "totalMinor" FROM orders WHERE id = $1::uuid`,
+      [prepared.orderId],
+    );
+    const totalMinor = order.rows[0]!.totalMinor;
+    const providerSessionId = "cs_task5_canonical_review_paid";
+    const normalizedPayload = {
+      schemaVersion: 1,
+      kind: "checkout_session",
+      providerEventId: "evt_task5_canonical_review_paid",
+      eventType: "checkout.session.completed",
+      providerCreatedAt: now.toISOString(),
+      livemode: false,
+      sessionId: providerSessionId,
+      orderId: prepared.orderId,
+      attemptId: prepared.attemptId,
+      paymentIntentId: "pi_task5_canonical_review_paid",
+      amountMinor: totalMinor,
+      currency: "usd",
+      paymentStatus: "paid",
+      sessionStatus: "complete",
+    } as const;
+    await client.query(
+      `UPDATE checkout_attempts
+       SET status = 'completed', provider_session_id = $2
+       WHERE id = $1::uuid`,
+      [prepared.attemptId, providerSessionId],
+    );
+    await client.query(
+      `UPDATE orders SET state = 'paid_pending_fulfillment'
+       WHERE id = $1::uuid`,
+      [prepared.orderId],
+    );
+    await client.query(
+      `INSERT INTO provider_events
+        (id, provider, provider_event_id, payload_hash, status, attempt_count,
+         received_at, processed_at, event_type, schema_version,
+         normalized_payload, provider_created_at, livemode)
+       VALUES ($1::uuid, 'local_test', $2, $3, 'processed', 1,
+               $4::timestamptz, $4::timestamptz,
+               'checkout.session.completed', 1, $5::jsonb,
+               $4::timestamptz, false)`,
+      [
+        ids.providerEvent,
+        normalizedPayload.providerEventId,
+        "8".repeat(64),
+        now.toISOString(),
+        JSON.stringify(normalizedPayload),
+      ],
+    );
+    await client.query(
+      `INSERT INTO payment_events
+        (id, provider_event_id, order_id, event_type, provider_payment_id,
+         idempotency_key, amount_minor, currency, occurred_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'payment_verified', $4, $5,
+               $6, 'USD', $7::timestamptz)`,
+      [
+        ids.paymentEvent,
+        ids.providerEvent,
+        prepared.orderId,
+        normalizedPayload.paymentIntentId,
+        `local_test:payment_intent:${normalizedPayload.paymentIntentId}`,
+        totalMinor,
+        now.toISOString(),
+      ],
+    );
+    await client.query(
+      `INSERT INTO shipments
+        (id, order_id, carrier, tracking_reference, state, updated_at)
+       VALUES ($1::uuid, $2::uuid, 'SYNTHETIC-CARRIER',
+               'SYNTHETIC-TRACKING', 'pending', $3::timestamptz)`,
+      [keyedUuid("canonical-review-shipment"), prepared.orderId, now.toISOString()],
+    );
+    const reviewInputs: unknown[] = [];
+    const fulfillment = createFulfillmentRepository({
+      runSerializableTransaction: (work) =>
+        client.transaction((transaction) =>
+          work({
+            query: (sql, params = []) => transaction.query(sql, [...params]),
+          }),
+        ),
+      sha256,
+      keyedUuid,
+      retrySleep: async () => undefined,
+      resolveExactReviewRequest: async (...args) => {
+        reviewInputs.push(args[1]);
+        return resolveExactReviewRequest(...args);
+      },
+    });
+
+    await expect(fulfillment.handoff({
+      actorUserId: ids.buyer2,
+      actorClerkUserId: "clerk-synthetic-buyer-b",
+      orderId: prepared.orderId,
+      now,
+      correlationId: "canonical-review-fulfillment-task5",
+    })).resolves.toEqual({ status: "handed_off" });
+    expect(reviewInputs).toContainEqual(expect.objectContaining({
+      items: [{ variantId: ids.variantA, quantity: 2 }],
+      automaticPromotions: [
+        { id: "spring20", version: 2 },
+        { id: "winter30", version: 1 },
+      ],
+    }));
+  });
+
+  it.each([
+    {
+      label: "discounted",
+      key: "30000000-0000-4000-8000-000000000130",
+      automaticPromotion: true,
+      quantity: 2,
+    },
+    {
+      label: "zero-discount",
+      key: "30000000-0000-4000-8000-000000000131",
+      automaticPromotion: false,
+      quantity: 1,
+    },
+  ])("replays the exact safe canonical $label quote and pricing revision", async ({ key, automaticPromotion, quantity }) => {
+    await seedCheckoutReadyVariant();
+    if (!automaticPromotion) {
+      await client.exec(
+        `DELETE FROM promotions WHERE id = '${ids.variantPromotion}'`,
+      );
+    }
+    const { service } = setup();
+    const replayRequest = {
+      ...variantRequest,
+      items: [{ variantId: ids.variantA, quantity }],
+    } as const;
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: replayRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical variant quote");
+    }
+    const sessionQuote = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: {
+        ...replayRequest,
+        pricingRevision: quoted.pricingRevision,
+      },
+    });
+    if (sessionQuote.status !== "quoted") throw new Error("expected session quote");
+    await expect(service.prepare(sessionQuote.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${sessionQuote.plan.identity.attemptId}`,
+      providerRequestHash: "d".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "canonical.replay@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    })).resolves.toMatchObject({ status: "prepared" });
+
+    const durableReplay = await client.query<{
+      pricingRevision: string;
+      quoteSnapshot: unknown;
+    }>(
+      `SELECT canonical_pricing_revision AS "pricingRevision",
+              canonical_quote_snapshot AS "quoteSnapshot"
+       FROM checkout_attempts WHERE id = $1::uuid`,
+      [sessionQuote.plan.identity.attemptId],
+    );
+    expect(durableReplay.rows[0]?.pricingRevision).toBe(quoted.pricingRevision);
+    expect(JSON.stringify(durableReplay.rows[0]?.quoteSnapshot)).not.toMatch(
+      /productId|stripe|priceBook|inventoryRevision/iu,
+    );
+
+    for (const replay of [
+      await service.quote({
+        buyerUserId: ids.buyer,
+        idempotencyKey: key,
+        paymentProviderAvailable: true,
+        request: replayRequest,
+      }),
+      await service.quoteForSession({
+        buyerUserId: ids.buyer,
+        idempotencyKey: key,
+        paymentProviderAvailable: true,
+        request: {
+          ...replayRequest,
+          pricingRevision: quoted.pricingRevision,
+        },
+      }),
+    ]) {
+      expect(replay).toMatchObject({
+        status: "loaded",
+        pricingRevision: quoted.pricingRevision,
+        quoteSnapshot: {
+          lines: [{
+            variantId: ids.variantA,
+            sku: "SYNTHETIC-VARIANT-5MG",
+            variantLabel: "5 mg synthetic checkout fixture",
+          }],
+        },
+      });
+      expect(JSON.stringify(replay)).not.toMatch(
+        /productId|stripe|priceBook|inventoryRevision/iu,
+      );
+    }
+  });
+
+  it("keeps legacy attempts null-compatible and rejects incoherent canonical replay fields", async () => {
+    const prepared = await quoteAndPrepare(
+      "30000000-0000-4000-8000-000000000135",
+    );
+    if (prepared.prepared.status !== "prepared") throw new Error("expected prepared");
+    const legacy = await client.query<{
+      pricingRevision: string | null;
+      quoteSnapshot: unknown;
+    }>(
+      `SELECT canonical_pricing_revision AS "pricingRevision",
+              canonical_quote_snapshot AS "quoteSnapshot"
+       FROM checkout_attempts WHERE id = $1::uuid`,
+      [prepared.prepared.attemptId],
+    );
+    expect(legacy.rows[0]).toEqual({
+      pricingRevision: null,
+      quoteSnapshot: null,
+    });
+    await expect(client.query(
+      `UPDATE checkout_attempts
+       SET canonical_pricing_revision = $2
+       WHERE id = $1::uuid`,
+      [prepared.prepared.attemptId, "a".repeat(64)],
+    )).rejects.toThrow(/checkout_attempts_canonical_replay_coherent/iu);
   });
 
   it("returns only explicitly bound canonical variant checkout facts", async () => {

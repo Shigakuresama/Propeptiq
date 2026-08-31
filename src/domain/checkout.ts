@@ -72,11 +72,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isDenseArray(value: unknown): value is readonly unknown[] {
-  if (!Array.isArray(value)) return false;
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype ||
+    Reflect.ownKeys(value).length !== value.length + 1
+  ) return false;
   for (let index = 0; index < value.length; index += 1) {
     if (!Object.hasOwn(value, index)) return false;
   }
-  return true;
+  return Reflect.ownKeys(value).every((key) =>
+    key === "length" ||
+    (typeof key === "string" && /^(?:0|[1-9]\d*)$/u.test(key)),
+  );
 }
 
 function deepFreeze<Value>(value: Value): Value {

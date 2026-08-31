@@ -233,6 +233,10 @@ function safeQuote(value: unknown): PublicCheckoutQuote | null {
         totalMinor: candidate.totalMinor,
       });
     });
+    const canonicalLineCount = lines.filter(
+      (line) => "variantId" in line,
+    ).length;
+    if (canonicalLineCount > 0 && canonicalLineCount !== lines.length) return null;
     if (lineSubtotal !== value.subtotalMinor || lineDiscount !== value.discountMinor) return null;
     return Object.freeze({
       status: value.status,
@@ -397,9 +401,21 @@ function quoteResponse(result: unknown): Response {
     if (result.status === "loaded") {
       const projected = safeQuote(result.quoteSnapshot);
       if (projected === null) return response(409, { status: "conflict" });
+      const canonical = projected.lines.some((line) => line.variantId !== undefined);
+      if (canonical && !safePricingRevision(result.pricingRevision)) {
+        return response(409, { status: "conflict" });
+      }
       return projected.status === "ready"
-        ? response(200, { status: "quoted", quote: projected })
-        : response(200, { status: "review_required", quote: projected });
+        ? response(200, {
+            status: "quoted",
+            ...(canonical ? { pricingRevision: result.pricingRevision } : {}),
+            quote: projected,
+          })
+        : response(200, {
+            status: "review_required",
+            ...(canonical ? { pricingRevision: result.pricingRevision } : {}),
+            quote: projected,
+          });
     }
     if (result.status === "review_rejected") return response(403, { status: "denied", reasons: ["review_rejected"] });
     if (result.status === "CHECKOUT_UNAVAILABLE") {

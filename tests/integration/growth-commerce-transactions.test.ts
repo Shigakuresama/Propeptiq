@@ -50,6 +50,9 @@ const ids = {
   affiliateTermsAcceptance: "92000000-0000-4000-8000-000000000020",
   affiliateProfile: "92000000-0000-4000-8000-000000000021",
   affiliateAttribution: "92000000-0000-4000-8000-000000000022",
+  storefrontPromotion: "92000000-0000-4000-8000-000000000023",
+  storefrontPromotionTarget: "92000000-0000-4000-8000-000000000024",
+  storefrontWinsKey: "92000000-0000-4000-8000-000000000025",
 } as const;
 
 const now = new Date("2026-08-28T12:00:00.000Z");
@@ -1274,7 +1277,55 @@ describe("growth and commerce transaction boundary on PGlite", () => {
     });
   });
 
-  it("fully reverses a qualified zero-point referral without appending ledger points", async () => {
+  it("persists no referral attribution or conversion when the storefront acquisition discount wins", async () => {
+    await client.query(
+      `INSERT INTO promotions
+         (id, code, version, name, kind, status, basis_points, configuration,
+          starts_at, ends_at)
+       VALUES ($1::uuid, 'STORE20', 1, 'Synthetic storefront winner',
+               'discount', 'active', 2000, '{}'::jsonb,
+               '2026-08-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z')`,
+      [ids.storefrontPromotion],
+    );
+    await client.query(
+      `INSERT INTO promotion_targets
+         (id, promotion_id, target_kind, product_id)
+       VALUES ($1::uuid, $2::uuid, 'product', $3::uuid)`,
+      [ids.storefrontPromotionTarget, ids.storefrontPromotion, ids.product],
+    );
+    const { service } = setup();
+    const quoted = await quote(
+      ids.storefrontWinsKey,
+      "signed-task5b-cookie",
+      { ...request, promotionIds: [ids.storefrontPromotion] },
+    );
+    expect(quoted.quote).toMatchObject({
+      promotionDiscountMinor: 2_000,
+      referralDiscountMinor: 0,
+    });
+
+    await expect(service.prepare(
+      quoted.plan,
+      providerPreparation(quoted.plan.identity.attemptId),
+    )).resolves.toMatchObject({ status: "prepared" });
+
+    const persisted = await client.query<{
+      attributions: number;
+      orderAttributions: number;
+      conversions: number;
+    }>(`SELECT
+      (SELECT count(*)::int FROM referral_attributions) AS attributions,
+      (SELECT count(*)::int FROM order_growth_attributions
+       WHERE program = 'customer_referral') AS "orderAttributions",
+      (SELECT count(*)::int FROM referral_conversions) AS conversions`);
+    expect(persisted.rows[0]).toEqual({
+      attributions: 0,
+      orderAttributions: 0,
+      conversions: 0,
+    });
+  });
+
+  it("does not bind or convert a zero-value referral that loses the deterministic acquisition tie", async () => {
     await client.query(
       `UPDATE product_prices SET amount_minor = 1 WHERE id = $1::uuid`,
       [ids.price],
@@ -1292,7 +1343,7 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       provider: "stripe",
       providerEventId: "evt_task5b_zero_referral_payment",
       now,
-    })).resolves.toEqual({ status: "applied" });
+    })).resolves.toEqual({ status: "idempotent" });
     await seedProcessedFinancialEvent({
       orderId: prepared.orderId,
       providerEventId: "evt_task5b_zero_referral_partial_refund",
@@ -1306,11 +1357,6 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       providerEventId: "evt_task5b_zero_referral_partial_refund",
       now: new Date("2026-08-28T12:00:01.000Z"),
     })).resolves.toEqual({ status: "idempotent" });
-    const partialState = await client.query<{ status: string }>(
-      `SELECT status FROM referral_conversions WHERE first_order_id = $1::uuid`,
-      [prepared.orderId],
-    );
-    expect(partialState.rows[0]).toEqual({ status: "qualified" });
     await seedProcessedFinancialEvent({
       orderId: prepared.orderId,
       providerEventId: "evt_task5b_zero_referral_final_refund",
@@ -1323,28 +1369,29 @@ describe("growth and commerce transaction boundary on PGlite", () => {
       provider: "stripe",
       providerEventId: "evt_task5b_zero_referral_final_refund",
       now: new Date("2026-08-28T12:00:02.000Z"),
-    })).resolves.toEqual({ status: "applied" });
+    })).resolves.toEqual({ status: "idempotent" });
     const state = await client.query<{
-      status: string;
-      rewardPoints: number;
+      conversions: number;
       referralLedgerEntries: number;
       referrerAccounts: number;
+      attributions: number;
     }>(
-      `SELECT status, referrer_reward_points AS "rewardPoints",
+      `SELECT (SELECT count(*)::int FROM referral_conversions
+               WHERE first_order_id = $2::uuid) AS conversions,
               (SELECT count(*)::int FROM reward_ledger_entries
                WHERE source_type IN ('referral_conversion',
                                      'referral_payment_event'))
                 AS "referralLedgerEntries",
               (SELECT count(*)::int FROM reward_accounts
-               WHERE buyer_user_id = $1::uuid) AS "referrerAccounts"
-       FROM referral_conversions WHERE first_order_id = $2::uuid`,
+               WHERE buyer_user_id = $1::uuid) AS "referrerAccounts",
+              (SELECT count(*)::int FROM referral_attributions) AS attributions`,
       [ids.referrer, prepared.orderId],
     );
     expect(state.rows[0]).toEqual({
-      status: "reversed",
-      rewardPoints: 0,
+      conversions: 0,
       referralLedgerEntries: 0,
       referrerAccounts: 0,
+      attributions: 0,
     });
   });
 

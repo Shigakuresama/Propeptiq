@@ -9,6 +9,7 @@ import {
   type Sha256Hasher,
 } from "@/commerce/checkout-identity";
 import {
+  canonicalActiveAutomaticPromotionIdentities,
   projectLoadedCheckoutAttempt,
   type AuthoritativeCheckoutFacts,
   type AuthoritativeCheckoutItemFact,
@@ -139,6 +140,217 @@ function safeInteger(value: number | string): number {
   const result = Number(value);
   if (!Number.isSafeInteger(result)) throw new Error("Unsafe database integer");
   return result;
+}
+
+function exactRecordKeys(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const expected = new Set(keys);
+  return (
+    Reflect.ownKeys(value).length === expected.size &&
+    Reflect.ownKeys(value).every(
+      (key) => typeof key === "string" && expected.has(key),
+    )
+  );
+}
+
+const replayQuoteKeys = [
+  "status",
+  "reviewRequired",
+  "reasons",
+  "currency",
+  "subtotalMinor",
+  "discountMinor",
+  "shippingMinor",
+  "taxMinor",
+  "totalMinor",
+  "promotionDiscountMinor",
+  "referralDiscountMinor",
+  "rewardRedemptionPoints",
+  "rewardRedemptionMinor",
+  "pendingBaseEarnPoints",
+  "rewardsBenefitAvailable",
+  "rewardsUnavailableReason",
+  "lines",
+] as const;
+
+const replayLineKeys = [
+  "variantId",
+  "sku",
+  "variantLabel",
+  "productName",
+  "packageForm",
+  "quantity",
+  "unitAmountMinor",
+  "subtotalMinor",
+  "discountMinor",
+  "totalMinor",
+] as const;
+
+function canonicalReplaySnapshot(
+  plan: AuthoritativeCheckoutPlanData,
+): unknown | null {
+  if (plan.kind !== "canonical_variant") return null;
+  return {
+    schemaVersion: 1,
+    kind: "canonical_variant",
+    quote: {
+      ...plan.browserQuote,
+      lines: plan.browserQuote.lines.map((line) => ({
+        variantId: line.variantId,
+        sku: line.sku,
+        variantLabel: line.variantLabel,
+        productName: line.productName,
+        packageForm: line.packageForm,
+        quantity: line.quantity,
+        unitAmountMinor: line.unitAmountMinor,
+        subtotalMinor: line.subtotalMinor,
+        discountMinor: line.discountMinor,
+        totalMinor: line.totalMinor,
+      })),
+    },
+  };
+}
+
+function parseCanonicalReplaySnapshot(value: unknown): BrowserCheckoutQuote | null {
+  if (value === null) return null;
+  if (!exactRecordKeys(value, ["schemaVersion", "kind", "quote"])) return null;
+  if (value.schemaVersion !== 1 || value.kind !== "canonical_variant") return null;
+  const quote = value.quote;
+  if (!exactRecordKeys(quote, replayQuoteKeys)) return null;
+  if (
+    (quote.status !== "ready" && quote.status !== "review_required") ||
+    quote.reviewRequired !== (quote.status === "review_required") ||
+    quote.currency !== "USD" ||
+    !Array.isArray(quote.reasons) ||
+    quote.reasons.length > 12 ||
+    quote.reasons.some((reason) => !nonblank(reason) || reason.length > 80) ||
+    !Array.isArray(quote.lines) ||
+    quote.lines.length < 1 ||
+    quote.lines.length > 50
+  ) {
+    return null;
+  }
+  const moneyKeys = [
+    "subtotalMinor",
+    "discountMinor",
+    "shippingMinor",
+    "taxMinor",
+    "totalMinor",
+    "promotionDiscountMinor",
+    "referralDiscountMinor",
+    "rewardRedemptionPoints",
+    "rewardRedemptionMinor",
+    "pendingBaseEarnPoints",
+  ] as const;
+  if (
+    moneyKeys.some(
+      (key) => !Number.isSafeInteger(quote[key]) || (quote[key] as number) < 0,
+    ) ||
+    typeof quote.rewardsBenefitAvailable !== "boolean" ||
+    (quote.rewardsUnavailableReason !== null &&
+      (!nonblank(quote.rewardsUnavailableReason) ||
+        quote.rewardsUnavailableReason.length > 80))
+  ) {
+    return null;
+  }
+  const lines: BrowserCheckoutQuote["lines"][number][] = [];
+  const variantIds = new Set<string>();
+  let lineSubtotal = 0;
+  let lineDiscount = 0;
+  for (const line of quote.lines) {
+    if (!exactRecordKeys(line, replayLineKeys)) return null;
+    if (
+      !isCanonicalUuid(line.variantId) ||
+      variantIds.has(line.variantId) ||
+      !nonblank(line.sku) ||
+      line.sku.length > 120 ||
+      !nonblank(line.variantLabel) ||
+      line.variantLabel.length > 240 ||
+      !nonblank(line.productName) ||
+      line.productName.length > 240 ||
+      !nonblank(line.packageForm) ||
+      line.packageForm.length > 240 ||
+      !Number.isSafeInteger(line.quantity) ||
+      (line.quantity as number) < 1 ||
+      (line.quantity as number) > 25
+    ) {
+      return null;
+    }
+    const lineMoneyKeys = [
+      "unitAmountMinor",
+      "subtotalMinor",
+      "discountMinor",
+      "totalMinor",
+    ] as const;
+    if (
+      lineMoneyKeys.some(
+        (key) => !Number.isSafeInteger(line[key]) || (line[key] as number) < 0,
+      ) ||
+      line.subtotalMinor !==
+        (line.unitAmountMinor as number) * (line.quantity as number) ||
+      (line.discountMinor as number) > (line.subtotalMinor as number) ||
+      line.totalMinor !==
+        (line.subtotalMinor as number) - (line.discountMinor as number)
+    ) {
+      return null;
+    }
+    variantIds.add(line.variantId);
+    lineSubtotal += line.subtotalMinor as number;
+    lineDiscount += line.discountMinor as number;
+    lines.push(Object.freeze({
+      variantId: line.variantId,
+      sku: line.sku,
+      variantLabel: line.variantLabel,
+      productName: line.productName,
+      packageForm: line.packageForm,
+      quantity: line.quantity as number,
+      unitAmountMinor: line.unitAmountMinor as number,
+      subtotalMinor: line.subtotalMinor as number,
+      discountMinor: line.discountMinor as number,
+      totalMinor: line.totalMinor as number,
+    }));
+  }
+  if (
+    lineSubtotal !== quote.subtotalMinor ||
+    lineDiscount !== quote.discountMinor ||
+    quote.discountMinor !==
+      (quote.promotionDiscountMinor as number) +
+        (quote.referralDiscountMinor as number) +
+        (quote.rewardRedemptionMinor as number) ||
+    quote.totalMinor !==
+      quote.subtotalMinor -
+        quote.discountMinor +
+        (quote.shippingMinor as number) +
+        (quote.taxMinor as number)
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    status: quote.status,
+    reviewRequired: quote.reviewRequired as boolean,
+    reasons: Object.freeze([...(quote.reasons as string[])]),
+    currency: "USD",
+    subtotalMinor: quote.subtotalMinor as number,
+    discountMinor: quote.discountMinor as number,
+    shippingMinor: quote.shippingMinor as number,
+    taxMinor: quote.taxMinor as number,
+    totalMinor: quote.totalMinor as number,
+    promotionDiscountMinor: quote.promotionDiscountMinor as number,
+    referralDiscountMinor: quote.referralDiscountMinor as number,
+    rewardRedemptionPoints: quote.rewardRedemptionPoints as number,
+    rewardRedemptionMinor: quote.rewardRedemptionMinor as number,
+    pendingBaseEarnPoints: quote.pendingBaseEarnPoints as number,
+    rewardsBenefitAvailable: quote.rewardsBenefitAvailable,
+    rewardsUnavailableReason: quote.rewardsUnavailableReason as string | null,
+    lines: Object.freeze(lines),
+  });
 }
 
 function nonblank(value: unknown): value is string {
@@ -278,6 +490,12 @@ async function getCheckoutVariantFacts(
 async function getAutomaticStorefrontPromotions(
   client: CheckoutSqlClient,
   lock = false,
+  candidateScope?: Readonly<{
+    productIds: readonly string[];
+    policyGroupIds: readonly string[];
+    variantIds: readonly string[];
+    at: Date;
+  }>,
 ): Promise<readonly PersistedStorefrontPromotion[]> {
   type PromotionRow = {
     recordId: string;
@@ -296,15 +514,47 @@ async function getAutomaticStorefrontPromotions(
     timezone: string;
     scope: "sitewide" | "products" | "variants";
   };
+  const candidatePredicate = candidateScope === undefined
+    ? ""
+    : `
+       AND status = 'active' AND enabled = true
+       AND (starts_at IS NULL OR starts_at <= $4::timestamptz)
+       AND (ends_at IS NULL OR ends_at > $4::timestamptz)
+       AND (
+         scope = 'sitewide'
+         OR EXISTS (
+           SELECT 1 FROM promotion_targets pt
+           WHERE pt.promotion_id = p.id
+             AND (
+               (pt.target_kind = 'product' AND pt.product_id = ANY($1::uuid[]))
+               OR (pt.target_kind = 'policy_group'
+                   AND pt.policy_group_id = ANY($2::uuid[]))
+             )
+         )
+         OR EXISTS (
+           SELECT 1 FROM promotion_variant_targets pvt
+           WHERE pvt.promotion_id = p.id
+             AND pvt.variant_id = ANY($3::uuid[])
+         )
+       )`;
   const parents = await client.query<PromotionRow>(
     `SELECT id::text AS "recordId", campaign_key AS "campaignKey", version,
             code AS "displayCode", name AS "displayName", kind, status,
             amount_minor AS "amountMinor", basis_points AS "discountBps",
             currency, enabled, starts_at AS "startAt", ends_at AS "endAt",
             timezone, scope
-     FROM promotions
+     FROM promotions p
      WHERE campaign_key IS NOT NULL AND application_mode = 'automatic'
-     ORDER BY campaign_key, version, id${lockSuffix(lock)}`,
+     ${candidatePredicate}
+     ORDER BY campaign_key, version, id${lockSuffix(lock, "p")}`,
+    candidateScope === undefined
+      ? []
+      : [
+          [...candidateScope.productIds].toSorted(),
+          [...candidateScope.policyGroupIds].toSorted(),
+          [...candidateScope.variantIds].toSorted(),
+          candidateScope.at.toISOString(),
+        ],
   );
   const result: PersistedStorefrontPromotion[] = [];
   for (const row of parents.rows) {
@@ -865,8 +1115,102 @@ async function loadVariantFactsFromClient(
     currency: string;
     effectiveAt: Date | string;
   };
+  const requestedVariantIds = input.request.items
+    .map((item) => item.variantId)
+    .toSorted();
+  if (input.lock) {
+    type IdentityRow = {
+      variantId: string;
+      productId: string;
+      policyGroupId: string;
+    };
+    const discovered = await client.query<IdentityRow>(
+      `SELECT v.id::text AS "variantId", v.product_id::text AS "productId",
+              p.policy_group_id::text AS "policyGroupId"
+       FROM product_variants v
+       JOIN products p ON p.id = v.product_id
+       WHERE v.id = ANY($1::uuid[])
+       ORDER BY v.id`,
+      [requestedVariantIds],
+    );
+    if (
+      discovered.rows.length !== requestedVariantIds.length ||
+      discovered.rows.some(
+        (row, index) => row.variantId !== requestedVariantIds[index],
+      )
+    ) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+    const discoveredByVariant = new Map(
+      discovered.rows.map((row) => [row.variantId, row]),
+    );
+    const productIds = [
+      ...new Set(discovered.rows.map((row) => row.productId)),
+    ].toSorted();
+    const lockedProducts = await client.query<{
+      productId: string;
+      policyGroupId: string;
+    }>(
+      `SELECT p.id::text AS "productId",
+              p.policy_group_id::text AS "policyGroupId"
+       FROM products p
+       WHERE p.id = ANY($1::uuid[])
+       ORDER BY p.id FOR UPDATE`,
+      [productIds],
+    );
+    if (
+      lockedProducts.rows.length !== productIds.length ||
+      lockedProducts.rows.some(
+        (row, index) =>
+          row.productId !== productIds[index] ||
+          discovered.rows
+            .filter((identity) => identity.productId === row.productId)
+            .some((identity) => identity.policyGroupId !== row.policyGroupId),
+      )
+    ) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+    const policyGroupIds = [
+      ...new Set(lockedProducts.rows.map((row) => row.policyGroupId)),
+    ].toSorted();
+    const lockedGroups = await client.query<{ policyGroupId: string }>(
+      `SELECT g.id::text AS "policyGroupId"
+       FROM product_policy_groups g
+       WHERE g.id = ANY($1::uuid[])
+       ORDER BY g.id FOR UPDATE`,
+      [policyGroupIds],
+    );
+    if (
+      lockedGroups.rows.length !== policyGroupIds.length ||
+      lockedGroups.rows.some(
+        (row, index) => row.policyGroupId !== policyGroupIds[index],
+      )
+    ) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+    const lockedVariants = await client.query<{
+      variantId: string;
+      productId: string;
+    }>(
+      `SELECT v.id::text AS "variantId", v.product_id::text AS "productId"
+       FROM product_variants v
+       WHERE v.id = ANY($1::uuid[])
+       ORDER BY v.id FOR UPDATE`,
+      [requestedVariantIds],
+    );
+    if (
+      lockedVariants.rows.length !== requestedVariantIds.length ||
+      lockedVariants.rows.some(
+        (row, index) =>
+          row.variantId !== requestedVariantIds[index] ||
+          discoveredByVariant.get(row.variantId)?.productId !== row.productId,
+      )
+    ) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+  }
   const cores = new Map<string, VariantCore>();
-  for (const variantId of input.request.items.map((item) => item.variantId).toSorted()) {
+  for (const variantId of requestedVariantIds) {
     const variants = await client.query<VariantRow>(
       `SELECT v.id::text AS "variantId", v.product_id::text AS "productId",
               v.sku, v.label AS "variantLabel", p.name AS "productName",
@@ -880,7 +1224,7 @@ async function loadVariantFactsFromClient(
        FROM product_variants v
        JOIN products p ON p.id = v.product_id
        JOIN product_policy_groups g ON g.id = p.policy_group_id
-       WHERE v.id = $1::uuid${lockSuffix(input.lock, "v, p, g")}`,
+       WHERE v.id = $1::uuid`,
       [variantId],
     );
     if (variants.rows.length !== 1) {
@@ -991,7 +1335,18 @@ async function loadVariantFactsFromClient(
      ORDER BY id${lockSuffix(input.lock)}`,
     [[...variantIds], input.now.toISOString()],
   );
-  const promotions = await getAutomaticStorefrontPromotions(client, input.lock);
+  const promotions = await getAutomaticStorefrontPromotions(
+    client,
+    input.lock,
+    {
+      productIds: [...new Set([...cores.values()].map((core) => core.productId))],
+      policyGroupIds: [
+        ...new Set([...cores.values()].map((core) => core.policyGroupId)),
+      ],
+      variantIds,
+      at: input.now,
+    },
+  );
   const items = input.request.items.map((requested) => {
     const core = cores.get(requested.variantId)!;
     const lotRows = lots.rows.filter((lot) => lot.variantId === requested.variantId);
@@ -1165,9 +1520,18 @@ export async function resolveExactReviewRequest(
     (policy) => policy.destinationPolicyId,
   );
   const expectedCart = {
-    schemaVersion: 1,
-    items: input.items,
-    promotionIds: input.promotionIds,
+    ...(input.automaticPromotions === undefined
+      ? {
+          schemaVersion: 1,
+          items: input.items,
+          promotionIds: input.promotionIds,
+        }
+      : {
+          schemaVersion: 2,
+          kind: "canonical_variant",
+          items: input.items,
+          automaticPromotions: input.automaticPromotions,
+        }),
   };
   if (
     row.buyerStatusSnapshot !== input.buyerStatus ||
@@ -1214,11 +1578,15 @@ async function storedAttemptFromClient(
     totalMinor: number | string;
     currency: string;
     hasReservations: boolean;
+    canonicalPricingRevision: string | null;
+    canonicalQuoteSnapshot: unknown;
   };
   const attempt = await client.query<AttemptRow>(
     `SELECT a.order_id::text AS "orderId", a.id::text AS "attemptId",
             a.request_hash AS "requestHash", a.status, a.permitted,
             a.review_required AS "reviewRequired", a.reasons,
+            a.canonical_pricing_revision AS "canonicalPricingRevision",
+            a.canonical_quote_snapshot AS "canonicalQuoteSnapshot",
             o.subtotal_minor AS "subtotalMinor",
             o.discount_minor AS "discountMinor", o.tax_minor AS "taxMinor",
             o.shipping_minor AS "shippingMinor", o.total_minor AS "totalMinor",
@@ -1254,8 +1622,21 @@ async function storedAttemptFromClient(
      ORDER BY product_id${lockSuffix(lockItems)}`,
     [row.orderId],
   );
+  const canonicalQuoteSnapshot = parseCanonicalReplaySnapshot(
+    row.canonicalQuoteSnapshot,
+  );
+  if (
+    (row.canonicalPricingRevision === null) !==
+      (row.canonicalQuoteSnapshot === null) ||
+    (row.canonicalPricingRevision !== null &&
+      (!/^[0-9a-f]{64}$/u.test(row.canonicalPricingRevision) ||
+        canonicalQuoteSnapshot === null))
+  ) {
+    throw new Error("Stored canonical checkout replay is invalid");
+  }
   const quoteSnapshot: BrowserCheckoutQuote | null =
-    row.currency === "USD" &&
+    canonicalQuoteSnapshot ??
+    (row.currency === "USD" &&
     items.rows.length > 0 &&
     safeInteger(row.discountMinor) === 0
       ? Object.freeze({
@@ -1290,7 +1671,7 @@ async function storedAttemptFromClient(
             ),
           ),
         })
-      : null;
+      : null);
   return Object.freeze({
     orderId: row.orderId,
     attemptId: row.attemptId,
@@ -1301,6 +1682,7 @@ async function storedAttemptFromClient(
     reviewRequired: row.reviewRequired,
     hasReservations: row.hasReservations,
     quoteSnapshot,
+    pricingRevision: row.canonicalPricingRevision,
   });
 }
 
@@ -1639,6 +2021,9 @@ async function writeCommercialSnapshots(
   );
 
   const gates = gateProjection(plan.decision);
+  const persistedCanonicalQuote = canonicalReplaySnapshot(plan);
+  const persistedPricingRevision =
+    plan.kind === "canonical_variant" ? plan.pricingRevision : null;
   const attemptValues = [
     plan.identity.attemptId,
     plan.identity.orderId,
@@ -1666,6 +2051,8 @@ async function writeCommercialSnapshots(
     providerPreparation?.providerRequestSchemaVersion ?? null,
     providerPreparation?.providerLivemode ?? null,
     providerPreparation?.providerScope ?? null,
+    persistedPricingRevision,
+    persistedCanonicalQuote,
     plan.authoritativeAt.toISOString(),
   ] as const;
   if (existing === null) {
@@ -1679,6 +2066,7 @@ async function writeCommercialSnapshots(
          provider_request_id, provider_request_hash, expires_at,
          provider_customer_email, provider_origin,
          provider_request_schema_version, provider_livemode, provider_scope,
+         canonical_pricing_revision, canonical_quote_snapshot,
          created_at)
        VALUES
         ($1::uuid, $2::uuid, $3::uuid, $4, $5, 'created',
@@ -1687,7 +2075,7 @@ async function writeCommercialSnapshots(
          $10::checkout_gate_result, $11::checkout_gate_result,
          $12, $13, $14::text[], true, true, $15, $16, $17,
          $18, $19, $20, $21::timestamptz, $22, $23, $24, $25, $26,
-         $27::timestamptz)`,
+         $27, $28::jsonb, $29::timestamptz)`,
       attemptValues,
     );
   } else {
@@ -1707,10 +2095,11 @@ async function writeCommercialSnapshots(
          provider_request_hash = $20, expires_at = $21::timestamptz,
          provider_customer_email = $22, provider_origin = $23,
          provider_request_schema_version = $24, provider_livemode = $25,
-         provider_scope = $26
+         provider_scope = $26, canonical_pricing_revision = $27,
+         canonical_quote_snapshot = $28::jsonb
        WHERE id = $1::uuid AND order_id = $2::uuid AND buyer_user_id = $3::uuid
          AND idempotency_key = $4 AND request_hash = $5`,
-      attemptValues.slice(0, 26),
+      attemptValues.slice(0, 28),
     );
   }
   return itemIds;
@@ -1760,14 +2149,18 @@ async function createOrLoadPendingReview(
       plan.facts.buyer.currentAttestationVersionId,
       plan.request.destination.stateCode,
       JSON.stringify({
-        schemaVersion: 1,
-        items: plan.request.items,
         ...(plan.kind === "canonical_variant"
           ? {
-              automaticPromotions: plan.effectiveLines.flatMap((line) =>
-                line.appliedPromotionIds),
+              schemaVersion: 2,
+              kind: "canonical_variant",
+              items: plan.request.items,
+              automaticPromotions: plan.activeAutomaticPromotions,
             }
-          : { promotionIds: plan.request.promotionIds }),
+          : {
+              schemaVersion: 1,
+              items: plan.request.items,
+              promotionIds: plan.request.promotionIds,
+            }),
       }),
       plan.facts.buyer.status === "review",
       reviewPolicyIds.length > 0,
@@ -2050,21 +2443,11 @@ async function prepareInTransaction(
         items: plan.request.items,
         ...(plan.kind === "canonical_variant"
           ? {
-              automaticPromotions: [...new Map(
-                plan.effectiveLines.flatMap((line) =>
-                  line.appliedPromotionIds.map((id) => {
-                    const promotion = (facts as AuthoritativeVariantCheckoutFacts).automaticPromotions.find(
-                      (candidate) => candidate.id === id,
-                    );
-                    return promotion === undefined
-                      ? []
-                      : [[`${promotion.id}:${promotion.version}`, {
-                          id: promotion.id,
-                          version: promotion.version,
-                        }] as const];
-                  }).flat()),
-              ).values()].toSorted((left, right) =>
-                left.id.localeCompare(right.id) || left.version - right.version),
+              automaticPromotions: canonicalActiveAutomaticPromotionIdentities(
+                facts as AuthoritativeVariantCheckoutFacts,
+                plan.request,
+                plan.authoritativeAt,
+              ),
             }
           : { promotionIds: plan.request.promotionIds }),
         destination: plan.request.destination,
@@ -2184,7 +2567,10 @@ async function prepareInTransaction(
   if (plan.referralQuote !== null && plan.affiliateQuote !== null) {
     throw new AffiliateBindingConflict();
   }
-  if (plan.referralQuote !== null) {
+  if (
+    plan.selectedAcquisitionSource === "referral" &&
+    plan.referralQuote !== null
+  ) {
     await bindCustomerReferralOrderInTransaction(client, {
       attributionId: plan.identity.keyedUuid("customer-referral-attribution"),
       conversionId: plan.identity.keyedUuid("customer-referral-conversion"),

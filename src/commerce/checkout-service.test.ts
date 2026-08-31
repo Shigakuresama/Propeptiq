@@ -833,6 +833,7 @@ describe("authoritative checkout service", () => {
       reviewRequired: true,
       hasReservations: false,
       quoteSnapshot: null,
+      pricingRevision: null,
     });
     await expect(
       service.quote({
@@ -882,6 +883,7 @@ describe("authoritative checkout service", () => {
         reviewRequired: false,
         hasReservations: attemptStatus === "provider_unknown",
         quoteSnapshot,
+        pricingRevision: null,
       });
 
       const replay: CheckoutQuoteResult = await service.quote({
@@ -898,6 +900,7 @@ describe("authoritative checkout service", () => {
         attemptStatus,
         orderState,
         quoteSnapshot,
+        pricingRevision: null,
       });
       expect(Reflect.ownKeys(replay).toSorted()).toEqual(
         [
@@ -906,6 +909,7 @@ describe("authoritative checkout service", () => {
           "orderId",
           "orderState",
           "quoteSnapshot",
+          "pricingRevision",
           "status",
         ].toSorted(),
       );
@@ -1100,6 +1104,45 @@ describe("authoritative canonical variant quote lifecycle", () => {
     expect(result).toMatchObject({
       status: "quoted",
       quote: { promotionDiscountMinor: 3_000, discountMinor: 3_000 },
+    });
+  });
+
+  it("carries every active applicable promotion identity into a review plan, including the losing candidate", async () => {
+    const reviewBuyer = {
+      ...variantFacts.buyer,
+      status: "review" as const,
+    };
+    const { service } = setupVariant({
+      buyer: reviewBuyer,
+      automaticPromotions: [
+        automaticPromotion({
+          recordId: "20000000-0000-4000-8000-000000000081",
+          id: "spring20",
+          campaignKey: "spring20",
+          version: 2,
+          discountBps: 2_000,
+        }),
+        automaticPromotion(),
+      ],
+    });
+
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: { status: "review_required", promotionDiscountMinor: 3_000 },
+    });
+    if (result.status !== "quoted") throw new Error("expected review quote");
+    expect(projectAuthoritativeCheckoutPlan(result.plan)).toMatchObject({
+      activeAutomaticPromotions: [
+        { id: "spring20", version: 2 },
+        { id: "winter30", version: 1 },
+      ],
     });
   });
 

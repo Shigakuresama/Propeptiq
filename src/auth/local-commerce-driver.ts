@@ -425,6 +425,8 @@ export function createLocalCommerceDriverV1(
           reviewRequired: true,
           hasReservations: false,
           quoteSnapshot: cloneQuote(plan.browserQuote),
+          pricingRevision:
+            plan.kind === "canonical_variant" ? plan.pricingRevision : null,
         });
         state.attempts.set(key, { stored, durable: null, providerPreparation: null, providerSessionId: null });
         state.reviews.set(plan.reviewSnapshotHash, { reviewRequestId, orderId: plan.identity.orderId, ownerUserId: plan.buyerUserId, snapshotHash: plan.reviewSnapshotHash });
@@ -457,6 +459,8 @@ export function createLocalCommerceDriverV1(
         reviewRequired: false,
         hasReservations: true,
         quoteSnapshot: cloneQuote(plan.browserQuote),
+        pricingRevision:
+          plan.kind === "canonical_variant" ? plan.pricingRevision : null,
       });
       const durable = createRepositoryDurableCheckoutRequestV1({
         buyerUserId: plan.buyerUserId,

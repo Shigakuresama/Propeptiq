@@ -201,6 +201,38 @@ describe("strict variant checkout requests", () => {
     });
   });
 
+  it("accepts only a standard dense items array with length and numeric own keys", () => {
+    const extraStringKey = [{ variantId: variantA, quantity: 1 }];
+    Object.defineProperty(extraStringKey, "claimedTotal", {
+      enumerable: false,
+      value: 1,
+    });
+    const extraSymbolKey = [{ variantId: variantA, quantity: 1 }];
+    Object.defineProperty(extraSymbolKey, Symbol("hidden"), {
+      enumerable: false,
+      value: true,
+    });
+    const inheritedEnumerableKey = [{ variantId: variantA, quantity: 1 }];
+    const customPrototype = Object.create(Array.prototype) as unknown[] & {
+      inheritedClaim?: number;
+    };
+    customPrototype.inheritedClaim = 1;
+    Object.setPrototypeOf(inheritedEnumerableKey, customPrototype);
+
+    for (const items of [
+      extraStringKey,
+      extraSymbolKey,
+      inheritedEnumerableKey,
+    ]) {
+      expect(parseCheckoutRequest({ ...sessionRequest(), items })).toEqual({
+        ok: false,
+        error: { code: "invalid_items", field: "items" },
+      });
+    }
+
+    expect(parseCheckoutRequest(sessionRequest())).toMatchObject({ ok: true });
+  });
+
   it.each([0, -1, 1.5, "500", null])(
     "rejects invalid reward points %j",
     (rewardRedemptionPoints) => {

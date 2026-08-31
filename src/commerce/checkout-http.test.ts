@@ -158,6 +158,49 @@ describe("checkout HTTP controllers", () => {
     expect(await json(response)).toEqual({ status: "quoted", pricingRevision, quote: allZeroQuote });
   });
 
+  it.each([quote, allZeroQuote])(
+    "replays a durable canonical quote with its exact opaque revision and no internal identity",
+    async (replayedQuote) => {
+      const { handlers } = fixture({
+        quoteCheckout: async () => ({
+          status: "loaded",
+          orderId: "61000000-0000-4000-8000-000000000003",
+          attemptId: "61000000-0000-4000-8000-000000000004",
+          attemptStatus: "open",
+          orderState: "checkout_pending",
+          pricingRevision,
+          quoteSnapshot: replayedQuote,
+        }),
+      });
+
+      const response = await handlers.quote(request("/api/checkout/quote"));
+
+      expect(response.status).toBe(200);
+      const result = await json(response);
+      expect(result).toEqual({ status: "quoted", pricingRevision, quote: replayedQuote });
+      expect(JSON.stringify(result)).not.toMatch(/productId|stripe|priceBook|inventoryRevision/iu);
+    },
+  );
+
+  it("fails closed when a canonical replay omits its durable revision", async () => {
+    const { handlers } = fixture({
+      quoteCheckout: async () => ({
+        status: "loaded",
+        orderId: "61000000-0000-4000-8000-000000000003",
+        attemptId: "61000000-0000-4000-8000-000000000004",
+        attemptStatus: "open",
+        orderState: "checkout_pending",
+        pricingRevision: null,
+        quoteSnapshot: quote,
+      }),
+    });
+
+    const response = await handlers.quote(request("/api/checkout/quote"));
+
+    expect(response.status).toBe(409);
+    await expect(json(response)).resolves.toEqual({ status: "conflict" });
+  });
+
   it.each([
     ["missing acquisition field", withoutQuoteFields("referralDiscountMinor")],
     ["missing rewards field", withoutQuoteFields("rewardsUnavailableReason")],

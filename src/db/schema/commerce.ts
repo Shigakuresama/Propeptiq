@@ -5,6 +5,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -159,6 +160,8 @@ export const checkoutAttempts = pgTable(
     buyerUserId: uuid("buyer_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
     idempotencyKey: text("idempotency_key").notNull(),
     requestHash: text("request_hash").notNull(),
+    canonicalPricingRevision: text("canonical_pricing_revision"),
+    canonicalQuoteSnapshot: jsonb("canonical_quote_snapshot"),
     status: checkoutAttemptStatusEnum("status").default("created").notNull(),
     accountGate: checkoutGateResultEnum("account_gate").notNull(),
     attestationGate: checkoutGateResultEnum("attestation_gate").notNull(),
@@ -201,6 +204,13 @@ export const checkoutAttempts = pgTable(
     ),
     check("checkout_attempts_idempotency_nonblank", nonblank(table.idempotencyKey)),
     check("checkout_attempts_request_hash", sha256(table.requestHash)),
+    check(
+      "checkout_attempts_canonical_replay_coherent",
+      sql`(${table.canonicalPricingRevision} is null and ${table.canonicalQuoteSnapshot} is null)
+          or (${table.canonicalPricingRevision} is not null
+            and ${sha256(table.canonicalPricingRevision)}
+            and ${table.canonicalQuoteSnapshot} is not null)`,
+    ),
     check("checkout_attempts_provider_request_hash", sql`${table.providerRequestHash} is null or ${sha256(table.providerRequestHash)}`),
     check(
       "checkout_attempts_quote_references_coherent",

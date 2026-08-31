@@ -160,6 +160,53 @@ describe("POST /api/checkout/quote", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("returns the exact safe canonical loaded-attempt replay", async () => {
+    quoteCheckout.mockResolvedValueOnce({
+      status: "loaded",
+      orderId: "6f000000-0000-4000-8000-000000000001",
+      attemptId: "6f000000-0000-4000-8000-000000000002",
+      attemptStatus: "open",
+      orderState: "checkout_pending",
+      pricingRevision,
+      quoteSnapshot: {
+        status: "ready",
+        reviewRequired: false,
+        reasons: [],
+        currency: "USD",
+        subtotalMinor: 4_800,
+        discountMinor: 0,
+        shippingMinor: 500,
+        taxMinor: 321,
+        totalMinor: 5_621,
+        promotionDiscountMinor: 0,
+        referralDiscountMinor: 0,
+        rewardRedemptionPoints: 0,
+        rewardRedemptionMinor: 0,
+        pendingBaseEarnPoints: 0,
+        rewardsBenefitAvailable: false,
+        rewardsUnavailableReason: "loyalty_policy_unavailable",
+        lines: [{
+          variantId: "20000000-0000-4000-8000-000000000001",
+          productName: "Synthetic local test only — Alpha",
+          variantLabel: "5 mg test fixture",
+          sku: "TEST-ALPHA-5MG",
+          quantity: 2,
+          unitAmountMinor: 2_400,
+          subtotalMinor: 4_800,
+          discountMinor: 0,
+          totalMinor: 4_800,
+        }],
+      },
+    });
+
+    const response = await POST(request());
+    const result = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(result).toMatchObject({ status: "quoted", pricingRevision });
+    expect(JSON.stringify(result)).not.toMatch(/productId|stripe|provider|priceBook|inventoryRevision/iu);
+  });
+
   it.each([
     ["productId", "20000000-0000-4000-8000-000000000010"],
     ["baseUnitMinor", 2_400],
