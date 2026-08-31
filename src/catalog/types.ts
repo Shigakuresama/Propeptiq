@@ -34,7 +34,7 @@ export type CatalogPriceRecord = {
   id: string;
   productId: string;
   version: number;
-  amountMinor: number;
+  amountMinor: number | null;
   currency: string;
   effectiveAt: string;
   supersededAt: string | null;

@@ -2,9 +2,9 @@ import { ArrowLeft } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 
-import type { BrowseCatalogProduct } from "@/catalog/browse-catalog";
+import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 
-export function CatalogItemDetail({ product }: { product: BrowseCatalogProduct }) {
+export function CatalogItemDetail({ product }: { product: PublicStorefrontProduct }) {
   const sourceLabelIsDistinct =
     product.sourceName.replace(/\s+/gu, "").toLocaleLowerCase("en-US") !==
     product.name.replace(/\s+/gu, "").toLocaleLowerCase("en-US");
@@ -49,16 +49,20 @@ export function CatalogItemDetail({ product }: { product: BrowseCatalogProduct }
               Supplied configurations
             </h2>
             <ul className="mt-5 divide-y divide-border border-y border-border">
-              {product.variants.map((variant) => (
+              {product.displayConfigurations.map((configuration) => (
                 <li
                   className="grid gap-1 py-4 sm:grid-cols-[minmax(5rem,auto)_1fr] sm:gap-6"
-                  key={`${product.slug}-${variant.code}-${variant.packageForm}`}
+                  key={`${product.slug}-${configuration.displayCode}-${configuration.packageForm}`}
                 >
-                  <span className="font-semibold tabular-nums text-ink">{variant.code}</span>
-                  <span className="leading-6 text-muted-ink">{variant.packageForm}</span>
-                  {variant.sourceName ? (
+                  <span className="font-semibold tabular-nums text-ink">
+                    {configuration.displayCode}
+                  </span>
+                  <span className="leading-6 text-muted-ink">
+                    {configuration.packageForm}
+                  </span>
+                  {configuration.sourceName ? (
                     <span className="text-sm leading-6 text-muted-ink sm:col-start-2">
-                      Source label: {variant.sourceName}
+                      Source label: {configuration.sourceName}
                     </span>
                   ) : null}
                 </li>

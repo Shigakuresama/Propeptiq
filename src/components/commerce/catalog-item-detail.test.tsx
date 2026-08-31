@@ -1,13 +1,27 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { findBrowseCatalogProduct } from "@/catalog/browse-catalog";
+import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
+import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
+import {
+  buildPublicStorefrontCatalog,
+  findPublicStorefrontProduct,
+  storefrontImageMetadata,
+} from "@/catalog/storefront-public";
 
 import { CatalogItemDetail } from "./catalog-item-detail";
 
 describe("CatalogItemDetail", () => {
+  const catalog = buildPublicStorefrontCatalog({
+    configuredPublicationId: browseCatalogPublicationId,
+    catalogData: storefrontCatalogData,
+    runtimeVariantFacts: [],
+    controlledContent: [],
+    verifiedImageMetadata: storefrontImageMetadata,
+  });
+
   it("shows every supplied variant and exposes a normalized source label", () => {
-    const product = findBrowseCatalogProduct("pinealon")!;
+    const product = findPublicStorefrontProduct(catalog, "pinealon")!;
     render(<CatalogItemDetail product={product} />);
 
     expect(screen.getByRole("heading", { level: 1, name: "Pinealon" })).toBeVisible();
@@ -27,7 +41,7 @@ describe("CatalogItemDetail", () => {
     ["cjc-1295-no-dac-ipa", "CP10", "CJC-1295 NO DAC 5mg + IPA 5mg"],
     ["cjc-1295-no-dac-ipa-cp20", "CP20", "CJC-1295 NO DAC 10mg + IPA 10mg"],
   ])("keeps the exact supplied blend composition attached to %s", (slug, code, sourceName) => {
-    const product = findBrowseCatalogProduct(slug)!;
+    const product = findPublicStorefrontProduct(catalog, slug)!;
     render(<CatalogItemDetail product={product} />);
 
     const variantRow = screen.getByText(code).closest("li");

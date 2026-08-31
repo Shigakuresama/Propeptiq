@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { getPublicBrowseCatalog } from "@/catalog/browse-catalog-server";
+import { getPublicStorefrontCatalog } from "@/catalog/storefront-public-server";
 import { CatalogExplorer } from "@/components/commerce/catalog-explorer";
 import { PageIntro } from "@/components/site/page-intro";
 import { PageTransition } from "@/components/site/page-transition";
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 };
 
 export default async function CatalogPage() {
-  const catalog = await getPublicBrowseCatalog();
+  const catalog = await getPublicStorefrontCatalog();
 
   return (
     <PageTransition>
@@ -20,7 +20,7 @@ export default async function CatalogPage() {
         <PageIntro
           eyebrow="Owner-supplied catalog"
           title="Research catalog, organized by product."
-          description={`${catalog.products.length} product families and ${catalog.variantCount} supplied package configurations. Prices and availability are intentionally excluded; imagery is an original illustrative presentation rather than product photography.`}
+          description={`${catalog.products.length} product families and ${catalog.displayConfigurationCount} supplied package configurations. Prices and availability are intentionally excluded; imagery is an original illustrative presentation rather than product photography.`}
         />
         {catalog.products.length > 0 ? (
           <CatalogExplorer products={catalog.products} />

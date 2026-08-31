@@ -2,13 +2,13 @@ import { render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-const { getPublicBrowseCatalogMock, getPublicGrowthProjectionMock } = vi.hoisted(() => ({
-  getPublicBrowseCatalogMock: vi.fn(),
+const { getPublicStorefrontCatalogMock, getPublicGrowthProjectionMock } = vi.hoisted(() => ({
+  getPublicStorefrontCatalogMock: vi.fn(),
   getPublicGrowthProjectionMock: vi.fn(),
 }));
 
-vi.mock("@/catalog/browse-catalog-server", () => ({
-  getPublicBrowseCatalog: getPublicBrowseCatalogMock,
+vi.mock("@/catalog/storefront-public-server", () => ({
+  getPublicStorefrontCatalog: getPublicStorefrontCatalogMock,
 }));
 vi.mock("@/growth/public-growth-server", () => ({
   getPublicGrowthProjection: getPublicGrowthProjectionMock,
@@ -47,7 +47,10 @@ const activeReferralPolicy = {
 
 describe("public home growth projection", () => {
   it("shows the program strip only from an active server projection", async () => {
-    getPublicBrowseCatalogMock.mockResolvedValue({ products: [], variantCount: 103 });
+    getPublicStorefrontCatalogMock.mockResolvedValue({
+      products: [],
+      displayConfigurationCount: 103,
+    });
     getPublicGrowthProjectionMock.mockResolvedValue({
       status: "active",
       projection: {
@@ -78,7 +81,10 @@ describe("public home growth projection", () => {
   });
 
   it("omits referral and shared-set entries when only loyalty is active", async () => {
-    getPublicBrowseCatalogMock.mockResolvedValue({ products: [], variantCount: 103 });
+    getPublicStorefrontCatalogMock.mockResolvedValue({
+      products: [],
+      displayConfigurationCount: 103,
+    });
     getPublicGrowthProjectionMock.mockResolvedValue({
       status: "active",
       projection: {
@@ -100,7 +106,10 @@ describe("public home growth projection", () => {
   it.each(["inactive", "read_error"] as const)(
     "omits the program strip when the growth read is %s",
     async (status) => {
-      getPublicBrowseCatalogMock.mockResolvedValue({ products: [], variantCount: 103 });
+      getPublicStorefrontCatalogMock.mockResolvedValue({
+        products: [],
+        displayConfigurationCount: 103,
+      });
       getPublicGrowthProjectionMock.mockResolvedValue({ status });
 
       render(await HomePage());

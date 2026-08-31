@@ -790,6 +790,25 @@ describe("public catalog projection", () => {
     expect(findPublicProduct(catalog, "synthetic-reference-alpha")).toBeNull();
   });
 
+  it("fails closed when the one current legacy price has a null amount", () => {
+    const base = createRecords();
+    const records = {
+      ...base,
+      prices: base.prices.map((entry) =>
+        entry.productId === "demo-product-alpha"
+          ? { ...entry, amountMinor: null }
+          : entry,
+      ),
+    } as CatalogRecordSet;
+
+    expect(
+      findPublicProduct(
+        buildPublicCatalog(records, { now }),
+        "synthetic-reference-alpha",
+      ),
+    ).toBeNull();
+  });
+
   it("excludes released stock exactly at expiry and when manufacture is still future", () => {
     const base = createRecords();
     const expired: CatalogRecordSet = {

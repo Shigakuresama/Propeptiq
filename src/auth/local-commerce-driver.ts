@@ -343,7 +343,18 @@ export function createLocalCommerceDriverV1(
         const product = records.products.find((candidate) => candidate.id === requested.productId);
         const price = records.prices.find((candidate) => candidate.productId === requested.productId && candidate.supersededAt === null);
         const lots = records.lots.filter((candidate) => candidate.productId === requested.productId && candidate.status === "released");
-        if (!product || !price) return Object.freeze({ ok: false as const, reasons: Object.freeze(["product_catalog_incomplete"]) });
+        if (
+          !product ||
+          !price ||
+          typeof price.amountMinor !== "number" ||
+          !Number.isSafeInteger(price.amountMinor) ||
+          price.amountMinor <= 0
+        ) {
+          return Object.freeze({
+            ok: false as const,
+            reasons: Object.freeze(["product_catalog_incomplete"]),
+          });
+        }
         const policyId = Object.hasOwn(POLICY_ID_BY_STATE, input.request.destination.stateCode)
           ? POLICY_ID_BY_STATE[input.request.destination.stateCode as keyof typeof POLICY_ID_BY_STATE]
           : null;
@@ -361,7 +372,12 @@ export function createLocalCommerceDriverV1(
           policyGroupId: product.policyGroupId,
           productActive: product.status === "active",
           policyGroupActive: true,
-          price: Object.freeze({ ...price, currency: "USD" as const, supersededAt: null }),
+          price: Object.freeze({
+            ...price,
+            amountMinor: price.amountMinor,
+            currency: "USD" as const,
+            supersededAt: null,
+          }),
           destination: Object.freeze({
             status: destinationStatus,
             normalizedStateCode: input.request.destination.stateCode,
@@ -439,7 +455,13 @@ export function createLocalCommerceDriverV1(
           (candidate.expiresAt === null ||
             new Date(candidate.expiresAt).getTime() > input.now.getTime()),
       );
-      if (!product || !price) {
+      if (
+        !product ||
+        !price ||
+        typeof price.amountMinor !== "number" ||
+        !Number.isSafeInteger(price.amountMinor) ||
+        price.amountMinor <= 0
+      ) {
         return Object.freeze({
           ok: false as const,
           reasons: Object.freeze(["variant_catalog_incomplete"]),
@@ -888,7 +910,15 @@ export function createLocalCommerceDriverV1(
           candidate.productId === LOCAL_CANONICAL_VARIANT_FIXTURE.productId &&
           candidate.supersededAt === null,
       );
-      if (!product || !price) return Object.freeze({ variants: Object.freeze([]) });
+      if (
+        !product ||
+        !price ||
+        typeof price.amountMinor !== "number" ||
+        !Number.isSafeInteger(price.amountMinor) ||
+        price.amountMinor <= 0
+      ) {
+        return Object.freeze({ variants: Object.freeze([]) });
+      }
       const availableQuantity = records.lots
         .filter((lot) =>
           lot.id === LOCAL_CANONICAL_VARIANT_FIXTURE.lotId &&

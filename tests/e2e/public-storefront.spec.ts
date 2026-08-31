@@ -63,6 +63,14 @@ test("synthetic commerce pages still identify every displayed record as fictiona
 }) => {
   await page.goto("/catalog/synthetic-reference-alpha");
 
+  await expect(page).toHaveURL(/\/catalog\/synthetic-reference-alpha$/u);
+  await expect(
+    page.getByRole("heading", {
+      level: 1,
+      name: "Synthetic Reference Alpha — Demo Only",
+    }),
+  ).toBeVisible();
+
   const notice = page.getByRole("note");
   await expect(
     notice.getByText("Synthetic demo catalog", { exact: true }),
@@ -387,14 +395,15 @@ test("owner-supplied catalog is complete, price-free, and serves every illustrat
     expect((await response.body()).byteLength).toBeGreaterThan(1_000);
   }
 
-  await page.goto("/catalog/items/pinealon");
-  await expect(page.getByRole("heading", { level: 1, name: "Pinealon" })).toBeVisible();
-  await expect(page.getByText("Source label: Pinealon10mg")).toBeVisible();
+  await page.goto("/catalog/items/tirzepatide");
+  await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide$/u);
+  await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
+  await expect(page.getByText("TR5", { exact: true })).toBeVisible();
   await expect(page.locator("main")).not.toContainText("$");
   await expect(page.getByRole("button", { name: /add .* to cart/i })).toHaveCount(0);
 
   const imageLoaded = await page.getByRole("img", {
-    name: /illustrative research-catalog still life for Pinealon/i,
+    name: /illustrative research-catalog still life for Tirzepatide/i,
   }).evaluate((image) => {
     const element = image as HTMLImageElement;
     return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0;

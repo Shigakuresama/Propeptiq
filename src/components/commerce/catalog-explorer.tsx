@@ -3,7 +3,7 @@
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import type { BrowseCatalogProduct } from "@/catalog/browse-catalog";
+import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
 
 type ExactFilters = Readonly<{
@@ -22,8 +22,10 @@ function normalized(value: string): string {
   return value.trim().toLocaleLowerCase("en-US");
 }
 
-function exactSourceNames(product: BrowseCatalogProduct): readonly string[] {
-  return product.variants.map((variant) => variant.sourceName ?? product.sourceName);
+function exactSourceNames(product: PublicStorefrontProduct): readonly string[] {
+  return product.displayConfigurations.map(
+    (configuration) => configuration.sourceName ?? product.sourceName,
+  );
 }
 
 function sortedUnique(values: readonly string[]): readonly string[] {
@@ -33,7 +35,7 @@ function sortedUnique(values: readonly string[]): readonly string[] {
 export function CatalogExplorer({
   products,
 }: {
-  products: readonly BrowseCatalogProduct[];
+  products: readonly PublicStorefrontProduct[];
 }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<ExactFilters>(emptyFilters);
@@ -42,11 +44,13 @@ export function CatalogExplorer({
     () => ({
       sourceNames: sortedUnique(products.flatMap(exactSourceNames)),
       sourceCodes: sortedUnique(
-        products.flatMap((product) => product.variants.map((variant) => variant.code)),
+        products.flatMap((product) =>
+          product.displayConfigurations.map((configuration) => configuration.displayCode),
+        ),
       ),
       packageUnits: sortedUnique(
         products.flatMap((product) =>
-          product.variants.map((variant) => variant.packageForm),
+          product.displayConfigurations.map((configuration) => configuration.packageForm),
         ),
       ),
     }),
@@ -63,16 +67,23 @@ export function CatalogExplorer({
           product.name,
           product.sourceName,
           ...sourceNames,
-          ...product.variants.flatMap((variant) => [variant.code, variant.packageForm]),
+          ...product.displayConfigurations.flatMap((configuration) => [
+            configuration.displayCode,
+            configuration.packageForm,
+          ]),
         ].some((value) => normalized(value).includes(searchTerm));
       const matchesSource =
         filters.sourceName.length === 0 || sourceNames.includes(filters.sourceName);
       const matchesCode =
         filters.sourceCode.length === 0 ||
-        product.variants.some((variant) => variant.code === filters.sourceCode);
+        product.displayConfigurations.some(
+          (configuration) => configuration.displayCode === filters.sourceCode,
+        );
       const matchesUnit =
         filters.packageUnit.length === 0 ||
-        product.variants.some((variant) => variant.packageForm === filters.packageUnit);
+        product.displayConfigurations.some(
+          (configuration) => configuration.packageForm === filters.packageUnit,
+        );
       return matchesQuery && matchesSource && matchesCode && matchesUnit;
     });
   }, [filters, products, query]);

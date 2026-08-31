@@ -413,7 +413,7 @@ async function getCheckoutVariantFacts(
     priceId: string;
     priceVersion: string | number;
     priceStatus: "pending" | "active" | "unavailable";
-    amountMinor: string | number;
+    amountMinor: string | number | null;
     currency: string;
     effectiveAt: Date | string;
   };
@@ -455,6 +455,7 @@ async function getCheckoutVariantFacts(
   ) {
     return null;
   }
+  if (price.amountMinor === null) return null;
   const amountMinor = safeInteger(price.amountMinor);
   const stripeMappingsPresent =
     nonblank(variant.stripeProductId) && nonblank(variant.stripePriceId);

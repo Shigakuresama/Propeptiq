@@ -2,7 +2,7 @@ import { ArrowRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 
-import type { BrowseCatalogProduct } from "@/catalog/browse-catalog";
+import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 
 const CARD_VARIANT_LIMIT = 3;
 
@@ -10,12 +10,13 @@ export function CatalogListingCard({
   product,
   priority = false,
 }: {
-  product: BrowseCatalogProduct;
+  product: PublicStorefrontProduct;
   priority?: boolean;
 }) {
   const headingId = `catalog-${product.slug}`;
-  const visibleVariants = product.variants.slice(0, CARD_VARIANT_LIMIT);
-  const remainingVariantCount = product.variants.length - visibleVariants.length;
+  const visibleConfigurations = product.displayConfigurations.slice(0, CARD_VARIANT_LIMIT);
+  const remainingConfigurationCount =
+    product.displayConfigurations.length - visibleConfigurations.length;
 
   return (
     <article
@@ -43,19 +44,22 @@ export function CatalogListingCard({
           aria-label={`${product.name} catalog variants`}
           className="mt-5 space-y-2 border-t border-border pt-4"
         >
-          {visibleVariants.map((variant) => (
+          {visibleConfigurations.map((configuration) => (
             <li
               className="grid grid-cols-[minmax(3.75rem,auto)_1fr] gap-3 text-sm leading-6 text-muted-ink"
-              key={`${product.slug}-${variant.code}-${variant.packageForm}`}
+              key={`${product.slug}-${configuration.displayCode}-${configuration.packageForm}`}
             >
-              <span className="font-semibold tabular-nums text-ink">{variant.code}</span>
-              <span>{variant.packageForm}</span>
+              <span className="font-semibold tabular-nums text-ink">
+                {configuration.displayCode}
+              </span>
+              <span>{configuration.packageForm}</span>
             </li>
           ))}
         </ul>
-        {remainingVariantCount > 0 ? (
+        {remainingConfigurationCount > 0 ? (
           <p className="mt-3 text-sm font-medium text-muted-ink">
-            +{remainingVariantCount} more catalog variant{remainingVariantCount === 1 ? "" : "s"}
+            +{remainingConfigurationCount} more catalog variant
+            {remainingConfigurationCount === 1 ? "" : "s"}
           </p>
         ) : null}
 

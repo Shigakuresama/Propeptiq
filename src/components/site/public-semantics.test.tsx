@@ -1,7 +1,12 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { browseCatalogProducts } from "@/catalog/browse-catalog";
+import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
+import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
+import {
+  buildPublicStorefrontCatalog,
+  storefrontImageMetadata,
+} from "@/catalog/storefront-public";
 import { PublicHome } from "@/components/site/public-home";
 import type { LoyaltyPolicy } from "@/domain/rewards";
 
@@ -20,9 +25,22 @@ const activeLoyaltyPolicy: LoyaltyPolicy = {
   supersededAt: null,
 };
 
+const publicCatalog = buildPublicStorefrontCatalog({
+  configuredPublicationId: browseCatalogPublicationId,
+  catalogData: storefrontCatalogData,
+  runtimeVariantFacts: [],
+  controlledContent: [],
+  verifiedImageMetadata: storefrontImageMetadata,
+});
+
 describe("public storefront semantics", () => {
   it("presents the owner-supplied catalog without inventing commerce facts", () => {
-    render(<PublicHome products={browseCatalogProducts} variantCount={103} />);
+    render(
+      <PublicHome
+        products={publicCatalog.products}
+        variantCount={publicCatalog.displayConfigurationCount}
+      />,
+    );
 
     expect(
       screen.getByRole("heading", {
@@ -49,7 +67,7 @@ describe("public storefront semantics", () => {
     expect(screen.getByText("Tirzepatide")).toBeVisible();
     expect(
       screen.getByRole("link", { name: /view catalog item: tirzepatide/i }),
-    ).toHaveAttribute("href", `/catalog/items/${browseCatalogProducts[0]!.slug}`);
+    ).toHaveAttribute("href", `/catalog/items/${publicCatalog.products[0]!.slug}`);
     expect(document.body).not.toHaveTextContent(/server-provided prices/i);
     expect(screen.queryByText(/apply|researcher approval/i)).toBeNull();
   });
@@ -79,8 +97,8 @@ describe("public storefront semantics", () => {
     render(
       <PublicHome
         loyaltyPolicy={activeLoyaltyPolicy}
-        products={browseCatalogProducts}
-        variantCount={103}
+        products={publicCatalog.products}
+        variantCount={publicCatalog.displayConfigurationCount}
       />,
     );
 

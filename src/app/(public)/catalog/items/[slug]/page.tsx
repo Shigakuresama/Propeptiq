@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { getPublicBrowseCatalog } from "@/catalog/browse-catalog-server";
+import {
+  findPublicStorefrontProduct,
+} from "@/catalog/storefront-public";
+import { getPublicStorefrontCatalog } from "@/catalog/storefront-public-server";
 import { CatalogItemDetail } from "@/components/commerce/catalog-item-detail";
 import { PageTransition } from "@/components/site/page-transition";
 
@@ -13,8 +16,8 @@ export async function generateMetadata({
   params,
 }: CatalogItemPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const catalog = await getPublicBrowseCatalog();
-  const product = catalog.products.find((entry) => entry.slug === slug);
+  const catalog = await getPublicStorefrontCatalog();
+  const product = findPublicStorefrontProduct(catalog, slug);
   return product
     ? {
         title: product.name,
@@ -25,8 +28,8 @@ export async function generateMetadata({
 
 export default async function CatalogItemPage({ params }: CatalogItemPageProps) {
   const { slug } = await params;
-  const catalog = await getPublicBrowseCatalog();
-  const product = catalog.products.find((entry) => entry.slug === slug);
+  const catalog = await getPublicStorefrontCatalog();
+  const product = findPublicStorefrontProduct(catalog, slug);
   if (!product) notFound();
 
   return (

@@ -28,9 +28,25 @@ export type DatabaseCatalogVariantRecord = Readonly<{
   amountUnit: "mg" | "mcg" | "iu" | null;
   packageQuantity: number;
   status: "inactive" | "active";
+  stripeProductId: string | null;
+  stripePriceId: string | null;
 }>;
-export type DatabaseCatalogRecordSet = CatalogRecordSet &
-  Readonly<{ variants: readonly DatabaseCatalogVariantRecord[] }>;
+export type DatabaseCatalogPriceRecord = CatalogPriceRecord &
+  Readonly<{
+    variantId: string | null;
+    priceStatus: "pending" | "active" | "unavailable";
+  }>;
+export type DatabaseCatalogLotRecord = CatalogLotRecord &
+  Readonly<{ variantId: string | null }>;
+export type DatabaseCatalogRecordSet = Omit<
+  CatalogRecordSet,
+  "prices" | "lots"
+> &
+  Readonly<{
+    variants: readonly DatabaseCatalogVariantRecord[];
+    prices: readonly DatabaseCatalogPriceRecord[];
+    lots: readonly DatabaseCatalogLotRecord[];
+  }>;
 type RawVariant = Omit<
   DatabaseCatalogVariantRecord,
   "canonicalAmount" | "packageQuantity"
@@ -41,7 +57,7 @@ type RawVariant = Omit<
 type RawPrice = Omit<CatalogPriceRecord, "amountMinor" | "effectiveAt" | "supersededAt"> & {
   variantId: string | null;
   priceStatus: "pending" | "active" | "unavailable";
-  amountMinor: string | number;
+  amountMinor: string | number | null;
   effectiveAt: Date | string;
   supersededAt: Date | string | null;
 };
@@ -98,7 +114,9 @@ export async function loadDatabaseCatalogRecords(
   const variants = await database.query<RawVariant>(`
     SELECT id::text AS "id", product_id::text AS "productId", sku, label,
            canonical_amount AS "canonicalAmount", amount_unit AS "amountUnit",
-           package_quantity AS "packageQuantity", status
+           package_quantity AS "packageQuantity", status,
+           stripe_product_id AS "stripeProductId",
+           stripe_price_id AS "stripePriceId"
     FROM product_variants
     ORDER BY created_at, id
   `);
@@ -162,7 +180,8 @@ export async function loadDatabaseCatalogRecords(
     })),
     prices: prices.rows.map((price) => ({
       ...price,
-      amountMinor: toSafeInteger(price.amountMinor),
+      amountMinor:
+        price.amountMinor === null ? null : toSafeInteger(price.amountMinor),
       effectiveAt: toIso(price.effectiveAt),
       supersededAt: toOptionalIso(price.supersededAt),
     })),

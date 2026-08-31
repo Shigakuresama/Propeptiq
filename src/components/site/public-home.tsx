@@ -2,7 +2,7 @@ import { ArrowRight, Coins, FileCheck2, FlaskConical, LibraryBig, Share2 } from 
 import type { Route } from "next";
 import Link from "next/link";
 
-import type { BrowseCatalogProduct } from "@/catalog/browse-catalog";
+import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
 import { ProgramStrip } from "@/components/growth/program-strip";
 import { ProofRail } from "@/components/site/proof-rail";
@@ -21,7 +21,7 @@ export function PublicHome({
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
   syntheticLocal?: boolean;
-  products: readonly BrowseCatalogProduct[];
+  products: readonly PublicStorefrontProduct[];
   variantCount: number;
 }) {
   const growthPrograms = [

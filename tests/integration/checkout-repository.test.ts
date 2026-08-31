@@ -1250,6 +1250,39 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     });
   });
 
+  it("keeps explicit pending zero but rejects a null current variant amount", async () => {
+    const { repository } = setup();
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'TEST-NULL-PRICE-5',
+        '5 mg null-price fixture', 5, 'mg', 1, 'inactive');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.variantPriceA}', '${ids.productA}', '${ids.variantA}',
+        1, 'pending', 0, 'USD', '2026-08-01T00:00:00.000Z');
+    `);
+
+    await expect(repository.getCheckoutVariantFacts(ids.variantA)).resolves.toMatchObject({
+      priceStatus: "pending",
+      amountMinor: 0,
+      checkoutReady: false,
+    });
+
+    await client.exec(`
+      ALTER TABLE product_prices
+        DROP CONSTRAINT product_prices_amount_status_coherent;
+      ALTER TABLE product_prices
+        ALTER COLUMN amount_minor DROP NOT NULL;
+      UPDATE product_prices SET amount_minor = NULL
+      WHERE id = '${ids.variantPriceA}';
+    `);
+
+    await expect(repository.getCheckoutVariantFacts(ids.variantA)).resolves.toBeNull();
+  });
+
   it("projects the exact automatic sitewide WINTER30 fixture from persisted records", async () => {
     const { repository } = setup();
     await client.exec(`

@@ -1,13 +1,26 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { browseCatalogProducts } from "@/catalog/browse-catalog";
+import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
+import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
+import {
+  buildPublicStorefrontCatalog,
+  storefrontImageMetadata,
+} from "@/catalog/storefront-public";
 
 import { CatalogExplorer } from "./catalog-explorer";
 
 describe("CatalogExplorer", () => {
+  const products = buildPublicStorefrontCatalog({
+    configuredPublicationId: browseCatalogPublicationId,
+    catalogData: storefrontCatalogData,
+    runtimeVariantFacts: [],
+    controlledContent: [],
+    verifiedImageMetadata: storefrontImageMetadata,
+  }).products;
+
   it("provides labeled search and exact source-name, code, and package-unit filters", () => {
-    render(<CatalogExplorer products={browseCatalogProducts} />);
+    render(<CatalogExplorer products={products} />);
 
     expect(screen.getByRole("searchbox", { name: "Search catalog" })).toBeVisible();
     const sourceFilter = screen.getByRole("combobox", { name: "Source name" });
@@ -18,8 +31,8 @@ describe("CatalogExplorer", () => {
   });
 
   it("finds source ambiguities without changing the immutable catalog rows", () => {
-    const snapshot = JSON.stringify(browseCatalogProducts);
-    render(<CatalogExplorer products={browseCatalogProducts} />);
+    const snapshot = JSON.stringify(products);
+    render(<CatalogExplorer products={products} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Source code" }), {
       target: { value: "LPC" },
@@ -28,11 +41,11 @@ describe("CatalogExplorer", () => {
     expect(screen.getAllByRole("article")).toHaveLength(2);
     expect(screen.getByRole("heading", { name: "LI PO-C" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "LI PO-C without B12" })).toBeVisible();
-    expect(JSON.stringify(browseCatalogProducts)).toBe(snapshot);
+    expect(JSON.stringify(products)).toBe(snapshot);
   });
 
   it("searches exact source facts and reports an accessible empty result", () => {
-    render(<CatalogExplorer products={browseCatalogProducts} />);
+    render(<CatalogExplorer products={products} />);
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search catalog" }), {
       target: { value: "PN5" },
@@ -47,7 +60,7 @@ describe("CatalogExplorer", () => {
   });
 
   it("filters a distinct exact source Name to its one matching card", () => {
-    render(<CatalogExplorer products={browseCatalogProducts} />);
+    render(<CatalogExplorer products={products} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Source name" }), {
       target: { value: "BPC 10mg + TB 10mg" },
