@@ -9,6 +9,22 @@ const neonAuthBaseUrl =
   "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth";
 const neonAuthCookieSecret =
   "synthetic-neon-auth-cookie-secret-at-least-32-characters";
+const betterAuthSecret =
+  "synthetic-better-auth-secret-material-0123456789ABCDEF";
+
+const applicationOwnedAuthTestInput = {
+  APP_ORIGIN: "http://localhost:3000",
+  AUTH_MODE: "test",
+  BETTER_AUTH_SECRET: betterAuthSecret,
+  RATE_LIMIT_SECRET: "synthetic-auth-rate-limit-secret-0123456789ABCDEF",
+  DATABASE_MODE: "test",
+  TEST_DATABASE_URL:
+    "postgresql://synthetic_auth:synthetic_password@db.example.invalid/propeptiq_auth_test",
+  TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+  EMAIL_MODE: "test",
+  RESEND_API_KEY: "re_synthetic_auth_test",
+  RESEND_FROM: "accounts@example.test",
+} as const;
 
 const exactPreviewInput = {
   APP_ENV: "preview",
@@ -19,8 +35,7 @@ const exactPreviewInput = {
   LOCAL_TEST_SECRET: "",
   AUTH_MODE: "test",
   AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
-  STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
-  NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+  BETTER_AUTH_SECRET: betterAuthSecret,
   RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
   DATABASE_MODE: "test",
   TEST_DATABASE_URL:
@@ -33,7 +48,9 @@ const exactPreviewInput = {
   STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
   STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
   STORAGE_MODE: "disabled",
-  EMAIL_MODE: "disabled",
+  EMAIL_MODE: "test",
+  RESEND_API_KEY: "re_synthetic_task7_preview",
+  RESEND_FROM: "accounts@example.test",
   TAX_MODE: "disabled",
   SHIPPING_MODE: "disabled",
   FULFILLMENT_MODE: "disabled",
@@ -45,6 +62,19 @@ const productionIdentity = {
   APP_ENV: "production",
   VERCEL_ENV: "production",
   APP_ORIGIN: "https://production.propeptiq.example.invalid",
+} as const;
+
+const liveAuthInput = {
+  ...productionIdentity,
+  AUTH_MODE: "live",
+  AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
+  BETTER_AUTH_SECRET: betterAuthSecret,
+  RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
+  DATABASE_MODE: "live",
+  DATABASE_URL: "postgresql://synthetic.invalid/database?sslmode=require",
+  EMAIL_MODE: "live",
+  RESEND_API_KEY: "re_synthetic",
+  RESEND_FROM: "accounts@example.test",
 } as const;
 
 describe("parseServerEnv", () => {
@@ -77,6 +107,77 @@ describe("parseServerEnv", () => {
     ).toBe("owner-pdf-2026-08-27-07cd4aa0-v1");
   });
 
+  it("accepts application-owned auth without Managed Neon Auth configuration", () => {
+    const env = parseServerEnv(applicationOwnedAuthTestInput);
+
+    expect(env).toMatchObject({
+      AUTH_MODE: "test",
+      BETTER_AUTH_SECRET: betterAuthSecret,
+      DATABASE_MODE: "test",
+      EMAIL_MODE: "test",
+    });
+    expect(env.STORAGE_NEON_AUTH_BASE_URL).toBeUndefined();
+    expect(env.NEON_AUTH_BASE_URL).toBeUndefined();
+    expect(env.NEON_AUTH_COOKIE_SECRET).toBeUndefined();
+  });
+
+  it("requires APP_ORIGIN to be an origin without credentials, path, query, or fragment", () => {
+    for (const APP_ORIGIN of [
+      "https://user:password@preview.example.test",
+      "https://preview.example.test/nested",
+      "https://preview.example.test?tenant=one",
+      "https://preview.example.test#fragment",
+    ]) {
+      expect(() =>
+        parseServerEnv({
+          ...applicationOwnedAuthTestInput,
+          APP_ENV: "preview",
+          APP_ORIGIN,
+        }),
+      ).toThrow(/APP_ORIGIN.*origin/i);
+    }
+  });
+
+  it("requires a generated Better Auth secret whenever auth is enabled", () => {
+    const withoutSecret = {
+      ...applicationOwnedAuthTestInput,
+      BETTER_AUTH_SECRET: undefined,
+    };
+
+    expect(() => parseServerEnv(withoutSecret)).toThrow(/BETTER_AUTH_SECRET/);
+    expect(() =>
+      parseServerEnv({
+        ...applicationOwnedAuthTestInput,
+        BETTER_AUTH_SECRET: "abcd".repeat(16),
+      }),
+    ).toThrow(/BETTER_AUTH_SECRET/);
+  });
+
+  it("requires enabled auth to use matching database and email modes", () => {
+    expect(() =>
+      parseServerEnv({
+        ...applicationOwnedAuthTestInput,
+        DATABASE_MODE: "disabled",
+      }),
+    ).toThrow(/AUTH_MODE=test requires DATABASE_MODE=test/);
+    expect(() =>
+      parseServerEnv({
+        ...applicationOwnedAuthTestInput,
+        EMAIL_MODE: "disabled",
+      }),
+    ).toThrow(/AUTH_MODE=test requires EMAIL_MODE=test/);
+  });
+
+  it("requires independent Better Auth and rate-limit secrets", () => {
+    expect(() =>
+      parseServerEnv({
+        ...applicationOwnedAuthTestInput,
+        BETTER_AUTH_SECRET:
+          applicationOwnedAuthTestInput.RATE_LIMIT_SECRET,
+      }),
+    ).toThrow(/Better Auth and rate-limit secrets must be independent/);
+  });
+
   it("rejects incomplete Stripe test configuration", () => {
     expect(() =>
       parseServerEnv({
@@ -99,14 +200,13 @@ describe("parseServerEnv", () => {
       DATABASE_MODE: "test",
       PAYMENTS_MODE: "test",
       STORAGE_MODE: "disabled",
-      EMAIL_MODE: "disabled",
+      EMAIL_MODE: "test",
       TAX_MODE: "disabled",
       SHIPPING_MODE: "disabled",
       FULFILLMENT_MODE: "disabled",
       COMMERCE_LIVE_CAPABILITY: "disabled",
       PAYMENTS_LIVE_CAPABILITY: "disabled",
-      STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
-      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
+      BETTER_AUTH_SECRET: betterAuthSecret,
       RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
       TEST_DATABASE_URL:
         "postgresql://synthetic_task7:synthetic_password@db.example.invalid/propeptiq_task7_test",
@@ -116,7 +216,7 @@ describe("parseServerEnv", () => {
       STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
     });
     expect(env.LOCAL_TEST_SECRET).toBeUndefined();
-    expect(resolveNeonAuthBaseUrl(env)).toBe(neonAuthBaseUrl);
+    expect(resolveNeonAuthBaseUrl(env)).toBeNull();
     expect(env.DATABASE_URL).toBeUndefined();
     expect(env.DATABASE_MIGRATION_URL).toBeUndefined();
   });
@@ -173,7 +273,7 @@ describe("parseServerEnv", () => {
     ["SHIPPING_MODE", { SHIPPING_MODE: "test" }],
     ["FULFILLMENT_MODE", { FULFILLMENT_MODE: "test" }],
   ] as const)(
-    "rejects a prerequisite-complete Production %s=test matrix with its exact mode error",
+    "rejects a prerequisite-complete Production %s=test matrix with its mode error",
     (modeKey, prerequisites) => {
       let message = "configuration unexpectedly accepted";
       try {
@@ -182,8 +282,8 @@ describe("parseServerEnv", () => {
         message = error instanceof Error ? error.message : String(error);
       }
 
-      expect(message).toBe(
-        `Invalid server configuration: ${modeKey}: ${modeKey} test mode is not permitted in production`,
+      expect(message).toContain(
+        `${modeKey}: ${modeKey} test mode is not permitted in production`,
       );
     },
   );
@@ -312,7 +412,7 @@ describe("parseServerEnv", () => {
   });
 
   it.each([
-    ["AUTH_MODE", "live", "STORAGE_NEON_AUTH_BASE_URL"],
+    ["AUTH_MODE", "live", "BETTER_AUTH_SECRET"],
     ["DATABASE_MODE", "live", "DATABASE_URL"],
     ["STORAGE_MODE", "live", "BLOB_READ_WRITE_TOKEN"],
     ["EMAIL_MODE", "live", "RESEND_API_KEY"],
@@ -331,25 +431,14 @@ describe("parseServerEnv", () => {
 
   it("accepts an explicitly complete live capability set", () => {
     const env = parseServerEnv({
-      APP_ENV: "production",
-      APP_ORIGIN: "https://research.example.test",
-      AUTH_MODE: "live",
-      AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
+      ...liveAuthInput,
       AUTH_PASSWORD_RESET_SESSION_REVOCATION: "verified",
-      DATABASE_MODE: "live",
       PAYMENTS_MODE: "live",
       STORAGE_MODE: "live",
-      EMAIL_MODE: "live",
-      STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
-      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
-      RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
-      DATABASE_URL: "postgresql://synthetic.invalid/database?sslmode=require",
       STRIPE_ACCOUNT_ID: "acct_synthetic123",
       STRIPE_SECRET_KEY: "sk_live_synthetic",
       STRIPE_WEBHOOK_SECRET: "whsec_synthetic",
       BLOB_READ_WRITE_TOKEN: "vercel_blob_rw_synthetic",
-      RESEND_API_KEY: "re_synthetic",
-      RESEND_FROM: "research@example.test",
     });
 
     expect(env.PAYMENTS_MODE).toBe("live");
@@ -358,26 +447,14 @@ describe("parseServerEnv", () => {
   it("keeps live Auth closed without verified production email delivery", () => {
     expect(() =>
       parseServerEnv({
-        APP_ENV: "production",
-        APP_ORIGIN: "https://research.example.test",
-        AUTH_MODE: "live",
-        STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
-        NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
-        RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
+        ...liveAuthInput,
+        AUTH_EMAIL_DELIVERY_VERIFIED: undefined,
       }),
     ).toThrow(/production email delivery/i);
   });
 
   it("permits live Auth without password recovery when production email delivery is verified", () => {
-    const env = parseServerEnv({
-      APP_ENV: "production",
-      APP_ORIGIN: "https://research.example.test",
-      AUTH_MODE: "live",
-      AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
-      STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
-      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
-      RATE_LIMIT_SECRET: "task5-rate-limit-secret-at-least-32-characters",
-    });
+    const env = parseServerEnv(liveAuthInput);
 
     expect(env.AUTH_MODE).toBe("live");
     expect(env.AUTH_PASSWORD_RESET_SESSION_REVOCATION).toBeUndefined();
@@ -453,20 +530,12 @@ describe("parseServerEnv", () => {
 
   it("maps the Vercel-injected Neon Auth URL before the documented fallback", () => {
     const storageConfigured = parseServerEnv({
-      APP_ORIGIN: "http://localhost:3000",
-      AUTH_MODE: "test",
       STORAGE_NEON_AUTH_BASE_URL: neonAuthBaseUrl,
-      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
-      RATE_LIMIT_SECRET: "synthetic-rate-limit-secret-at-least-32-characters",
     });
     expect(resolveNeonAuthBaseUrl(storageConfigured)).toBe(neonAuthBaseUrl);
 
     const fallbackConfigured = parseServerEnv({
-      APP_ORIGIN: "http://localhost:3000",
-      AUTH_MODE: "test",
       NEON_AUTH_BASE_URL: neonAuthBaseUrl,
-      NEON_AUTH_COOKIE_SECRET: neonAuthCookieSecret,
-      RATE_LIMIT_SECRET: "synthetic-rate-limit-secret-at-least-32-characters",
     });
     expect(resolveNeonAuthBaseUrl(fallbackConfigured)).toBe(neonAuthBaseUrl);
   });

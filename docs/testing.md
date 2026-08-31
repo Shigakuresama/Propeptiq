@@ -4,7 +4,7 @@
 
 - **Domain unit tests:** automatic buyer activation, exact gate decisions/reason codes, destination precedence, explicit review snapshots, content/publication policy, price/promotion calculations, order/payment/inventory/refund/fulfillment transitions.
 - **Repository integration tests:** Drizzle queries and constraints against an isolated database, guarded migrations, provider event/hash uniqueness, concurrent inventory/refund/shipment behavior.
-- **Adapter contract tests:** Managed Neon Auth verification projection, uncached server identity and post-OTP session confirmation, live Auth without recovery, enumeration-neutral password-reset requests, reset callback/action error handling, allowlisted protected-route return, Stripe raw-body signature verification and idempotency, Blob authorization, and the durable downstream-effect repository/lease-worker factory with visibly injected test sinks.
+- **Adapter contract tests:** Better Auth verification projection, database-validated server identity and post-OTP session confirmation, live Auth without recovery, enumeration-neutral password-reset requests, reset callback/action error handling, allowlisted protected-route return, Stripe raw-body signature verification and idempotency, Blob authorization, and the durable downstream-effect repository/lease-worker factory with visibly injected test sinks.
 - **Component/browser tests:** public catalog/prices/promotions/cart, preserved cart through sign-in, account attestation, own-order authorization, staff MFA/capability denial, read-only success route, safe empty/error states.
 - **Responsive/accessibility tests:** 375px, 768px, 1024px, and 1440px; keyboard-only; visible focus; reduced motion; 200% zoom; no horizontal overflow; accessible navigation sheet and Proof Rail.
 
@@ -28,6 +28,19 @@ separate branch-isolated recovery lifecycle test: create at least two sessions,
 complete one reset, prove the same token fails on reuse, and prove both pre-reset
 sessions are rejected through uncached provider checks and protected application
 routes. Failure of this recovery lane does not authorize the recovery assertion.
+
+The guarded real-PostgreSQL lane is
+`src/auth/better-auth-postgres.integration.test.ts`. Without both
+direct, non-`-pooler` `TEST_DATABASE_URL` and
+`TEST_DATABASE_CONFIRMATION=isolated-test-database`, it skips before opening a
+connection. Against a disposable branch it uses only unique `@example.test`
+identities and an in-memory email sink. After the isolation guard, it applies
+the idempotent Auth-only support migration, exercises the real reset callback,
+then deletes its user, account, session, verification, and rate-limit rows.
+`MANAGED_NEON_AUTH_BASE_URL` optionally enables the
+one-release credential-compatibility proof. The managed branch must have
+verification email-on-signup disabled only for that synthetic test and restored
+immediately afterward; never point this lane at Production.
 
 ## Documentation checks
 

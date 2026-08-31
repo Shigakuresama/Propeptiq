@@ -12,7 +12,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["tests/integration/**/*.test.ts"],
+    include: [
+      "tests/integration/**/*.test.ts",
+      "src/**/*.integration.test.ts",
+    ],
     pool: "forks",
     fileParallelism: false,
     hookTimeout: 30_000,

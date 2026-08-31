@@ -4,8 +4,8 @@ import { parseServerEnv, type ServerEnv } from "@/config/env-schema";
 
 import {
   isVerifiedIdentityAt,
+  projectBetterAuthIdentity,
   projectClerkIdentity,
-  projectNeonIdentity,
   resolveServerIdentity,
   signLocalActor,
   verifyLocalActor,
@@ -84,9 +84,9 @@ describe("server identity boundary", () => {
     });
   });
 
-  it("projects a verified Neon user while keeping staff MFA evidence fail-closed", () => {
+  it("projects a verified Better Auth user while keeping staff MFA evidence fail-closed", () => {
     expect(
-      projectNeonIdentity(
+      projectBetterAuthIdentity(
         {
           id: "neon-user-verified",
           email: " Researcher@Example.test ",
@@ -103,8 +103,8 @@ describe("server identity boundary", () => {
     });
   });
 
-  it("does not mark an unverified Neon email as verified", () => {
-    const identity = projectNeonIdentity({
+  it("does not mark an unverified Better Auth email as verified", () => {
+    const identity = projectBetterAuthIdentity({
       id: "neon-user-unverified",
       email: "researcher@example.test",
       emailVerified: false,

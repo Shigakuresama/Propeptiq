@@ -1,11 +1,25 @@
-import { getNeonAuth } from "@/auth/neon-server";
+import { getBetterAuth } from "@/auth/better-auth-server";
+import { readAuthCallerAddress } from "@/auth/caller-address";
 import { readServerEnv } from "@/env";
 
 type AuthRouteContext = Readonly<{
   params: Promise<Readonly<{ path: string[] }>>;
 }>;
 
-type AuthMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+type AuthMethod = "GET" | "POST";
+
+function privateNoStoreResponse(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set("Cache-Control", "private, no-store, max-age=0");
+  headers.set("Pragma", "no-cache");
+  headers.set("Expires", "0");
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 function disabledResponse(): Response {
   return Response.json(
@@ -13,6 +27,19 @@ function disabledResponse(): Response {
     {
       status: 404,
       headers: { "Cache-Control": "no-store" },
+    },
+  );
+}
+
+function untrustedCallerResponse(): Response {
+  return Response.json(
+    { error: "Identity request unavailable" },
+    {
+      status: 429,
+      headers: {
+        "Cache-Control": "no-store",
+        "Retry-After": "60",
+      },
     },
   );
 }
@@ -65,15 +92,19 @@ async function forward(
   context: AuthRouteContext,
 ): Promise<Response> {
   const { path } = await context.params;
+  const environment = readServerEnv();
   if (
     (await isPasswordRecoveryRequest(method, path, request)) &&
-    readServerEnv().AUTH_PASSWORD_RESET_SESSION_REVOCATION !== "verified"
+    environment.AUTH_PASSWORD_RESET_SESSION_REVOCATION !== "verified"
   ) {
     return disabledResponse();
   }
-  const auth = getNeonAuth();
+  const auth = getBetterAuth();
   if (!auth) return disabledResponse();
-  return auth.handler()[method](request, context);
+  if (!readAuthCallerAddress(request.headers, environment.APP_ENV)) {
+    return untrustedCallerResponse();
+  }
+  return privateNoStoreResponse(await auth.handler(request));
 }
 
 export function GET(request: Request, context: AuthRouteContext) {
@@ -82,16 +113,4 @@ export function GET(request: Request, context: AuthRouteContext) {
 
 export function POST(request: Request, context: AuthRouteContext) {
   return forward("POST", request, context);
-}
-
-export function PUT(request: Request, context: AuthRouteContext) {
-  return forward("PUT", request, context);
-}
-
-export function DELETE(request: Request, context: AuthRouteContext) {
-  return forward("DELETE", request, context);
-}
-
-export function PATCH(request: Request, context: AuthRouteContext) {
-  return forward("PATCH", request, context);
 }

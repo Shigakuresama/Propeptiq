@@ -53,7 +53,7 @@ type ClerkUserProjection = Readonly<{
   twoFactorEnabled: boolean;
 }>;
 
-type NeonUserProjection = Readonly<{
+type BetterAuthUserProjection = Readonly<{
   id: string;
   email: string;
   emailVerified: boolean;
@@ -102,8 +102,8 @@ export function projectClerkIdentity(
   });
 }
 
-export function projectNeonIdentity(
-  user: NeonUserProjection | null | undefined,
+export function projectBetterAuthIdentity(
+  user: BetterAuthUserProjection | null | undefined,
   now: Date = new Date(),
 ): VerifiedIdentity | null {
   if (!user || !isNonBlank(user.id)) return null;
@@ -118,11 +118,11 @@ export function projectNeonIdentity(
 
   return Object.freeze({
     // `clerkUserId` is a compatibility field across the existing persistence
-    // boundary. New Neon identities store their Managed Better Auth user ID.
+    // boundary. Application-owned Better Auth identities store their user ID.
     clerkUserId: user.id,
     primaryEmail,
     emailVerifiedAt: verifiedAt,
-    // Managed Neon Auth's documented Next.js session does not expose a
+    // This Better Auth configuration does not yet expose a server-verifiable
     // server-verifiable MFA ceremony. Never infer staff MFA from login alone.
     mfaConfigured: false,
     secondFactorCompleted: false,

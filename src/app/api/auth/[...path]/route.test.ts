@@ -2,19 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   environment: {
+    APP_ENV: "local" as "local" | "production",
     AUTH_EMAIL_DELIVERY_VERIFIED: "verified" as const,
     AUTH_MODE: "live" as const,
     AUTH_PASSWORD_RESET_SESSION_REVOCATION: undefined as
       | "verified"
       | undefined,
   },
-  get: vi.fn(),
-  getNeonAuth: vi.fn(),
-  post: vi.fn(),
+  handler: vi.fn(),
+  getBetterAuth: vi.fn(),
 }));
 
-vi.mock("@/auth/neon-server", () => ({
-  getNeonAuth: mocks.getNeonAuth,
+vi.mock("@/auth/better-auth-server", () => ({
+  getBetterAuth: mocks.getBetterAuth,
 }));
 
 vi.mock("@/env", () => ({
@@ -27,11 +27,12 @@ const context = {
   params: Promise.resolve({ path: ["sign-in", "email"] }),
 };
 
-describe("Managed Neon Auth API proxy route", () => {
+describe("application-owned Better Auth API route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.environment.APP_ENV = "local";
     mocks.environment.AUTH_PASSWORD_RESET_SESSION_REVOCATION = undefined;
-    mocks.getNeonAuth.mockReturnValue(null);
+    mocks.getBetterAuth.mockReturnValue(null);
   });
 
   it.each([
@@ -47,9 +48,7 @@ describe("Managed Neon Auth API proxy route", () => {
   ] as const)(
     "blocks the %s /%s recovery endpoint until session revocation is verified",
     async (method, path) => {
-      mocks.getNeonAuth.mockReturnValue({
-        handler: () => ({ GET: mocks.get, POST: mocks.post }),
-      });
+      mocks.getBetterAuth.mockReturnValue({ handler: mocks.handler });
       const recoveryContext = { params: Promise.resolve({ path: [...path] }) };
       const request = new Request(
         `https://example.test/api/auth/${path.join("/")}`,
@@ -63,8 +62,7 @@ describe("Managed Neon Auth API proxy route", () => {
 
       expect(response.status).toBe(404);
       expect(response.headers.get("cache-control")).toBe("no-store");
-      expect(mocks.get).not.toHaveBeenCalled();
-      expect(mocks.post).not.toHaveBeenCalled();
+      expect(mocks.handler).not.toHaveBeenCalled();
     },
   );
 
@@ -83,20 +81,24 @@ describe("Managed Neon Auth API proxy route", () => {
     async (method, path) => {
       mocks.environment.AUTH_PASSWORD_RESET_SESSION_REVOCATION = "verified";
       const expected = new Response(null, { status: 204 });
-      mocks.get.mockResolvedValue(expected);
-      mocks.post.mockResolvedValue(expected);
-      mocks.getNeonAuth.mockReturnValue({
-        handler: () => ({ GET: mocks.get, POST: mocks.post }),
-      });
+      mocks.handler.mockResolvedValue(expected);
+      mocks.getBetterAuth.mockReturnValue({ handler: mocks.handler });
       const recoveryContext = { params: Promise.resolve({ path: [...path] }) };
       const request = new Request(
         `https://example.test/api/auth/${path.join("/")}`,
         { method },
       );
 
-      await expect(
-        (method === "GET" ? GET : POST)(request, recoveryContext),
-      ).resolves.toBe(expected);
+      const response = await (method === "GET" ? GET : POST)(
+        request,
+        recoveryContext,
+      );
+
+      expect(response.status).toBe(expected.status);
+      expect(response.headers.get("cache-control")).toBe(
+        "private, no-store, max-age=0",
+      );
+      expect(mocks.handler).toHaveBeenCalledWith(request);
     },
   );
 
@@ -109,9 +111,7 @@ describe("Managed Neon Auth API proxy route", () => {
   ] as const)(
     "blocks password recovery through the shared email-otp/%s endpoint",
     async (path, body) => {
-      mocks.getNeonAuth.mockReturnValue({
-        handler: () => ({ POST: mocks.post }),
-      });
+      mocks.getBetterAuth.mockReturnValue({ handler: mocks.handler });
       const recoveryContext = {
         params: Promise.resolve({ path: ["email-otp", path] }),
       };
@@ -127,16 +127,14 @@ describe("Managed Neon Auth API proxy route", () => {
       const response = await POST(request, recoveryContext);
 
       expect(response.status).toBe(404);
-      expect(mocks.post).not.toHaveBeenCalled();
+      expect(mocks.handler).not.toHaveBeenCalled();
     },
   );
 
   it.each(["send-verification-otp", "check-verification-otp"])(
     "fails a malformed shared email-otp/%s body closed",
     async (path) => {
-      mocks.getNeonAuth.mockReturnValue({
-        handler: () => ({ POST: mocks.post }),
-      });
+      mocks.getBetterAuth.mockReturnValue({ handler: mocks.handler });
       const recoveryContext = {
         params: Promise.resolve({ path: ["email-otp", path] }),
       };
@@ -148,22 +146,20 @@ describe("Managed Neon Auth API proxy route", () => {
       const response = await POST(request, recoveryContext);
 
       expect(response.status).toBe(404);
-      expect(mocks.post).not.toHaveBeenCalled();
+      expect(mocks.handler).not.toHaveBeenCalled();
     },
   );
 
   it("forwards non-recovery OTP traffic without consuming its body", async () => {
     const expected = new Response(null, { status: 204 });
-    mocks.post.mockImplementation(async (forwardedRequest: Request) => {
+    mocks.handler.mockImplementation(async (forwardedRequest: Request) => {
       await expect(forwardedRequest.json()).resolves.toEqual({
         email: "buyer@example.test",
         type: "sign-in",
       });
       return expected;
     });
-    mocks.getNeonAuth.mockReturnValue({
-      handler: () => ({ POST: mocks.post }),
-    });
+    mocks.getBetterAuth.mockReturnValue({ handler: mocks.handler });
     const otpContext = {
       params: Promise.resolve({
         path: ["email-otp", "send-verification-otp"],
@@ -181,8 +177,13 @@ describe("Managed Neon Auth API proxy route", () => {
       },
     );
 
-    await expect(POST(request, otpContext)).resolves.toBe(expected);
-    expect(mocks.post).toHaveBeenCalledWith(request, otpContext);
+    const response = await POST(request, otpContext);
+
+    expect(response.status).toBe(expected.status);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0",
+    );
+    expect(mocks.handler).toHaveBeenCalledWith(request);
   });
 
   it("returns a non-cacheable 404 while auth is disabled", async () => {
@@ -202,10 +203,8 @@ describe("Managed Neon Auth API proxy route", () => {
     "forwards live %s requests while recovery remains disabled",
     async (operation) => {
       const expected = new Response(null, { status: 204 });
-      mocks.post.mockResolvedValue(expected);
-      mocks.getNeonAuth.mockReturnValue({
-        handler: () => ({ POST: mocks.post }),
-      });
+      mocks.handler.mockResolvedValue(expected);
+      mocks.getBetterAuth.mockReturnValue({ handler: mocks.handler });
       const request = new Request(
         `https://example.test/api/auth/${operation}/email`,
         { method: "POST" },
@@ -214,8 +213,81 @@ describe("Managed Neon Auth API proxy route", () => {
         params: Promise.resolve({ path: [operation, "email"] }),
       };
 
-      await expect(POST(request, enabledContext)).resolves.toBe(expected);
-      expect(mocks.post).toHaveBeenCalledWith(request, enabledContext);
+      const response = await POST(request, enabledContext);
+
+      expect(response.status).toBe(expected.status);
+      expect(response.headers.get("cache-control")).toBe(
+        "private, no-store, max-age=0",
+      );
+      expect(mocks.handler).toHaveBeenCalledWith(request);
     },
   );
+
+  it("fails a deployed request closed without one trusted Vercel caller address", async () => {
+    mocks.environment.APP_ENV = "production";
+    mocks.getBetterAuth.mockReturnValue({ handler: mocks.handler });
+    const response = await POST(
+      new Request("https://example.test/api/auth/sign-in/email", {
+        method: "POST",
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(mocks.handler).not.toHaveBeenCalled();
+  });
+
+  it("forwards a deployed request with one valid Vercel caller address", async () => {
+    mocks.environment.APP_ENV = "production";
+    const expected = new Response(null, { status: 204 });
+    mocks.handler.mockResolvedValue(expected);
+    mocks.getBetterAuth.mockReturnValue({ handler: mocks.handler });
+    const request = new Request(
+      "https://example.test/api/auth/sign-in/email",
+      {
+        method: "POST",
+        headers: { "x-vercel-forwarded-for": "203.0.113.8" },
+      },
+    );
+
+    const response = await POST(request, context);
+
+    expect(response.status).toBe(expected.status);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0",
+    );
+    expect(mocks.handler).toHaveBeenCalledWith(request);
+  });
+
+  it("forces forwarded auth responses to remain private and non-cacheable", async () => {
+    const upstream = Response.json(
+      { session: null },
+      {
+        headers: {
+          "Cache-Control": "public, max-age=60",
+          "Set-Cookie": "better-auth.session_token=synthetic; Path=/; HttpOnly",
+        },
+      },
+    );
+    mocks.handler.mockResolvedValue(upstream);
+    mocks.getBetterAuth.mockReturnValue({ handler: mocks.handler });
+
+    const response = await GET(
+      new Request("https://example.test/api/auth/get-session"),
+      { params: Promise.resolve({ path: ["get-session"] }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe(
+      "private, no-store, max-age=0",
+    );
+    expect(response.headers.get("pragma")).toBe("no-cache");
+    expect(response.headers.get("expires")).toBe("0");
+    expect(response.headers.get("set-cookie")).toContain(
+      "better-auth.session_token=synthetic",
+    );
+    await expect(response.json()).resolves.toEqual({ session: null });
+  });
 });

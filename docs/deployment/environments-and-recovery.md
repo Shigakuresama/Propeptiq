@@ -36,40 +36,47 @@ never be promoted into Production data.
 
 These are deployment inputs and owner evidence, not database approval workflows. Missing catalog/destination inputs keep affected products unavailable; missing tax/shipping/provider inputs deny checkout; missing fulfillment readiness prevents release.
 
-Managed Neon Auth production activation additionally requires all of the
+Application-owned Better Auth activation additionally requires all of the
 following, with evidence retained for the exact deployment target:
 
-- separate, independently generated, stable cookie-signing and application
-  rate-limit secrets stored outside the repository;
-- production-capable custom SMTP configured in Managed Neon Auth with a verified
-  sender;
-- provider-required email verification;
-- reviewed exact Preview and Production trusted origins, with localhost disabled
-  for Production; and
-- a branch-isolated Preview lifecycle test covering signup, email verification,
-  sign-in, protected-route return, and sign-out without a Production identity or
-  data write.
+- separate, independently generated, stable `BETTER_AUTH_SECRET` and
+  `RATE_LIMIT_SECRET` values stored outside the repository;
+- the environment's direct, non-`-pooler` Neon PostgreSQL URL, with Better Auth
+  restricted to the branch-local `neon_auth` schema; a pooled URL is invalid
+  because the required search path is connection state;
+- the reviewed `src/auth/migrations/0001_rate_limit_windows.sql` support
+  migration applied to the exact target, followed by a read-back proving the
+  `propeptiq_auth.rate_limit_windows` shape and runtime-role access;
+- a Resend API key and verified sender address scoped to the environment;
+- provider-required email verification and the exact environment `APP_ORIGIN`;
+  and
+- a branch-isolated lifecycle test covering signup, OTP verification, sign-in,
+  protected-route return, and sign-out without a Production identity or data
+  write.
 
-Password recovery is independently closed until provider configuration is proven
-to revoke every pre-existing identity session after reset and a two-session branch
-test proves the reset token is single-use and both old sessions are rejected.
-Normal signup, verification, sign-in, and sign-out do not expose recovery while
-this evidence is absent.
+Password recovery is independently closed until the exact deployed Better Auth
+configuration proves that one reset rejects every pre-existing identity session
+and a two-session test proves the reset token is single-use. Normal signup,
+verification, sign-in, and sign-out do not expose recovery while this evidence is
+absent.
 
 The environment assertion `AUTH_EMAIL_DELIVERY_VERIFIED=verified` keeps live Auth
 closed until the normal production email and lifecycle evidence is retained. The
 separate `AUTH_PASSWORD_RESET_SESSION_REVOCATION=verified` assertion keeps only
 recovery closed. Neither value is evidence on its own.
 
-The 2026-08-30 disposable-branch test changed a synthetic password and consumed
-its reset token but left all three pre-reset sessions valid. Adding an undocumented
-`revokeSessionsOnPasswordReset` project-config key on that branch did not change
-the result. Therefore the recovery assertion must remain unset until Neon exposes
-and documents a working provider setting. Server identity reads bypass the SDK's
-signed session-data cache, and middleware cache reuse is limited to the SDK's
-shortest supported positive TTL (one second).
+The historical 2026-08-30 Managed Neon Auth test left all three pre-reset
+sessions valid. The replacement application-owned Better Auth configuration
+sets `revokeSessionsOnPasswordReset: true` and disables session-cookie caching.
+On an isolated disposable Neon branch, the application runtime then proved that
+one reset rejected two independent old sessions, the token could not be reused,
+the old password failed, and the new password worked. A second branch test proved
+that a credential created by the Managed Neon endpoint kept the same user ID and
+password hash when used by the application-owned runtime. Synthetic rows were
+removed after both tests. This evidence permits Preview validation; it does not
+establish that Production has been configured or deployed.
 
-Provider signup, application user projection, and `active` buyer creation are
+Better Auth signup, application user projection, and `active` buyer creation are
 three distinct transitions. A verified provider session may project an internal
 user only when the Auth and database adapters are enabled; age, structured
 purpose, and current attestation acceptance are still required before the buyer
@@ -78,6 +85,22 @@ profile becomes `active`.
 ## Promotion and migration
 
 Use reviewed commits, protected production deployment, environment-specific secrets, guarded ordered migrations, and a pre-deploy backup/restore plan. This repository currently exposes `db:generate` and `db:check` for source consistency only; it does **not** provide or authorize a Preview or Production migration-apply command. A future migration apply requires a separately reviewed command, exact target proof, backup/recovery evidence, and post-apply reconciliation. Never infer a passed integration, applied migration, external decision, or live behavior from local lint/tests.
+
+The compatible Better Auth 1.6.23 runtime cutover does not migrate identity
+rows. Do not apply a Better Auth 1.7 schema directly over the populated 1.6
+`account` table. A 1.7 upgrade requires the official read-only migration plan,
+a restored-backup rehearsal, stopped Auth writers, the guided account-identity
+data/schema migration, and post-migration verification.
+
+The Auth support migration is deliberately separate from the Drizzle commerce
+history. A live-shaped disposable branch contained `neon_auth` but neither the
+commerce migration ledger nor its general rate-limit table; applying that whole
+history just to activate Auth is not approved. The support migration creates
+only `propeptiq_auth.rate_limit_windows`, is safe to reapply after its target has
+been proven, and validates its columns, key, checks, and index before commit. A
+migration owner must grant the runtime role only the schema usage and table
+read/write privileges it needs, then prove an atomic increment through that
+runtime role. The SQL file is not an automatic Production-apply command.
 
 ## Safe modes
 
@@ -115,3 +138,12 @@ Do not delete journals or fabricate records to force systems to agree. Restore t
 ## Rollback
 
 Application rollback does not automatically reverse a database migration or provider effect. Prefer forward fixes; use a reviewed data migration when needed. A rollback must preserve compatibility with the deployed schema and journals, then rerun scoped verification and reconciliation before resuming writes.
+
+For the bounded Auth cutover window, rollback restores the previous application
+deployment and its Managed Neon Auth URL/cookie-secret variables without
+rewriting `neon_auth` rows. Do not rotate or delete existing credential data as
+part of application rollback. Read back signup, verified sign-in, sign-out, and
+recovery state on the restored deployment before reopening account writes.
+Customers with a Managed Neon browser cookie may need to sign in once after the
+forward cutover because the application-owned runtime uses its own cookie prefix
+and secret; password records and user IDs remain unchanged.

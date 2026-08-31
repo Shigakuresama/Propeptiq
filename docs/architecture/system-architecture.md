@@ -8,7 +8,7 @@ Browser
     -> server actions and route handlers
       -> pure domain policies
         -> server-only repositories and adapters
-          -> Managed Neon Auth | Neon/Drizzle | Stripe-hosted Checkout | Blob | Resend
+          -> Better Auth + Resend | Neon PostgreSQL/Drizzle | Stripe-hosted Checkout | Blob
 ```
 
 The final adapter line is the target topology, not a claim that those vendor
@@ -21,7 +21,7 @@ The browser may hold anonymous cart product IDs and quantities. It is never auth
 ## Public and account flow
 
 1. Public catalog projections expose only active manifest-backed products, prices, promotions, and supported quality records.
-2. Anonymous cart state contains product IDs/quantities and survives Managed Neon Auth sign-in.
+2. Anonymous cart state contains product IDs/quantities and survives Better Auth sign-in.
 3. Checkout collects a provider-verified account, age 21+, structured purpose, current attestation, and destination.
 4. Completing account facts creates an `active` buyer automatically.
 5. The server loads all six eligibility gates and the separate tax/shipping prerequisites.
@@ -37,7 +37,7 @@ Signed raw-body provider webhooks are the payment write boundary. Unique provide
 
 ## Administration
 
-Staff routes require an application capability and current server-verifiable MFA. One administrator may publish catalog, destination, promotion, and copy changes with an audit event. Refund and fulfillment mutations require their matching capability and MFA. Until the Managed Neon Auth adapter can project that MFA evidence, its staff access fails closed.
+Staff routes require an application capability and current server-verifiable MFA. One administrator may publish catalog, destination, promotion, and copy changes with an audit event. Refund and fulfillment mutations require their matching capability and MFA. Until the Better Auth adapter can project that MFA evidence, its staff access fails closed.
 
 ## Failure behavior
 

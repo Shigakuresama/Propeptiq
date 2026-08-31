@@ -1,11 +1,12 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { readServerEnv } from "@/env";
+import { consumeAuthActionRateLimit } from "@/auth/action-rate-limit";
 
 import {
   authRouteWithDestination,
@@ -49,27 +50,32 @@ function isUnverifiedEmailError(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&
-    "code" in error &&
-    error.code === "email_not_confirmed"
+    "body" in error &&
+    typeof error.body === "object" &&
+    error.body !== null &&
+    "code" in error.body &&
+    error.body.code === "EMAIL_NOT_VERIFIED"
   );
 }
 
-async function loadManagedAuth(environment: ReturnType<typeof readServerEnv>) {
-  const { getNeonAuthForEnvironment } = await import("@/auth/neon-server");
-  return getNeonAuthForEnvironment(environment);
+async function loadBetterAuth(environment: ReturnType<typeof readServerEnv>) {
+  const { getBetterAuthForEnvironment } = await import(
+    "@/auth/better-auth-server"
+  );
+  return getBetterAuthForEnvironment(environment);
 }
 
 async function requestVerificationCode(
   email: string,
 ): Promise<boolean> {
   const environment = readServerEnv();
-  const auth = await loadManagedAuth(environment);
+  const auth = await loadBetterAuth(environment);
   if (!auth) return false;
-  const { data, error } = await auth.emailOtp.sendVerificationOtp({
-    email,
-    type: "email-verification",
+  const result = await auth.api.sendVerificationOTP({
+    body: { email, type: "email-verification" },
+    headers: await headers(),
   });
-  return !error && data?.success === true;
+  return result.success === true;
 }
 
 function verificationState(
@@ -102,28 +108,28 @@ export async function signUpWithEmail(
   }
 
   const environment = readServerEnv();
-  const auth = await loadManagedAuth(environment);
+  if (!(await consumeAuthActionRateLimit(environment, "signUp"))) {
+    return genericAuthError;
+  }
+  const auth = await loadBetterAuth(environment);
   if (!auth) return genericAuthError;
 
-  let verified = false;
   try {
-    const { data, error } = await auth.signUp.email(parsed.data);
-    if (error || !data?.user) return genericAuthError;
-    verified = data.user.emailVerified;
-    if (!verified) {
-      const sent = await requestVerificationCode(parsed.data.email);
+    const result = await auth.api.signUpEmail({
+      body: parsed.data,
+      headers: await headers(),
+    });
+    if (!result?.user) return genericAuthError;
+    if (!result.user.emailVerified) {
       return verificationState(
         parsed.data.email,
-        sent
-          ? "Enter the verification code sent to your email address."
-          : "Your account was created, but a verification code could not be sent. Request a new code to continue.",
+        "Enter the verification code from your email. If it does not arrive, request a new code.",
       );
     }
   } catch {
     return genericAuthError;
   }
-  if (verified) redirect(resolveAuthDestination(formData.get("returnTo")));
-  return genericAuthError;
+  redirect(resolveAuthDestination(formData.get("returnTo")));
 }
 
 export async function signInWithEmail(
@@ -139,34 +145,36 @@ export async function signInWithEmail(
   if (!parsed.success) return genericAuthError;
 
   const environment = readServerEnv();
-  const auth = await loadManagedAuth(environment);
+  if (!(await consumeAuthActionRateLimit(environment, "signIn"))) {
+    return genericAuthError;
+  }
+  const auth = await loadBetterAuth(environment);
   if (!auth) return genericAuthError;
 
   try {
-    const { data, error } = await auth.signIn.email(parsed.data);
-    if (error) {
-      if (isUnverifiedEmailError(error)) {
-        const sent = await requestVerificationCode(parsed.data.email);
-        return verificationState(
-          parsed.data.email,
-          sent
-            ? "Enter the verification code sent to your email address."
-            : "Your email still needs verification, but a code could not be sent. Request a new code to continue.",
-        );
-      }
-      return genericAuthError;
-    }
-    if (!data?.user) return genericAuthError;
-    if (!data.user.emailVerified) {
-      const sent = await requestVerificationCode(parsed.data.email);
+    const result = await auth.api.signInEmail({
+      body: parsed.data,
+      headers: await headers(),
+    });
+    if (!result?.user || !result.user.emailVerified) {
+      await requestVerificationCode(parsed.data.email);
       return verificationState(
         parsed.data.email,
-        sent
-          ? "Enter the verification code sent to your email address."
-          : "Your email still needs verification, but a code could not be sent. Request a new code to continue.",
+        "If this address can receive a verification code, one has been requested. Check your inbox.",
       );
     }
-  } catch {
+  } catch (error) {
+    if (isUnverifiedEmailError(error)) {
+      try {
+        await requestVerificationCode(parsed.data.email);
+      } catch {
+        // Keep the public state independent of account and delivery status.
+      }
+      return verificationState(
+        parsed.data.email,
+        "If this address can receive a verification code, one has been requested. Check your inbox.",
+      );
+    }
     return genericAuthError;
   }
   redirect(resolveAuthDestination(formData.get("returnTo")));
@@ -185,26 +193,27 @@ export async function verifyEmailOtp(
   }
 
   const environment = readServerEnv();
-  const auth = await loadManagedAuth(environment);
+  if (!(await consumeAuthActionRateLimit(environment, "verifyEmail"))) {
+    return verificationState(
+      email.data,
+      "That code could not be verified. Request a new code and try again.",
+    );
+  }
+  const auth = await loadBetterAuth(environment);
   if (!auth) return genericAuthError;
 
   const destination = resolveAuthDestination(formData.get("returnTo"));
   try {
-    const { data, error } = await auth.emailOtp.verifyEmail({
-      email: email.data,
-      otp: otp.data,
+    const result = await auth.api.verifyEmailOTP({
+      body: { email: email.data, otp: otp.data },
+      headers: await headers(),
     });
-    if (error || data?.status !== true) {
+    if (
+      result.status !== true ||
+      !result.token ||
+      !result.user.emailVerified
+    ) {
       return verificationState(email.data, "That code could not be verified. Request a new code and try again.");
-    }
-    const sessionResult = await auth.getSession({
-      query: { disableCookieCache: "true" },
-    });
-    if (sessionResult.error || !sessionResult.data?.user.emailVerified) {
-      return verificationState(
-        email.data,
-        "Your email was verified, but the session could not be refreshed. Use a different email to sign in again.",
-      );
     }
   } catch {
     return verificationState(email.data, "That code could not be verified. Request a new code and try again.");
@@ -218,8 +227,13 @@ export async function resendVerificationCode(
 ): Promise<ManagedAuthActionState> {
   const email = emailSchema.safeParse(formData.get("email"));
   if (!email.success) return genericAuthError;
+  const environment = readServerEnv();
   try {
-    await requestVerificationCode(email.data);
+    if (
+      await consumeAuthActionRateLimit(environment, "resendVerification")
+    ) {
+      await requestVerificationCode(email.data);
+    }
   } catch {
     // Keep the public response identical so this action cannot be used to
     // distinguish registered, unverified, or unknown email addresses.
@@ -235,7 +249,7 @@ export async function signOutManagedIdentity(
   formData: FormData,
 ): Promise<ManagedAuthActionState> {
   void _previousState;
-  const auth = await loadManagedAuth(readServerEnv());
+  const auth = await loadBetterAuth(readServerEnv());
   if (!auth) {
     return Object.freeze({
       status: "error",
@@ -243,8 +257,8 @@ export async function signOutManagedIdentity(
     });
   }
   try {
-    const { error } = await auth.signOut();
-    if (error) {
+    const result = await auth.api.signOut({ headers: await headers() });
+    if (!result.success) {
       return Object.freeze({
         status: "error",
         message: "We could not sign you out. Please try again.",
@@ -284,13 +298,21 @@ export async function requestManagedPasswordReset(
     return genericPasswordResetUnavailable;
   }
   const destination = resolveAuthDestination(formData.get("returnTo"));
-  let auth: Awaited<ReturnType<typeof loadManagedAuth>>;
+  if (!environment.APP_ORIGIN) {
+    return genericPasswordResetUnavailable;
+  }
+  if (
+    !(await consumeAuthActionRateLimit(environment, "requestPasswordReset"))
+  ) {
+    return genericPasswordResetRequest;
+  }
+  let auth: Awaited<ReturnType<typeof loadBetterAuth>>;
   try {
-    auth = await loadManagedAuth(environment);
+    auth = await loadBetterAuth(environment);
   } catch {
     return genericPasswordResetUnavailable;
   }
-  if (!auth || !environment.APP_ORIGIN) {
+  if (!auth) {
     return genericPasswordResetUnavailable;
   }
 
@@ -300,9 +322,12 @@ export async function requestManagedPasswordReset(
   );
   redirectUrl.searchParams.set("returnTo", destination);
   try {
-    await auth.requestPasswordReset({
-      email: email.data,
-      redirectTo: redirectUrl.toString(),
+    await auth.api.requestPasswordReset({
+      body: {
+        email: email.data,
+        redirectTo: redirectUrl.toString(),
+      },
+      headers: await headers(),
     });
   } catch {
     // The public response must remain identical for known and unknown emails,
@@ -348,14 +373,20 @@ export async function resetManagedPassword(
   ) {
     return genericPasswordResetUnavailable;
   }
-  const auth = await loadManagedAuth(environment);
+  if (!(await consumeAuthActionRateLimit(environment, "resetPassword"))) {
+    return genericPasswordResetError;
+  }
+  const auth = await loadBetterAuth(environment);
   if (!auth) return genericPasswordResetError;
   try {
-    const { data, error } = await auth.resetPassword({
-      newPassword: passwords.data.password,
-      token: token.data,
+    const result = await auth.api.resetPassword({
+      body: {
+        newPassword: passwords.data.password,
+        token: token.data,
+      },
+      headers: await headers(),
     });
-    if (error || !data?.status) return genericPasswordResetError;
+    if (!result.status) return genericPasswordResetError;
   } catch {
     return genericPasswordResetError;
   }

@@ -19,11 +19,11 @@ import { POST, dynamic } from "./route";
 const buyerUserId = "50000000-0000-4000-8000-000000000004";
 const idempotencyKey = "6e000000-0000-4000-8000-000000000001";
 const origin = "http://127.0.0.1:4631";
-const syntheticNeonAuth = {
-  STORAGE_NEON_AUTH_BASE_URL:
-    "https://ep-synthetic.neonauth.c-10.us-east-1.aws.neon.tech/neondb/auth",
-  NEON_AUTH_COOKIE_SECRET:
-    "synthetic-neon-auth-cookie-secret-at-least-32-characters",
+const syntheticBetterAuth = {
+  BETTER_AUTH_SECRET:
+    "synthetic-better-auth-secret-material-0123456789ABCDEF",
+  RESEND_API_KEY: "re_synthetic_auth_test",
+  RESEND_FROM: "accounts@example.test",
 } as const;
 const previewEnvironment = parseServerEnv({
   APP_ENV: "preview",
@@ -33,7 +33,7 @@ const previewEnvironment = parseServerEnv({
   LOCAL_TEST_DRIVER: "disabled",
   LOCAL_TEST_SECRET: "",
   AUTH_MODE: "test",
-  ...syntheticNeonAuth,
+  ...syntheticBetterAuth,
   RATE_LIMIT_SECRET: "synthetic-task7-preview-rate-limit-secret-0001",
   DATABASE_MODE: "test",
   TEST_DATABASE_URL:
@@ -46,7 +46,7 @@ const previewEnvironment = parseServerEnv({
   STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
   STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
   STORAGE_MODE: "disabled",
-  EMAIL_MODE: "disabled",
+  EMAIL_MODE: "test",
   TAX_MODE: "disabled",
   SHIPPING_MODE: "disabled",
   FULFILLMENT_MODE: "disabled",

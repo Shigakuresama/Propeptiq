@@ -1,17 +1,22 @@
-import type { NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-import { getNeonAuthForEnvironment } from "@/auth/neon-server";
+import { getBetterAuthForEnvironment } from "@/auth/better-auth-server";
 import { authRouteWithDestination, SIGN_IN_ROUTE } from "@/auth/routes";
 import { parseServerEnv } from "@/config/env-schema";
 
-export default function proxy(request: NextRequest) {
+export default async function proxy(request: NextRequest) {
   const environment = parseServerEnv(process.env);
-  const auth = getNeonAuthForEnvironment(environment);
+  const auth = getBetterAuthForEnvironment(environment);
   if (!auth) return;
+  const validatedSession = await auth.api.getSession({
+    headers: request.headers,
+  });
+  if (validatedSession?.user) return;
+
   const returnTo = `${request.nextUrl.pathname}${request.nextUrl.search}`;
-  return auth.middleware({
-    loginUrl: authRouteWithDestination(SIGN_IN_ROUTE, returnTo),
-  })(request);
+  return NextResponse.redirect(
+    new URL(authRouteWithDestination(SIGN_IN_ROUTE, returnTo), request.url),
+  );
 }
 
 export const config = {
