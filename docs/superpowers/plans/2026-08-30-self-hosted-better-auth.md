@@ -157,7 +157,7 @@ Expected: all new tests pass without opening a real database connection.
 - [ ] **Step 6: Commit the application-owned runtime**
 
 ```text
-git add src/auth/better-auth-email.ts src/auth/better-auth-email.test.ts src/auth/better-auth-server.ts src/auth/better-auth-server.test.ts src/auth/neon-server.ts src/auth/neon-server.test.ts
+git add -A -- src/auth
 git commit -m "feat(auth): configure self-hosted Better Auth"
 ```
 

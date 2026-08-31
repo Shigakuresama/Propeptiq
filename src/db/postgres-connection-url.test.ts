@@ -23,6 +23,35 @@ describe("PostgreSQL connection URL preparation", () => {
     expect(preparePostgresConnectionUrl(input)).toBe(input);
   });
 
+  it("adds verified TLS when a remote URL omits sslmode", () => {
+    expect(
+      preparePostgresConnectionUrl(
+        "postgresql://role:password@ep-example.aws.neon.tech/neondb",
+      ),
+    ).toBe(
+      "postgresql://role:password@ep-example.aws.neon.tech/neondb?sslmode=verify-full",
+    );
+  });
+
+  it.each(["disable", "allow", "no-verify"])(
+    "rejects the explicit remote TLS downgrade sslmode=%s",
+    (sslMode) => {
+      expect(() =>
+        preparePostgresConnectionUrl(
+          `postgresql://role:password@db.example.test/neondb?sslmode=${sslMode}`,
+        ),
+      ).toThrow(/verified TLS/i);
+    },
+  );
+
+  it.each([
+    "postgresql://role:password@localhost/neondb",
+    "postgresql://role:password@127.0.0.1/neondb?sslmode=disable",
+    "postgresql://role:password@[::1]/neondb",
+  ])("preserves an unencrypted loopback-only URL: %s", (input) => {
+    expect(preparePostgresConnectionUrl(input)).toBe(input);
+  });
+
   it("rejects transaction-pooled URLs when a persistent session is required", () => {
     expect(() =>
       preparePostgresConnectionUrl(

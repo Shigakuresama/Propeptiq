@@ -2,6 +2,15 @@ type PostgresConnectionOptions = Readonly<{
   requirePersistentSession?: boolean;
 }>;
 
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname.toLowerCase() === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  );
+}
+
 export function preparePostgresConnectionUrl(
   input: string,
   options: PostgresConnectionOptions = {},
@@ -25,14 +34,18 @@ export function preparePostgresConnectionUrl(
     );
   }
 
+  if (isLoopbackHostname(databaseUrl.hostname)) return input;
+
   const sslMode = databaseUrl.searchParams.get("sslmode")?.toLowerCase();
+  if (sslMode === "verify-full") return input;
   if (
-    sslMode === "prefer" ||
-    sslMode === "require" ||
-    sslMode === "verify-ca"
+    sslMode === "disable" ||
+    sslMode === "allow" ||
+    sslMode === "no-verify"
   ) {
-    databaseUrl.searchParams.set("sslmode", "verify-full");
-    return databaseUrl.toString();
+    throw new Error("Remote PostgreSQL connection URL must use verified TLS");
   }
-  return input;
+
+  databaseUrl.searchParams.set("sslmode", "verify-full");
+  return databaseUrl.toString();
 }

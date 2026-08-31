@@ -35,11 +35,8 @@ function untrustedCallerResponse(): Response {
   return Response.json(
     { error: "Identity request unavailable" },
     {
-      status: 429,
-      headers: {
-        "Cache-Control": "no-store",
-        "Retry-After": "60",
-      },
+      status: 400,
+      headers: { "Cache-Control": "no-store" },
     },
   );
 }

@@ -233,9 +233,9 @@ describe("application-owned Better Auth API route", () => {
       context,
     );
 
-    expect(response.status).toBe(429);
+    expect(response.status).toBe(400);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.get("retry-after")).toBe("60");
+    expect(response.headers.get("retry-after")).toBeNull();
     expect(mocks.handler).not.toHaveBeenCalled();
   });
 

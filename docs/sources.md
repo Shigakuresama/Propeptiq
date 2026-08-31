@@ -24,10 +24,10 @@ These sources do not establish that any PROPEPTIQ SKU is legal in any jurisdicti
 ## Identity and authorization
 
 - Better Auth 1.6 Next.js integration and server-action cookies: https://better-auth.com/docs/1.6/integrations/next
-- Better Auth email/password and reset-session revocation: https://better-auth.com/docs/authentication/email-password
-- Better Auth email OTP: https://better-auth.com/docs/plugins/email-otp
-- Better Auth session management: https://better-auth.com/docs/concepts/session-management
-- Better Auth PostgreSQL and non-default `search_path`: https://better-auth.com/docs/adapters/postgresql
+- Better Auth email/password and reset-session revocation: https://better-auth.com/docs/1.6/authentication/email-password
+- Better Auth email OTP: https://better-auth.com/docs/1.6/plugins/email-otp
+- Better Auth session management: https://better-auth.com/docs/1.6/concepts/session-management
+- Better Auth PostgreSQL and non-default `search_path`: https://better-auth.com/docs/1.6/adapters/postgresql
 - Better Auth 1.7 guided migration requirements: https://better-auth.com/docs/guides/1-7-upgrade-guide
 - Neon branchable Auth data in the branch-local `neon_auth` schema: https://neon.com/docs/changelog/2025-12-12
 - Managed Neon Auth Next.js server SDK, retained for the bounded rollback window: https://neon.com/docs/auth/reference/nextjs-server

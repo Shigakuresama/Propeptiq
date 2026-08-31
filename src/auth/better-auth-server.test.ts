@@ -62,7 +62,8 @@ describe("application-owned Better Auth server configuration", () => {
 
     expect(auth).toEqual({ marker: "better-auth" });
     expect(createPool).toHaveBeenCalledWith({
-      connectionString: enabledEnvironment.TEST_DATABASE_URL,
+      connectionString:
+        "postgresql://synthetic_auth:synthetic_password@db.example.invalid/propeptiq_auth_test?sslmode=verify-full",
       options: "-c search_path=neon_auth",
       max: 5,
       idleTimeoutMillis: 10_000,
