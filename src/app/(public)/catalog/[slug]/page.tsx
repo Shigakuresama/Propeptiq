@@ -117,7 +117,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               Tax, shipping, and final discounts are calculated later.
             </p>
             <AddToCartButton
-              productId={product.id}
+              variantId={null}
               productName={product.name}
               className="mt-7 w-full"
             />

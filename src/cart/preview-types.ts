@@ -1,5 +1,5 @@
 export type CartPreviewItem = {
-  productId: string;
+  variantId: string;
   quantity: number;
   available: boolean;
   name: string | null;
@@ -25,11 +25,6 @@ export function canContinueFromPreview(
   preview: CartPreview,
   acknowledgedPreviewToken: string | null,
 ): boolean {
-  if (preview.items.length === 0 || preview.items.some((item) => !item.available)) {
-    return false;
-  }
-  return (
-    !preview.requiresAcknowledgement ||
-    acknowledgedPreviewToken === preview.previewToken
-  );
+  if (preview.items.length === 0 || preview.items.some((item) => !item.available)) return false;
+  return !preview.requiresAcknowledgement || acknowledgedPreviewToken === preview.previewToken;
 }

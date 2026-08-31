@@ -7,25 +7,29 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export function AddToCartButton({
-  productId,
+  variantId,
   productName,
   className,
 }: {
-  productId: string;
+  variantId: string | null;
   productName: string;
   className?: string;
 }) {
-  const { addItem } = useCart();
+  const { addVariant } = useCart();
+  const unavailable = variantId === null;
 
   return (
     <Button
       type="button"
       className={cn("action-primary", className)}
-      aria-label={`Add ${productName} to cart`}
-      onClick={() => addItem(productId)}
+      aria-label={unavailable ? `${productName} requires variant selection` : `Add ${productName} to cart`}
+      disabled={unavailable}
+      onClick={() => {
+        if (variantId !== null) addVariant(variantId);
+      }}
     >
       <ShoppingBag aria-hidden="true" />
-      Add to cart
+      {unavailable ? "Variant selection unavailable" : "Add to cart"}
     </Button>
   );
 }

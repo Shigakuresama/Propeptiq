@@ -276,7 +276,7 @@ export function CheckoutForm({
   const presentationLoadedRef = useRef(false);
 
   const checkoutItems = useMemo(
-    () => items.map((item) => ({ productId: item.productId.toLowerCase(), quantity: item.quantity })),
+    () => items.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
     [items],
   );
   const requestedRewardPoints = Number(rewardRedemptionPoints);
@@ -332,20 +332,20 @@ export function CheckoutForm({
         if (
           parsed === null || parsed.items.length !== checkoutItems.length ||
           parsed.items.some((line, index) =>
-            line.productId !== checkoutItems[index]?.productId ||
+            line.variantId !== checkoutItems[index]?.variantId ||
             line.quantity !== checkoutItems[index]?.quantity)
         ) throw new Error("Authoritative cart preview is incoherent");
         return parsed;
       })
       .then((preview) => {
-        const priorById = new Map(retained?.items.map((line) => [line.productId, line]));
-        const currentIds = new Set(preview.items.map((line) => line.productId));
+        const priorById = new Map(retained?.items.map((line) => [line.variantId, line]));
+        const currentIds = new Set(preview.items.map((line) => line.variantId));
         const changes = [
-          ...(retained?.items.filter((line) => !currentIds.has(line.productId))
-            .map((line) => `Removed request: ${line.name ?? line.productId}`) ?? []),
+          ...(retained?.items.filter((line) => !currentIds.has(line.variantId))
+            .map((line) => `Removed request: ${line.name ?? line.variantId}`) ?? []),
           ...preview.items.flatMap((line) => {
-            const prior = priorById.get(line.productId);
-            const label = line.name ?? prior?.name ?? line.productId;
+            const prior = priorById.get(line.variantId);
+            const label = line.name ?? prior?.name ?? line.variantId;
             if (!line.available) return [`Unavailable request: ${label}`];
             if (prior && prior.quantity !== line.quantity) return [`Quantity adjusted in preview: ${label}`];
             if (prior && (prior.name !== line.name || prior.packageForm !== line.packageForm ||
@@ -402,6 +402,7 @@ export function CheckoutForm({
 
   function validate(): boolean {
     const next: Errors = {};
+    if (items.length > 0) next.items = "Checkout is temporarily unavailable while variant checkout is being connected.";
     if (items.length < 1) next.items = "Add at least one available catalog record";
     if (!normalizedRequest.destination.recipientName || normalizedRequest.destination.recipientName.length > 120) next.recipientName = "Enter a recipient name";
     if (!normalizedRequest.destination.line1 || normalizedRequest.destination.line1.length > 120) next.line1 = "Enter address line 1";
@@ -424,6 +425,14 @@ export function CheckoutForm({
 
   async function submitQuote(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (items.length > 0) {
+      setFeedback({
+        fingerprint,
+        message: "Checkout is temporarily unavailable while canonical variant checkout is being connected. Your browser-saved cart has not been cleared.",
+        lastFailed: null,
+      });
+      return;
+    }
     if (!previewCanContinue) {
       setFeedback({
         fingerprint,
@@ -525,7 +534,7 @@ export function CheckoutForm({
       <p className="eyebrow">Authoritative checkout</p>
       <h2 id="checkout-form-heading" className="mt-3 font-heading text-3xl">Destination and totals</h2>
       <p className="mt-3 text-base leading-7 text-muted-ink">
-        Product IDs and quantities come from your browser-saved cart. The server reloads every price, discount, availability, destination, shipping, and tax fact.
+        Your browser-saved cart contains canonical variant identifiers and quantities. Variant checkout is temporarily unavailable while the server checkout boundary is being connected.
       </p>
       {syntheticLocal ? (
         <p className="warning-record mt-5 font-semibold">Synthetic local test only</p>
@@ -647,8 +656,8 @@ export function CheckoutForm({
           />
         </Field>
         {errors.items ? <p id="items-error" className="error-record text-base" role="alert">{errors.items}</p> : null}
-        <Button type="submit" className="action-primary min-h-12 w-full sm:w-auto" disabled={busy !== null || items.length === 0 || !previewCanContinue}>
-          {busy === "quote" ? "Getting authoritative quote…" : "Get authoritative quote"}
+        <Button type="submit" className="action-primary min-h-12 w-full sm:w-auto" disabled={true}>
+          {busy === "quote" ? "Getting authoritative quote…" : "Variant checkout unavailable"}
         </Button>
       </form>
 

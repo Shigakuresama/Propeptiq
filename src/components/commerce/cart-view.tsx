@@ -32,9 +32,11 @@ export function CartView({
   const {
     items,
     hydrated,
+    legacyItemCount,
     setQuantity,
     removeItem,
     clearCart,
+    acknowledgeLegacyReselection,
   } = useCart();
   const cartKey = JSON.stringify(items);
   const [previewState, setPreviewState] = useState<{
@@ -109,7 +111,8 @@ export function CartView({
   const displayedItems: readonly CartPreviewItem[] =
     preview?.items ??
     items.map((item) => ({
-      ...item,
+      quantity: item.quantity,
+      variantId: item.variantId,
       available: false,
       name: null,
       packageForm: null,
@@ -128,12 +131,33 @@ export function CartView({
     return <div className="cart-loading" aria-label="Loading saved cart" />;
   }
 
+  if (legacyItemCount !== null) {
+    return (
+      <section className="empty-record" aria-labelledby="cart-reselection-heading">
+        <h2 id="cart-reselection-heading" className="font-heading text-section text-ink">
+          Choose your variants again.
+        </h2>
+        <p className="mt-4 max-w-[60ch] leading-7 text-muted-ink">
+          Your saved cart contains {legacyItemCount} requested unit{legacyItemCount === 1 ? "" : "s"} from an older cart format. Choose each exact variant again before continuing.
+        </p>
+        <div className="mt-7 flex flex-wrap gap-3">
+          <Button type="button" className="action-primary" onClick={acknowledgeLegacyReselection}>
+            Clear old cart and choose variants
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/catalog">Return to catalog</Link>
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
   if (items.length === 0) {
     return (
       <section className="empty-record">
         <h2 className="font-heading text-section text-ink">Your cart is empty.</h2>
         <p className="mt-4 max-w-[60ch] leading-7 text-muted-ink">
-          Add an active catalog record to create a local request. Prices and availability
+          Add an exact active catalog variant to create a local request. Prices and availability
           will be reloaded from the server.
         </p>
         <Button asChild className="action-primary mt-7">
@@ -174,9 +198,9 @@ export function CartView({
 
         <ul className="divide-y divide-border" aria-live="polite">
           {displayedItems.map((item) => {
-            const label = item.name ?? item.productId;
+            const label = item.name ?? item.variantId;
             return (
-              <li className="py-7" key={item.productId}>
+              <li className="py-7" key={item.variantId}>
                 <div className="grid gap-5 sm:grid-cols-[1fr_auto] sm:items-start">
                   <div>
                     <p className="font-heading text-2xl text-ink">{label}</p>
@@ -198,7 +222,7 @@ export function CartView({
                     <div>
                       <label
                         className="mb-2 block text-xs font-semibold text-muted-ink"
-                        htmlFor={`quantity-${item.productId}`}
+                        htmlFor={`quantity-${item.variantId}`}
                       >
                         Quantity
                       </label>
@@ -208,12 +232,12 @@ export function CartView({
                           variant="outline"
                           size="icon"
                           aria-label={`Decrease quantity for ${label}`}
-                          onClick={() => setQuantity(item.productId, item.quantity - 1)}
+                          onClick={() => setQuantity(item.variantId, item.quantity - 1)}
                         >
                           <Minus aria-hidden="true" />
                         </Button>
                         <input
-                          id={`quantity-${item.productId}`}
+                          id={`quantity-${item.variantId}`}
                           aria-label={`Quantity for ${label}`}
                           inputMode="numeric"
                           min="1"
@@ -223,7 +247,7 @@ export function CartView({
                           onChange={(event) => {
                             const quantity = event.currentTarget.valueAsNumber;
                             if (Number.isFinite(quantity)) {
-                              setQuantity(item.productId, quantity);
+                              setQuantity(item.variantId, quantity);
                             }
                           }}
                         />
@@ -232,7 +256,7 @@ export function CartView({
                           variant="outline"
                           size="icon"
                           aria-label={`Increase quantity for ${label}`}
-                          onClick={() => setQuantity(item.productId, item.quantity + 1)}
+                          onClick={() => setQuantity(item.variantId, item.quantity + 1)}
                         >
                           <Plus aria-hidden="true" />
                         </Button>
@@ -243,7 +267,7 @@ export function CartView({
                       variant="ghost"
                       size="icon"
                       aria-label={`Remove ${label} from cart`}
-                      onClick={() => removeItem(item.productId)}
+                      onClick={() => removeItem(item.variantId)}
                     >
                       <Trash2 aria-hidden="true" />
                     </Button>

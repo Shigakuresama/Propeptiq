@@ -46,7 +46,7 @@ describe("public shared research set page", () => {
     expect(markup).toContain("Analytical reference set");
     expect(markup).toContain("Reference A");
     expect(markup).toContain("One saved product is no longer available");
-    expect(markup).toContain("Add set to cart");
+    expect(markup).toContain("Variant selection unavailable");
     expect(markup).toMatch(/<article[^>]+aria-labelledby=/u);
     expect(markup.match(/<h1/gu)).toHaveLength(1);
     expect(markup).not.toMatch(/owner|email|price|discount|inventory|checkout/iu);

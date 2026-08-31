@@ -47,19 +47,19 @@ export function CheckoutCartStatus() {
       <h2 id="saved-request-heading" className="mt-3 font-heading text-3xl">{quantity} requested unit{quantity === 1 ? "" : "s"}</h2>
       {previewError ? (
         <p className="error-record mt-5" role="alert">
-          The authoritative product preview is unavailable. Browser request identifiers below are not verified product facts.
+          The authoritative variant preview is unavailable. Browser request identifiers below are not verified product facts.
         </p>
       ) : null}
       {items.length > 0 ? (
         <ul className="mt-6 grid gap-3 p-0" aria-label="Saved cart lines">
           {items.map((item) => {
             const verified = preview?.items.find(
-              (candidate) => candidate.productId === item.productId,
+              (candidate) => candidate.variantId === item.variantId,
             );
             return (
-              <li key={item.productId} className="flex min-w-0 justify-between gap-4 border-b border-border pb-3">
+              <li key={item.variantId} className="flex min-w-0 justify-between gap-4 border-b border-border pb-3">
                 <span className="min-w-0 break-all font-medium">
-                  {verified?.name ?? item.productId}
+                  {verified?.name ?? item.variantId}
                   {!verified ? (
                     <span className="mt-1 block text-sm font-normal text-muted-ink">
                       {preview

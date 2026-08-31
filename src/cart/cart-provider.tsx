@@ -12,8 +12,10 @@ import {
 
 import {
   CART_STORAGE_KEY,
+  LEGACY_CART_STORAGE_KEY,
   MAX_CART_ITEM_QUANTITY,
   type CartLine,
+  acknowledgeLegacyCartReselection,
   loadCart,
   normalizeCart,
   persistCart,
@@ -23,10 +25,12 @@ type CartContextValue = {
   items: readonly CartLine[];
   itemCount: number;
   hydrated: boolean;
-  addItem: (productId: string, quantity?: number) => void;
-  setQuantity: (productId: string, quantity: number) => void;
-  removeItem: (productId: string) => void;
+  legacyItemCount: number | null;
+  addVariant: (variantId: string, quantity?: number) => void;
+  setQuantity: (variantId: string, quantity: number) => void;
+  removeItem: (variantId: string) => void;
   clearCart: () => void;
+  acknowledgeLegacyReselection: () => void;
 };
 
 const CartContext = createContext<CartContextValue | null>(null);
@@ -38,34 +42,49 @@ function itemCount(items: readonly CartLine[]): number {
 export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartLine[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [legacyItemCount, setLegacyItemCount] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState("");
 
   useEffect(() => {
     const hydration = window.setTimeout(() => {
-      setItems(loadCart(window.localStorage));
+      const loaded = loadCart(window.localStorage);
+      if (loaded.status === "ready") {
+        setItems([...loaded.items]);
+        setLegacyItemCount(null);
+      } else {
+        setItems([]);
+        setLegacyItemCount(loaded.legacyItemCount);
+      }
       setHydrated(true);
     }, 0);
     return () => window.clearTimeout(hydration);
   }, []);
 
   useEffect(() => {
-    if (hydrated) persistCart(window.localStorage, items);
-  }, [hydrated, items]);
+    if (hydrated && legacyItemCount === null) persistCart(window.localStorage, items);
+  }, [hydrated, items, legacyItemCount]);
 
   useEffect(() => {
     function synchronize(event: StorageEvent) {
-      if (event.key === CART_STORAGE_KEY) {
-        setItems(loadCart(window.localStorage));
+      if (event.key === CART_STORAGE_KEY || event.key === LEGACY_CART_STORAGE_KEY) {
+        const loaded = loadCart(window.localStorage);
+        if (loaded.status === "ready") {
+          setItems([...loaded.items]);
+          setLegacyItemCount(null);
+        } else {
+          setItems([]);
+          setLegacyItemCount(loaded.legacyItemCount);
+        }
       }
     }
     window.addEventListener("storage", synchronize);
     return () => window.removeEventListener("storage", synchronize);
   }, []);
 
-  const addItem = useCallback((productId: string, quantity = 1) => {
+  const addVariant = useCallback((variantId: string, quantity = 1) => {
     setItems((current) => {
-      const next = normalizeCart([...current, { productId, quantity }]);
-      const added = next.find((item) => item.productId === productId)?.quantity;
+      const next = normalizeCart([...current, { variantId, quantity }]);
+      const added = next.find((item) => item.variantId === variantId)?.quantity;
       setAnnouncement(
         added
           ? `Cart updated. ${added} unit${added === 1 ? "" : "s"} requested for this record.`
@@ -75,14 +94,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setQuantity = useCallback((productId: string, quantity: number) => {
+  const setQuantity = useCallback((variantId: string, quantity: number) => {
     setItems((current) => {
       const bounded = Math.min(MAX_CART_ITEM_QUANTITY, Math.floor(quantity));
       const next =
         bounded <= 0
-          ? current.filter((item) => item.productId !== productId)
+          ? current.filter((item) => item.variantId !== variantId)
           : current.map((item) =>
-              item.productId === productId ? { ...item, quantity: bounded } : item,
+              item.variantId === variantId ? { ...item, quantity: bounded } : item,
             );
       setAnnouncement(
         bounded <= 0
@@ -93,9 +112,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const removeItem = useCallback((productId: string) => {
+  const removeItem = useCallback((variantId: string) => {
     setItems((current) =>
-      current.filter((item) => item.productId !== productId),
+      current.filter((item) => item.variantId !== variantId),
     );
     setAnnouncement("Item removed from cart.");
   }, []);
@@ -105,17 +124,26 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setAnnouncement("Cart cleared.");
   }, []);
 
+  const acknowledgeLegacyReselection = useCallback(() => {
+    acknowledgeLegacyCartReselection(window.localStorage);
+    setLegacyItemCount(null);
+    setItems([]);
+    setAnnouncement("Choose a variant again to add it to your cart.");
+  }, []);
+
   const value = useMemo<CartContextValue>(
     () => ({
       items,
       itemCount: itemCount(items),
       hydrated,
-      addItem,
+      legacyItemCount,
+      addVariant,
       setQuantity,
       removeItem,
       clearCart,
+      acknowledgeLegacyReselection,
     }),
-    [items, hydrated, addItem, setQuantity, removeItem, clearCart],
+    [items, hydrated, legacyItemCount, addVariant, setQuantity, removeItem, clearCart, acknowledgeLegacyReselection],
   );
 
   return (

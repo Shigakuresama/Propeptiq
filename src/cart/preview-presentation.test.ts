@@ -8,7 +8,7 @@ import {
 
 const preview = {
   items: [{
-    productId: "61000000-0000-4000-8000-000000000001",
+    variantId: "61000000-0000-4000-8000-000000000001",
     quantity: 2,
     available: true,
     name: "Synthetic local test only — Alpha",

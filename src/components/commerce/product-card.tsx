@@ -67,7 +67,7 @@ export function ProductCard({
           <ArrowRight aria-hidden="true" className="size-4" />
         </Link>
         <AddToCartButton
-          productId={product.id}
+          variantId={null}
           productName={product.name}
           className="min-h-11"
         />

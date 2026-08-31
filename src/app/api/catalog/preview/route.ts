@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
 import { buildCartPreview } from "@/cart/preview";
-import { getPublicCatalog } from "@/catalog/server";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +28,10 @@ export async function POST(request: Request) {
     typeof previousValue === "string" && /^[a-f0-9]{64}$/.test(previousValue)
       ? previousValue
       : null;
-  const catalog = await getPublicCatalog();
-  const preview = buildCartPreview(items, catalog, previousPreviewToken);
+  // Canonical variant facts are not yet exposed by the public browse catalog.
+  // Until Task 5 installs the server variant checkout boundary, every browser
+  // cart line remains unavailable rather than being mapped from a product.
+  const preview = buildCartPreview(items, { variants: [] }, previousPreviewToken);
 
   return NextResponse.json(preview, {
     headers: { "Cache-Control": "no-store" },
