@@ -91,6 +91,7 @@ type AttemptRow = Readonly<{
   providerRequestSchemaVersion: number | string | null;
   providerLivemode: boolean | null;
   providerScope: string | null;
+  reviewAuthorizationMode: string | null;
 }>;
 
 type PaymentRow = Readonly<{
@@ -237,6 +238,7 @@ type Discovery = Readonly<{
   reviewBinding: AttemptReviewBinding | null;
   reviewInput: ReviewSnapshotHashInput | null;
   reviewNeeded: boolean;
+  reviewAuthorizationMode: string | null;
 }>;
 
 type ExactPayment = Readonly<{
@@ -282,6 +284,12 @@ function iso(value: Date | string): string | null {
 
 function providerKind(value: unknown): value is ProviderKind {
   return value === "stripe" || value === "local_test";
+}
+
+function reviewAuthorizationMode(
+  value: unknown,
+): "bound" | "none" | null {
+  return value === "bound" || value === "none" ? value : null;
 }
 
 function boundedText(value: unknown, maximum = 200): value is string {
@@ -342,6 +350,19 @@ async function readAttemptDiscovery(
   return source?.kind === "checkout_session" && source.orderId === orderId
     ? source.attemptId
     : null;
+}
+
+async function readAttemptReviewAuthorizationMode(
+  client: FulfillmentSqlClient,
+  attemptId: string | null,
+): Promise<string | null> {
+  if (attemptId === null) return null;
+  const result = await client.query<{ mode: string | null }>(
+    `SELECT review_authorization_mode AS mode
+     FROM checkout_attempts WHERE id = $1::uuid`,
+    [attemptId],
+  );
+  return result.rows.length === 1 ? result.rows[0]!.mode : null;
 }
 
 async function readAttemptReviewBinding(
@@ -792,6 +813,10 @@ async function preflight(
     false,
   );
   const attemptId = await readAttemptDiscovery(client, order.id);
+  const authorizationMode = await readAttemptReviewAuthorizationMode(
+    client,
+    attemptId,
+  );
   const bindingRead = await readAttemptReviewBinding(
     client,
     attemptId,
@@ -828,7 +853,8 @@ async function preflight(
     reviewInput,
     reviewNeeded:
       order.state !== "fulfilled" &&
-      (reviewBinding !== null || currentReviewNeeded),
+      (authorizationMode === "bound" || currentReviewNeeded),
+    reviewAuthorizationMode: authorizationMode,
   });
 }
 
@@ -912,7 +938,8 @@ async function lockAttempt(
             provider_request_hash AS "providerRequestHash",
             provider_request_schema_version AS "providerRequestSchemaVersion",
             provider_livemode AS "providerLivemode",
-            provider_scope AS "providerScope"
+            provider_scope AS "providerScope",
+            review_authorization_mode AS "reviewAuthorizationMode"
      FROM checkout_attempts WHERE id = $1::uuid FOR UPDATE`,
     [attemptId],
   );
@@ -1407,6 +1434,17 @@ async function loadLockedFacts(
   const lockedBinding = lockedBindingRead.status === "bound"
     ? lockedBindingRead.value
     : null;
+  const authorizationMode = attempt === null
+    ? null
+    : reviewAuthorizationMode(attempt.reviewAuthorizationMode);
+  if (discovered.attemptId !== null && (
+    authorizationMode === null ||
+    authorizationMode !== reviewAuthorizationMode(discovered.reviewAuthorizationMode) ||
+    (authorizationMode === "bound" && lockedBinding === null) ||
+    (authorizationMode === "none" && lockedBinding !== null)
+  )) {
+    return Object.freeze({ status: "conflict" });
+  }
   if (
     (lockedBinding === null) !== (discovered.reviewBinding === null) ||
     (lockedBinding !== null && discovered.reviewBinding !== null &&

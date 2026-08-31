@@ -162,6 +162,7 @@ export const checkoutAttempts = pgTable(
     requestHash: text("request_hash").notNull(),
     canonicalPricingRevision: text("canonical_pricing_revision"),
     canonicalQuoteSnapshot: jsonb("canonical_quote_snapshot"),
+    reviewAuthorizationMode: text("review_authorization_mode"),
     status: checkoutAttemptStatusEnum("status").default("created").notNull(),
     accountGate: checkoutGateResultEnum("account_gate").notNull(),
     attestationGate: checkoutGateResultEnum("attestation_gate").notNull(),
@@ -210,6 +211,11 @@ export const checkoutAttempts = pgTable(
           or (${table.canonicalPricingRevision} is not null
             and ${sha256(table.canonicalPricingRevision)}
             and ${table.canonicalQuoteSnapshot} is not null)`,
+    ),
+    check(
+      "checkout_attempts_review_authorization_mode",
+      sql`${table.reviewAuthorizationMode} is null
+          or ${table.reviewAuthorizationMode} in ('bound', 'none')`,
     ),
     check("checkout_attempts_provider_request_hash", sql`${table.providerRequestHash} is null or ${sha256(table.providerRequestHash)}`),
     check(

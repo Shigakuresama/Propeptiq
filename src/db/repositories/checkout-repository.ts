@@ -2194,6 +2194,40 @@ async function bindExactApprovedReview(
     existing.rows[0]!.reviewSnapshotHash === review.reviewSnapshotHash;
 }
 
+async function hasNoAttemptReviewBinding(
+  client: CheckoutSqlClient,
+  attemptId: string,
+): Promise<boolean> {
+  const existing = await client.query<{ checkoutAttemptId: string }>(
+    `SELECT checkout_attempt_id::text AS "checkoutAttemptId"
+     FROM checkout_attempt_review_bindings
+     WHERE checkout_attempt_id = $1::uuid FOR UPDATE`,
+    [attemptId],
+  );
+  return existing.rows.length === 0;
+}
+
+async function persistReviewAuthorizationMode(
+  client: CheckoutSqlClient,
+  plan: AuthoritativeCheckoutPlanData,
+  mode: "bound" | "none",
+): Promise<boolean> {
+  const updated = await client.query<{ mode: string }>(
+    `UPDATE checkout_attempts
+     SET review_authorization_mode = $4
+     WHERE id = $1::uuid AND order_id = $2::uuid AND buyer_user_id = $3::uuid
+       AND (review_authorization_mode IS NULL OR review_authorization_mode = $4)
+     RETURNING review_authorization_mode AS mode`,
+    [
+      plan.identity.attemptId,
+      plan.identity.orderId,
+      plan.buyerUserId,
+      mode,
+    ],
+  );
+  return updated.rows.length === 1 && updated.rows[0]!.mode === mode;
+}
+
 async function createOrLoadPendingReview(
   client: CheckoutSqlClient,
   plan: AuthoritativeCheckoutPlanData,
@@ -2653,11 +2687,20 @@ async function prepareInTransaction(
     existing,
   );
   if (itemIds === null) return { status: "facts_changed_retry" };
-  if (
-    finalReview !== null &&
-    !(await bindExactApprovedReview(client, plan, finalReview))
-  ) {
-    return { status: "facts_changed_retry" };
+  if (finalReview !== null) {
+    if (!(await bindExactApprovedReview(client, plan, finalReview))) {
+      throw new ReviewAuthorizationRejected();
+    }
+    if (!(await persistReviewAuthorizationMode(client, plan, "bound"))) {
+      throw new ReviewAuthorizationRejected();
+    }
+  } else {
+    if (!(await hasNoAttemptReviewBinding(client, plan.identity.attemptId))) {
+      throw new ReviewAuthorizationRejected();
+    }
+    if (!(await persistReviewAuthorizationMode(client, plan, "none"))) {
+      throw new ReviewAuthorizationRejected();
+    }
   }
   if (plan.referralQuote !== null && plan.affiliateQuote !== null) {
     throw new AffiliateBindingConflict();
@@ -2788,6 +2831,13 @@ class RewardReservationRejected extends Error {
   constructor() {
     super("Authoritative reward reservation was rejected");
     this.name = "RewardReservationRejected";
+  }
+}
+
+class ReviewAuthorizationRejected extends Error {
+  constructor() {
+    super("Checkout review authorization could not be persisted");
+    this.name = "ReviewAuthorizationRejected";
   }
 }
 
@@ -3044,6 +3094,7 @@ export function createPostgresCheckoutRepository(dependencies: Readonly<{
       } catch (error) {
         if (
           error instanceof RewardReservationRejected ||
+          error instanceof ReviewAuthorizationRejected ||
           error instanceof ReferralBindingConflict ||
           error instanceof AffiliateBindingConflict
         ) {

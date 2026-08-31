@@ -139,7 +139,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          provider_session_id, provider_request_hash, provider_customer_email,
          provider_origin, provider_request_schema_version, provider_livemode,
          provider_scope, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at)
+         shipping_service, expires_at, review_authorization_mode)
       VALUES
         ('${ids.attempt}', '${ids.order}', '${ids.buyer}', 'fulfillment-checkout-6f',
          '${"2".repeat(64)}', 'completed', 'pass', 'pass', 'pass', 'pass',
@@ -147,7 +147,8 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          'checkout_attempt:${ids.attempt}', 'cs_fulfillment_6f', '${"3".repeat(64)}',
          'private-buyer@example.test', 'http://localhost:3000', 1, false,
          'local_test:synthetic-propeptiq-v1', 'tax_fulfillment_6f',
-         'ship_fulfillment_6f', 'synthetic_ground', '2027-08-26T12:00:00.000Z');
+         'ship_fulfillment_6f', 'synthetic_ground', '2027-08-26T12:00:00.000Z',
+         'none');
       INSERT INTO provider_events
         (id, provider, provider_event_id, payload_hash, status, attempt_count,
          received_at, processed_at, event_type, schema_version,
@@ -285,6 +286,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
   async function seedBuyerReview(options: Readonly<{
     outcome?: "approved" | "rejected";
     coversBuyerReview?: boolean;
+    authorizationMode?: "bound" | "none";
   }> = {}) {
     await client.exec(
       `UPDATE buyer_profiles SET status = 'review' WHERE user_id = '${ids.buyer}'`,
@@ -346,7 +348,26 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
                '2026-08-25T12:00:00.000Z')`,
       [ids.attempt, ids.order, ids.review, reviewHash],
     );
+    if ((options.authorizationMode ?? "bound") === "bound") {
+      await client.exec(`
+        ALTER TABLE checkout_attempts
+          DISABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+        UPDATE checkout_attempts SET review_authorization_mode = 'bound'
+        WHERE id = '${ids.attempt}';
+        ALTER TABLE checkout_attempts
+          ENABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+      `);
+    }
     return reviewInput;
+  }
+
+  async function expectNoFulfillmentAuthority(): Promise<void> {
+    expect((await client.query(`
+      SELECT
+        (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+        (SELECT count(*)::int FROM downstream_effects) AS effects,
+        (SELECT state FROM shipments WHERE id = '${ids.shipment}') AS shipment
+    `)).rows).toEqual([{ releases: 0, effects: 0, shipment: "pending" }]);
   }
 
   it("returns before authorization and preserves a byte-equivalent authority snapshot for disabled or forged context", async () => {
@@ -451,7 +472,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          provider_session_id, provider_request_hash, provider_customer_email,
          provider_origin, provider_request_schema_version, provider_livemode,
          provider_scope, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at)
+         shipping_service, expires_at, review_authorization_mode)
       VALUES
         ('${reverseAttempt}', '${reverseOrder}', '${ids.staff}',
          'reverse-checkout-6f', '${"9".repeat(64)}', 'completed',
@@ -462,7 +483,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          'http://localhost:3000', 1, false,
          'local_test:synthetic-propeptiq-v1', 'tax_reverse_6f',
          'ship_reverse_6f', 'synthetic_ground',
-         '2027-08-26T12:00:00.000Z');
+         '2027-08-26T12:00:00.000Z', 'none');
       INSERT INTO provider_events
         (id, provider, provider_event_id, payload_hash, status, attempt_count,
          received_at, processed_at, event_type, schema_version,
@@ -522,6 +543,10 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
   });
 
   it("atomically hands off every line/lot exactly once with one redacted effect and audit", async () => {
+    expect((await client.query<{ mode: string }>(`
+      SELECT review_authorization_mode AS mode
+      FROM checkout_attempts WHERE id = '${ids.attempt}'
+    `)).rows).toEqual([{ mode: "none" }]);
     await expect(setup().handoff(command())).resolves.toEqual({ status: "handed_off" });
     const releaseId = keyedUuid(`fulfillment-release:${ids.order}:1`);
     const effectId = keyedUuid(`fulfillment-handoff-effect:${releaseId}`);
@@ -652,6 +677,60 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
       { id: ids.lotA2, available: 3 },
       { id: ids.lotB, available: 5 },
     ]);
+  });
+
+  it("fails closed for a bound attempt whose binding is missing after review facts relax", async () => {
+    await seedBuyerReview();
+    await client.exec(`
+      DELETE FROM checkout_attempt_review_bindings
+      WHERE checkout_attempt_id = '${ids.attempt}';
+      UPDATE buyer_profiles SET status = 'active'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("fails closed for a bound review whose exact facts no longer match even when current facts allow", async () => {
+    await seedBuyerReview();
+    await client.exec(`
+      UPDATE buyer_profiles SET status = 'active'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("fails closed when a none-authorized attempt possesses any review binding", async () => {
+    await seedBuyerReview({ authorizationMode: "none" });
+    await client.exec(`
+      UPDATE buyer_profiles SET status = 'active'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("fails closed when current facts require review for a none-authorized attempt", async () => {
+    await client.exec(`
+      UPDATE buyer_profiles SET status = 'review'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("fails closed for a fulfillment-eligible migration-era attempt with ambiguous authorization", async () => {
+    await client.exec(`
+      ALTER TABLE checkout_attempts
+        DISABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+      UPDATE checkout_attempts SET review_authorization_mode = NULL
+      WHERE id = '${ids.attempt}';
+      ALTER TABLE checkout_attempts
+        ENABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
   });
 
   it("retries 40001 then 40P01 with the same captured now and deterministic identities", async () => {
@@ -785,7 +864,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          provider_session_id, provider_request_hash, provider_customer_email,
          provider_origin, provider_request_schema_version, provider_livemode,
          provider_scope, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at, created_at)
+         shipping_service, expires_at, created_at, review_authorization_mode)
       VALUES
         ('81000000-0000-4000-8000-000000000112',
          '81000000-0000-4000-8000-000000000110', '${ids.buyer}',
@@ -797,7 +876,9 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          'later-reservation@example.test', 'http://localhost:3000', 1, false,
          'local_test:synthetic-propeptiq-v1', 'tax_later_reservation_6f',
          'ship_later_reservation_6f', 'synthetic_ground',
-         '2026-08-26T13:00:00.000Z', '2026-08-26T12:00:00.000Z');
+         '2026-08-26T13:00:00.000Z', '2026-08-26T12:00:00.000Z',
+         'none');
+
       UPDATE lots SET available_quantity = available_quantity - 1
       WHERE id = '${ids.lotA1}';
       INSERT INTO inventory_reservations

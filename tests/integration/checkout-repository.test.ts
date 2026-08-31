@@ -377,6 +377,15 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       promotionId: ids.variantPromotion,
       reservationCount: 1,
     });
+    expect((await client.query<{ mode: string; bindings: number }>(
+      `SELECT review_authorization_mode AS mode,
+              (SELECT count(*)::int
+               FROM checkout_attempt_review_bindings
+               WHERE checkout_attempt_id = checkout_attempts.id) AS bindings
+       FROM checkout_attempts
+       WHERE id = $1::uuid`,
+      [sessionQuote.plan.identity.attemptId],
+    )).rows).toEqual([{ mode: "none", bindings: 0 }]);
     expect(transactionSql.some((sql) =>
       sql.includes("FROM product_variants") && sql.includes("ORDER BY v.id FOR UPDATE"),
     )).toBe(true);
@@ -753,6 +762,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       reviewRequestId: review.reviewRequestId,
       reviewSnapshotHash: reviewIdentity.rows[0]!.snapshotHash,
     }]);
+    expect((await client.query<{ mode: string }>(
+      `SELECT review_authorization_mode AS mode
+       FROM checkout_attempts WHERE id = $1::uuid`,
+      [prepared.attemptId],
+    )).rows).toEqual([{ mode: "bound" }]);
     const order = await client.query<{ totalMinor: number }>(
       `SELECT total_minor AS "totalMinor" FROM orders WHERE id = $1::uuid`,
       [prepared.orderId],
@@ -854,6 +868,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
        WHERE checkout_attempt_id = $1::uuid`,
       [prepared.attemptId],
     );
+    await client.query(
+      `UPDATE destination_policies SET result = 'allowed', version = 3
+       WHERE id = $1::uuid`,
+      [ids.policyA],
+    );
     await expect(fulfillment.handoff({
       actorUserId: ids.buyer2,
       actorClerkUserId: "clerk-synthetic-buyer-b",
@@ -891,6 +910,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       now,
       correlationId: "canonical-review-wrong-binding-task5",
     })).resolves.toEqual({ status: "conflict" });
+    await client.query(
+      `UPDATE destination_policies SET result = 'review', version = 2
+       WHERE id = $1::uuid`,
+      [ids.policyA],
+    );
     await client.query(
       `UPDATE checkout_attempt_review_bindings
        SET review_request_id = $2::uuid, review_snapshot_hash = $3
