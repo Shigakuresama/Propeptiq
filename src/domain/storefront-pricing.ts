@@ -4,10 +4,10 @@ const BASIS_POINT_DENOMINATOR = 10_000n;
 const MAX_QUANTITY = 25;
 
 export const QUANTITY_TIERS = Object.freeze([
-  { minQuantity: 1, discountBps: 0 },
-  { minQuantity: 2, discountBps: 800 },
-  { minQuantity: 3, discountBps: 1000 },
-  { minQuantity: 10, discountBps: 3000 },
+  Object.freeze({ minQuantity: 1, discountBps: 0 }),
+  Object.freeze({ minQuantity: 2, discountBps: 800 }),
+  Object.freeze({ minQuantity: 3, discountBps: 1000 }),
+  Object.freeze({ minQuantity: 10, discountBps: 3000 }),
 ] as const);
 
 export type StorefrontPromotionScope =

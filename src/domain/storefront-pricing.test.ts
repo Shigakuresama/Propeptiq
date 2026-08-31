@@ -4,6 +4,7 @@ import {
   calculateVariantLinePrice,
   isStorefrontPromotionActive,
   promotionApplies,
+  QUANTITY_TIERS,
   quantityDiscountBps,
   resolveEffectiveDiscount,
   type StorefrontPromotion,
@@ -27,6 +28,16 @@ describe("quantityDiscountBps", () => {
     "rejects invalid quantity %s",
     (quantity) => expect(() => quantityDiscountBps(quantity)).toThrow(RangeError),
   );
+
+  it("keeps exported quantity tiers immutable", () => {
+    try {
+      (QUANTITY_TIERS[0] as { discountBps: number }).discountBps = 9_999;
+    } catch {
+      // Strict-mode assignment to a frozen tier is expected to throw.
+    }
+    expect(Object.isFrozen(QUANTITY_TIERS[0])).toBe(true);
+    expect(quantityDiscountBps(1)).toBe(0);
+  });
 });
 
 describe("nonstacking discounts", () => {
