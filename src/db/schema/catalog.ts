@@ -6,6 +6,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   text,
   timestamp,
@@ -18,10 +19,15 @@ import {
   destinationResultEnum,
   destinationScopeKindEnum,
   lotStatusEnum,
+  priceStatusEnum,
   productStatusEnum,
+  productVariantStatusEnum,
+  promotionApplicationModeEnum,
   promotionKindEnum,
+  promotionScopeEnum,
   promotionStatusEnum,
   promotionTargetKindEnum,
+  variantAmountUnitEnum,
 } from "./enums";
 import {
   createdAt,
@@ -29,6 +35,7 @@ import {
   money,
   nonblank,
   nullableMoney,
+  safeNonnegativeMoney,
   safePositiveMoney,
   sha256,
   stateCode,
@@ -80,6 +87,56 @@ export const products = pgTable(
   ],
 );
 
+export const productVariants = pgTable(
+  "product_variants",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    productId: uuid("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    sku: text("sku").notNull(),
+    label: text("label").notNull(),
+    canonicalAmount: numeric("canonical_amount", {
+      precision: 20,
+      scale: 6,
+    }),
+    amountUnit: variantAmountUnitEnum("amount_unit"),
+    packageQuantity: integer("package_quantity").notNull(),
+    status: productVariantStatusEnum("status").default("inactive").notNull(),
+    stripeProductId: text("stripe_product_id"),
+    stripePriceId: text("stripe_price_id"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (table) => [
+    unique("product_variants_id_product_unique").on(table.id, table.productId),
+    unique("product_variants_sku_unique").on(table.sku),
+    check("product_variants_sku_nonblank", nonblank(table.sku)),
+    check("product_variants_label_nonblank", nonblank(table.label)),
+    check(
+      "product_variants_amount_coherent",
+      sql`(${table.canonicalAmount} is null and ${table.amountUnit} is null)
+          or (${table.canonicalAmount} > 0 and ${table.amountUnit} is not null)`,
+    ),
+    check(
+      "product_variants_package_quantity_positive",
+      sql`${table.packageQuantity} > 0`,
+    ),
+    check(
+      "product_variants_stripe_product_nonblank",
+      sql`${table.stripeProductId} is null or ${nonblank(table.stripeProductId)}`,
+    ),
+    check(
+      "product_variants_stripe_price_nonblank",
+      sql`${table.stripePriceId} is null or ${nonblank(table.stripePriceId)}`,
+    ),
+    index("product_variants_product_status_idx").on(
+      table.productId,
+      table.status,
+    ),
+  ],
+);
+
 export const productPrices = pgTable(
   "product_prices",
   {
@@ -87,7 +144,9 @@ export const productPrices = pgTable(
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "restrict" }),
+    variantId: uuid("variant_id"),
     version: integer("version").notNull(),
+    priceStatus: priceStatusEnum("price_status").default("active").notNull(),
     amountMinor: money("amount_minor"),
     currency: text("currency").notNull(),
     effectiveAt: timestamp("effective_at", { withTimezone: true }).notNull(),
@@ -96,15 +155,30 @@ export const productPrices = pgTable(
   },
   (table) => [
     unique("product_prices_id_product_unique").on(table.id, table.productId),
-    unique("product_prices_product_version_unique").on(
-      table.productId,
-      table.version,
-    ),
-    uniqueIndex("product_prices_active_product_currency_unique")
+    unique("product_prices_id_variant_unique").on(table.id, table.variantId),
+    foreignKey({
+      columns: [table.variantId, table.productId],
+      foreignColumns: [productVariants.id, productVariants.productId],
+      name: "product_prices_variant_product_fk",
+    }).onDelete("restrict"),
+    uniqueIndex("product_prices_legacy_product_version_unique")
+      .on(table.productId, table.version)
+      .where(sql`${table.variantId} is null`),
+    uniqueIndex("product_prices_variant_version_unique")
+      .on(table.variantId, table.version)
+      .where(sql`${table.variantId} is not null`),
+    uniqueIndex("product_prices_active_legacy_product_currency_unique")
       .on(table.productId, table.currency)
-      .where(sql`${table.supersededAt} is null`),
+      .where(sql`${table.supersededAt} is null and ${table.variantId} is null`),
+    uniqueIndex("product_prices_active_variant_currency_unique")
+      .on(table.variantId, table.currency)
+      .where(sql`${table.supersededAt} is null and ${table.variantId} is not null`),
     check("product_prices_version_positive", sql`${table.version} > 0`),
-    check("product_prices_amount_positive_safe", safePositiveMoney(table.amountMinor)),
+    check(
+      "product_prices_amount_status_coherent",
+      sql`(${table.priceStatus} = 'pending' and ${safeNonnegativeMoney(table.amountMinor)})
+          or (${table.priceStatus} in ('active', 'unavailable') and ${safePositiveMoney(table.amountMinor)})`,
+    ),
     check("product_prices_currency_format", currency(table.currency)),
     check(
       "product_prices_time_coherent",
@@ -120,6 +194,7 @@ export const lots = pgTable(
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "restrict" }),
+    variantId: uuid("variant_id"),
     supplierName: text("supplier_name").notNull(),
     supplierLotCode: text("supplier_lot_code").notNull(),
     analyticalMethod: text("analytical_method"),
@@ -133,6 +208,11 @@ export const lots = pgTable(
   },
   (table) => [
     unique("lots_id_product_unique").on(table.id, table.productId),
+    foreignKey({
+      columns: [table.variantId, table.productId],
+      foreignColumns: [productVariants.id, productVariants.productId],
+      name: "lots_variant_product_fk",
+    }).onDelete("restrict"),
     unique("lots_product_supplier_code_unique").on(
       table.productId,
       table.supplierName,
@@ -265,6 +345,7 @@ export const promotions = pgTable(
   "promotions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
+    campaignKey: text("campaign_key"),
     code: text("code").notNull(),
     version: integer("version").default(1).notNull(),
     name: text("name").notNull(),
@@ -274,6 +355,10 @@ export const promotions = pgTable(
     basisPoints: integer("basis_points"),
     currency: text("currency"),
     configuration: jsonb("configuration").default({}).notNull(),
+    enabled: boolean("enabled").default(false).notNull(),
+    timezone: text("timezone"),
+    applicationMode: promotionApplicationModeEnum("application_mode"),
+    scope: promotionScopeEnum("scope"),
     startsAt: timestamp("starts_at", { withTimezone: true }),
     endsAt: timestamp("ends_at", { withTimezone: true }),
     createdAt: createdAt(),
@@ -282,9 +367,43 @@ export const promotions = pgTable(
   (table) => [
     unique("promotions_code_unique").on(table.code),
     unique("promotions_id_version_unique").on(table.id, table.version),
+    uniqueIndex("promotions_campaign_key_unique")
+      .on(table.campaignKey)
+      .where(sql`${table.campaignKey} is not null`),
     check("promotions_version_positive", sql`${table.version} > 0`),
     check("promotions_code_nonblank", nonblank(table.code)),
     check("promotions_name_nonblank", nonblank(table.name)),
+    check(
+      "promotions_campaign_key_format",
+      sql`${table.campaignKey} is null or ${table.campaignKey} ~ '^[a-z0-9]+(?:[_-][a-z0-9]+)*$'`,
+    ),
+    check(
+      "promotions_storefront_configuration_coherent",
+      sql`(${table.campaignKey} is null and ${table.enabled} = false
+            and ${table.timezone} is null and ${table.applicationMode} is null
+            and ${table.scope} is null)
+          or (${table.campaignKey} is not null and ${nonblank(table.timezone)}
+            and ${table.applicationMode} is not null and ${table.scope} is not null
+            and (${table.enabled} = false or ${table.status} = 'active'))`,
+    ),
+    check(
+      "promotions_automatic_discount_coherent",
+      sql`${table.applicationMode} is distinct from 'automatic'
+          or (${table.kind} = 'discount' and ${table.basisPoints} is not null
+            and ${table.amountMinor} is null and ${table.currency} is null)`,
+    ),
+    check(
+      "promotions_winter30_exact",
+      sql`${table.campaignKey} is distinct from 'winter30'
+          or (${table.code} = 'WINTER30' and ${table.name} = 'Winter Sale'
+            and ${table.kind} = 'discount' and ${table.status} = 'active'
+            and ${table.amountMinor} is null and ${table.basisPoints} = 3000
+            and ${table.currency} is null and ${table.enabled} = true
+            and ${table.startsAt} is null and ${table.endsAt} is null
+            and ${table.timezone} = 'America/Los_Angeles'
+            and ${table.applicationMode} = 'automatic'
+            and ${table.scope} = 'sitewide')`,
+    ),
     check(
       "promotions_discount_shape",
       sql`(${table.amountMinor} is null or ${safePositiveMoney(table.amountMinor)})
@@ -314,12 +433,19 @@ export const promotionTargets = pgTable(
       () => productPolicyGroups.id,
       { onDelete: "restrict" },
     ),
+    variantId: uuid("variant_id").references(() => productVariants.id, {
+      onDelete: "restrict",
+    }),
   },
   (table) => [
     check(
       "promotion_targets_target_scope_coherent",
-      sql`(${table.targetKind} = 'product' and ${table.productId} is not null and ${table.policyGroupId} is null)
-          or (${table.targetKind} = 'policy_group' and ${table.productId} is null and ${table.policyGroupId} is not null)`,
+      sql`(${table.targetKind} = 'product' and ${table.productId} is not null
+            and ${table.policyGroupId} is null and ${table.variantId} is null)
+          or (${table.targetKind} = 'policy_group' and ${table.productId} is null
+            and ${table.policyGroupId} is not null and ${table.variantId} is null)
+          or (${table.targetKind} = 'variant' and ${table.productId} is null
+            and ${table.policyGroupId} is null and ${table.variantId} is not null)`,
     ),
     uniqueIndex("promotion_targets_product_unique")
       .on(table.promotionId, table.productId)
@@ -327,5 +453,8 @@ export const promotionTargets = pgTable(
     uniqueIndex("promotion_targets_group_unique")
       .on(table.promotionId, table.policyGroupId)
       .where(sql`${table.policyGroupId} is not null`),
+    uniqueIndex("promotion_targets_variant_unique")
+      .on(table.promotionId, table.variantId)
+      .where(sql`${table.variantId} is not null`),
   ],
 );

@@ -48,12 +48,35 @@ const fixture = {
   release1: "67000000-0000-4000-8000-000000000019",
 } as const;
 
+const variantFixture = {
+  group: "68000000-0000-4000-8000-000000000001",
+  productA: "68000000-0000-4000-8000-000000000002",
+  productB: "68000000-0000-4000-8000-000000000003",
+  variantA: "68000000-0000-4000-8000-000000000004",
+  variantB: "68000000-0000-4000-8000-000000000005",
+  priceA: "68000000-0000-4000-8000-000000000006",
+} as const;
+
 const hashA = "a".repeat(64);
 const hashB = "b".repeat(64);
 const hashC = "c".repeat(64);
 
 async function expectRejected(client: PGlite, sql: string): Promise<void> {
   await expect(client.exec(sql)).rejects.toThrow();
+}
+
+async function insertVariantProducts(client: PGlite): Promise<void> {
+  await client.exec(`
+    INSERT INTO product_policy_groups (id, slug, name)
+    VALUES ('${variantFixture.group}', 'variant-fixture-group', 'Variant fixture group');
+    INSERT INTO products
+      (id, slug, name, package_form, material_identity, policy_group_id, status)
+    VALUES
+      ('${variantFixture.productA}', 'variant-fixture-a', 'Variant fixture A',
+       'sealed unit', 'Synthetic identity A', '${variantFixture.group}', 'active'),
+      ('${variantFixture.productB}', 'variant-fixture-b', 'Variant fixture B',
+       'sealed unit', 'Synthetic identity B', '${variantFixture.group}', 'active');
+  `);
 }
 
 async function insertTask6Fixture(client: PGlite): Promise<void> {
@@ -149,6 +172,173 @@ describe("Task 6 schema boundary", () => {
   afterEach(async () => {
     await client?.close();
     client = undefined;
+  });
+
+  it("refuses the variant migration when current legacy commerce facts have no approved mapping", async () => {
+    client = new PGliteClient();
+    for (let migration = 0; migration <= 25; migration += 1) {
+      await applyMigration(client, migration);
+    }
+    await insertVariantProducts(client);
+    await client.exec(`
+      INSERT INTO product_prices
+        (id, product_id, version, amount_minor, currency, effective_at)
+      VALUES
+        ('${variantFixture.priceA}', '${variantFixture.productA}', 1, 1000,
+         'USD', now());
+    `);
+
+    await expect(applyMigration(client, 26)).rejects.toThrow(
+      /0026 preflight refused.*variant reconciliation/i,
+    );
+
+    const boundary = await client.query<{ variants_table: boolean }>(`
+      SELECT to_regclass('public.product_variants') IS NOT NULL AS variants_table
+    `);
+    expect(boundary.rows).toEqual([{ variants_table: false }]);
+  });
+
+  it("rejects duplicate canonical variant SKUs", async () => {
+    client = await createMigratedPglite();
+    await insertVariantProducts(client);
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${variantFixture.variantA}', '${variantFixture.productA}',
+         'TEST-FIXTURE-5', '5 mg synthetic unit', 5, 'mg', 1, 'inactive');
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+       VALUES ('${variantFixture.variantB}', '${variantFixture.productB}',
+         'TEST-FIXTURE-5', 'Another synthetic unit', 5, 'mg', 1, 'inactive')`,
+    );
+  });
+
+  it("rejects overlapping current prices for one canonical variant", async () => {
+    client = await createMigratedPglite();
+    await insertVariantProducts(client);
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${variantFixture.variantA}', '${variantFixture.productA}',
+         'TEST-FIXTURE-5', '5 mg synthetic unit', 5, 'mg', 1, 'inactive');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES
+        ('${variantFixture.priceA}', '${variantFixture.productA}',
+         '${variantFixture.variantA}', 1, 'pending', 0, 'USD', now());
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO product_prices
+        (product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+       VALUES ('${variantFixture.productA}', '${variantFixture.variantA}', 2,
+         'pending', 0, 'USD', now())`,
+    );
+  });
+
+  it("rejects an active zero-dollar canonical variant price", async () => {
+    client = await createMigratedPglite();
+    await insertVariantProducts(client);
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${variantFixture.variantA}', '${variantFixture.productA}',
+         'TEST-FIXTURE-5', '5 mg synthetic unit', 5, 'mg', 1, 'active');
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO product_prices
+        (product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+       VALUES ('${variantFixture.productA}', '${variantFixture.variantA}', 1,
+         'active', 0, 'USD', now())`,
+    );
+  });
+
+  it("rejects an order item whose canonical variant belongs to another product", async () => {
+    client = await createMigratedPglite();
+    await insertVariantProducts(client);
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${variantFixture.variantA}', '${variantFixture.productA}',
+         'TEST-FIXTURE-5', '5 mg synthetic unit', 5, 'mg', 1, 'active'),
+        ('${variantFixture.variantB}', '${variantFixture.productB}',
+         'TEST-FIXTURE-10', '10 mg synthetic unit', 10, 'mg', 1, 'active');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES
+        ('${variantFixture.priceA}', '${variantFixture.productB}',
+         '${variantFixture.variantB}', 1, 'active', 1000, 'USD', now());
+      INSERT INTO users (id, clerk_id, email_verified_at)
+      VALUES ('68000000-0000-4000-8000-000000000011', 'variant-order-buyer', now());
+      INSERT INTO attestation_versions
+        (id, version, content_hash, policy_text, effective_at)
+      VALUES ('68000000-0000-4000-8000-000000000012', 1, '${hashA}',
+        'Variant order fixture attestation', now());
+      INSERT INTO attestation_acceptances
+        (id, user_id, attestation_version_id, accepted_at)
+      VALUES ('68000000-0000-4000-8000-000000000013',
+        '68000000-0000-4000-8000-000000000011',
+        '68000000-0000-4000-8000-000000000012', now());
+      INSERT INTO destination_policies
+        (id, scope_kind, product_id, state_code, result, version, active,
+         effective_at)
+      VALUES ('68000000-0000-4000-8000-000000000014', 'product',
+        '${variantFixture.productB}', 'CA', 'allowed', 1, true, now());
+      INSERT INTO orders
+        (id, buyer_user_id, buyer_status_snapshot, attestation_acceptance_id,
+         destination_state_code, currency, subtotal_minor, discount_minor,
+         tax_minor, shipping_minor, total_minor, state)
+      VALUES ('68000000-0000-4000-8000-000000000015',
+        '68000000-0000-4000-8000-000000000011', 'active',
+        '68000000-0000-4000-8000-000000000013', 'CA', 'USD',
+        1000, 0, 0, 0, 1000, 'checkout_pending');
+    `);
+
+    await expectRejected(
+      client,
+      `INSERT INTO order_items
+        (order_id, product_id, variant_id, product_price_id,
+         destination_policy_id, product_name_snapshot, package_form_snapshot,
+         currency, unit_amount_minor, quantity, subtotal_minor,
+         discount_minor, total_minor)
+       VALUES ('68000000-0000-4000-8000-000000000015',
+         '${variantFixture.productB}', '${variantFixture.variantA}',
+         '${variantFixture.priceA}', '68000000-0000-4000-8000-000000000014',
+         'Variant fixture B', 'sealed unit', 'USD', 1000, 1, 1000, 0, 1000)`,
+    );
+  });
+
+  it("rejects a WINTER30 campaign with any percentage other than 3000 basis points", async () => {
+    client = await createMigratedPglite();
+
+    await expect(
+      client.exec(`INSERT INTO promotions
+        (campaign_key, code, name, kind, status, basis_points, configuration,
+         enabled, timezone, application_mode, scope)
+       VALUES ('winter30', 'WINTER30', 'Winter Sale', 'discount', 'active',
+         2999, '{}'::jsonb, true, 'America/Los_Angeles', 'automatic',
+         'sitewide')`),
+    ).rejects.toThrow(/promotions_winter30_exact/);
   });
 
   it("rejects a populated 0002 commerce chain before any 0003 conversion", async () => {

@@ -12,7 +12,13 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { destinationPolicies, productPrices, products, promotions } from "./catalog";
+import {
+  destinationPolicies,
+  productPrices,
+  products,
+  productVariants,
+  promotions,
+} from "./catalog";
 import {
   buyerStatusEnum,
   checkoutAttemptStatusEnum,
@@ -87,6 +93,7 @@ export const orderItems = pgTable(
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "restrict" }),
+    variantId: uuid("variant_id"),
     productPriceId: uuid("product_price_id").notNull(),
     destinationPolicyId: uuid("destination_policy_id")
       .notNull()
@@ -112,6 +119,16 @@ export const orderItems = pgTable(
       columns: [table.productPriceId, table.productId],
       foreignColumns: [productPrices.id, productPrices.productId],
       name: "order_items_price_product_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.variantId, table.productId],
+      foreignColumns: [productVariants.id, productVariants.productId],
+      name: "order_items_variant_product_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.productPriceId, table.variantId],
+      foreignColumns: [productPrices.id, productPrices.variantId],
+      name: "order_items_price_variant_fk",
     }).onDelete("restrict"),
     check("order_items_name_nonblank", nonblank(table.productNameSnapshot)),
     check("order_items_package_nonblank", nonblank(table.packageFormSnapshot)),

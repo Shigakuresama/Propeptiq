@@ -33,6 +33,11 @@ const ids = {
   providerEvent: "30000000-0000-4000-8000-000000000018",
   paymentEvent: "30000000-0000-4000-8000-000000000019",
   previousAttestation: "30000000-0000-4000-8000-000000000020",
+  variantA: "30000000-0000-4000-8000-000000000021",
+  variantPriceA: "30000000-0000-4000-8000-000000000022",
+  variantLotA: "30000000-0000-4000-8000-000000000023",
+  variantPromotion: "30000000-0000-4000-8000-000000000024",
+  variantPromotionTarget: "30000000-0000-4000-8000-000000000025",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -224,6 +229,96 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     expect(prepared.status).toBe("prepared");
     return { ...setupResult, quoted, prepared };
   }
+
+  it("returns only explicitly bound canonical variant checkout facts", async () => {
+    const { repository } = setup();
+    await expect(repository.getCheckoutVariantFacts(ids.productA)).resolves.toBeNull();
+
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status, stripe_product_id, stripe_price_id)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'TEST-FIXTURE-5',
+        '5 mg synthetic unit', 5, 'mg', 1, 'inactive', null, null);
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.variantPriceA}', '${ids.productA}', '${ids.variantA}',
+        1, 'pending', 0, 'USD', '2026-08-01T00:00:00.000Z');
+      INSERT INTO lots
+        (id, product_id, variant_id, supplier_name, supplier_lot_code,
+         received_quantity, available_quantity, status, expires_at)
+      VALUES ('${ids.variantLotA}', '${ids.productA}', '${ids.variantA}',
+        'Synthetic supplier', 'SYN-VARIANT-ZERO', 1, 0, 'draft', null);
+    `);
+
+    expect(await repository.getCheckoutVariantFacts(ids.variantA)).toMatchObject({
+      variantId: ids.variantA,
+      productId: ids.productA,
+      sku: "TEST-FIXTURE-5",
+      priceStatus: "pending",
+      amountMinor: 0,
+      currency: "USD",
+      stripePriceId: null,
+      availableQuantity: 0,
+    });
+  });
+
+  it("projects the exact automatic sitewide WINTER30 fixture from persisted records", async () => {
+    const { repository } = setup();
+    await client.exec(`
+      INSERT INTO promotions
+        (campaign_key, code, name, kind, status, basis_points, configuration,
+         enabled, timezone, application_mode, scope, starts_at, ends_at)
+      VALUES ('winter30', 'WINTER30', 'Winter Sale', 'discount', 'active',
+        3000, '{}'::jsonb, true, 'America/Los_Angeles', 'automatic',
+        'sitewide', null, null);
+    `);
+
+    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([
+      expect.objectContaining({
+        id: "winter30",
+        displayName: "Winter Sale",
+        displayCode: "WINTER30",
+        discountBps: 3000,
+        enabled: true,
+        startAt: null,
+        endAt: null,
+        timezone: "America/Los_Angeles",
+        applicationMode: "automatic",
+        scope: { kind: "sitewide" },
+      }),
+    ]);
+  });
+
+  it("projects an automatic promotion only to its explicitly persisted variant targets", async () => {
+    const { repository } = setup();
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'TEST-FIXTURE-5',
+        '5 mg synthetic unit', 5, 'mg', 1, 'inactive');
+      INSERT INTO promotions
+        (id, campaign_key, code, name, kind, status, basis_points,
+         configuration, enabled, timezone, application_mode, scope)
+      VALUES ('${ids.variantPromotion}', 'variant15', 'VARIANT15',
+        'Synthetic variant offer', 'discount', 'active', 1500, '{}'::jsonb,
+        true, 'America/Los_Angeles', 'automatic', 'variants');
+      INSERT INTO promotion_targets
+        (id, promotion_id, target_kind, variant_id)
+      VALUES ('${ids.variantPromotionTarget}', '${ids.variantPromotion}',
+        'variant', '${ids.variantA}');
+    `);
+
+    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([
+      expect.objectContaining({
+        id: "variant15",
+        discountBps: 1500,
+        scope: { kind: "variants", variantIds: [ids.variantA] },
+      }),
+    ]);
+  });
 
   it("persists authoritative snapshots and allocates earliest-expiry lots atomically with idempotent replay", async () => {
     const key = "30000000-0000-4000-8000-000000000101";

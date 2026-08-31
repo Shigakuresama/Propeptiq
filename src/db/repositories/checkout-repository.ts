@@ -32,6 +32,10 @@ import {
   type DestinationRule,
 } from "@/domain/eligibility";
 import type { PromotionRecord } from "@/domain/promotions";
+import type {
+  StorefrontPromotion,
+  StorefrontPromotionScope,
+} from "@/domain/storefront-pricing";
 import {
   releaseCheckoutRewardsInTransaction,
   reserveCheckoutRewardsInTransaction,
@@ -62,6 +66,44 @@ export type CheckoutTransactionRunner = <Value>(
   work: (client: CheckoutSqlClient) => Promise<Value>,
   options: Readonly<{ isolationLevel: "serializable" }>,
 ) => Promise<Value>;
+
+export type CheckoutVariantFacts = Readonly<{
+  variantId: string;
+  productId: string;
+  sku: string;
+  label: string;
+  canonicalAmount: number | null;
+  amountUnit: "mg" | "mcg" | "iu" | null;
+  packageQuantity: number;
+  variantStatus: "inactive" | "active";
+  productStatus: "draft" | "active" | "retired";
+  stripeProductId: string | null;
+  stripePriceId: string | null;
+  priceId: string;
+  priceVersion: number;
+  priceStatus: "pending" | "active" | "unavailable";
+  amountMinor: number;
+  currency: "USD";
+  effectiveAt: string;
+  availableQuantity: number;
+  checkoutReady: boolean;
+}>;
+
+export type PersistedStorefrontPromotion = StorefrontPromotion &
+  Readonly<{
+    recordId: string;
+    campaignKey: string;
+    version: number;
+  }>;
+
+export type CanonicalCommerceFactsRepository = Readonly<{
+  getCheckoutVariantFacts: (
+    variantId: string,
+  ) => Promise<CheckoutVariantFacts | null>;
+  getAutomaticStorefrontPromotions: () => Promise<
+    readonly PersistedStorefrontPromotion[]
+  >;
+}>;
 
 type BuyerFacts = AuthoritativeCheckoutFacts["buyer"];
 
@@ -114,6 +156,241 @@ function isTimestampAtOrBefore(
   if (value === null) return false;
   const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
   return Number.isFinite(timestamp) && timestamp <= authoritativeNow.getTime();
+}
+
+async function getCheckoutVariantFacts(
+  client: CheckoutSqlClient,
+  variantId: string,
+): Promise<CheckoutVariantFacts | null> {
+  if (!isCanonicalUuid(variantId)) return null;
+  type VariantRow = {
+    variantId: string;
+    productId: string;
+    sku: string;
+    label: string;
+    canonicalAmount: string | number | null;
+    amountUnit: "mg" | "mcg" | "iu" | null;
+    packageQuantity: string | number;
+    variantStatus: "inactive" | "active";
+    productStatus: "draft" | "active" | "retired";
+    stripeProductId: string | null;
+    stripePriceId: string | null;
+  };
+  const variants = await client.query<VariantRow>(
+    `SELECT v.id::text AS "variantId", v.product_id::text AS "productId",
+            v.sku, v.label, v.canonical_amount AS "canonicalAmount",
+            v.amount_unit AS "amountUnit",
+            v.package_quantity AS "packageQuantity",
+            v.status AS "variantStatus", p.status AS "productStatus",
+            v.stripe_product_id AS "stripeProductId",
+            v.stripe_price_id AS "stripePriceId"
+     FROM product_variants v
+     JOIN products p ON p.id = v.product_id
+     WHERE v.id = $1::uuid`,
+    [variantId],
+  );
+  if (variants.rows.length !== 1) return null;
+  const variant = variants.rows[0]!;
+
+  type PriceRow = {
+    priceId: string;
+    priceVersion: string | number;
+    priceStatus: "pending" | "active" | "unavailable";
+    amountMinor: string | number;
+    currency: string;
+    effectiveAt: Date | string;
+  };
+  const prices = await client.query<PriceRow>(
+    `SELECT id::text AS "priceId", version AS "priceVersion",
+            price_status AS "priceStatus", amount_minor AS "amountMinor",
+            currency, effective_at AS "effectiveAt"
+     FROM product_prices
+     WHERE variant_id = $1::uuid AND currency = 'USD'
+       AND effective_at <= now() AND superseded_at IS NULL
+     ORDER BY version, id`,
+    [variantId],
+  );
+  if (prices.rows.length !== 1) return null;
+  const price = prices.rows[0]!;
+
+  type InventoryRow = { availableQuantity: string | number };
+  const inventory = await client.query<InventoryRow>(
+    `SELECT COALESCE(sum(available_quantity), 0)::bigint AS "availableQuantity"
+     FROM lots
+     WHERE variant_id = $1::uuid AND status = 'released'
+       AND available_quantity > 0
+       AND (expires_at IS NULL OR expires_at > now())`,
+    [variantId],
+  );
+  const availableQuantity = safeInteger(
+    inventory.rows[0]?.availableQuantity ?? 0,
+  );
+  const canonicalAmount =
+    variant.canonicalAmount === null ? null : Number(variant.canonicalAmount);
+  if (
+    !nonblank(variant.sku) ||
+    !nonblank(variant.label) ||
+    !isCanonicalUuid(variant.productId) ||
+    (canonicalAmount !== null &&
+      (!Number.isFinite(canonicalAmount) || canonicalAmount <= 0)) ||
+    (variant.canonicalAmount === null) !== (variant.amountUnit === null) ||
+    price.currency !== "USD"
+  ) {
+    return null;
+  }
+  const amountMinor = safeInteger(price.amountMinor);
+  const stripeMappingsPresent =
+    nonblank(variant.stripeProductId) && nonblank(variant.stripePriceId);
+  return Object.freeze({
+    variantId: variant.variantId,
+    productId: variant.productId,
+    sku: variant.sku,
+    label: variant.label,
+    canonicalAmount,
+    amountUnit: variant.amountUnit,
+    packageQuantity: safeInteger(variant.packageQuantity),
+    variantStatus: variant.variantStatus,
+    productStatus: variant.productStatus,
+    stripeProductId: variant.stripeProductId,
+    stripePriceId: variant.stripePriceId,
+    priceId: price.priceId,
+    priceVersion: safeInteger(price.priceVersion),
+    priceStatus: price.priceStatus,
+    amountMinor,
+    currency: "USD",
+    effectiveAt: toIso(price.effectiveAt),
+    availableQuantity,
+    checkoutReady:
+      variant.variantStatus === "active" &&
+      variant.productStatus === "active" &&
+      price.priceStatus === "active" &&
+      amountMinor > 0 &&
+      availableQuantity > 0 &&
+      stripeMappingsPresent,
+  });
+}
+
+async function getAutomaticStorefrontPromotions(
+  client: CheckoutSqlClient,
+): Promise<readonly PersistedStorefrontPromotion[]> {
+  type PromotionRow = {
+    recordId: string;
+    campaignKey: string;
+    version: string | number;
+    displayCode: string;
+    displayName: string;
+    kind: "discount" | "bundle" | "subscription" | "loyalty" | "cross_sell";
+    status: "draft" | "active" | "retired";
+    amountMinor: string | number | null;
+    discountBps: string | number | null;
+    currency: string | null;
+    enabled: boolean;
+    startAt: Date | string | null;
+    endAt: Date | string | null;
+    timezone: string;
+    scope: "sitewide" | "products" | "variants";
+  };
+  const parents = await client.query<PromotionRow>(
+    `SELECT id::text AS "recordId", campaign_key AS "campaignKey", version,
+            code AS "displayCode", name AS "displayName", kind, status,
+            amount_minor AS "amountMinor", basis_points AS "discountBps",
+            currency, enabled, starts_at AS "startAt", ends_at AS "endAt",
+            timezone, scope
+     FROM promotions
+     WHERE campaign_key IS NOT NULL AND application_mode = 'automatic'
+     ORDER BY campaign_key, version, id`,
+  );
+  const result: PersistedStorefrontPromotion[] = [];
+  for (const row of parents.rows) {
+    type TargetRow = {
+      targetKind: "product" | "policy_group" | "variant";
+      productId: string | null;
+      policyGroupId: string | null;
+      variantId: string | null;
+    };
+    const targets = await client.query<TargetRow>(
+      `SELECT target_kind AS "targetKind", product_id::text AS "productId",
+              policy_group_id::text AS "policyGroupId",
+              variant_id::text AS "variantId"
+       FROM promotion_targets
+       WHERE promotion_id = $1::uuid
+       ORDER BY target_kind, COALESCE(product_id, policy_group_id, variant_id)`,
+      [row.recordId],
+    );
+    const discountBps =
+      row.discountBps === null ? null : safeInteger(row.discountBps);
+    if (
+      !nonblank(row.campaignKey) ||
+      !nonblank(row.displayCode) ||
+      !nonblank(row.displayName) ||
+      !nonblank(row.timezone) ||
+      row.kind !== "discount" ||
+      row.amountMinor !== null ||
+      row.currency !== null ||
+      discountBps === null ||
+      discountBps < 1 ||
+      discountBps > 10_000
+    ) {
+      continue;
+    }
+
+    let scope: StorefrontPromotionScope | null = null;
+    if (row.scope === "sitewide" && targets.rows.length === 0) {
+      scope = Object.freeze({ kind: "sitewide" });
+    } else if (
+      row.scope === "products" &&
+      targets.rows.length > 0 &&
+      targets.rows.every(
+        (target) =>
+          target.targetKind === "product" &&
+          target.productId !== null &&
+          isCanonicalUuid(target.productId),
+      )
+    ) {
+      scope = Object.freeze({
+        kind: "products",
+        productIds: Object.freeze(
+          targets.rows.map((target) => target.productId!),
+        ),
+      });
+    } else if (
+      row.scope === "variants" &&
+      targets.rows.length > 0 &&
+      targets.rows.every(
+        (target) =>
+          target.targetKind === "variant" &&
+          target.variantId !== null &&
+          isCanonicalUuid(target.variantId),
+      )
+    ) {
+      scope = Object.freeze({
+        kind: "variants",
+        variantIds: Object.freeze(
+          targets.rows.map((target) => target.variantId!),
+        ),
+      });
+    }
+    if (scope === null) continue;
+
+    result.push(
+      Object.freeze({
+        recordId: row.recordId,
+        campaignKey: row.campaignKey,
+        version: safeInteger(row.version),
+        id: row.campaignKey,
+        displayName: row.displayName,
+        displayCode: row.displayCode,
+        discountBps,
+        enabled: row.enabled && row.status === "active",
+        startAt: row.startAt === null ? null : toIso(row.startAt),
+        endAt: row.endAt === null ? null : toIso(row.endAt),
+        timezone: row.timezone,
+        scope,
+        applicationMode: "automatic" as const,
+      }),
+    );
+  }
+  return Object.freeze(result);
 }
 
 async function readBuyerFacts(
@@ -1875,13 +2152,19 @@ export function createPostgresCheckoutRepository(dependencies: Readonly<{
     retryNumber: 1 | 2,
     sqlState: "40001" | "40P01",
   ) => Promise<void>;
-}>): CheckoutRepository {
+}>): CheckoutRepository & CanonicalCommerceFactsRepository {
   const releaseKeyedUuid = dependencies.keyedUuid;
   const retryOptions =
     dependencies.retrySleep === undefined
       ? {}
       : { sleep: dependencies.retrySleep };
   return Object.freeze({
+    getCheckoutVariantFacts(variantId) {
+      return getCheckoutVariantFacts(dependencies.client, variantId);
+    },
+    getAutomaticStorefrontPromotions() {
+      return getAutomaticStorefrontPromotions(dependencies.client);
+    },
     findAttempt(input) {
       return storedAttemptFromClient(dependencies.client, input, false);
     },

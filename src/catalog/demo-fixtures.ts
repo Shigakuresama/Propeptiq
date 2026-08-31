@@ -1,5 +1,18 @@
 import type { CatalogRecordSet } from "./types";
 
+export const syntheticWinter30PromotionFixture = Object.freeze({
+  campaignKey: "winter30",
+  displayName: "Winter Sale",
+  displayCode: "WINTER30",
+  basisPoints: 3000,
+  enabled: true,
+  startsAt: null,
+  endsAt: null,
+  timezone: "America/Los_Angeles",
+  applicationMode: "automatic",
+  scope: "sitewide",
+} as const);
+
 /** Development/test fixture only. Every value is synthetic and non-operational. */
 export const syntheticDemoCatalogRecords: CatalogRecordSet = {
   source: "synthetic-demo",
@@ -160,6 +173,18 @@ export const syntheticDemoCatalogRecords: CatalogRecordSet = {
       startsAt: null,
       endsAt: null,
       configuration: { productIds: ["61000000-0000-4000-8000-000000000002"] },
+    },
+    {
+      id: "66000000-0000-4000-8000-000000000006",
+      code: syntheticWinter30PromotionFixture.displayCode,
+      version: 1,
+      name: syntheticWinter30PromotionFixture.displayName,
+      kind: "discount",
+      status: "active",
+      amountMinor: null,
+      currency: null,
+      configuration: {},
+      ...syntheticWinter30PromotionFixture,
     },
   ],
   promotionTargets: [

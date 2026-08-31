@@ -19,12 +19,34 @@ export type CatalogQueryPort = Readonly<{
 type RawProduct = Omit<CatalogProductRecord, "status"> & {
   status: CatalogProductRecord["status"];
 };
+export type DatabaseCatalogVariantRecord = Readonly<{
+  id: string;
+  productId: string;
+  sku: string;
+  label: string;
+  canonicalAmount: number | null;
+  amountUnit: "mg" | "mcg" | "iu" | null;
+  packageQuantity: number;
+  status: "inactive" | "active";
+}>;
+export type DatabaseCatalogRecordSet = CatalogRecordSet &
+  Readonly<{ variants: readonly DatabaseCatalogVariantRecord[] }>;
+type RawVariant = Omit<
+  DatabaseCatalogVariantRecord,
+  "canonicalAmount" | "packageQuantity"
+> & {
+  canonicalAmount: string | number | null;
+  packageQuantity: string | number;
+};
 type RawPrice = Omit<CatalogPriceRecord, "amountMinor" | "effectiveAt" | "supersededAt"> & {
+  variantId: string | null;
+  priceStatus: "pending" | "active" | "unavailable";
   amountMinor: string | number;
   effectiveAt: Date | string;
   supersededAt: Date | string | null;
 };
 type RawLot = Omit<CatalogLotRecord, "manufacturedAt" | "expiresAt"> & {
+  variantId: string | null;
   manufacturedAt: Date | string | null;
   expiresAt: Date | string | null;
 };
@@ -33,6 +55,11 @@ type RawCoa = Omit<CatalogCoaRecord, "issuedAt"> & {
 };
 type RawClaim = CatalogClaimRecord;
 type RawPromotion = Omit<CatalogPromotionRecord, "amountMinor" | "startsAt" | "endsAt"> & {
+  campaignKey: string | null;
+  enabled: boolean;
+  timezone: string | null;
+  applicationMode: "automatic" | "code_required" | null;
+  scope: "sitewide" | "products" | "variants" | null;
   amountMinor: string | number | null;
   startsAt: Date | string | null;
   endsAt: Date | string | null;
@@ -60,7 +87,7 @@ function toSafeInteger(value: string | number): number {
 
 export async function loadDatabaseCatalogRecords(
   database: CatalogQueryPort,
-): Promise<CatalogRecordSet> {
+): Promise<DatabaseCatalogRecordSet> {
   const products = await database.query<RawProduct>(`
     SELECT id::text AS "id", slug, name, package_form AS "packageForm",
            material_identity AS "materialIdentity",
@@ -68,8 +95,16 @@ export async function loadDatabaseCatalogRecords(
     FROM products
     ORDER BY created_at, id
   `);
+  const variants = await database.query<RawVariant>(`
+    SELECT id::text AS "id", product_id::text AS "productId", sku, label,
+           canonical_amount AS "canonicalAmount", amount_unit AS "amountUnit",
+           package_quantity AS "packageQuantity", status
+    FROM product_variants
+    ORDER BY created_at, id
+  `);
   const prices = await database.query<RawPrice>(`
-    SELECT id::text AS "id", product_id::text AS "productId", version,
+    SELECT id::text AS "id", product_id::text AS "productId",
+           variant_id::text AS "variantId", version, price_status AS "priceStatus",
            amount_minor AS "amountMinor", currency,
            effective_at AS "effectiveAt", superseded_at AS "supersededAt"
     FROM product_prices
@@ -77,6 +112,7 @@ export async function loadDatabaseCatalogRecords(
   `);
   const lots = await database.query<RawLot>(`
     SELECT id::text AS "id", product_id::text AS "productId",
+           variant_id::text AS "variantId",
            supplier_name AS "supplierName", supplier_lot_code AS "supplierLotCode",
            available_quantity AS "availableQuantity", status,
            analytical_method AS "analyticalMethod",
@@ -98,7 +134,9 @@ export async function loadDatabaseCatalogRecords(
     ORDER BY created_at, id
   `);
   const promotions = await database.query<RawPromotion>(`
-    SELECT id::text AS "id", code, version, name, kind, status,
+    SELECT id::text AS "id", campaign_key AS "campaignKey", code, version,
+           name, kind, status, enabled, timezone,
+           application_mode AS "applicationMode", scope,
            amount_minor AS "amountMinor", basis_points AS "basisPoints", currency,
            starts_at AS "startsAt", ends_at AS "endsAt", configuration
     FROM promotions
@@ -114,6 +152,14 @@ export async function loadDatabaseCatalogRecords(
   return Object.freeze({
     source: "production",
     products: products.rows,
+    variants: variants.rows.map((variant) => ({
+      ...variant,
+      canonicalAmount:
+        variant.canonicalAmount === null
+          ? null
+          : Number(variant.canonicalAmount),
+      packageQuantity: toSafeInteger(variant.packageQuantity),
+    })),
     prices: prices.rows.map((price) => ({
       ...price,
       amountMinor: toSafeInteger(price.amountMinor),

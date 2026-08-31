@@ -16,6 +16,20 @@ export const productStatusEnum = pgEnum("product_status", [
   "active",
   "retired",
 ]);
+export const productVariantStatusEnum = pgEnum("product_variant_status", [
+  "inactive",
+  "active",
+]);
+export const variantAmountUnitEnum = pgEnum("variant_amount_unit", [
+  "mg",
+  "mcg",
+  "iu",
+]);
+export const priceStatusEnum = pgEnum("price_status", [
+  "pending",
+  "active",
+  "unavailable",
+]);
 export const lotStatusEnum = pgEnum("lot_status", [
   "draft",
   "quarantined",
@@ -47,6 +61,16 @@ export const promotionStatusEnum = pgEnum("promotion_status", [
 export const promotionTargetKindEnum = pgEnum("promotion_target_kind", [
   "product",
   "policy_group",
+  "variant",
+]);
+export const promotionApplicationModeEnum = pgEnum(
+  "promotion_application_mode",
+  ["automatic", "code_required"],
+);
+export const promotionScopeEnum = pgEnum("promotion_scope", [
+  "sitewide",
+  "products",
+  "variants",
 ]);
 export const orderStateEnum = pgEnum("order_state", [
   "draft",

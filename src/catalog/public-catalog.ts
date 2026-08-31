@@ -222,6 +222,22 @@ function targetApplies(
   );
 }
 
+function isLegacyProductPrice(price: CatalogPriceRecord): boolean {
+  const persisted = price as CatalogPriceRecord & {
+    variantId?: string | null;
+    priceStatus?: "pending" | "active" | "unavailable";
+  };
+  return (
+    (persisted.variantId === undefined || persisted.variantId === null) &&
+    (persisted.priceStatus === undefined || persisted.priceStatus === "active")
+  );
+}
+
+function isLegacyProductLot(lot: CatalogLotRecord): boolean {
+  const persisted = lot as CatalogLotRecord & { variantId?: string | null };
+  return persisted.variantId === undefined || persisted.variantId === null;
+}
+
 export function buildPublicCatalog(
   records: CatalogRecordSet,
   options: { now?: Date } = {},
@@ -251,6 +267,7 @@ export function buildPublicCatalog(
       const expiresAt = lot.expiresAt ? new Date(lot.expiresAt).getTime() : null;
       return (
         activeProductIds.has(lot.productId) &&
+        isLegacyProductLot(lot) &&
         lot.status === "released" &&
         lot.availableQuantity > 0 &&
         passesOrdinaryPublicCopy(lot.supplierLotCode) &&
@@ -316,6 +333,7 @@ export function buildPublicCatalog(
     const currentPrices = records.prices.filter(
       (candidate) =>
         candidate.productId === product.id &&
+        isLegacyProductPrice(candidate) &&
         candidate.supersededAt === null &&
         new Date(candidate.effectiveAt).getTime() <= now.getTime(),
     );
