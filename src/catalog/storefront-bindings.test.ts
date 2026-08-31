@@ -49,7 +49,11 @@ describe("parseStorefrontBindings", () => {
   });
 
   it("does not infer an amount or package quantity from a label", () => {
-    const { amount: _amount, packageQuantity: _packageQuantity, ...withoutCanonicalFacts } = approved.variants[0];
+    const withoutCanonicalFacts: Record<string, unknown> = {
+      ...approved.variants[0],
+    };
+    delete withoutCanonicalFacts.amount;
+    delete withoutCanonicalFacts.packageQuantity;
     expect(() => parseStorefrontBindings({ ...approved, variants: [withoutCanonicalFacts] })).toThrow();
   });
 });

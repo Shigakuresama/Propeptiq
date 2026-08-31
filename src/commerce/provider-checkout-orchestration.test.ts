@@ -22,6 +22,10 @@ const ids = {
   policy: "76000000-0000-4000-8000-000000000007",
   attestation: "76000000-0000-4000-8000-000000000008",
   acceptance: "76000000-0000-4000-8000-000000000009",
+  variantA: "76000000-0000-4000-8000-00000000000a",
+  variantB: "76000000-0000-4000-8000-00000000000b",
+  priceB: "76000000-0000-4000-8000-00000000000c",
+  lotB: "76000000-0000-4000-8000-00000000000d",
 } as const;
 const now = new Date("2026-08-25T12:00:00.123Z");
 const sha256 = async (value: string) => createHash("sha256").update(value).digest("hex");
@@ -539,3 +543,438 @@ describe("provider Checkout orchestration", () => {
 function checkoutRepositoryPrepareCalls(repository: CheckoutRepository): number {
   return vi.mocked(repository.prepare).mock.calls.length;
 }
+
+async function stripeContext(provider: PaymentProvider) {
+  const result = await createProviderExecutionContextV1({
+    environment: parseServerEnv({
+      APP_ENV: "preview",
+      APP_ORIGIN: "https://commerce.synthetic.example",
+      PAYMENTS_MODE: "test",
+      STRIPE_ACCOUNT_ID: "acct_synthetic6d",
+      STRIPE_SECRET_KEY: "sk_test_synthetic_not_a_real_secret",
+      STRIPE_WEBHOOK_SECRET: "whsec_synthetic_not_a_real_secret",
+    }),
+    identity: {
+      clerkUserId: "user_synthetic_orchestration",
+      primaryEmail: "Synthetic.Buyer@Example.Test",
+      emailVerifiedAt: "2026-08-25T11:00:00.000Z",
+      mfaConfigured: false,
+      secondFactorCompleted: false,
+    },
+    now,
+    resolveDatabaseUsersByClerkId: async () => [ids.buyer],
+    adapters: { stripe: provider, localTest: null },
+  });
+  if (!result.ok) throw new Error("invalid synthetic Stripe context");
+  return result.context;
+}
+
+function stripeProviderWith(
+  createResult: (request: Parameters<PaymentProvider["createCheckoutSession"]>[0]) => CheckoutProviderResult,
+  retrieveResult?: (request: Parameters<PaymentProvider["retrieveCheckoutSession"]>[0]) => CheckoutProviderResult,
+): PaymentProvider {
+  return Object.freeze({
+    context: Object.freeze({
+      provider: "stripe" as const,
+      livemode: false,
+      scope: "stripe:acct_synthetic6d",
+    }),
+    createCheckoutSession: vi.fn(async (exactRequest) => createResult(exactRequest)),
+    retrieveCheckoutSession: vi.fn(async (input) =>
+      retrieveResult?.(input) ?? Object.freeze({
+        status: "provider_unknown" as const,
+        knownProviderSessionId: input.knownProviderSessionId,
+        evidenceCode: "provider_sdk_unknown" as const,
+      })),
+    createRefund: vi.fn(async (): Promise<RefundProviderResult> => ({
+      status: "provider_unknown",
+      knownProviderRefundId: null,
+      evidenceCode: "provider_sdk_unknown",
+    })),
+    retrieveRefund: vi.fn(async (input): Promise<RefundProviderResult> => ({
+      status: "provider_unknown",
+      knownProviderRefundId: input.knownProviderRefundId,
+      evidenceCode: "provider_sdk_unknown",
+    })),
+  });
+}
+
+function canonicalSetup(
+  provider: PaymentProvider,
+  verifyStatus: "verified" | "unavailable" = "verified",
+) {
+  const trace: string[] = [];
+  let durable: Record<string, unknown> | null = null;
+  let stored: null | Readonly<{
+    orderId: string;
+    attemptId: string;
+    requestHash: string;
+    status: "created" | "open" | "provider_unknown";
+    orderState: "checkout_pending";
+    permitted: true;
+    reviewRequired: false;
+    hasReservations: true;
+    quoteSnapshot: BrowserCheckoutQuote;
+    pricingRevision: string;
+  }> = null;
+  const canonicalFacts = Object.freeze({
+    buyer: facts.buyer,
+    items: Object.freeze([
+      Object.freeze({
+        variantId: ids.variantB,
+        productId: ids.product,
+        sku: "SYNTH-B",
+        variantLabel: "10 mg",
+        productName: "Synthetic Product",
+        packageForm: "sealed vial",
+        policyGroupId: ids.group,
+        productActive: true,
+        policyGroupActive: true,
+        variantActive: true,
+        availabilityRevision: "variant-b-revision-1",
+        inventoryRevision: "inventory-b-revision-1",
+        price: Object.freeze({
+          id: ids.priceB,
+          version: 4,
+          status: "active" as const,
+          amountMinor: 2_500,
+          currency: "USD",
+          effectiveAt: "2026-08-01T00:00:00.000Z",
+        }),
+        stripeProductId: "prod_synthetic_parent",
+        stripePriceId: "price_synthetic_b",
+        destination: facts.items[0]!.destination,
+        eligibleLots: Object.freeze([{ ...facts.items[0]!.eligibleLots[0]!, id: ids.lotB }]),
+      }),
+      Object.freeze({
+        variantId: ids.variantA,
+        productId: ids.product,
+        sku: "SYNTH-A",
+        variantLabel: "5 mg",
+        productName: "Synthetic Product",
+        packageForm: "sealed vial",
+        policyGroupId: ids.group,
+        productActive: true,
+        policyGroupActive: true,
+        variantActive: true,
+        availabilityRevision: "variant-a-revision-1",
+        inventoryRevision: "inventory-a-revision-1",
+        price: Object.freeze({
+          id: ids.price,
+          version: 3,
+          status: "active" as const,
+          amountMinor: 2_000,
+          currency: "USD",
+          effectiveAt: "2026-08-01T00:00:00.000Z",
+        }),
+        stripeProductId: "prod_synthetic_parent",
+        stripePriceId: "price_synthetic_a",
+        destination: facts.items[0]!.destination,
+        eligibleLots: facts.items[0]!.eligibleLots,
+      }),
+    ]),
+    automaticPromotions: Object.freeze([]),
+  });
+  const checkoutRepository = {
+    findAttempt: vi.fn(async () => stored),
+    loadVariantFacts: vi.fn(async () => ({ ok: true as const, value: canonicalFacts })),
+    findExactReview: vi.fn(async () => null),
+    prepare: vi.fn(async (plan, preparation) => {
+      trace.push("prepare");
+      if (preparation === null) return { status: "facts_changed_retry" as const };
+      stored = {
+        orderId: plan.identity.orderId,
+        attemptId: plan.identity.attemptId,
+        requestHash: plan.requestHash,
+        status: "created",
+        orderState: "checkout_pending",
+        permitted: true,
+        reviewRequired: false,
+        hasReservations: true,
+        quoteSnapshot: plan.browserQuote,
+        pricingRevision: plan.pricingRevision,
+      };
+      durable = {
+        buyerUserId: plan.buyerUserId,
+        idempotencyKey: plan.idempotencyKey,
+        orderId: plan.identity.orderId,
+        attemptId: plan.identity.attemptId,
+        requestHash: plan.requestHash,
+        attemptStatus: "created",
+        orderState: "checkout_pending",
+        provider: preparation.provider,
+        providerIdempotencyKey: preparation.providerIdempotencyKey,
+        providerSessionId: null,
+        providerRequestHash: preparation.providerRequestHash,
+        providerExpiresAt: preparation.providerExpiresAt,
+        providerCustomerEmail: preparation.providerCustomerEmail,
+        providerOrigin: preparation.providerOrigin,
+        providerRequestSchemaVersion: preparation.providerRequestSchemaVersion,
+        providerLivemode: preparation.providerLivemode,
+        providerScope: preparation.providerScope,
+        providerBindingSnapshot: preparation.providerBindingSnapshot,
+        currency: "USD",
+        destination: plan.request.destination,
+        lines: preparation.providerBindingSnapshot?.lines ?? [],
+        shippingMinor: plan.totals!.shippingMinor,
+        taxMinor: plan.totals!.taxMinor,
+        totalMinor: plan.totals!.totalMinor,
+      };
+      return {
+        status: "prepared" as const,
+        orderId: plan.identity.orderId,
+        attemptId: plan.identity.attemptId,
+        reviewRequestId: null,
+        quote: plan.browserQuote,
+      };
+    }),
+    releaseDefiniteFailure: vi.fn(async () => ({ status: "released" as const })),
+  };
+  const checkoutService = createCheckoutService({
+    repository: checkoutRepository as never,
+    shippingQuotePort: { quoteShipping: async (input) => ({
+      status: "ready", bindingHash: input.bindingHash, reference: "ship_canonical",
+      service: "Synthetic Ground", amountMinor: 700, currency: "USD",
+    }) },
+    taxQuotePort: { quoteTax: async (input) => ({
+      status: "ready", bindingHash: input.bindingHash, reference: "tax_canonical",
+      amountMinor: 325, currency: "USD",
+    }) },
+    sha256,
+    clock: () => new Date(now),
+    keyedUuid,
+    moneyPolicy: {
+      allowedCurrencies: ["USD"], maximumLineCount: 50,
+      maximumQuantityPerLine: 25, maximumOrderAmountMinor: 1_000_000,
+    },
+  });
+  const bindingVerifier = {
+    verifyBindings: vi.fn(async () => {
+      trace.push("verify");
+      return { status: verifyStatus } as const;
+    }),
+  };
+  const sessions = {
+    load: vi.fn(async () => durable as never),
+    recordOpen: vi.fn(async (_loaded, providerSessionId) => {
+      trace.push("cas:open");
+      durable = { ...durable!, attemptStatus: "open", providerSessionId };
+      stored = { ...stored!, status: "open" };
+      return { status: "applied" as const };
+    }),
+    recordUnknown: vi.fn(async (_loaded, input) => {
+      trace.push("cas:unknown");
+      durable = {
+        ...durable!,
+        attemptStatus: "provider_unknown",
+        providerSessionId: durable!.providerSessionId ?? input.knownProviderSessionId,
+      };
+      stored = { ...stored!, status: "provider_unknown" };
+      return { status: "applied" as const };
+    }),
+  };
+  const orchestrator = createProviderCheckoutOrchestrator({
+    checkoutService,
+    providerSessionRepository: sessions,
+    releaseDefiniteFailure: checkoutRepository.releaseDefiniteFailure,
+    bindingVerifier,
+    sha256,
+  });
+  const quoteRequest = {
+    items: [
+      { variantId: ids.variantB, quantity: 1 },
+      { variantId: ids.variantA, quantity: 2 },
+    ],
+    destination: request.destination,
+  };
+  return {
+    orchestrator,
+    checkoutService,
+    checkoutRepository,
+    bindingVerifier,
+    sessions,
+    trace,
+    quoteRequest,
+    getDurable: () => durable,
+  };
+}
+
+describe("canonical variant provider state machine", () => {
+  it("fails unavailable before preparation, reservation, durable creation, or Session creation", async () => {
+    const provider = stripeProviderWith((exactRequest) => ({
+      status: "open",
+      session: {
+        ...normalizedSession(exactRequest),
+        provider: "stripe",
+        hostedUrl: "https://checkout.stripe.com/c/pay/cs_test_synthetic",
+      },
+    }));
+    const fixture = canonicalSetup(provider, "unavailable");
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted") throw new Error(`unexpected quote ${quote.status}`);
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: { ...fixture.quoteRequest, pricingRevision: quote.pricingRevision },
+    })).resolves.toEqual({ status: "unavailable" });
+    expect(fixture.bindingVerifier.verifyBindings).toHaveBeenCalledTimes(1);
+    expect(fixture.checkoutRepository.prepare).not.toHaveBeenCalled();
+    expect(fixture.sessions.load).not.toHaveBeenCalled();
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+    expect(fixture.getDurable()).toBeNull();
+  });
+
+  it("keeps same-parent variants distinct through V2 preparation, durable replay, and inline Session creation", async () => {
+    const provider = stripeProviderWith((exactRequest) => {
+      expect(exactRequest).toMatchObject({
+        allow_promotion_codes: false,
+        line_items: [
+          { quantity: 1, price_data: { product: "prod_synthetic_parent", unit_amount: 3_680 } },
+          { quantity: 1, price_data: { product: "prod_synthetic_parent", unit_amount: 2_500 } },
+          { quantity: 1, price_data: { product_data: { name: "Shipping" }, unit_amount: 700 } },
+          { quantity: 1, price_data: { product_data: { name: "Sales tax" }, unit_amount: 325 } },
+        ],
+      });
+      return {
+        status: "open",
+        session: {
+          ...normalizedSession(exactRequest),
+          provider: "stripe",
+          hostedUrl: "https://checkout.stripe.com/c/pay/cs_test_synthetic",
+        },
+      };
+    });
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted") throw new Error(`unexpected quote ${quote.status}`);
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: { ...fixture.quoteRequest, pricingRevision: quote.pricingRevision },
+    })).resolves.toMatchObject({ status: "open" });
+    expect(fixture.trace.slice(0, 2)).toEqual(["verify", "prepare"]);
+    expect(fixture.checkoutRepository.prepare).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        providerRequestSchemaVersion: 2,
+        providerBindingSnapshot: {
+          schemaVersion: 2,
+          lines: [
+            expect.objectContaining({ variantId: ids.variantA, productId: ids.product }),
+            expect.objectContaining({ variantId: ids.variantB, productId: ids.product }),
+          ],
+        },
+      }),
+    );
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("retrieves a known V2 Session without rechecking mutable catalog bindings", async () => {
+    const provider = stripeProviderWith(
+      () => ({
+        status: "provider_unknown",
+        knownProviderSessionId: "cs_test_synthetic_known_v2",
+        evidenceCode: "create_requires_retrieve",
+      }),
+      (input) => ({
+        status: "open",
+        session: {
+          ...normalizedSession(
+            input.expectedRequest,
+            input.knownProviderSessionId,
+          ),
+          provider: "stripe",
+          hostedUrl: "https://checkout.stripe.com/c/pay/cs_test_synthetic_known_v2",
+        },
+      }),
+    );
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted") throw new Error(`unexpected quote ${quote.status}`);
+    const exactRequest = {
+      ...fixture.quoteRequest,
+      pricingRevision: quote.pricingRevision,
+    };
+
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: exactRequest,
+    })).resolves.toEqual({ status: "provider_unknown" });
+    vi.mocked(fixture.bindingVerifier.verifyBindings).mockResolvedValue({
+      status: "unavailable",
+    });
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: exactRequest,
+    })).resolves.toMatchObject({ status: "open", orderId: expect.any(String) });
+
+    expect(fixture.bindingVerifier.verifyBindings).toHaveBeenCalledTimes(1);
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains a no-ID V2 outcome as unknown when replay-time bindings drift", async () => {
+    const provider = stripeProviderWith(() => ({
+      status: "provider_unknown",
+      knownProviderSessionId: null,
+      evidenceCode: "provider_transport_unknown",
+    }));
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted") throw new Error(`unexpected quote ${quote.status}`);
+    const exactRequest = {
+      ...fixture.quoteRequest,
+      pricingRevision: quote.pricingRevision,
+    };
+
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: exactRequest,
+    })).resolves.toEqual({ status: "provider_unknown" });
+    vi.mocked(fixture.bindingVerifier.verifyBindings).mockResolvedValue({
+      status: "unavailable",
+    });
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: exactRequest,
+    })).resolves.toEqual({ status: "provider_unknown" });
+
+    expect(fixture.bindingVerifier.verifyBindings).toHaveBeenCalledTimes(2);
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
+    expect(fixture.sessions.recordUnknown).toHaveBeenCalledTimes(2);
+    expect(fixture.checkoutRepository.releaseDefiniteFailure).not.toHaveBeenCalled();
+    expect(fixture.getDurable()).toMatchObject({
+      attemptStatus: "provider_unknown",
+      providerSessionId: null,
+    });
+  });
+});

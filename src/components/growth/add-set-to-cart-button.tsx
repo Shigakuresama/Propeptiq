@@ -3,10 +3,11 @@
 import { Button } from "@/components/ui/button";
 
 export function AddSetToCartButton({
-  items: _items,
+  items,
 }: {
   items: readonly Readonly<{ productId: string; quantity: number }>[];
 }) {
+  void items;
   return (
     <>
       <Button type="button" className="action-primary" disabled aria-describedby="set-cart-unavailable">

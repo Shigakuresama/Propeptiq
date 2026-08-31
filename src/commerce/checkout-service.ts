@@ -1968,21 +1968,34 @@ export function createCheckoutService(dependencies: Readonly<{
       ) {
         return { status: "invalid_request", reason: "checkout_input_invalid" };
       }
-      const parsed = parseRewardsCheckoutRequest(input.request);
-      if (!parsed.ok) {
+      const parsedSession = parseRewardsCheckoutRequest(input.request);
+      const parsedQuote = parseRewardsCheckoutQuoteRequest(input.request);
+      if (!parsedSession.ok && !parsedQuote.ok) {
         return { status: "invalid_request", reason: "checkout_input_invalid" };
       }
+      let parsed: RewardsCheckoutQuoteRequest;
+      let acknowledgedPricingRevision: string | null;
+      if (parsedSession.ok) {
+        parsed = parsedSession.value;
+        acknowledgedPricingRevision = parsedSession.value.pricingRevision;
+      } else {
+        if (!parsedQuote.ok) {
+          return { status: "invalid_request", reason: "checkout_input_invalid" };
+        }
+        parsed = parsedQuote.value;
+        acknowledgedPricingRevision = null;
+      }
       const request: RewardsCheckoutQuoteRequest = Object.freeze({
-        items: parsed.value.items,
-        destination: parsed.value.destination,
-        ...(Object.hasOwn(parsed.value, "rewardRedemptionPoints")
-          ? { rewardRedemptionPoints: parsed.value.rewardRedemptionPoints }
+        items: parsed.items,
+        destination: parsed.destination,
+        ...(Object.hasOwn(parsed, "rewardRedemptionPoints")
+          ? { rewardRedemptionPoints: parsed.rewardRedemptionPoints }
           : {}),
       });
       return quoteCanonicalVariant(
         input,
         request,
-        parsed.value.pricingRevision,
+        acknowledgedPricingRevision,
       );
     },
 

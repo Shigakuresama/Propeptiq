@@ -5,14 +5,20 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { BuyerProfileRecord } from "@/account/account-service";
 import type { OrderDetail, OrderSummary } from "@/account/account-read";
 import type { LocalCommerceDriverV1, LocalCommerceInspectionV1 } from "@/auth/local-driver-types";
-import { projectAuthoritativeCheckoutPlan, projectLoadedCheckoutAttempt, type AuthoritativeCheckoutFacts, type AuthoritativeCheckoutPlan, type BrowserCheckoutQuote, type CheckoutRepository, type StoredCheckoutAttempt } from "@/commerce/checkout-service";
+import { projectAuthoritativeCheckoutPlan, projectLoadedCheckoutAttempt, type AuthoritativeCheckoutFacts, type AuthoritativeCheckoutPlan, type AuthoritativeVariantCheckoutFacts, type BrowserCheckoutQuote, type CheckoutRepository, type StoredCheckoutAttempt } from "@/commerce/checkout-service";
 import type { ProviderPreparation, ShippingQuotePort, TaxQuotePort } from "@/commerce/checkout-ports";
 import type { CheckoutSuccessReadModel } from "@/commerce/checkout-success-read";
 import type { FulfillmentCommandRepository } from "@/commerce/fulfillment-service";
 import { createSyntheticLocalPaymentProvider } from "local-payment-provider";
 import { buildProviderRefundRequestV1 } from "@/commerce/provider-contracts";
 import type { RefundClaimDescriptorV1, RefundCommandRepository } from "@/commerce/refund-service";
-import { createRepositoryDurableCheckoutRequestV1, projectDurableCheckoutRequestV1, type DurableCheckoutRequestV1, type ProviderSessionRepository } from "@/db/repositories/provider-session-repository";
+import {
+  createRepositoryDurableCheckoutRequestV1,
+  createRepositoryDurableCheckoutRequestV2,
+  projectDurableCheckoutRequest,
+  type DurableCheckoutRequest,
+  type ProviderSessionRepository,
+} from "@/db/repositories/provider-session-repository";
 import type { BuyerStatus } from "@/domain/eligibility";
 import type { PromotionRecord } from "@/domain/promotions";
 import type {
@@ -43,6 +49,17 @@ const LOCAL_REFERRAL_CODE_ID = "6b000000-0000-4000-8000-000000000031";
 const LOCAL_REFERRER_USER_ID = "6b000000-0000-4000-8000-000000000032";
 const LOCAL_REFERRAL_POLICY_ID = "6b000000-0000-4000-8000-000000000033";
 const LOCAL_SHARED_SET_CODE = "set_LocalRuntimeResearch01";
+/** Local/test-only canonical variant. Catalog fields are sourced from the synthetic demo records. */
+const LOCAL_CANONICAL_VARIANT_FIXTURE = Object.freeze({
+  variantId: "55000000-0000-4000-8000-000000000001",
+  productId: "61000000-0000-4000-8000-000000000001",
+  priceId: "62000000-0000-4000-8000-000000000001",
+  lotId: "63000000-0000-4000-8000-000000000001",
+  sku: "SYNTHETIC-ALPHA-5MG",
+  variantLabel: "Synthetic 5 mg fixture",
+  stripeProductId: "prod_synthetic_alpha",
+  stripePriceId: "price_synthetic_alpha_5mg",
+});
 const LOCAL_GROWTH_POLICY_BUNDLE_SENTINEL =
   "LOCAL_GROWTH_POLICY_BUNDLE_TEST_ONLY_PROPEPTIQ_2PPD_1MPP_500MIN_2500MAX_30D_1000BP_2500CAP_5PPD_2500PTS_1000BP_500BP_180D_30D_5000USD_4F8C21";
 
@@ -62,7 +79,7 @@ type SharedFacts = Readonly<{
 
 type AttemptRecord = {
   stored: StoredCheckoutAttempt;
-  durable: DurableCheckoutRequestV1 | null;
+  durable: DurableCheckoutRequest | null;
   providerPreparation: ProviderPreparation | null;
   providerSessionId: string | null;
 };
@@ -387,6 +404,124 @@ export function createLocalCommerceDriverV1(
         }),
       });
     },
+    async loadVariantFacts(input) {
+      const profile = shared.loadProfile(input.buyerUserId);
+      if (profile === null) {
+        return Object.freeze({
+          ok: false as const,
+          reasons: Object.freeze(["account_required"]),
+        });
+      }
+      if (input.request.items.some(
+        (item) => item.variantId !== LOCAL_CANONICAL_VARIANT_FIXTURE.variantId,
+      )) {
+        return Object.freeze({
+          ok: false as const,
+          reasons: Object.freeze(["variant_catalog_incomplete"]),
+        });
+      }
+
+      const records = loadSyntheticDemoCatalogRecords();
+      const product = records.products.find(
+        (candidate) => candidate.id === LOCAL_CANONICAL_VARIANT_FIXTURE.productId,
+      );
+      const price = records.prices.find(
+        (candidate) =>
+          candidate.id === LOCAL_CANONICAL_VARIANT_FIXTURE.priceId &&
+          candidate.productId === LOCAL_CANONICAL_VARIANT_FIXTURE.productId &&
+          candidate.supersededAt === null,
+      );
+      const lots = records.lots.filter(
+        (candidate) =>
+          candidate.id === LOCAL_CANONICAL_VARIANT_FIXTURE.lotId &&
+          candidate.productId === LOCAL_CANONICAL_VARIANT_FIXTURE.productId &&
+          candidate.status === "released" &&
+          (candidate.expiresAt === null ||
+            new Date(candidate.expiresAt).getTime() > input.now.getTime()),
+      );
+      if (!product || !price) {
+        return Object.freeze({
+          ok: false as const,
+          reasons: Object.freeze(["variant_catalog_incomplete"]),
+        });
+      }
+
+      const policyId = Object.hasOwn(
+        POLICY_ID_BY_STATE,
+        input.request.destination.stateCode,
+      )
+        ? POLICY_ID_BY_STATE[
+          input.request.destination.stateCode as keyof typeof POLICY_ID_BY_STATE
+        ]
+        : null;
+      const destinationStatus = input.request.destination.stateCode === "CA"
+        ? "allowed"
+        : input.request.destination.stateCode === "OR"
+          ? "review"
+          : input.request.destination.stateCode === "NV"
+            ? "blocked"
+            : "unavailable";
+      const item: AuthoritativeVariantCheckoutFacts["items"][number] = Object.freeze({
+        variantId: LOCAL_CANONICAL_VARIANT_FIXTURE.variantId,
+        productId: product.id,
+        sku: LOCAL_CANONICAL_VARIANT_FIXTURE.sku,
+        variantLabel: LOCAL_CANONICAL_VARIANT_FIXTURE.variantLabel,
+        productName: product.name,
+        packageForm: product.packageForm,
+        policyGroupId: product.policyGroupId,
+        productActive: product.status === "active",
+        policyGroupActive: true,
+        variantActive: true,
+        availabilityRevision:
+          `local-test:${product.id}:${price.id}:${price.version}:active`,
+        inventoryRevision:
+          `local-test:${lots.map((lot) => `${lot.id}:${lot.availableQuantity}`).join(",")}`,
+        price: Object.freeze({
+          id: price.id,
+          version: price.version,
+          status: "active" as const,
+          amountMinor: price.amountMinor,
+          currency: price.currency,
+          effectiveAt: price.effectiveAt,
+        }),
+        stripeProductId: LOCAL_CANONICAL_VARIANT_FIXTURE.stripeProductId,
+        stripePriceId: LOCAL_CANONICAL_VARIANT_FIXTURE.stripePriceId,
+        destination: Object.freeze({
+          status: destinationStatus,
+          normalizedStateCode: input.request.destination.stateCode,
+          ruleId: policyId,
+          ruleVersion: policyId === null ? null : "1",
+          scope: policyId === null ? null : "product",
+        }),
+        eligibleLots: Object.freeze(lots.map((lot) => Object.freeze({
+          id: lot.id,
+          status: "released" as const,
+          receivedQuantity: lot.availableQuantity,
+          availableQuantity: lot.availableQuantity,
+          expiresAt: lot.expiresAt,
+        }))),
+      });
+      return Object.freeze({
+        ok: true as const,
+        value: Object.freeze({
+          buyer: Object.freeze({
+            userId: input.buyerUserId,
+            emailVerified: shared.loadEmail(input.buyerUserId) !== null,
+            status: profile.status as BuyerStatus,
+            currentAttestationVersionId: CURRENT_ATTESTATION_ID,
+            currentAttestationVersion: 1,
+            attestationAcceptanceId: shared.hasCurrentAttestation(input.buyerUserId)
+              ? "67000000-0000-4000-8000-000000000002"
+              : null,
+            acceptedAttestationVersionId: shared.hasCurrentAttestation(input.buyerUserId)
+              ? CURRENT_ATTESTATION_ID
+              : null,
+          }),
+          items: Object.freeze(input.request.items.map(() => item)),
+          automaticPromotions: Object.freeze([]),
+        }),
+      });
+    },
     async findExactReview(input) {
       const review = state.reviews.get(input.snapshotHash);
       if (!review || review.orderId !== input.orderId || review.ownerUserId !== input.buyerUserId) return null;
@@ -462,14 +597,14 @@ export function createLocalCommerceDriverV1(
         pricingRevision:
           plan.kind === "canonical_variant" ? plan.pricingRevision : null,
       });
-      const durable = createRepositoryDurableCheckoutRequestV1({
+      const durableCommon = {
         buyerUserId: plan.buyerUserId,
         idempotencyKey: plan.idempotencyKey,
         orderId: plan.identity.orderId,
         attemptId: plan.identity.attemptId,
         requestHash: plan.requestHash,
-        attemptStatus: "created",
-        orderState: "checkout_pending",
+        attemptStatus: "created" as const,
+        orderState: "checkout_pending" as const,
         provider: providerPreparation.provider,
         providerIdempotencyKey: providerPreparation.providerIdempotencyKey,
         providerSessionId: null,
@@ -477,22 +612,36 @@ export function createLocalCommerceDriverV1(
         providerExpiresAt: providerPreparation.providerExpiresAt,
         providerCustomerEmail: providerPreparation.providerCustomerEmail,
         providerOrigin: providerPreparation.providerOrigin,
-        providerRequestSchemaVersion: 1,
         providerLivemode: providerPreparation.providerLivemode,
         providerScope: providerPreparation.providerScope,
-        currency: "USD",
+        currency: "USD" as const,
         destination: plan.request.destination,
-        lines: Object.freeze(plan.browserQuote.lines.map((line) => Object.freeze({
-          productId: line.productId ?? line.variantId!,
-          productName: line.productName,
-          packageForm: line.packageForm,
-          purchasedQuantity: line.quantity,
-          postDiscountTotalMinor: line.totalMinor,
-        }))),
         shippingMinor: plan.totals.shippingMinor,
         taxMinor: plan.totals.taxMinor,
         totalMinor: plan.totals.totalMinor,
-      });
+      };
+      const durable = plan.kind === "canonical_variant"
+        ? providerPreparation.providerRequestSchemaVersion !== 2
+          ? null
+          : createRepositoryDurableCheckoutRequestV2({
+              ...durableCommon,
+              providerRequestSchemaVersion: 2,
+              providerBindingSnapshot: providerPreparation.providerBindingSnapshot,
+            })
+        : providerPreparation.providerRequestSchemaVersion !== 1
+          ? null
+          : createRepositoryDurableCheckoutRequestV1({
+              ...durableCommon,
+              providerRequestSchemaVersion: 1,
+              lines: Object.freeze(plan.browserQuote.lines.map((line) => Object.freeze({
+                productId: line.productId!,
+                productName: line.productName,
+                packageForm: line.packageForm,
+                purchasedQuantity: line.quantity,
+                postDiscountTotalMinor: line.totalMinor,
+              }))),
+            });
+      if (durable === null) return Object.freeze({ status: "facts_changed_retry" as const });
       state.attempts.set(key, { stored, durable, providerPreparation, providerSessionId: null });
       state.orders.set(plan.identity.orderId, { ownerUserId: plan.buyerUserId, destinationStateCode: plan.request.destination.stateCode, success });
       bump(state, true);
@@ -515,7 +664,7 @@ export function createLocalCommerceDriverV1(
       return state.attempts.get(attemptKey(input.buyerUserId, input.idempotencyKey))?.durable ?? null;
     },
     async recordOpen(value, providerSessionId) {
-      const durable = projectDurableCheckoutRequestV1(value);
+      const durable = projectDurableCheckoutRequest(value);
       if (durable === null) return Object.freeze({ status: "conflict" as const });
       const record = state.attempts.get(attemptKey(durable.buyerUserId, durable.idempotencyKey));
       if (!record || record.stored.orderState !== "checkout_pending") return Object.freeze({ status: "nonpayable" as const });
@@ -523,12 +672,14 @@ export function createLocalCommerceDriverV1(
       const already = record.providerSessionId === providerSessionId && record.stored.status === "open";
       record.providerSessionId = providerSessionId;
       record.stored = Object.freeze({ ...record.stored, status: "open" });
-      record.durable = createRepositoryDurableCheckoutRequestV1({ ...durable, providerSessionId, attemptStatus: "open" });
+      record.durable = durable.providerRequestSchemaVersion === 1
+        ? createRepositoryDurableCheckoutRequestV1({ ...durable, providerSessionId, attemptStatus: "open" })
+        : createRepositoryDurableCheckoutRequestV2({ ...durable, providerSessionId, attemptStatus: "open" });
       if (!already) bump(state);
       return Object.freeze({ status: already ? "idempotent" as const : "applied" as const });
     },
     async recordUnknown(value, input) {
-      const durable = projectDurableCheckoutRequestV1(value);
+      const durable = projectDurableCheckoutRequest(value);
       if (durable === null) return Object.freeze({ status: "conflict" as const });
       const record = state.attempts.get(attemptKey(durable.buyerUserId, durable.idempotencyKey));
       if (!record) return Object.freeze({ status: "conflict" as const });
@@ -537,7 +688,9 @@ export function createLocalCommerceDriverV1(
       const already = record.stored.status === "provider_unknown" && record.providerSessionId === known;
       record.providerSessionId = known;
       record.stored = Object.freeze({ ...record.stored, status: "provider_unknown" });
-      record.durable = createRepositoryDurableCheckoutRequestV1({ ...durable, providerSessionId: known, attemptStatus: "provider_unknown" });
+      record.durable = durable.providerRequestSchemaVersion === 1
+        ? createRepositoryDurableCheckoutRequestV1({ ...durable, providerSessionId: known, attemptStatus: "provider_unknown" })
+        : createRepositoryDurableCheckoutRequestV2({ ...durable, providerSessionId: known, attemptStatus: "provider_unknown" });
       if (!already) bump(state);
       return Object.freeze({ status: already ? "idempotent" as const : "applied" as const });
     },
@@ -683,7 +836,7 @@ export function createLocalCommerceDriverV1(
       (candidate) => candidate.providerSessionId === input.sessionId,
     );
     const durable = attempt?.durable
-      ? projectDurableCheckoutRequestV1(attempt.durable)
+      ? projectDurableCheckoutRequest(attempt.durable)
       : null;
     const order = durable === null ? null : state.orders.get(durable.orderId) ?? null;
     if (
@@ -724,6 +877,42 @@ export function createLocalCommerceDriverV1(
 
   const driver: LocalCommerceDriverV1 = Object.freeze({
     checkoutRepository,
+    cartPreviewSource() {
+      const records = loadSyntheticDemoCatalogRecords();
+      const product = records.products.find(
+        (candidate) => candidate.id === LOCAL_CANONICAL_VARIANT_FIXTURE.productId,
+      );
+      const price = records.prices.find(
+        (candidate) =>
+          candidate.id === LOCAL_CANONICAL_VARIANT_FIXTURE.priceId &&
+          candidate.productId === LOCAL_CANONICAL_VARIANT_FIXTURE.productId &&
+          candidate.supersededAt === null,
+      );
+      if (!product || !price) return Object.freeze({ variants: Object.freeze([]) });
+      const availableQuantity = records.lots
+        .filter((lot) =>
+          lot.id === LOCAL_CANONICAL_VARIANT_FIXTURE.lotId &&
+          lot.productId === product.id &&
+          lot.status === "released" &&
+          (lot.expiresAt === null || new Date(lot.expiresAt).getTime() > Date.now()))
+        .reduce((total, lot) => total + lot.availableQuantity, 0);
+      return Object.freeze({
+        variants: Object.freeze([Object.freeze({
+          variantId: LOCAL_CANONICAL_VARIANT_FIXTURE.variantId,
+          productId: product.id,
+          name: product.name,
+          packageForm: product.packageForm,
+          variantLabel: LOCAL_CANONICAL_VARIANT_FIXTURE.variantLabel,
+          sku: LOCAL_CANONICAL_VARIANT_FIXTURE.sku,
+          baseUnitMinor: price.amountMinor,
+          currency: "USD" as const,
+          priceStatus: "active" as const,
+          availability: availableQuantity > 0 ? "available" as const : "unavailable" as const,
+          availableQuantity,
+          eligiblePromotions: Object.freeze([]),
+        })]),
+      });
+    },
     providerSessionRepository,
     paymentProvider: providerHarness.provider,
     shippingQuotePort,
@@ -828,7 +1017,9 @@ export function createLocalCommerceDriverV1(
       state.paymentTransitionCount += 1;
       hosted.order.success = Object.freeze({ ...hosted.order.success, state: "paid_pending_fulfillment", paymentState: "paid", updatedAt: nextInstant(state) });
       hosted.attempt.stored = Object.freeze({ ...hosted.attempt.stored, status: "completed", orderState: "paid_pending_fulfillment" });
-      hosted.attempt.durable = createRepositoryDurableCheckoutRequestV1({ ...hosted.durable, attemptStatus: "completed", orderState: "paid_pending_fulfillment" });
+      hosted.attempt.durable = hosted.durable.providerRequestSchemaVersion === 1
+        ? createRepositoryDurableCheckoutRequestV1({ ...hosted.durable, attemptStatus: "completed", orderState: "paid_pending_fulfillment" })
+        : createRepositoryDurableCheckoutRequestV2({ ...hosted.durable, attemptStatus: "completed", orderState: "paid_pending_fulfillment" });
       providerHarness.control.setCheckoutState(input.sessionId, "complete");
       bump(state, true);
       return Object.freeze({ status: "paid" as const, orderId: hosted.durable.orderId });

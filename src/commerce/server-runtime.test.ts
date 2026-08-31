@@ -72,7 +72,7 @@ function requestForActor(actorKey: "non_admin" | "admin") {
 }
 
 const checkoutRequest = {
-  items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }],
+  items: [{ variantId: "55000000-0000-4000-8000-000000000001", quantity: 2 }],
   destination: {
     recipientName: "Synthetic Research Buyer",
     line1: "100 Test Way",
@@ -82,7 +82,6 @@ const checkoutRequest = {
     postalCode: "90001",
     countryCode: "US",
   },
-  promotionIds: ["66000000-0000-4000-8000-000000000001"],
 } as const;
 const idempotencyKey = "6b000000-0000-4000-8000-000000000001";
 const localAffiliateCode = "aff_LocalRuntimePartner01";
@@ -122,16 +121,18 @@ describe("commerce server composition", () => {
       status: "quoted",
       quote: {
         subtotalMinor: 4_800,
-        discountMinor: 480,
+        discountMinor: 384,
         shippingMinor: 500,
         taxMinor: 321,
-        totalMinor: 5_141,
+        totalMinor: 5_237,
       },
     });
+    expect(quoted.status).toBe("quoted");
+    if (quoted.status !== "quoted") throw new Error("expected canonical runtime quote");
     const opened = await runtime!.startSession({
       buyerUserId: request.principal!.actorId,
       idempotencyKey,
-      request: checkoutRequest,
+      request: { ...checkoutRequest, pricingRevision: quoted.pricingRevision },
     });
     expect(opened).toMatchObject({ status: "open" });
     if (opened.status === "open") {
@@ -140,7 +141,7 @@ describe("commerce server composition", () => {
     await expect(runtime!.startSession({
       buyerUserId: request.principal!.actorId,
       idempotencyKey,
-      request: checkoutRequest,
+      request: { ...checkoutRequest, pricingRevision: quoted.pricingRevision },
     })).resolves.toEqual(opened);
     expect(request.localDriver.commerce.inspect()).toMatchObject({
       orderCount: 1,
@@ -148,6 +149,45 @@ describe("commerce server composition", () => {
       providerSessionCount: 1,
       reservationCount: 1,
     });
+  });
+
+  it("routes a canonical variant quote and session through the same pricing revision", async () => {
+    const request = requestForActor("non_admin");
+    const runtime = await createCheckoutServerRuntime(request);
+    expect(runtime).not.toBeNull();
+
+    const quoted = await runtime!.quoteCheckout({
+      buyerUserId: request.principal!.actorId,
+      idempotencyKey: "6b000000-0000-4000-8000-000000000041",
+      request: checkoutRequest,
+    });
+    expect(quoted).toMatchObject({
+      status: "quoted",
+      quote: {
+        subtotalMinor: 4_800,
+        discountMinor: 384,
+        shippingMinor: 500,
+        taxMinor: 321,
+        totalMinor: 5_237,
+        lines: [{
+          variantId: "55000000-0000-4000-8000-000000000001",
+          productId: "61000000-0000-4000-8000-000000000001",
+          quantity: 2,
+        }],
+      },
+    });
+    expect(quoted.status).toBe("quoted");
+    if (quoted.status !== "quoted") throw new Error("expected canonical runtime quote");
+    expect(quoted.pricingRevision).toMatch(/^[0-9a-f]{64}$/u);
+
+    await expect(runtime!.startSession({
+      buyerUserId: request.principal!.actorId,
+      idempotencyKey: "6b000000-0000-4000-8000-000000000041",
+      request: {
+        ...checkoutRequest,
+        pricingRevision: quoted.pricingRevision,
+      },
+    })).resolves.toMatchObject({ status: "open" });
   });
 
   it("binds a real signed affiliate cookie through the unmodified deterministic driver", async () => {
@@ -214,7 +254,7 @@ describe("commerce server composition", () => {
       buyerUserId: request.principal!.actorId,
       idempotencyKey: "6b000000-0000-4000-8000-000000000002",
       attributionCookie: cookie!.value,
-      request: { ...checkoutRequest, promotionIds: [] },
+      request: checkoutRequest,
     });
 
     expect(quoted.status).toBe("quoted");
@@ -242,7 +282,7 @@ describe("commerce server composition", () => {
       buyerUserId: request.principal!.actorId,
       idempotencyKey: "6b000000-0000-4000-8000-000000000002",
       attributionCookie: cookie!.value,
-      request: { ...checkoutRequest, promotionIds: [] },
+      request: { ...checkoutRequest, pricingRevision: quoted.pricingRevision },
     });
     expect(opened).toMatchObject({ status: "open" });
     expect(request.localDriver.commerce.inspect()).toMatchObject({

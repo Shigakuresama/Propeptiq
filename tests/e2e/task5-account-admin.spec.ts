@@ -22,10 +22,10 @@ test("preserves exact cart IDs and quantities through fixed sign-in and checkout
   await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
   await page.evaluate(() => {
     window.localStorage.setItem(
-      "propeptiq.cart.v1",
-      JSON.stringify({ version: 1, items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }] }),
+      "propeptiq.cart.v2",
+      JSON.stringify({ version: 2, items: [{ variantId: "55000000-0000-4000-8000-000000000001", quantity: 2 }] }),
     );
-    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v1" }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2" }));
   });
   await expect(page.getByRole("button", { name: "Continue to sign in" })).toBeVisible();
   await page.reload();
@@ -38,11 +38,11 @@ test("preserves exact cart IDs and quantities through fixed sign-in and checkout
   await expect(page.getByRole("list", { name: "Saved cart lines" })).toContainText("Synthetic Reference Alpha");
   await expect(page.getByRole("list", { name: "Saved cart lines" })).toContainText("× 2");
   const savedCart = await page.evaluate(() =>
-    JSON.parse(window.localStorage.getItem("propeptiq.cart.v1") ?? "null"),
+    JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"),
   );
   expect(savedCart).toEqual({
-    version: 1,
-    items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }],
+    version: 2,
+    items: [{ variantId: "55000000-0000-4000-8000-000000000001", quantity: 2 }],
   });
 });
 

@@ -1,5 +1,9 @@
 import { isSha256 } from "@/commerce/checkout-identity";
 import {
+  createStripeProviderBindingSnapshotV2,
+  type StripeProviderBindingSnapshotV2,
+} from "@/commerce/provider-contracts";
+import {
   parseCheckoutQuoteRequest,
   parseCheckoutRequest,
   type CheckoutQuoteRequest,
@@ -86,7 +90,7 @@ export type TaxQuotePort = Readonly<{
   quoteTax: (request: TaxQuoteRequest) => Promise<unknown>;
 }>;
 
-export type ProviderPreparation = Readonly<{
+type ProviderPreparationBase = Readonly<{
   authority: "server_prepared_provider_request";
   provider: "stripe" | "local_test";
   providerIdempotencyKey: string;
@@ -94,10 +98,19 @@ export type ProviderPreparation = Readonly<{
   providerExpiresAt: string;
   providerCustomerEmail: string;
   providerOrigin: string;
-  providerRequestSchemaVersion: 1;
   providerLivemode: boolean;
   providerScope: string;
 }>;
+
+export type ProviderPreparation =
+  | Readonly<ProviderPreparationBase & {
+      providerRequestSchemaVersion: 1;
+      providerBindingSnapshot?: never;
+    }>
+  | Readonly<ProviderPreparationBase & {
+      providerRequestSchemaVersion: 2;
+      providerBindingSnapshot: StripeProviderBindingSnapshotV2;
+    }>;
 
 export type RewardsCheckoutQuoteRequest = CheckoutQuoteRequest;
 export type RewardsCheckoutRequest = CheckoutRequest;
@@ -400,8 +413,15 @@ export function parseProviderPreparation(
   value: unknown,
   expected: Readonly<{ attemptId: string; now: Date }>,
 ): ContractResult<ProviderPreparation> {
+  if (!isRecord(value)) return fail("providerPreparation");
+  const schemaVersion = value.providerRequestSchemaVersion;
+  const binding = schemaVersion === 2 && isRecord(value.providerBindingSnapshot)
+    ? value.providerBindingSnapshot
+    : null;
+  const parsedBinding = binding === null
+    ? null
+    : createStripeProviderBindingSnapshotV2(binding.lines);
   if (
-    !isRecord(value) ||
     !exactKeys(value, [
       "authority",
       "provider",
@@ -413,6 +433,7 @@ export function parseProviderPreparation(
       "providerRequestSchemaVersion",
       "providerLivemode",
       "providerScope",
+      ...(schemaVersion === 2 ? ["providerBindingSnapshot"] : []),
     ]) ||
     value.authority !== "server_prepared_provider_request" ||
     (value.provider !== "stripe" && value.provider !== "local_test") ||
@@ -422,7 +443,14 @@ export function parseProviderPreparation(
     typeof value.providerExpiresAt !== "string" ||
     !isCanonicalProviderEmail(value.providerCustomerEmail) ||
     !isCanonicalProviderOrigin(value.providerOrigin, value.provider) ||
-    value.providerRequestSchemaVersion !== 1 ||
+    (schemaVersion !== 1 && schemaVersion !== 2) ||
+    (schemaVersion === 2 &&
+      (binding === null ||
+        !exactKeys(binding, ["schemaVersion", "lines"]) ||
+        binding.schemaVersion !== 2 ||
+        parsedBinding === null ||
+        !parsedBinding.ok ||
+        JSON.stringify(parsedBinding.value) !== JSON.stringify(binding))) ||
     typeof value.providerLivemode !== "boolean" ||
     !isCoherentProviderScope(
       value.provider,
@@ -445,19 +473,30 @@ export function parseProviderPreparation(
   ) {
     return fail("providerPreparation.providerExpiresAt");
   }
+  const common = {
+    authority: "server_prepared_provider_request" as const,
+    provider: value.provider as ProviderPreparationBase["provider"],
+    providerIdempotencyKey: value.providerIdempotencyKey,
+    providerRequestHash: value.providerRequestHash,
+    providerExpiresAt: value.providerExpiresAt,
+    providerCustomerEmail: value.providerCustomerEmail,
+    providerOrigin: value.providerOrigin,
+    providerLivemode: value.providerLivemode,
+    providerScope: value.providerScope,
+  };
+  if (schemaVersion === 1) {
+    return Object.freeze({
+      ok: true as const,
+      value: Object.freeze({ ...common, providerRequestSchemaVersion: 1 as const }),
+    });
+  }
+  if (parsedBinding === null || !parsedBinding.ok) return fail("providerPreparation");
   return Object.freeze({
-    ok: true,
+    ok: true as const,
     value: Object.freeze({
-      authority: "server_prepared_provider_request" as const,
-      provider: value.provider,
-      providerIdempotencyKey: value.providerIdempotencyKey,
-      providerRequestHash: value.providerRequestHash,
-      providerExpiresAt: value.providerExpiresAt,
-      providerCustomerEmail: value.providerCustomerEmail,
-      providerOrigin: value.providerOrigin,
-      providerRequestSchemaVersion: 1,
-      providerLivemode: value.providerLivemode,
-      providerScope: value.providerScope,
+      ...common,
+      providerRequestSchemaVersion: 2 as const,
+      providerBindingSnapshot: parsedBinding.value,
     }),
   });
 }

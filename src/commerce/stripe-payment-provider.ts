@@ -4,8 +4,10 @@ import Stripe from "stripe";
 
 import type {
   ProviderRefundRequestV1,
-  StripeCheckoutRequestV1,
+  StripeProviderBindingSnapshotV2,
+  StripeCheckoutRequest,
 } from "@/commerce/provider-contracts";
+import { createStripeProviderBindingSnapshotV2 } from "@/commerce/provider-contracts";
 import type {
   CheckoutProviderResult,
   ExpectedProviderContextV1,
@@ -48,6 +50,24 @@ export type StripeSdkClient = Readonly<{
       options: StripeRequestOptions,
     ) => Promise<unknown>;
   }>;
+}>;
+
+export type StripeBindingVerifierSdkClient = Readonly<{
+  accounts: Readonly<{
+    retrieveCurrent: () => Promise<unknown>;
+  }>;
+  prices: Readonly<{
+    retrieve: (
+      id: string,
+      params: Readonly<{ expand: readonly ["product"] }>,
+    ) => Promise<unknown>;
+  }>;
+}>;
+
+export type StripeBindingVerifier = Readonly<{
+  verifyBindings: (
+    snapshot: StripeProviderBindingSnapshotV2,
+  ) => Promise<Readonly<{ status: "verified" | "unavailable" }>>;
 }>;
 
 export type StripeConstructorLike = new (
@@ -197,7 +217,7 @@ function unknownRefund(
 
 function normalizedSession(
   raw: unknown,
-  expected: StripeCheckoutRequestV1,
+  expected: StripeCheckoutRequest,
   context: ExpectedProviderContextV1,
   knownId: string | null,
 ): NormalizedCheckoutSessionV1 | null {
@@ -253,7 +273,7 @@ function normalizedSession(
 
 function adaptSession(
   raw: unknown,
-  expected: StripeCheckoutRequestV1,
+  expected: StripeCheckoutRequest,
   context: ExpectedProviderContextV1,
   operation: "create" | "retrieve",
   knownId: string | null,
@@ -321,6 +341,101 @@ function directField(record: Record<string, unknown> | null, key: string): unkno
   return record === null ? undefined : record[key];
 }
 
+const bindingUnavailable = Object.freeze({ status: "unavailable" as const });
+const bindingVerified = Object.freeze({ status: "verified" as const });
+
+function exactCurrentAccount(raw: unknown, expectedAccountId: string): boolean {
+  const account = objectRecord(raw);
+  return (
+    account !== null &&
+    account.object === "account" &&
+    account.id === expectedAccountId
+  );
+}
+
+function exactExpandedProduct(
+  raw: unknown,
+  expectedProductId: string,
+  expectedLivemode: boolean,
+): boolean {
+  const product = objectRecord(raw);
+  return (
+    product !== null &&
+    product.object === "product" &&
+    product.id === expectedProductId &&
+    product.active === true &&
+    product.deleted !== true &&
+    product.livemode === expectedLivemode
+  );
+}
+
+function exactConfiguredPrice(
+  raw: unknown,
+  expected: StripeProviderBindingSnapshotV2["lines"][number],
+  expectedLivemode: boolean,
+): boolean {
+  const price = objectRecord(raw);
+  return (
+    price !== null &&
+    price.object === "price" &&
+    price.id === expected.stripePriceId &&
+    price.active === true &&
+    price.type === "one_time" &&
+    price.recurring === null &&
+    price.billing_scheme === "per_unit" &&
+    price.custom_unit_amount === null &&
+    price.tiers_mode === null &&
+    Number.isSafeInteger(price.unit_amount) &&
+    (price.unit_amount as number) > 0 &&
+    price.unit_amount === expected.baseUnitMinor &&
+    price.currency === expected.currency.toLowerCase() &&
+    price.livemode === expectedLivemode &&
+    exactExpandedProduct(
+      price.product,
+      expected.stripeProductId,
+      expectedLivemode,
+    )
+  );
+}
+
+export function createStripeBindingVerifier(input: Readonly<{
+  sdk: StripeBindingVerifierSdkClient;
+  context: ExpectedProviderContextV1;
+}>): StripeBindingVerifier {
+  if (
+    input.context.provider !== "stripe" ||
+    !/^stripe:acct_[A-Za-z0-9]{8,64}$/u.test(input.context.scope)
+  ) {
+    throw new Error("Stripe binding verifier context is invalid");
+  }
+  const expectedAccountId = input.context.scope.slice("stripe:".length);
+  const expectedLivemode = input.context.livemode;
+  return Object.freeze({
+    async verifyBindings(snapshot) {
+      if (snapshot.schemaVersion !== 2) return bindingUnavailable;
+      const canonical = createStripeProviderBindingSnapshotV2(snapshot.lines);
+      if (!canonical.ok || JSON.stringify(canonical.value) !== JSON.stringify(snapshot)) {
+        return bindingUnavailable;
+      }
+      try {
+        const account = await input.sdk.accounts.retrieveCurrent();
+        if (!exactCurrentAccount(account, expectedAccountId)) return bindingUnavailable;
+        for (const line of canonical.value.lines) {
+          const price = await input.sdk.prices.retrieve(line.stripePriceId, {
+            expand: ["product"],
+          });
+          if (!exactConfiguredPrice(price, line, expectedLivemode)) {
+            return bindingUnavailable;
+          }
+        }
+        return bindingVerified;
+      } catch {
+        return bindingUnavailable;
+      }
+    },
+  });
+}
+
 export function classifyStripeProviderError(
   error: unknown,
   operation: StripeOperation,
@@ -375,7 +490,7 @@ export function classifyStripeProviderError(
   });
 }
 
-function checkoutParams(request: StripeCheckoutRequestV1): Stripe.Checkout.SessionCreateParams {
+function checkoutParams(request: StripeCheckoutRequest): Stripe.Checkout.SessionCreateParams {
   return {
     ui_mode: request.ui_mode,
     mode: request.mode,
@@ -393,13 +508,22 @@ function checkoutParams(request: StripeCheckoutRequestV1): Stripe.Checkout.Sessi
         address: { ...request.payment_intent_data.shipping.address },
       },
     },
+    ...("allow_promotion_codes" in request
+      ? { allow_promotion_codes: false }
+      : {}),
     line_items: request.line_items.map((item) => ({
       quantity: 1,
-      price_data: {
-        currency: "usd",
-        unit_amount: item.price_data.unit_amount,
-        product_data: { name: item.price_data.product_data.name },
-      },
+      price_data: "product" in item.price_data
+        ? {
+            currency: "usd" as const,
+            unit_amount: item.price_data.unit_amount,
+            product: item.price_data.product,
+          }
+        : {
+            currency: "usd" as const,
+            unit_amount: item.price_data.unit_amount,
+            product_data: { name: item.price_data.product_data.name },
+          },
     })),
   };
 }

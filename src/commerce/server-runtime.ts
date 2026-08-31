@@ -11,13 +11,18 @@ import {
   type CheckoutQuoteResult,
   type CheckoutSessionQuoteResult,
 } from "@/commerce/checkout-service";
+import { parseRewardsCheckoutQuoteRequest } from "@/commerce/checkout-ports";
 import { createProviderCheckoutOrchestrator, type ProviderCheckoutRouteResult } from "@/commerce/provider-checkout-orchestration";
 import { createProviderExecutionContextV1 } from "@/commerce/provider-context";
 import { createProviderEventServiceV1 } from "@/commerce/provider-event-service";
 import { createProviderEventAuthorityV1 } from "@/commerce/stripe-webhook-verifier";
 import {
   STRIPE_API_VERSION,
+  createStripeBindingVerifier,
+  createStripePaymentProvider,
   createRuntimeStripePaymentProvider,
+  type StripeBindingVerifierSdkClient,
+  type StripeSdkClient,
 } from "@/commerce/stripe-payment-provider";
 import { createStripeShippingQuotePort } from "@/commerce/stripe-shipping-provider";
 import { createStripeTaxQuotePort } from "@/commerce/stripe-tax-provider";
@@ -170,15 +175,24 @@ async function createPostgresCheckoutServerRuntime(
 
   let paymentProvider;
   let stripeSdk;
+  let bindingVerifier;
   try {
-    paymentProvider = createRuntimeStripePaymentProvider({
-      secretKey: environment.STRIPE_SECRET_KEY!,
-      accountId: environment.STRIPE_ACCOUNT_ID!,
-      livemode,
-    });
     stripeSdk = new Stripe(environment.STRIPE_SECRET_KEY!, {
       apiVersion: STRIPE_API_VERSION,
       maxNetworkRetries: 0,
+    });
+    const providerContext = Object.freeze({
+      provider: "stripe" as const,
+      livemode,
+      scope: `stripe:${environment.STRIPE_ACCOUNT_ID!}`,
+    });
+    paymentProvider = createStripePaymentProvider({
+      sdk: stripeSdk as unknown as StripeSdkClient,
+      context: providerContext,
+    });
+    bindingVerifier = createStripeBindingVerifier({
+      sdk: stripeSdk as unknown as StripeBindingVerifierSdkClient,
+      context: providerContext,
     });
   } catch {
     return null;
@@ -307,6 +321,7 @@ async function createPostgresCheckoutServerRuntime(
         runTransaction(work, { isolationLevel: "serializable" }),
     }),
     releaseDefiniteFailure: checkoutRepository.releaseDefiniteFailure,
+    bindingVerifier,
     sha256,
   });
 
@@ -328,6 +343,13 @@ async function createPostgresCheckoutServerRuntime(
         }));
       }
       return (async () => {
+        const parsedRequest = parseRewardsCheckoutQuoteRequest(input.request);
+        if (!parsedRequest.ok) {
+          return Object.freeze({
+            status: "invalid_request" as const,
+            reason: "checkout_input_invalid" as const,
+          });
+        }
         const resolved = await providerContext();
         if (!resolved.ok || resolved.context.buyerUserId !== buyerUserId) {
           return Object.freeze({
@@ -335,15 +357,21 @@ async function createPostgresCheckoutServerRuntime(
             reason: "checkout_input_invalid" as const,
           });
         }
-        return checkoutService.quote({
+        const result = await checkoutService.quoteForSession({
           buyerUserId,
           idempotencyKey: input.idempotencyKey,
           paymentProviderAvailable: resolved.context.checkoutCreationAvailable,
-          request: input.request,
+          request: parsedRequest.value,
           ...(input.attributionCookie === undefined
             ? {}
             : { attributionCookie: input.attributionCookie }),
         });
+        return result.status === "PRICE_CHANGED"
+          ? Object.freeze({
+              status: "invalid_request" as const,
+              reason: "checkout_input_invalid" as const,
+            })
+          : result;
       })();
     },
     startSession(input) {
@@ -426,23 +454,37 @@ export async function createCheckoutServerRuntime(
     checkoutService,
     providerSessionRepository: driver.commerce.providerSessionRepository,
     releaseDefiniteFailure: driver.commerce.checkoutRepository.releaseDefiniteFailure,
+    bindingVerifier: null,
     sha256,
   });
   const buyerUserId = request.principal!.actorId;
   return Object.freeze({
     buyerUserId,
     rateLimitStore: driver.commerce.rateLimitStore,
-    quoteCheckout(input) {
+    async quoteCheckout(input) {
       if (input.buyerUserId !== buyerUserId) return Promise.resolve(Object.freeze({ status: "invalid_request" as const, reason: "checkout_input_invalid" as const }));
-      return checkoutService.quote({
+      const parsedRequest = parseRewardsCheckoutQuoteRequest(input.request);
+      if (!parsedRequest.ok) {
+        return Object.freeze({
+          status: "invalid_request" as const,
+          reason: "checkout_input_invalid" as const,
+        });
+      }
+      const result = await checkoutService.quoteForSession({
         buyerUserId,
         idempotencyKey: input.idempotencyKey,
         paymentProviderAvailable: contextResult.context.checkoutCreationAvailable,
-        request: input.request,
+        request: parsedRequest.value,
         ...(input.attributionCookie === undefined
           ? {}
           : { attributionCookie: input.attributionCookie }),
       });
+      return result.status === "PRICE_CHANGED"
+        ? Object.freeze({
+            status: "invalid_request" as const,
+            reason: "checkout_input_invalid" as const,
+          })
+        : result;
     },
     startSession(input) {
       if (input.buyerUserId !== buyerUserId) return Promise.resolve(Object.freeze({ status: "invalid" as const }));

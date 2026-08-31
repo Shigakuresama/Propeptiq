@@ -72,6 +72,56 @@ describe("guarded local commerce driver", () => {
     expect(driver.loadOrder("50000000-0000-4000-8000-000000000001", "local-order-customer")).not.toBeNull();
   });
 
+  it("loads the clearly labeled local/test canonical variant from existing demo records", async () => {
+    const commerce = getLocalTestDriver().commerce;
+    const repository = commerce.checkoutRepository;
+    expect(repository.loadVariantFacts).toBeTypeOf("function");
+
+    const loaded = await repository.loadVariantFacts!({
+      buyerUserId: ownerUserId,
+      request: {
+        items: [{ variantId: "55000000-0000-4000-8000-000000000001", quantity: 2 }],
+        destination: {
+          recipientName: "Synthetic Buyer",
+          line1: "100 Test Way",
+          line2: null,
+          city: "Los Angeles",
+          stateCode: "CA",
+          postalCode: "90001",
+          countryCode: "US",
+        },
+      },
+      now: new Date("2026-08-26T12:00:00.000Z"),
+    });
+
+    expect(loaded).toMatchObject({
+      ok: true,
+      value: {
+        items: [{
+          variantId: "55000000-0000-4000-8000-000000000001",
+          productId: "61000000-0000-4000-8000-000000000001",
+          sku: "SYNTHETIC-ALPHA-5MG",
+          price: {
+            id: "62000000-0000-4000-8000-000000000001",
+            amountMinor: 2_400,
+            currency: "USD",
+          },
+          eligibleLots: [{ id: "63000000-0000-4000-8000-000000000001" }],
+        }],
+        automaticPromotions: [],
+      },
+    });
+    expect(commerce.cartPreviewSource()).toEqual({
+      variants: [expect.objectContaining({
+        variantId: "55000000-0000-4000-8000-000000000001",
+        productId: "61000000-0000-4000-8000-000000000001",
+        baseUnitMinor: 2_400,
+        availability: "available",
+        availableQuantity: 12,
+      })],
+    });
+  });
+
   it("keeps hosted return pending until one internally authenticated event and replays once", async () => {
     const driver = getLocalTestDriver();
     driver.commerce.reset();

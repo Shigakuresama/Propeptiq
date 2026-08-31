@@ -15,6 +15,7 @@ import {
   attestationAcceptances,
   attestationVersions,
   buyerProfiles,
+  checkoutAttemptReviewBindings,
   checkoutAttempts,
   coaDocuments,
   destinationPolicies,
@@ -36,8 +37,10 @@ import {
   paymentEvents,
   productPolicyGroups,
   productPrices,
+  productVariants,
   products,
   promotionTargets,
+  promotionVariantTargets,
   promotions,
   providerEvents,
   rateLimitWindows,
@@ -69,6 +72,7 @@ const expectedLeanTables = [
   [staffRoles, "staff_roles"],
   [productPolicyGroups, "product_policy_groups"],
   [products, "products"],
+  [productVariants, "product_variants"],
   [productPrices, "product_prices"],
   [lots, "lots"],
   [coaDocuments, "coa_documents"],
@@ -76,6 +80,7 @@ const expectedLeanTables = [
   [destinationPolicies, "destination_policies"],
   [promotions, "promotions"],
   [promotionTargets, "promotion_targets"],
+  [promotionVariantTargets, "promotion_variant_targets"],
   [orders, "orders"],
   [orderItems, "order_items"],
   [checkoutAttempts, "checkout_attempts"],
@@ -89,6 +94,7 @@ const expectedLeanTables = [
   [inventoryEvents, "inventory_events"],
   [refunds, "refunds"],
   [reviewRequests, "review_requests"],
+  [checkoutAttemptReviewBindings, "checkout_attempt_review_bindings"],
   [reviewRequestDestinationPolicies, "review_request_destination_policies"],
   [fulfillmentReleases, "fulfillment_releases"],
   [shipments, "shipments"],
@@ -1004,7 +1010,7 @@ describe("lean database migration", () => {
       ORDER BY table_name, column_name
     `);
 
-    // review_requests.snapshot_hash is the only routine ELIGIBILITY hash.
+    // The review snapshot hashes are the only routine ELIGIBILITY hashes.
     // Everything else here is content-integrity (content_hash, evidence_hash)
     // or idempotency/replay (request_hash, payload_hash, scope_hash), and none
     // is read to make an eligibility decision.
@@ -1012,6 +1018,10 @@ describe("lean database migration", () => {
       { table_name: "affiliate_payouts", column_name: "paid_request_hash" },
       { table_name: "affiliate_payouts", column_name: "request_hash" },
       { table_name: "attestation_versions", column_name: "content_hash" },
+      {
+        table_name: "checkout_attempt_review_bindings",
+        column_name: "review_snapshot_hash",
+      },
       { table_name: "checkout_attempts", column_name: "provider_request_hash" },
       { table_name: "checkout_attempts", column_name: "request_hash" },
       { table_name: "coa_documents", column_name: "evidence_hash" },

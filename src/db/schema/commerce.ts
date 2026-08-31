@@ -183,6 +183,7 @@ export const checkoutAttempts = pgTable(
     providerCustomerEmail: text("provider_customer_email"),
     providerOrigin: text("provider_origin"),
     providerRequestSchemaVersion: integer("provider_request_schema_version"),
+    providerBindingSnapshot: jsonb("provider_binding_snapshot"),
     providerLivemode: boolean("provider_livemode"),
     providerScope: text("provider_scope"),
     taxQuoteReference: text("tax_quote_reference"),
@@ -235,6 +236,7 @@ export const checkoutAttempts = pgTable(
             and ${table.providerExpiresAt} is null
             and ${table.providerCustomerEmail} is null and ${table.providerOrigin} is null
             and ${table.providerRequestSchemaVersion} is null
+            and ${table.providerBindingSnapshot} is null
             and ${table.providerLivemode} is null and ${table.providerScope} is null)
           or (${table.provider} is not null and ${nonblank(table.provider)}
             and ${table.providerRequestId} is not null and ${nonblank(table.providerRequestId)}
@@ -242,7 +244,11 @@ export const checkoutAttempts = pgTable(
             and ${table.providerExpiresAt} is not null
             and ${table.providerCustomerEmail} is not null and ${nonblank(table.providerCustomerEmail)}
             and ${table.providerOrigin} is not null and ${nonblank(table.providerOrigin)}
-            and ${table.providerRequestSchemaVersion} = 1
+            and ((${table.providerRequestSchemaVersion} = 1
+                    and ${table.providerBindingSnapshot} is null)
+              or (${table.providerRequestSchemaVersion} = 2
+                    and ${table.providerBindingSnapshot} is not null
+                    and ${table.providerBindingSnapshot}->>'schemaVersion' = '2'))
             and ${table.providerLivemode} is not null
             and ${table.providerScope} is not null and ${nonblank(table.providerScope)}
             and (${table.providerSessionId} is null or ${nonblank(table.providerSessionId)}))`,

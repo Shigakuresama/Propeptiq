@@ -8,6 +8,7 @@ import type {
 import type { VerifiedIdentity } from "@/auth/identity";
 import type { CheckoutRepository } from "@/commerce/checkout-service";
 import type { ShippingQuotePort, TaxQuotePort } from "@/commerce/checkout-ports";
+import type { CartPreviewSource } from "@/cart/preview";
 import type { CheckoutSuccessReadModel } from "@/commerce/checkout-success-read";
 import type { FulfillmentCommandRepository } from "@/commerce/fulfillment-service";
 import type { PaymentProvider } from "@/commerce/payment-provider";
@@ -78,6 +79,7 @@ export type LocalCommerceInspectionV1 = Readonly<{
 
 export type LocalCommerceDriverV1 = Readonly<{
   checkoutRepository: CheckoutRepository;
+  cartPreviewSource: () => CartPreviewSource;
   providerSessionRepository: ProviderSessionRepository;
   paymentProvider: PaymentProvider;
   shippingQuotePort: ShippingQuotePort;

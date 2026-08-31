@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildProviderRefundRequestV1,
   buildStripeCheckoutRequestV1,
+  buildStripeCheckoutRequestV2,
+  createStripeProviderBindingSnapshotV2,
   hashProviderCheckoutRequest,
   hashProviderRefundRequest,
 } from "@/commerce/provider-contracts";
@@ -15,6 +17,10 @@ const ids = {
   productA: "71000000-0000-4000-8000-000000000003",
   productB: "71000000-0000-4000-8000-000000000004",
   refund: "71000000-0000-4000-8000-000000000005",
+  variantA: "71000000-0000-4000-8000-000000000006",
+  variantB: "71000000-0000-4000-8000-000000000007",
+  priceBookA: "71000000-0000-4000-8000-000000000008",
+  priceBookB: "71000000-0000-4000-8000-000000000009",
 } as const;
 
 const sha256 = async (value: string) =>
@@ -220,12 +226,196 @@ describe("exact hosted Checkout request V1", () => {
         ),
       ).resolves.not.toBe(baseHash);
     }
-    await expect(
+    expect(() =>
       hashProviderCheckoutRequest(
         { provider: "stripe", providerRequestSchemaVersion: 2, request: first },
         sha256,
       ),
-    ).resolves.not.toBe(baseHash);
+    ).toThrow("Invalid provider Checkout hash envelope");
+  });
+});
+
+const canonicalCheckoutFacts = {
+  provider: "stripe",
+  providerRequestSchemaVersion: 2,
+  orderId: ids.order,
+  attemptId: ids.attempt,
+  providerCustomerEmail: "synthetic.buyer@example.test",
+  providerOrigin: "https://commerce.synthetic.example",
+  providerExpiresAt: "2026-08-25T13:00:00.000Z",
+  currency: "USD",
+  destination: checkoutFacts.destination,
+  lines: [
+    {
+      variantId: ids.variantB,
+      productId: ids.productA,
+      sku: "SYNTH-B",
+      productName: "Synthetic Alpha",
+      variantLabel: "10 mg",
+      requestedQuantity: 1,
+      netLineMinor: 2_500,
+      baseUnitMinor: 2_500,
+      currency: "USD",
+      priceBookId: ids.priceBookB,
+      priceVersion: 4,
+      stripeProductId: "prod_synthetic_alpha",
+      stripePriceId: "price_synthetic_alpha_b",
+    },
+    {
+      variantId: ids.variantA,
+      productId: ids.productA,
+      sku: "SYNTH-A",
+      productName: "Synthetic Alpha",
+      variantLabel: "5 mg",
+      requestedQuantity: 2,
+      netLineMinor: 3_676,
+      baseUnitMinor: 2_000,
+      currency: "USD",
+      priceBookId: ids.priceBookA,
+      priceVersion: 3,
+      stripeProductId: "prod_synthetic_alpha",
+      stripePriceId: "price_synthetic_alpha_a",
+    },
+  ],
+  shippingMinor: 700,
+  taxMinor: 525,
+  totalMinor: 7_401,
+} as const;
+
+describe("exact canonical hosted Checkout request V2", () => {
+  it("keeps two variants of one product as deterministic inline merchandise lines", () => {
+    const result = buildStripeCheckoutRequestV2(canonicalCheckoutFacts);
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.value).toMatchObject({
+      allow_promotion_codes: false,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: 3_676,
+            product: "prod_synthetic_alpha",
+          },
+        },
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: 2_500,
+            product: "prod_synthetic_alpha",
+          },
+        },
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: 700,
+            product_data: { name: "Shipping" },
+          },
+        },
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: 525,
+            product_data: { name: "Sales tax" },
+          },
+        },
+      ],
+    });
+    expect(result.value.line_items).toHaveLength(4);
+    const serialized = JSON.stringify(result.value);
+    expect(serialized).not.toContain('"price":');
+    expect(serialized).not.toContain('"discounts":');
+    expect(serialized).not.toContain('"automatic_tax":');
+    expect(serialized).not.toContain('"shipping_options":');
+    expect(serialized).not.toContain('"adjustable_quantity":');
+    expect(serialized).not.toContain('"metadata":{"variant');
+    expect(serialized).not.toContain("WINTER30");
+    expect(result.value.line_items[0]!.price_data).not.toHaveProperty("product_data");
+    expect(result.value.line_items[1]!.price_data).not.toHaveProperty("product_data");
+  });
+
+  it("rejects duplicate variant identity while allowing a shared parent product", () => {
+    expect(buildStripeCheckoutRequestV2({
+      ...canonicalCheckoutFacts,
+      lines: [
+        canonicalCheckoutFacts.lines[0],
+        { ...canonicalCheckoutFacts.lines[1], variantId: ids.variantB },
+      ],
+    })).toEqual({
+      ok: false,
+      error: { code: "invalid_contract", field: "checkoutFacts.lines" },
+    });
+  });
+
+  it("reverses input byte-identically and hash-binds every internal variant mapping fact", async () => {
+    const first = buildStripeCheckoutRequestV2(canonicalCheckoutFacts);
+    const reversedFacts = {
+      ...canonicalCheckoutFacts,
+      lines: [...canonicalCheckoutFacts.lines].reverse(),
+    };
+    const reversed = buildStripeCheckoutRequestV2(reversedFacts);
+    expect(reversed).toEqual(first);
+    if (!first.ok || !reversed.ok) return;
+    const snapshot = createStripeProviderBindingSnapshotV2(canonicalCheckoutFacts.lines);
+    const reversedSnapshot = createStripeProviderBindingSnapshotV2(reversedFacts.lines);
+    expect(snapshot).toEqual(reversedSnapshot);
+    if (!snapshot.ok || !reversedSnapshot.ok) return;
+    const baseHash = await hashProviderCheckoutRequest({
+      provider: "stripe",
+      providerRequestSchemaVersion: 2,
+      request: first.value,
+      providerBindingSnapshot: snapshot.value,
+    }, sha256);
+    await expect(hashProviderCheckoutRequest({
+      provider: "stripe",
+      providerRequestSchemaVersion: 2,
+      request: reversed.value,
+      providerBindingSnapshot: reversedSnapshot.value,
+    }, sha256)).resolves.toBe(baseHash);
+
+    const mutations = [
+      { sku: "SYNTH-CHANGED" },
+      { requestedQuantity: 3 },
+      { netLineMinor: 2_499 },
+      { baseUnitMinor: 2_499 },
+      { priceBookId: "71000000-0000-4000-8000-000000000010" },
+      { priceVersion: 5 },
+      { stripeProductId: "prod_synthetic_changed" },
+      { stripePriceId: "price_synthetic_changed" },
+    ] as const;
+    for (const mutation of mutations) {
+      const changed = createStripeProviderBindingSnapshotV2([
+        { ...canonicalCheckoutFacts.lines[0], ...mutation },
+        canonicalCheckoutFacts.lines[1],
+      ]);
+      expect(changed).toMatchObject({ ok: true });
+      if (!changed.ok) continue;
+      await expect(hashProviderCheckoutRequest({
+        provider: "stripe",
+        providerRequestSchemaVersion: 2,
+        request: first.value,
+        providerBindingSnapshot: changed.value,
+      }, sha256)).resolves.not.toBe(baseHash);
+    }
+  });
+
+  it("preserves exact totals when shipping and tax are both zero", () => {
+    const result = buildStripeCheckoutRequestV2({
+      ...canonicalCheckoutFacts,
+      shippingMinor: 0,
+      taxMinor: 0,
+      totalMinor: 6_176,
+    });
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+    expect(result.value.line_items).toHaveLength(2);
+    expect(result.value.line_items.reduce(
+      (total, line) => total + line.price_data.unit_amount,
+      0,
+    )).toBe(6_176);
   });
 });
 

@@ -17,6 +17,20 @@ const screenshotDirectory = path.resolve(
   process.cwd(),
   ".superpowers/sdd/2026-08-24-propeptiq-lightweight-commerce/screenshots",
 );
+const localTestVariantId = "55000000-0000-4000-8000-000000000001";
+
+async function seedLocalTestCart(page: import("@playwright/test").Page, quantity = 1) {
+  await page.evaluate(({ variantId, requestedQuantity }) => {
+    window.localStorage.setItem(
+      "propeptiq.cart.v2",
+      JSON.stringify({
+        version: 2,
+        items: [{ variantId, quantity: requestedQuantity }],
+      }),
+    );
+    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2" }));
+  }, { variantId: localTestVariantId, requestedQuantity: quantity });
+}
 
 test.beforeAll(() => {
   mkdirSync(screenshotDirectory, { recursive: true });
@@ -61,7 +75,7 @@ test("synthetic commerce pages still identify every displayed record as fictiona
   ).toBeVisible();
 });
 
-test("anonymous catalog to cart flow survives reload and preserves only IDs and quantities", async ({
+test("anonymous canonical local/test cart survives reload and preserves only variant IDs and quantities", async ({
   page,
 }) => {
   await page.goto("/catalog/synthetic-reference-alpha");
@@ -72,11 +86,8 @@ test("anonymous catalog to cart flow survives reload and preserves only IDs and 
     }),
   ).toBeVisible();
 
-  await page
-    .getByRole("button", {
-      name: "Add Synthetic Reference Alpha — Demo Only to cart",
-    })
-    .click();
+  await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(0);
+  await seedLocalTestCart(page);
   await expect(page.getByRole("link", { name: /Cart, 1 requested unit/ })).toBeVisible();
   await page.getByRole("link", { name: /Cart, 1 requested unit/ }).click();
 
@@ -85,11 +96,11 @@ test("anonymous catalog to cart flow survives reload and preserves only IDs and 
   await expect(page.getByRole("button", { name: "Continue to sign in" })).toBeEnabled();
 
   const persisted = await page.evaluate(() =>
-    JSON.parse(window.localStorage.getItem("propeptiq.cart.v1") ?? "null"),
+    JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"),
   );
   expect(persisted).toEqual({
-    version: 1,
-    items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 1 }],
+    version: 2,
+    items: [{ variantId: localTestVariantId, quantity: 1 }],
   });
 
   await page.reload();
@@ -103,11 +114,11 @@ test("anonymous catalog to cart flow survives reload and preserves only IDs and 
   await expect(page).toHaveURL(/\/sign-in$/);
   expect(
     await page.evaluate(() =>
-      JSON.parse(window.localStorage.getItem("propeptiq.cart.v1") ?? "null"),
+      JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"),
     ),
   ).toEqual({
-    version: 1,
-    items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 1 }],
+    version: 2,
+    items: [{ variantId: localTestVariantId, quantity: 1 }],
   });
 
   const accessibility = await new AxeBuilder({ page }).analyze();
@@ -116,11 +127,8 @@ test("anonymous catalog to cart flow survives reload and preserves only IDs and 
 
 test("cart quantity controls are keyboard operable", async ({ page }) => {
   await page.goto("/catalog/synthetic-reference-alpha");
-  await page
-    .getByRole("button", {
-      name: "Add Synthetic Reference Alpha — Demo Only to cart",
-    })
-    .click();
+  await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(0);
+  await seedLocalTestCart(page);
   await page.goto("/cart");
   const increase = page.getByRole("button", {
     name: "Increase quantity for Synthetic Reference Alpha — Demo Only",

@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { buildProviderRefundRequestV1, buildStripeCheckoutRequestV1 } from "@/commerce/provider-contracts";
+import {
+  buildProviderRefundRequestV1,
+  buildStripeCheckoutRequestV1,
+  buildStripeCheckoutRequestV2,
+  createStripeProviderBindingSnapshotV2,
+} from "@/commerce/provider-contracts";
 import {
   STRIPE_API_VERSION,
   classifyStripeProviderError,
   createRuntimeStripePaymentProvider,
+  createStripeBindingVerifier,
   createStripePaymentProvider,
+  type StripeSdkClient,
 } from "@/commerce/stripe-payment-provider";
 
 const ids = {
@@ -13,6 +20,8 @@ const ids = {
   attempt: "72000000-0000-4000-8000-000000000002",
   product: "72000000-0000-4000-8000-000000000003",
   refund: "72000000-0000-4000-8000-000000000004",
+  variant: "72000000-0000-4000-8000-000000000005",
+  priceBook: "72000000-0000-4000-8000-000000000006",
 } as const;
 
 const context = Object.freeze({
@@ -73,6 +82,34 @@ function exactRefundRequest() {
   return built.value;
 }
 
+function exactCheckoutRequestV2() {
+  const built = buildStripeCheckoutRequestV2({
+    provider: "stripe",
+    providerRequestSchemaVersion: 2,
+    orderId: ids.order,
+    attemptId: ids.attempt,
+    providerCustomerEmail: "synthetic.buyer@example.test",
+    providerOrigin: "https://commerce.synthetic.example",
+    providerExpiresAt: "2026-08-25T13:00:00.000Z",
+    currency: "USD",
+    destination: {
+      recipientName: "Synthetic Researcher",
+      line1: "100 Test Way",
+      line2: null,
+      city: "Los Angeles",
+      stateCode: "CA",
+      postalCode: "90001",
+      countryCode: "US",
+    },
+    lines: syntheticBindingSnapshot().lines,
+    shippingMinor: 700,
+    taxMinor: 600,
+    totalMinor: 4_976,
+  });
+  if (!built.ok) throw new Error("invalid synthetic V2 checkout fixture");
+  return built.value;
+}
+
 function rawSession(overrides: Record<string, unknown> = {}) {
   const request = exactCheckoutRequest();
   return {
@@ -114,17 +151,175 @@ function setup() {
   const sdk = {
     checkout: {
       sessions: {
-        create: vi.fn(async () => rawSession()),
-        retrieve: vi.fn(async () => rawSession()),
+        create: vi.fn<StripeSdkClient["checkout"]["sessions"]["create"]>(
+          async () => rawSession(),
+        ),
+        retrieve: vi.fn<StripeSdkClient["checkout"]["sessions"]["retrieve"]>(
+          async () => rawSession(),
+        ),
       },
     },
     refunds: {
-      create: vi.fn(async () => rawRefund()),
-      retrieve: vi.fn(async () => rawRefund()),
+      create: vi.fn<StripeSdkClient["refunds"]["create"]>(async () => rawRefund()),
+      retrieve: vi.fn<StripeSdkClient["refunds"]["retrieve"]>(async () => rawRefund()),
     },
   };
   return { sdk, provider: createStripePaymentProvider({ sdk, context }) };
 }
+
+function syntheticBindingSnapshot() {
+  const result = createStripeProviderBindingSnapshotV2([{
+    variantId: ids.variant,
+    productId: ids.product,
+    sku: "SYNTH-5MG",
+    productName: "Synthetic Alpha",
+    variantLabel: "5 mg",
+    requestedQuantity: 2,
+    netLineMinor: 3_676,
+    baseUnitMinor: 2_000,
+    currency: "USD",
+    priceBookId: ids.priceBook,
+    priceVersion: 3,
+    stripeProductId: "prod_synthetic_alpha",
+    stripePriceId: "price_synthetic_alpha_5mg",
+  }]);
+  if (!result.ok) throw new Error("invalid synthetic binding fixture");
+  return result.value;
+}
+
+function rawAccount(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "acct_synthetic6d",
+    object: "account",
+    business_profile: { name: "must-not-retain" },
+    ...overrides,
+  };
+}
+
+function rawPrice(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "price_synthetic_alpha_5mg",
+    object: "price",
+    active: true,
+    billing_scheme: "per_unit",
+    currency: "usd",
+    custom_unit_amount: null,
+    livemode: false,
+    recurring: null,
+    tiers_mode: null,
+    transform_quantity: null,
+    type: "one_time",
+    unit_amount: 2_000,
+    unit_amount_decimal: "2000",
+    product: {
+      id: "prod_synthetic_alpha",
+      object: "product",
+      active: true,
+      livemode: false,
+      name: "must-not-retain",
+    },
+    ...overrides,
+  };
+}
+
+function setupBindingVerifier() {
+  const sdk = {
+    accounts: {
+      retrieveCurrent: vi.fn<() => Promise<unknown>>(async () => rawAccount()),
+    },
+    prices: {
+      retrieve: vi.fn<
+        (id: string, params: Readonly<{ expand: readonly ["product"] }>) => Promise<unknown>
+      >(async () => rawPrice()),
+    },
+  };
+  return {
+    sdk,
+    verifier: createStripeBindingVerifier({ sdk, context }),
+  };
+}
+
+describe("Stripe owner-account binding verifier test double", () => {
+  it("is lazy and verifies the current account plus the expanded configured Price/Product", async () => {
+    const { sdk, verifier } = setupBindingVerifier();
+    expect(sdk.accounts.retrieveCurrent).not.toHaveBeenCalled();
+    expect(sdk.prices.retrieve).not.toHaveBeenCalled();
+    await expect(verifier.verifyBindings(syntheticBindingSnapshot())).resolves.toEqual({
+      status: "verified",
+    });
+    expect(sdk.accounts.retrieveCurrent).toHaveBeenCalledWith();
+    expect(sdk.prices.retrieve).toHaveBeenCalledWith(
+      "price_synthetic_alpha_5mg",
+      { expand: ["product"] },
+    );
+  });
+
+  it("fails closed for every account, Price, amount, mode, currency, and Product mismatch", async () => {
+    const invalidPrices = [
+      null,
+      {},
+      rawPrice({ id: "price_wrong" }),
+      rawPrice({ active: false }),
+      rawPrice({ type: "recurring", recurring: { interval: "month" } }),
+      rawPrice({ billing_scheme: "tiered" }),
+      rawPrice({ custom_unit_amount: { enabled: true } }),
+      rawPrice({ unit_amount: null, unit_amount_decimal: "2000.5" }),
+      rawPrice({ unit_amount: 0 }),
+      rawPrice({ unit_amount: -1 }),
+      rawPrice({ unit_amount: Number.MAX_SAFE_INTEGER + 1 }),
+      rawPrice({ unit_amount: 2_001 }),
+      rawPrice({ currency: "eur" }),
+      rawPrice({ livemode: true }),
+      rawPrice({ product: "prod_synthetic_alpha" }),
+      rawPrice({ product: { id: "prod_wrong", object: "product", active: true, livemode: false } }),
+      rawPrice({ product: { id: "prod_synthetic_alpha", object: "product", active: false, livemode: false } }),
+      rawPrice({ product: { id: "prod_synthetic_alpha", object: "product", deleted: true } }),
+      rawPrice({ product: { id: "prod_synthetic_alpha", object: "future_product", active: true, livemode: false } }),
+      rawPrice({ product: { id: "prod_synthetic_alpha", object: "product", active: true, livemode: true } }),
+      rawPrice({ object: "future_price" }),
+      rawPrice({ type: "future_type" }),
+    ];
+    for (const price of invalidPrices) {
+      const { sdk, verifier } = setupBindingVerifier();
+      sdk.prices.retrieve.mockResolvedValueOnce(price);
+      const result = await verifier.verifyBindings(syntheticBindingSnapshot());
+      expect(result).toEqual({ status: "unavailable" });
+      expect(JSON.stringify(result)).not.toContain("must-not-retain");
+    }
+
+    for (const account of [
+      null,
+      {},
+      rawAccount({ id: "acct_wrong" }),
+      rawAccount({ object: "future_account" }),
+    ]) {
+      const { sdk, verifier } = setupBindingVerifier();
+      sdk.accounts.retrieveCurrent.mockResolvedValueOnce(account);
+      await expect(verifier.verifyBindings(syntheticBindingSnapshot())).resolves.toEqual({
+        status: "unavailable",
+      });
+      expect(sdk.prices.retrieve).not.toHaveBeenCalled();
+    }
+  });
+
+  it("converts verifier transport and SDK failures to one safe result without retaining raw errors", async () => {
+    for (const failingMethod of ["account", "price"] as const) {
+      const { sdk, verifier } = setupBindingVerifier();
+      const rawError = {
+        type: "StripeConnectionError",
+        message: "private provider body must-not-retain",
+      };
+      if (failingMethod === "account") {
+        sdk.accounts.retrieveCurrent.mockRejectedValueOnce(rawError);
+      } else {
+        sdk.prices.retrieve.mockRejectedValueOnce(rawError);
+      }
+      const result = await verifier.verifyBindings(syntheticBindingSnapshot());
+      expect(result).toEqual({ status: "unavailable" });
+      expect(JSON.stringify(result)).not.toContain("must-not-retain");
+    }
+  });
+});
 
 describe("Stripe Checkout adapter", () => {
   it("pins the bundled API version in the injectable runtime factory", () => {
@@ -183,6 +378,61 @@ describe("Stripe Checkout adapter", () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain("must-not-retain");
+  });
+
+  it("forwards V2 inline merchandise and synthetic components without discounts or line metadata", async () => {
+    const { sdk, provider } = setup();
+    const request = exactCheckoutRequestV2();
+    sdk.checkout.sessions.create.mockResolvedValueOnce(rawSession({
+      amount_total: 4_976,
+    }));
+
+    await expect(provider.createCheckoutSession(
+      request,
+      `checkout_attempt:${ids.attempt}`,
+    )).resolves.toMatchObject({ status: "open" });
+
+    expect(sdk.checkout.sessions.create).toHaveBeenCalledWith(request, {
+      idempotencyKey: `checkout_attempt:${ids.attempt}`,
+      maxNetworkRetries: 0,
+    });
+    const sent = sdk.checkout.sessions.create.mock.calls[0]![0];
+    expect(sent).toMatchObject({
+      allow_promotion_codes: false,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: 3_676,
+            product: "prod_synthetic_alpha",
+          },
+        },
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: 700,
+            product_data: { name: "Shipping" },
+          },
+        },
+        {
+          quantity: 1,
+          price_data: {
+            currency: "usd",
+            unit_amount: 600,
+            product_data: { name: "Sales tax" },
+          },
+        },
+      ],
+    });
+    expect(sent).not.toHaveProperty("discounts");
+    expect(sent).not.toHaveProperty("automatic_tax");
+    for (const line of sent.line_items ?? []) {
+      expect(line).not.toHaveProperty("metadata");
+      expect(line).not.toHaveProperty("price");
+      expect(line).not.toHaveProperty("adjustable_quantity");
+    }
   });
 
   it("retrieves only a known ID while receiving the complete immutable expectation", async () => {

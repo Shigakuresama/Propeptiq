@@ -5,8 +5,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 const origin = "http://127.0.0.1:4631";
-const productId = "61000000-0000-4000-8000-000000000001";
-const promotionId = "66000000-0000-4000-8000-000000000001";
+const variantId = "55000000-0000-4000-8000-000000000001";
 const localTestSecret = "task5-local-driver-secret-at-least-32-chars";
 const screenshotDirectory = path.resolve(
   process.cwd(),
@@ -59,12 +58,12 @@ async function seedCart(page: Page, quantity = 2) {
   await expect(page.getByLabel("Loading saved cart")).toHaveCount(0);
   await page.evaluate(({ id, requestedQuantity }) => {
     window.localStorage.setItem(
-      "propeptiq.cart.v1",
-      JSON.stringify({ version: 1, items: [{ productId: id, quantity: requestedQuantity }] }),
+      "propeptiq.cart.v2",
+      JSON.stringify({ version: 2, items: [{ variantId: id, quantity: requestedQuantity }] }),
     );
     window.sessionStorage.removeItem("propeptiq.cart-preview.presentation.v1");
-    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v1" }));
-  }, { id: productId, requestedQuantity: quantity });
+    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2" }));
+  }, { id: variantId, requestedQuantity: quantity });
   await expect(page.getByRole("link", { name: `Cart, ${quantity} requested units` })).toBeVisible();
 }
 
@@ -80,18 +79,34 @@ async function fillDestination(page: Page, stateCode: "CA" | "OR" | "NV" | "DE")
   await page.getByLabel("City").fill("Los Angeles");
   await page.getByLabel("State or district").selectOption(stateCode);
   await page.getByLabel("Postal code").fill("90001");
-  await page.getByLabel("Promotion (optional)").selectOption(promotionId);
 }
 
 function checkoutBody(stateCode: "CA" | "OR" | "NV" | "DE") {
   return {
-    items: [{ productId, quantity: 2 }],
+    items: [{ variantId, quantity: 2 }],
     destination: {
       recipientName: "Synthetic Research Buyer", line1: "100 Test Way", line2: null,
       city: "Los Angeles", stateCode, postalCode: "90001", countryCode: "US",
     },
-    promotionIds: [promotionId],
   };
+}
+
+async function checkoutSessionBody(
+  page: Page,
+  headers: Readonly<Record<string, string>>,
+  stateCode: "CA" | "OR" | "NV" | "DE",
+) {
+  const quote = await page.request.post("/api/checkout/quote", {
+    headers,
+    data: checkoutBody(stateCode),
+  });
+  expect(quote.status()).toBe(200);
+  const body = await quote.json();
+  expect(body).toMatchObject({
+    status: stateCode === "OR" ? "review_required" : "quoted",
+    pricingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
+  });
+  return { ...checkoutBody(stateCode), pricingRevision: body.pricingRevision as string };
 }
 
 async function captureBrowserChannels(
@@ -152,9 +167,10 @@ test("replays one exact hosted session and conflicts on changed facts for the sa
     "Content-Type": "application/json",
     "Idempotency-Key": "6c000000-0000-4000-8000-000000000003",
   };
+  const sessionRequest = await checkoutSessionBody(page, headers, "CA");
   const first = await page.request.post("/api/checkout/sessions", {
     headers,
-    data: checkoutBody("CA"),
+    data: sessionRequest,
   });
   const firstBody = await first.json();
   expect({ httpStatus: first.status(), body: firstBody }).toEqual({
@@ -172,7 +188,7 @@ test("replays one exact hosted session and conflicts on changed facts for the sa
 
   const replay = await page.request.post("/api/checkout/sessions", {
     headers,
-    data: checkoutBody("CA"),
+    data: sessionRequest,
   });
   expect(replay.status()).toBe(200);
   expect(await replay.json()).toEqual(firstBody);
@@ -181,8 +197,8 @@ test("replays one exact hosted session and conflicts on changed facts for the sa
   const changed = await page.request.post("/api/checkout/sessions", {
     headers,
     data: {
-      ...checkoutBody("CA"),
-      destination: { ...checkoutBody("CA").destination, postalCode: "90002" },
+      ...sessionRequest,
+      destination: { ...sessionRequest.destination, postalCode: "90002" },
     },
   });
   expect(changed.status()).toBe(409);
@@ -206,13 +222,13 @@ test("renders exact CA totals and keeps hosted return pending until one internal
   page.on("response", (response) => networkMetadata.push(response.url(), JSON.stringify(response.headers())));
   await openBuyerCheckout(page);
   await fillDestination(page, "CA");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
   await expect(page.getByRole("heading", { name: "Authoritative total" })).toBeVisible();
   await expect(page.getByText("Synthetic Reference Alpha — Demo Only", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("−$4.80", { exact: true })).toBeVisible();
+  await expect(page.getByText("−$3.84", { exact: true })).toBeVisible();
   await expect(page.getByText("$5.00", { exact: true })).toBeVisible();
   await expect(page.getByText("$3.21", { exact: true })).toBeVisible();
-  await expect(page.getByText("$51.41", { exact: true })).toBeVisible();
+  await expect(page.getByText("$52.37", { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.screenshot({ path: path.join(screenshotDirectory, "checkout-ready-1440.png"), fullPage: true });
 
@@ -272,7 +288,7 @@ test("renders exact CA totals and keeps hosted return pending until one internal
     eventId: `local-event:${sessionId}`,
     sessionId,
     orderId,
-    amountMinor: 5_141,
+    amountMinor: 5_237,
     currency: "USD",
   });
   const signature = createHmac("sha256", localTestSecret).update(signedPayload).digest();
@@ -294,7 +310,7 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
   await page.setViewportSize({ width: 375, height: 812 });
   await openBuyerCheckout(page);
   await fillDestination(page, "OR");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
   await expect(page.getByText("Manual review is required", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to hosted payment" })).toHaveCount(0);
   const reviewHeaders = {
@@ -302,9 +318,10 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
     "Content-Type": "application/json",
     "Idempotency-Key": "6c000000-0000-4000-8000-000000000002",
   };
+  const reviewSessionRequest = await checkoutSessionBody(page, reviewHeaders, "OR");
   const firstReview = await page.request.post("/api/checkout/sessions", {
     headers: reviewHeaders,
-    data: checkoutBody("OR"),
+    data: reviewSessionRequest,
   });
   expect(firstReview.status()).toBe(202);
   const firstReviewBody = await firstReview.json();
@@ -313,7 +330,7 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
   expect(reviewed.reviewRequestCount).toBe(1);
   const replayReview = await page.request.post("/api/checkout/sessions", {
     headers: reviewHeaders,
-    data: checkoutBody("OR"),
+    data: reviewSessionRequest,
   });
   expect(replayReview.status()).toBe(202);
   expect(await replayReview.json()).toEqual(firstReviewBody);
@@ -321,14 +338,17 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
   await page.screenshot({ path: path.join(screenshotDirectory, "checkout-review-375.png"), fullPage: true });
 
   await page.getByLabel("State or district").selectOption("NV");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
   await expect(page.getByText(/checkout is not permitted/i)).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to hosted payment" })).toHaveCount(0);
   await page.screenshot({ path: path.join(screenshotDirectory, "checkout-blocked-375.png"), fullPage: true });
 
   await page.getByLabel("State or district").selectOption("DE");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
-  await expect(page.getByText(/checkout is not permitted/i)).toBeVisible();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
+  await expect(page.getByText(
+    "One or more variants cannot be checked out with the current authoritative facts.",
+    { exact: true },
+  )).toBeVisible();
   await expect(page.getByRole("button", { name: "Try authoritative quote again" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to hosted payment" })).toHaveCount(0);
   expect((await inspectCommerce(request)).providerSessionCount).toBe(0);
@@ -337,7 +357,7 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
 test("owner success URLs fail closed for malformed and cross-owner reads", async ({ page, request }) => {
   await openBuyerCheckout(page);
   await fillDestination(page, "CA");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
   await page.getByRole("button", { name: "Continue to hosted payment" }).click();
   await page.getByRole("button", { name: "Return without payment event" }).click();
   const ownerSuccessUrl = page.url();
@@ -409,7 +429,7 @@ test("required commerce pages preserve responsive, keyboard, and accessibility c
   await page.emulateMedia({ reducedMotion: "reduce" });
   await openBuyerCheckout(page);
   await fillDestination(page, "CA");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
   await page.getByRole("button", { name: "Continue to hosted payment" }).click();
   await page.getByRole("button", { name: "Return without payment event" }).click();
   const successUrl = page.url();

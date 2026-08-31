@@ -2088,6 +2088,9 @@ async function writeCommercialSnapshots(
     providerPreparation?.providerRequestSchemaVersion ?? null,
     providerPreparation?.providerLivemode ?? null,
     providerPreparation?.providerScope ?? null,
+    providerPreparation?.providerRequestSchemaVersion === 2
+      ? providerPreparation.providerBindingSnapshot
+      : null,
     persistedPricingRevision,
     persistedCanonicalQuote,
     plan.authoritativeAt.toISOString(),
@@ -2101,9 +2104,10 @@ async function writeCommercialSnapshots(
          reasons, tax_ready, shipping_ready, tax_quote_reference,
          shipping_quote_reference, shipping_service, provider,
          provider_request_id, provider_request_hash, expires_at,
-         provider_customer_email, provider_origin,
-         provider_request_schema_version, provider_livemode, provider_scope,
-         canonical_pricing_revision, canonical_quote_snapshot,
+          provider_customer_email, provider_origin,
+          provider_request_schema_version, provider_livemode, provider_scope,
+          provider_binding_snapshot,
+          canonical_pricing_revision, canonical_quote_snapshot,
          created_at)
        VALUES
         ($1::uuid, $2::uuid, $3::uuid, $4, $5, 'created',
@@ -2111,8 +2115,8 @@ async function writeCommercialSnapshots(
          $8::checkout_gate_result, $9::checkout_gate_result,
          $10::checkout_gate_result, $11::checkout_gate_result,
          $12, $13, $14::text[], true, true, $15, $16, $17,
-         $18, $19, $20, $21::timestamptz, $22, $23, $24, $25, $26,
-         $27, $28::jsonb, $29::timestamptz)`,
+          $18, $19, $20, $21::timestamptz, $22, $23, $24, $25, $26,
+          $27::jsonb, $28, $29::jsonb, $30::timestamptz)`,
       attemptValues,
     );
   } else {
@@ -2131,12 +2135,13 @@ async function writeCommercialSnapshots(
          provider_request_id = $19, provider_session_id = NULL,
          provider_request_hash = $20, expires_at = $21::timestamptz,
          provider_customer_email = $22, provider_origin = $23,
-         provider_request_schema_version = $24, provider_livemode = $25,
-         provider_scope = $26, canonical_pricing_revision = $27,
-         canonical_quote_snapshot = $28::jsonb
+          provider_request_schema_version = $24, provider_livemode = $25,
+          provider_scope = $26, provider_binding_snapshot = $27::jsonb,
+          canonical_pricing_revision = $28,
+          canonical_quote_snapshot = $29::jsonb
        WHERE id = $1::uuid AND order_id = $2::uuid AND buyer_user_id = $3::uuid
          AND idempotency_key = $4 AND request_hash = $5`,
-      attemptValues.slice(0, 28),
+      attemptValues.slice(0, 29),
     );
   }
   return itemIds;

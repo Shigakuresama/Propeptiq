@@ -1,7 +1,7 @@
 import type {
   ProviderKind,
   ProviderRefundRequestV1,
-  StripeCheckoutRequestV1,
+  StripeCheckoutRequest,
 } from "@/commerce/provider-contracts";
 
 export type ExpectedProviderContextV1 = Readonly<{
@@ -78,12 +78,12 @@ export type RefundProviderResult =
 export type PaymentProvider = Readonly<{
   context: ExpectedProviderContextV1;
   createCheckoutSession: (
-    exactRequest: StripeCheckoutRequestV1,
+    exactRequest: StripeCheckoutRequest,
     providerIdempotencyKey: string,
   ) => Promise<CheckoutProviderResult>;
   retrieveCheckoutSession: (input: Readonly<{
     knownProviderSessionId: string;
-    expectedRequest: StripeCheckoutRequestV1;
+    expectedRequest: StripeCheckoutRequest;
     expectedProviderContext: ExpectedProviderContextV1;
   }>) => Promise<CheckoutProviderResult>;
   createRefund: (

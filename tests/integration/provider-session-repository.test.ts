@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createProviderSessionRepository,
+  projectDurableCheckoutRequest,
   projectDurableCheckoutRequestV1,
 } from "@/db/repositories/provider-session-repository";
 
@@ -23,6 +24,10 @@ const ids = {
   attempt: "75000000-0000-4000-8000-000000000012",
   reservation: "75000000-0000-4000-8000-000000000013",
   key: "75000000-0000-4000-8000-000000000014",
+  variantA: "75000000-0000-4000-8000-000000000015",
+  variantB: "75000000-0000-4000-8000-000000000016",
+  priceB: "75000000-0000-4000-8000-000000000017",
+  itemB: "75000000-0000-4000-8000-000000000018",
 } as const;
 
 describe("durable provider-session repository on PGlite", () => {
@@ -145,6 +150,111 @@ describe("durable provider-session repository on PGlite", () => {
     expect(Object.isFrozen(durable)).toBe(true);
     expect(projectDurableCheckoutRequestV1({ ...durable! })).toBeNull();
     expect(projectDurableCheckoutRequestV1(durable)).toBe(durable);
+  });
+
+  it("loads two V2 variants of one product without reinterpreting them as legacy V1", async () => {
+    const snapshot = {
+      schemaVersion: 2,
+      lines: [
+        {
+          variantId: ids.variantA,
+          productId: ids.product,
+          sku: "SYNTH-A",
+          productName: "Synthetic Product",
+          variantLabel: "5 mg",
+          requestedQuantity: 1,
+          netLineMinor: 2_000,
+          baseUnitMinor: 2_000,
+          currency: "USD",
+          priceBookId: ids.price,
+          priceVersion: 1,
+          stripeProductId: "prod_synthetic_parent",
+          stripePriceId: "price_synthetic_a",
+        },
+        {
+          variantId: ids.variantB,
+          productId: ids.product,
+          sku: "SYNTH-B",
+          productName: "Synthetic Product",
+          variantLabel: "10 mg",
+          requestedQuantity: 1,
+          netLineMinor: 2_500,
+          baseUnitMinor: 2_500,
+          currency: "USD",
+          priceBookId: ids.priceB,
+          priceVersion: 2,
+          stripeProductId: "prod_synthetic_parent",
+          stripePriceId: "price_synthetic_b",
+        },
+      ],
+    };
+    await client.query(
+      `INSERT INTO product_variants
+         (id, product_id, sku, label, package_quantity, status,
+          stripe_product_id, stripe_price_id)
+       VALUES
+         ($1::uuid, $3::uuid, 'SYNTH-A', '5 mg', 1, 'active',
+          'prod_synthetic_parent', 'price_synthetic_a'),
+         ($2::uuid, $3::uuid, 'SYNTH-B', '10 mg', 1, 'active',
+          'prod_synthetic_parent', 'price_synthetic_b')`,
+      [ids.variantA, ids.variantB, ids.product],
+    );
+    await client.query(
+      "UPDATE product_prices SET variant_id = $1::uuid WHERE id = $2::uuid",
+      [ids.variantA, ids.price],
+    );
+    await client.query(
+      `INSERT INTO product_prices
+         (id, product_id, variant_id, version, amount_minor, currency, effective_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 2, 2500, 'USD', now())`,
+      [ids.priceB, ids.product, ids.variantB],
+    );
+    await client.query(
+      "UPDATE order_items SET variant_id = $1::uuid WHERE id = $2::uuid",
+      [ids.variantA, ids.item],
+    );
+    await client.query(
+      `INSERT INTO order_items
+         (id, order_id, product_id, variant_id, product_price_id,
+          destination_policy_id, product_name_snapshot, package_form_snapshot,
+          currency, unit_amount_minor, quantity, subtotal_minor,
+          discount_minor, total_minor)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+          $6::uuid, 'Synthetic Product', 'sealed vial', 'USD', 2500, 1,
+          2500, 0, 2500)`,
+      [
+        ids.itemB,
+        ids.order,
+        ids.product,
+        ids.variantB,
+        ids.priceB,
+        ids.policy,
+      ],
+    );
+    await client.query(
+      `UPDATE orders SET subtotal_minor = 4500, discount_minor = 0,
+         total_minor = 4880 WHERE id = $1::uuid`,
+      [ids.order],
+    );
+    await client.query(
+      `UPDATE checkout_attempts SET provider_request_schema_version = 2,
+         provider_binding_snapshot = $1::jsonb WHERE id = $2::uuid`,
+      [JSON.stringify(snapshot), ids.attempt],
+    );
+
+    const durable = await repository().load({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+    });
+    expect(durable).toMatchObject({
+      providerRequestSchemaVersion: 2,
+      providerBindingSnapshot: snapshot,
+      shippingMinor: 200,
+      taxMinor: 180,
+      totalMinor: 4_880,
+    });
+    expect(projectDurableCheckoutRequestV1(durable)).toBeNull();
+    expect(projectDurableCheckoutRequest(durable)).toBe(durable);
   });
 
   it("fails closed when item/allocation totals do not cohere with the order", async () => {

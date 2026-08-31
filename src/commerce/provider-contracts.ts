@@ -45,6 +45,43 @@ export type CheckoutProviderFactsV1 = Readonly<{
   totalMinor: number;
 }>;
 
+export type StripeVariantLine = Readonly<{
+  variantId: string;
+  productId: string;
+  sku: string;
+  productName: string;
+  variantLabel: string;
+  requestedQuantity: number;
+  netLineMinor: number;
+  baseUnitMinor: number;
+  currency: "USD";
+  priceBookId: string;
+  priceVersion: number;
+  stripeProductId: string;
+  stripePriceId: string;
+}>;
+
+export type CheckoutProviderFactsV2 = Readonly<{
+  provider: ProviderKind;
+  providerRequestSchemaVersion: 2;
+  orderId: string;
+  attemptId: string;
+  providerCustomerEmail: string;
+  providerOrigin: string;
+  providerExpiresAt: string;
+  currency: "USD";
+  destination: CheckoutProviderFactsV1["destination"];
+  lines: readonly StripeVariantLine[];
+  shippingMinor: number;
+  taxMinor: number;
+  totalMinor: number;
+}>;
+
+export type StripeProviderBindingSnapshotV2 = Readonly<{
+  schemaVersion: 2;
+  lines: readonly StripeVariantLine[];
+}>;
+
 type StripeLineItemV1 = Readonly<{
   quantity: 1;
   price_data: Readonly<{
@@ -53,6 +90,17 @@ type StripeLineItemV1 = Readonly<{
     product_data: Readonly<{ name: string }>;
   }>;
 }>;
+
+type StripeMerchandiseLineV2 = Readonly<{
+  quantity: 1;
+  price_data: Readonly<{
+    currency: "usd";
+    unit_amount: number;
+    product: string;
+  }>;
+}>;
+
+type StripeComponentLineV2 = StripeLineItemV1;
 
 export type StripeCheckoutRequestV1 = Readonly<{
   ui_mode: "hosted_page";
@@ -80,6 +128,15 @@ export type StripeCheckoutRequestV1 = Readonly<{
   }>;
   line_items: readonly StripeLineItemV1[];
 }>;
+
+export type StripeCheckoutRequestV2 = Readonly<
+  Omit<StripeCheckoutRequestV1, "line_items"> & {
+    allow_promotion_codes: false;
+    line_items: readonly (StripeMerchandiseLineV2 | StripeComponentLineV2)[];
+  }
+>;
+
+export type StripeCheckoutRequest = StripeCheckoutRequestV1 | StripeCheckoutRequestV2;
 
 export type ProviderRefundRequestV1 = Readonly<{
   schemaVersion: 1;
@@ -126,6 +183,22 @@ const lineKeys = [
   "packageForm",
   "purchasedQuantity",
   "postDiscountTotalMinor",
+] as const;
+
+const canonicalLineKeys = [
+  "variantId",
+  "productId",
+  "sku",
+  "productName",
+  "variantLabel",
+  "requestedQuantity",
+  "netLineMinor",
+  "baseUnitMinor",
+  "currency",
+  "priceBookId",
+  "priceVersion",
+  "stripeProductId",
+  "stripePriceId",
 ] as const;
 
 const refundFactKeys = [
@@ -296,6 +369,182 @@ function stripeLine(name: string, amountMinor: number): StripeLineItemV1 {
   });
 }
 
+function canonicalStripeReference(
+  value: unknown,
+  prefix: "prod_" | "price_",
+): value is string {
+  return (
+    canonicalText(value, prefix.length + 1, 200) &&
+    value.startsWith(prefix) &&
+    /^[A-Za-z0-9_]+$/u.test(value)
+  );
+}
+
+function canonicalizeVariantLines(
+  value: unknown,
+): ContractResult<readonly StripeVariantLine[]> {
+  if (!denseArray(value) || value.length < 1 || value.length > 50) {
+    return failure("checkoutFacts.lines");
+  }
+  const seen = new Set<string>();
+  const lines: StripeVariantLine[] = [];
+  for (const candidate of value) {
+    if (
+      !exactRecord(candidate, canonicalLineKeys) ||
+      !isCanonicalUuid(candidate.variantId) ||
+      seen.has(candidate.variantId) ||
+      !isCanonicalUuid(candidate.productId) ||
+      !canonicalText(candidate.sku, 1, 120) ||
+      !canonicalText(candidate.productName, 1, 200) ||
+      !canonicalText(candidate.variantLabel, 1, 200) ||
+      !Number.isSafeInteger(candidate.requestedQuantity) ||
+      (candidate.requestedQuantity as number) < 1 ||
+      (candidate.requestedQuantity as number) > 25 ||
+      !safeNonnegative(candidate.netLineMinor) ||
+      !safePositive(candidate.baseUnitMinor) ||
+      candidate.currency !== "USD" ||
+      !isCanonicalUuid(candidate.priceBookId) ||
+      !Number.isSafeInteger(candidate.priceVersion) ||
+      (candidate.priceVersion as number) < 1 ||
+      !canonicalStripeReference(candidate.stripeProductId, "prod_") ||
+      !canonicalStripeReference(candidate.stripePriceId, "price_")
+    ) {
+      return failure("checkoutFacts.lines");
+    }
+    seen.add(candidate.variantId);
+    lines.push(Object.freeze({
+      variantId: candidate.variantId,
+      productId: candidate.productId,
+      sku: candidate.sku,
+      productName: candidate.productName,
+      variantLabel: candidate.variantLabel,
+      requestedQuantity: candidate.requestedQuantity as number,
+      netLineMinor: candidate.netLineMinor,
+      baseUnitMinor: candidate.baseUnitMinor,
+      currency: "USD",
+      priceBookId: candidate.priceBookId,
+      priceVersion: candidate.priceVersion as number,
+      stripeProductId: candidate.stripeProductId,
+      stripePriceId: candidate.stripePriceId,
+    }));
+  }
+  return Object.freeze({
+    ok: true as const,
+    value: Object.freeze(lines.toSorted((left, right) =>
+      left.variantId.localeCompare(right.variantId))),
+  });
+}
+
+export function createStripeProviderBindingSnapshotV2(
+  value: unknown,
+): ContractResult<StripeProviderBindingSnapshotV2> {
+  const lines = canonicalizeVariantLines(value);
+  return lines.ok
+    ? Object.freeze({
+        ok: true as const,
+        value: Object.freeze({ schemaVersion: 2 as const, lines: lines.value }),
+      })
+    : lines;
+}
+
+function commonStripeCheckoutRequest(
+  value: CheckoutProviderFactsV1 | CheckoutProviderFactsV2,
+  lineItems: readonly (StripeLineItemV1 | StripeMerchandiseLineV2)[],
+) {
+  const metadata = Object.freeze({
+    orderId: value.orderId,
+    attemptId: value.attemptId,
+  });
+  const address = Object.freeze({
+    line1: value.destination.line1,
+    ...(value.destination.line2 === null
+      ? {}
+      : { line2: value.destination.line2 }),
+    city: value.destination.city,
+    state: value.destination.stateCode,
+    postal_code: value.destination.postalCode,
+    country: "US" as const,
+  });
+  const expiresAt = new Date(value.providerExpiresAt).getTime() / 1000;
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= 0) return null;
+  return Object.freeze({
+    ui_mode: "hosted_page" as const,
+    mode: "payment" as const,
+    payment_method_types: Object.freeze(["card"] as const),
+    success_url: `${value.providerOrigin}/checkout/success/${value.orderId}`,
+    cancel_url: `${value.providerOrigin}/checkout`,
+    client_reference_id: value.orderId,
+    customer_email: value.providerCustomerEmail,
+    expires_at: expiresAt,
+    metadata,
+    payment_intent_data: Object.freeze({
+      metadata,
+      shipping: Object.freeze({
+        name: value.destination.recipientName,
+        address,
+      }),
+    }),
+    line_items: Object.freeze([...lineItems]),
+  });
+}
+
+export function buildStripeCheckoutRequestV2(
+  value: unknown,
+): ContractResult<StripeCheckoutRequestV2> {
+  if (!exactRecord(value, checkoutFactKeys)) return failure("checkoutFacts");
+  if (
+    (value.provider !== "stripe" && value.provider !== "local_test") ||
+    value.providerRequestSchemaVersion !== 2 ||
+    !isCanonicalUuid(value.orderId) ||
+    !isCanonicalUuid(value.attemptId) ||
+    !canonicalEmail(value.providerCustomerEmail) ||
+    !canonicalOrigin(value.providerOrigin, value.provider) ||
+    !canonicalWholeSecond(value.providerExpiresAt) ||
+    value.currency !== "USD" ||
+    !validDestination(value.destination) ||
+    !safeNonnegative(value.shippingMinor) ||
+    !safeNonnegative(value.taxMinor) ||
+    !safePositive(value.totalMinor)
+  ) {
+    return failure("checkoutFacts");
+  }
+  const canonicalLines = canonicalizeVariantLines(value.lines);
+  if (!canonicalLines.ok) return canonicalLines;
+  let sum = 0;
+  const lineItems: Array<StripeMerchandiseLineV2 | StripeComponentLineV2> = [];
+  for (const line of canonicalLines.value) {
+    sum += line.netLineMinor;
+    if (!Number.isSafeInteger(sum)) return failure("checkoutFacts.totalMinor");
+    lineItems.push(Object.freeze({
+      quantity: 1 as const,
+      price_data: Object.freeze({
+        currency: "usd" as const,
+        unit_amount: line.netLineMinor,
+        product: line.stripeProductId,
+      }),
+    }));
+  }
+  sum += value.shippingMinor + value.taxMinor;
+  if (!Number.isSafeInteger(sum) || sum !== value.totalMinor) {
+    return failure("checkoutFacts.totalMinor");
+  }
+  if (value.shippingMinor > 0) lineItems.push(stripeLine("Shipping", value.shippingMinor));
+  if (value.taxMinor > 0) lineItems.push(stripeLine("Sales tax", value.taxMinor));
+  const common = commonStripeCheckoutRequest(
+    value as CheckoutProviderFactsV2,
+    lineItems,
+  );
+  if (common === null) return failure("checkoutFacts.providerExpiresAt");
+  return Object.freeze({
+    ok: true as const,
+    value: Object.freeze({
+      ...common,
+      allow_promotion_codes: false as const,
+      line_items: Object.freeze(lineItems),
+    }),
+  });
+}
+
 export function buildStripeCheckoutRequestV1(
   value: unknown,
 ): ContractResult<StripeCheckoutRequestV1> {
@@ -409,14 +658,32 @@ export function hashProviderCheckoutRequest(
   value: Readonly<{
     provider: ProviderKind;
     providerRequestSchemaVersion: number;
-    request: StripeCheckoutRequestV1;
+    request: StripeCheckoutRequest;
+    providerBindingSnapshot?: StripeProviderBindingSnapshotV2 | null;
   }>,
   sha256: Sha256Hasher,
 ): Promise<string> {
   if (
     (value.provider !== "stripe" && value.provider !== "local_test") ||
     !Number.isSafeInteger(value.providerRequestSchemaVersion) ||
-    value.providerRequestSchemaVersion < 1
+    (value.providerRequestSchemaVersion !== 1 &&
+      value.providerRequestSchemaVersion !== 2)
+  ) {
+    throw new Error("Invalid provider Checkout hash envelope");
+  }
+  if (
+    value.providerRequestSchemaVersion === 1 &&
+    value.providerBindingSnapshot !== undefined &&
+    value.providerBindingSnapshot !== null
+  ) {
+    throw new Error("Invalid provider Checkout hash envelope");
+  }
+  if (
+    value.providerRequestSchemaVersion === 2 &&
+    (value.providerBindingSnapshot?.schemaVersion !== 2 ||
+      !createStripeProviderBindingSnapshotV2(
+        value.providerBindingSnapshot.lines,
+      ).ok)
   ) {
     throw new Error("Invalid provider Checkout hash envelope");
   }
@@ -426,6 +693,9 @@ export function hashProviderCheckoutRequest(
       provider: value.provider,
       kind: "hosted_checkout",
       request: value.request,
+      ...(value.providerRequestSchemaVersion === 2
+        ? { providerBindingSnapshot: value.providerBindingSnapshot }
+        : {}),
     },
     sha256,
   );

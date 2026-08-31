@@ -25,6 +25,7 @@ const ids = {
   attempt: "79000000-0000-4000-8000-000000000011",
   reservation: "79000000-0000-4000-8000-000000000012",
   key: "79000000-0000-4000-8000-000000000013",
+  variant: "79000000-0000-4000-8000-000000000014",
 } as const;
 const now = new Date("2026-08-25T12:00:30.000Z");
 const providerCreated = 1_787_659_200;
@@ -587,6 +588,92 @@ describe("provider event Transaction B checkout semantics on PGlite", () => {
     );
     return paymentEventId;
   }
+
+  it("preserves V2 amount/correlation through paid fulfillment authority and refund reconciliation", async () => {
+    const providerBindingSnapshot = {
+      schemaVersion: 2,
+      lines: [{
+        variantId: ids.variant,
+        productId: ids.product,
+        sku: "SYNTH-V2",
+        productName: "Synthetic Product",
+        variantLabel: "5 mg",
+        requestedQuantity: 1,
+        netLineMinor: 2_000,
+        baseUnitMinor: 2_000,
+        currency: "USD",
+        priceBookId: ids.price,
+        priceVersion: 1,
+        stripeProductId: "prod_synthetic_v2",
+        stripePriceId: "price_synthetic_v2",
+      }],
+    } as const;
+    await client.query(
+      `INSERT INTO product_variants
+         (id, product_id, sku, label, package_quantity, status,
+          stripe_product_id, stripe_price_id)
+       VALUES ($1::uuid, $2::uuid, 'SYNTH-V2', '5 mg', 1, 'active',
+          'prod_synthetic_v2', 'price_synthetic_v2')`,
+      [ids.variant, ids.product],
+    );
+    await client.query(
+      "UPDATE product_prices SET variant_id = $1::uuid WHERE id = $2::uuid",
+      [ids.variant, ids.price],
+    );
+    await client.query(
+      "UPDATE order_items SET variant_id = $1::uuid WHERE id = $2::uuid",
+      [ids.variant, ids.item],
+    );
+    await client.query(
+      `UPDATE checkout_attempts
+       SET provider_request_schema_version = 2,
+           provider_binding_snapshot = $1::jsonb
+       WHERE id = $2::uuid`,
+      [JSON.stringify(providerBindingSnapshot), ids.attempt],
+    );
+
+    const repo = repository();
+    const paid = await claim(
+      checkoutNormalization(
+        "checkout.session.completed",
+        "evt_synthetic_6e_v2_paid",
+      ),
+      "v2-paid",
+    );
+    await expect(repo.processClaim({ claim: paid, authority: authority(), now }))
+      .resolves.toEqual({ status: "processed" });
+    expect((await client.query(`SELECT
+      (SELECT state FROM orders WHERE id = '${ids.order}') AS order_state,
+      (SELECT status FROM checkout_attempts WHERE id = '${ids.attempt}') AS attempt_status,
+      (SELECT provider_session_id FROM checkout_attempts WHERE id = '${ids.attempt}') AS session_id,
+      (SELECT count(*)::int FROM payment_events WHERE event_type = 'payment_verified') AS payments,
+      (SELECT count(*)::int FROM downstream_effects WHERE effect_type = 'payment_verified') AS fulfillment_effects`)).rows[0])
+      .toEqual({
+        order_state: "paid_pending_fulfillment",
+        attempt_status: "completed",
+        session_id: providerSessionId,
+        payments: 1,
+        fulfillment_effects: 1,
+      });
+
+    const refund = await claim(
+      refundNormalization("evt_synthetic_6e_v2_refund", "succeeded"),
+      "v2-refund",
+    );
+    await expect(repo.processClaim({ claim: refund, authority: authority(), now }))
+      .resolves.toEqual({ status: "processed" });
+    expect((await client.query(`SELECT
+      (SELECT state FROM orders WHERE id = '${ids.order}') AS order_state,
+      (SELECT count(*)::int FROM refunds WHERE origin = 'provider_observed' AND status = 'succeeded') AS refunds,
+      (SELECT count(*)::int FROM payment_events WHERE event_type = 'refund_verified') AS refund_journals,
+      (SELECT provider_binding_snapshot FROM checkout_attempts WHERE id = '${ids.attempt}') AS binding_snapshot`)).rows[0])
+      .toEqual({
+        order_state: "paid_on_hold",
+        refunds: 1,
+        refund_journals: 1,
+        binding_snapshot: providerBindingSnapshot,
+      });
+  });
 
   it("verifies paid active inventory, journals once, and enqueues exact payment plus wake effects", async () => {
     const repo = repository();

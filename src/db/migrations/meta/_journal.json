@@ -211,6 +211,13 @@
       "when": 1788161355463,
       "tag": "0029_task5-review-authorization-mode",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788167018498,
+      "tag": "0030_task6-provider-request-v2",
+      "breakpoints": true
     }
   ]
 }

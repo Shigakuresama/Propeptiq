@@ -14,12 +14,16 @@ import type { ProviderPreparation } from "@/commerce/checkout-ports";
 import { projectProviderExecutionContextV1, type ProviderExecutionContextV1 } from "@/commerce/provider-context";
 import {
   buildStripeCheckoutRequestV1,
+  buildStripeCheckoutRequestV2,
+  createStripeProviderBindingSnapshotV2,
   hashProviderCheckoutRequest,
-  type StripeCheckoutRequestV1,
+  type StripeCheckoutRequest,
+  type StripeProviderBindingSnapshotV2,
 } from "@/commerce/provider-contracts";
 import type { CheckoutProviderResult } from "@/commerce/payment-provider";
+import type { StripeBindingVerifier } from "@/commerce/stripe-payment-provider";
 import type {
-  DurableCheckoutRequestV1,
+  DurableCheckoutRequest,
   ProviderSessionCasResult,
   ProviderSessionRepository,
 } from "@/db/repositories/provider-session-repository";
@@ -70,6 +74,11 @@ export type ProviderCheckoutRouteResult =
   | Extract<CheckoutSessionQuoteResult,
       Readonly<{ status: "PRICE_CHANGED" | "CHECKOUT_UNAVAILABLE" }>>;
 
+type ExactProviderCheckoutRequest = Readonly<{
+  request: StripeCheckoutRequest;
+  providerBindingSnapshot: StripeProviderBindingSnapshotV2 | null;
+}>;
+
 function requestFromPlan(
   plan: AuthoritativeCheckoutPlanData,
   replay: Readonly<{
@@ -77,13 +86,68 @@ function requestFromPlan(
     providerCustomerEmail: string;
     providerOrigin: string;
     providerExpiresAt: string;
-    providerRequestSchemaVersion: 1;
   }>,
-): StripeCheckoutRequestV1 | null {
+): ExactProviderCheckoutRequest | null {
   if (plan.totals === null) return null;
+  if (plan.kind === "canonical_variant") {
+    const totalByVariant = new Map(
+      plan.totals.lines.map((line) => [line.productId, line] as const),
+    );
+    const factByVariant = new Map(
+      plan.facts.items.map((line) => [line.variantId, line] as const),
+    );
+    if (
+      totalByVariant.size !== plan.effectiveLines.length ||
+      factByVariant.size !== plan.effectiveLines.length
+    ) return null;
+    const snapshot = createStripeProviderBindingSnapshotV2(
+      plan.effectiveLines.map((line) => {
+        const total = totalByVariant.get(line.variantId);
+        const fact = factByVariant.get(line.variantId);
+        if (total === undefined || fact === undefined) return null;
+        return {
+          variantId: line.variantId,
+          productId: line.productId,
+          sku: line.sku,
+          productName: fact.productName,
+          variantLabel: line.variantLabel,
+          requestedQuantity: line.quantity,
+          netLineMinor: total.totalMinor,
+          baseUnitMinor: line.baseUnitMinor,
+          currency: "USD" as const,
+          priceBookId: line.priceId,
+          priceVersion: line.priceVersion,
+          stripeProductId: line.stripeProductId,
+          stripePriceId: line.stripePriceId,
+        };
+      }),
+    );
+    if (!snapshot.ok) return null;
+    const result = buildStripeCheckoutRequestV2({
+      provider: replay.provider,
+      providerRequestSchemaVersion: 2,
+      orderId: plan.identity.orderId,
+      attemptId: plan.identity.attemptId,
+      providerCustomerEmail: replay.providerCustomerEmail,
+      providerOrigin: replay.providerOrigin,
+      providerExpiresAt: replay.providerExpiresAt,
+      currency: "USD",
+      destination: plan.request.destination,
+      lines: snapshot.value.lines,
+      shippingMinor: plan.totals.shippingMinor,
+      taxMinor: plan.totals.taxMinor,
+      totalMinor: plan.totals.totalMinor,
+    });
+    return result.ok
+      ? Object.freeze({
+          request: result.value,
+          providerBindingSnapshot: snapshot.value,
+        })
+      : null;
+  }
   const result = buildStripeCheckoutRequestV1({
     provider: replay.provider,
-    providerRequestSchemaVersion: replay.providerRequestSchemaVersion,
+    providerRequestSchemaVersion: 1,
     orderId: plan.identity.orderId,
     attemptId: plan.identity.attemptId,
     providerCustomerEmail: replay.providerCustomerEmail,
@@ -102,15 +166,16 @@ function requestFromPlan(
     taxMinor: plan.totals.taxMinor,
     totalMinor: plan.totals.totalMinor,
   });
-  return result.ok ? result.value : null;
+  return result.ok
+    ? Object.freeze({ request: result.value, providerBindingSnapshot: null })
+    : null;
 }
 
 function requestFromDurable(
-  durable: DurableCheckoutRequestV1,
-): StripeCheckoutRequestV1 | null {
-  const result = buildStripeCheckoutRequestV1({
+  durable: DurableCheckoutRequest,
+): ExactProviderCheckoutRequest | null {
+  const common = {
     provider: durable.provider,
-    providerRequestSchemaVersion: durable.providerRequestSchemaVersion,
     orderId: durable.orderId,
     attemptId: durable.attemptId,
     providerCustomerEmail: durable.providerCustomerEmail,
@@ -118,12 +183,31 @@ function requestFromDurable(
     providerExpiresAt: durable.providerExpiresAt,
     currency: durable.currency,
     destination: durable.destination,
-    lines: durable.lines,
     shippingMinor: durable.shippingMinor,
     taxMinor: durable.taxMinor,
     totalMinor: durable.totalMinor,
+  };
+  if (durable.providerRequestSchemaVersion === 1) {
+    const result = buildStripeCheckoutRequestV1({
+      ...common,
+      providerRequestSchemaVersion: 1,
+      lines: durable.lines,
+    });
+    return result.ok
+      ? Object.freeze({ request: result.value, providerBindingSnapshot: null })
+      : null;
+  }
+  const result = buildStripeCheckoutRequestV2({
+    ...common,
+    providerRequestSchemaVersion: 2,
+    lines: durable.providerBindingSnapshot.lines,
   });
-  return result.ok ? result.value : null;
+  return result.ok
+    ? Object.freeze({
+        request: result.value,
+        providerBindingSnapshot: durable.providerBindingSnapshot,
+      })
+    : null;
 }
 
 function preparationExpiry(authoritativeAt: Date): string | null {
@@ -164,10 +248,24 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
   releaseDefiniteFailure: (
     evidence: DefiniteFailureReleaseInput,
   ) => Promise<DefiniteFailureReleaseResult>;
+  bindingVerifier?: StripeBindingVerifier | null;
   sha256: Sha256Hasher;
 }>) {
+  async function verifyBindings(
+    provider: "stripe" | "local_test",
+    snapshot: StripeProviderBindingSnapshotV2 | null,
+  ): Promise<boolean> {
+    if (provider === "local_test") return snapshot !== null;
+    if (snapshot === null || input.bindingVerifier == null) return false;
+    try {
+      return (await input.bindingVerifier.verifyBindings(snapshot)).status === "verified";
+    } catch {
+      return false;
+    }
+  }
+
   async function markUnknown(
-    durable: DurableCheckoutRequestV1,
+    durable: DurableCheckoutRequest,
     knownProviderSessionId: string | null,
     integrityFailure: boolean,
   ): Promise<void> {
@@ -183,8 +281,9 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
   }
 
   async function processDurable(
-    durable: DurableCheckoutRequestV1,
+    durable: DurableCheckoutRequest,
     contextValue: ProviderExecutionContextV1,
+    bindingsAlreadyVerified = false,
   ): Promise<ProviderCheckoutRouteResult> {
     if (durable.attemptStatus === "completed") {
       return Object.freeze({ status: "provider_pending", orderId: durable.orderId });
@@ -197,20 +296,23 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
     }
     const context = projectProviderExecutionContextV1(contextValue);
     if (context === null) return Object.freeze({ status: "invalid" });
-    const exactRequest = requestFromDurable(durable);
-    const rebuiltHash = exactRequest === null
+    const exact = requestFromDurable(durable);
+    const rebuiltHash = exact === null
       ? null
       : await hashProviderCheckoutRequest(
           {
             provider: durable.provider,
             providerRequestSchemaVersion: durable.providerRequestSchemaVersion,
-            request: exactRequest,
+            request: exact.request,
+            ...(durable.providerRequestSchemaVersion === 2
+              ? { providerBindingSnapshot: durable.providerBindingSnapshot }
+              : {}),
           },
           input.sha256,
         );
     const adapter = context.adapter;
     if (
-      exactRequest === null ||
+      exact === null ||
       rebuiltHash !== durable.providerRequestHash ||
       !context.sessionRecoveryAvailable ||
       adapter === null ||
@@ -238,16 +340,25 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
       await markUnknown(durable, durable.providerSessionId, true);
       return Object.freeze({ status: "provider_unknown" });
     }
+    if (
+      operation === "create" &&
+      durable.providerRequestSchemaVersion === 2 &&
+      !bindingsAlreadyVerified &&
+      !(await verifyBindings(durable.provider, durable.providerBindingSnapshot))
+    ) {
+      await markUnknown(durable, durable.providerSessionId, false);
+      return Object.freeze({ status: "provider_unknown" });
+    }
     let providerResult: CheckoutProviderResult;
     try {
       providerResult = operation === "create"
         ? await adapter.createCheckoutSession(
-            exactRequest,
+            exact.request,
             durable.providerIdempotencyKey,
           )
         : await adapter.retrieveCheckoutSession({
             knownProviderSessionId: durable.providerSessionId!,
-            expectedRequest: exactRequest,
+            expectedRequest: exact.request,
             expectedProviderContext: expectedContext,
           });
     } catch {
@@ -438,23 +549,32 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
         }
         const expiry = preparationExpiry(plan.authoritativeAt);
         if (expiry === null) return Object.freeze({ status: "conflict" });
-        const exactRequest = requestFromPlan(plan, {
+        const exact = requestFromPlan(plan, {
           provider: context.provider,
           providerCustomerEmail: context.providerCustomerEmail,
           providerOrigin: context.trustedOrigin,
           providerExpiresAt: expiry,
-          providerRequestSchemaVersion: 1,
         });
-        if (exactRequest === null) return Object.freeze({ status: "conflict" });
+        if (exact === null) return Object.freeze({ status: "conflict" });
+        const schemaVersion = plan.kind === "canonical_variant" ? 2 : 1;
+        if (
+          schemaVersion === 2 &&
+          !(await verifyBindings(context.provider, exact.providerBindingSnapshot))
+        ) {
+          return Object.freeze({ status: "unavailable" });
+        }
         const requestHash = await hashProviderCheckoutRequest(
           {
             provider: context.provider,
-            providerRequestSchemaVersion: 1,
-            request: exactRequest,
+            providerRequestSchemaVersion: schemaVersion,
+            request: exact.request,
+            ...(schemaVersion === 2
+              ? { providerBindingSnapshot: exact.providerBindingSnapshot! }
+              : {}),
           },
           input.sha256,
         );
-        const preparation: ProviderPreparation = Object.freeze({
+        const preparationBase = {
           authority: "server_prepared_provider_request",
           provider: context.provider,
           providerIdempotencyKey: `checkout_attempt:${plan.identity.attemptId}`,
@@ -462,10 +582,19 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
           providerExpiresAt: expiry,
           providerCustomerEmail: context.providerCustomerEmail,
           providerOrigin: context.trustedOrigin,
-          providerRequestSchemaVersion: 1,
           providerLivemode: context.expectedLivemode,
           providerScope: context.providerScope,
-        });
+        } as const;
+        const preparation: ProviderPreparation = schemaVersion === 1
+          ? Object.freeze({
+              ...preparationBase,
+              providerRequestSchemaVersion: 1 as const,
+            })
+          : Object.freeze({
+              ...preparationBase,
+              providerRequestSchemaVersion: 2 as const,
+              providerBindingSnapshot: exact.providerBindingSnapshot!,
+            });
         const prepared = await input.checkoutService.prepare(
           quote.plan,
           preparation,
@@ -483,7 +612,7 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
         });
         return durable === null
           ? Object.freeze({ status: "provider_unknown" })
-          : processDurable(durable, startInput.context);
+          : processDurable(durable, startInput.context, schemaVersion === 2);
       }
       return Object.freeze({ status: "facts_changed_retry" });
     },
