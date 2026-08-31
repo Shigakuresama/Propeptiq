@@ -464,6 +464,50 @@ describe("Task 6 schema boundary", () => {
     expect(variants.rows).toEqual([{ variant_id: null }]);
   });
 
+  it.each([
+    [
+      "canonical item with legacy lot",
+      `UPDATE product_prices SET variant_id = '${variantFixture.variantA}'
+         WHERE id = '${fixture.price}';
+       UPDATE order_items SET variant_id = '${variantFixture.variantA}'
+         WHERE id = '${fixture.item1}';`,
+    ],
+    [
+      "legacy item with canonical lot",
+      `UPDATE lots SET variant_id = '${variantFixture.variantA}'
+         WHERE id = '${fixture.lot}';`,
+    ],
+  ] as const)("refuses to backfill a populated %s reservation identity", async (_label, mutation) => {
+    client = new PGliteClient();
+    for (let migration = 0; migration <= 30; migration += 1) {
+      await applyMigration(client, migration);
+    }
+    await insertTask6Fixture(client);
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES ('${variantFixture.variantA}', '${fixture.product}',
+        'TASK6-MIGRATION-MIXED', 'Task 6 mixed migration variant',
+        5, 'mg', 1, 'active');
+      ${mutation}
+      INSERT INTO inventory_reservations
+        (id, checkout_attempt_id, idempotency_key, order_id, order_item_id,
+         product_id, lot_id, quantity_reserved, quantity_remaining, state, expires_at)
+      VALUES ('${fixture.reservation1}', '${fixture.attempt1}',
+        'task6-migration-mixed-null', '${fixture.order1}', '${fixture.item1}',
+        '${fixture.product}', '${fixture.lot}', 1, 1, 'active',
+        now() + interval '1 hour');
+    `);
+
+    await expect(applyMigration(client, 31)).rejects.toThrow(
+      /inventory reservation variant reconciliation required/i,
+    );
+    expect((await client.query<{ variant_id: string | null }>(
+      `SELECT variant_id::text FROM inventory_reservations WHERE id = '${fixture.reservation1}'`,
+    )).rows).toEqual([{ variant_id: null }]);
+  });
+
   it("rejects a WINTER30 campaign with any percentage other than 3000 basis points", async () => {
     client = await createMigratedPglite();
 

@@ -13,7 +13,11 @@ BEGIN
      AND lot.product_id = reservation.product_id
     WHERE NOT (
       (item.variant_id IS NULL AND lot.variant_id IS NULL)
-      OR (item.variant_id IS NOT NULL AND lot.variant_id = item.variant_id)
+      OR (
+        item.variant_id IS NOT NULL
+        AND lot.variant_id IS NOT NULL
+        AND lot.variant_id = item.variant_id
+      )
     )
   ) THEN
     RAISE EXCEPTION 'inventory reservation variant reconciliation required';
