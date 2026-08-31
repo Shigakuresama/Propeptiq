@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { CartProvider, useCart } from "./cart-provider";
@@ -54,6 +55,29 @@ function CartHarness() {
         type="button"
       >
         Fill 5 mg line
+      </button>
+    </div>
+  );
+}
+
+function CapacityHarness() {
+  const { addVariant, hydrated, items } = useCart();
+  const [lastResult, setLastResult] = useState("not attempted");
+
+  function recordAdd(variantId: string) {
+    setLastResult(addVariant(variantId) ? "accepted" : "rejected");
+  }
+
+  return (
+    <div>
+      <p>{hydrated ? "Capacity cart hydrated" : "Capacity cart loading"}</p>
+      <output aria-label="Capacity cart lines">{JSON.stringify(items)}</output>
+      <output aria-label="Last add result">{lastResult}</output>
+      <button onClick={() => recordAdd("variant-00")} type="button">
+        Grow existing line
+      </button>
+      <button onClick={() => recordAdd("variant-51")} type="button">
+        Add fifty-first line
       </button>
     </div>
   );
@@ -120,5 +144,62 @@ describe("CartProvider exact-variant announcements", () => {
     const serialized = window.localStorage.getItem(CART_STORAGE_KEY) ?? "";
     expect(serialized).not.toContain("Synthetic Product Alpha");
     expect(serialized).not.toContain("5 mg");
+  });
+
+  it("keeps an exact-variant add made before deferred hydration alongside stored lines", async () => {
+    window.localStorage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        items: [{ variantId: "variant-stored", quantity: 2 }],
+      }),
+    );
+    render(
+      <CartProvider>
+        <CartHarness />
+      </CartProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add 5 mg once" }));
+
+    await screen.findByText("Cart hydrated");
+    expect(screen.getByLabelText("Cart lines")).toHaveTextContent(
+      JSON.stringify([
+        { variantId: "variant-stored", quantity: 2 },
+        { variantId: "variant-5mg", quantity: 1 },
+      ]),
+    );
+  });
+
+  it("reports accepted merges and rejected distinct lines from real normalization", async () => {
+    window.localStorage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        items: Array.from({ length: 50 }, (_, index) => ({
+          variantId: `variant-${String(index).padStart(2, "0")}`,
+          quantity: 1,
+        })),
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <CartProvider>
+        <CapacityHarness />
+      </CartProvider>,
+    );
+    await screen.findByText("Capacity cart hydrated");
+
+    await user.click(screen.getByRole("button", { name: "Grow existing line" }));
+    expect(screen.getByLabelText("Last add result")).toHaveTextContent("accepted");
+    expect(screen.getByLabelText("Capacity cart lines")).toHaveTextContent(
+      JSON.stringify({ variantId: "variant-00", quantity: 2 }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add fifty-first line" }));
+    expect(screen.getByLabelText("Last add result")).toHaveTextContent("rejected");
+    expect(screen.getByLabelText("Capacity cart lines")).not.toHaveTextContent(
+      "variant-51",
+    );
   });
 });

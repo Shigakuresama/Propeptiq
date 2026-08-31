@@ -93,7 +93,7 @@ export function QuickAddVariantSheet({
                   type="radio"
                   value={entry.id}
                 />
-                <span className="grid flex-1 gap-1">
+                <span className="grid min-w-0 flex-1 gap-1 [overflow-wrap:anywhere]">
                   <span className="block font-medium text-ink">{entry.label}</span>
                   <ProductPrice
                     pricing={pricing}

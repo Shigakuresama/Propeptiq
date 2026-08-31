@@ -222,6 +222,29 @@ describe("card variant presentation", () => {
     expect(selectCardVariant({ product: product(variants, "variant-default"), pricing: pricing("production", [winter30]) })?.id).toBe("variant-default");
   });
 
+  it("selects the lowest displayable available variant ahead of a preview-only zero", () => {
+    const variants = [
+      variant({
+        id: "variant-preview-zero",
+        label: "Preview zero",
+        priceStatus: "pending",
+        availability: "preview_only",
+        baseUnitMinor: 0,
+        checkoutReady: false,
+      }),
+      variant({
+        id: "variant-available-ten",
+        label: "Available ten",
+        baseUnitMinor: 1_000,
+      }),
+    ];
+
+    expect(selectCardVariant({
+      product: product(variants, "variant-preview-zero"),
+      pricing: pricing("preview", [winter30]),
+    })?.id).toBe("variant-available-ten");
+  });
+
   it("builds structured same-unit summaries without parsing labels", () => {
     expect(summarizePublicStorefrontVariants([
       variant({ amount: { value: 10, unit: "mg" }, label: "Option A" }),

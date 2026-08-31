@@ -57,11 +57,11 @@ export function AddToCartButton({
         ) {
           return;
         }
-        addVariant(variantId, quantity, {
+        const added = addVariant(variantId, quantity, {
           productName,
           ...(variantLabel === undefined ? {} : { variantLabel }),
         });
-        onAdded?.();
+        if (added) onAdded?.();
       }}
     >
       <ShoppingBag aria-hidden="true" />

@@ -36,7 +36,7 @@ type CartContextValue = {
     variantId: string,
     quantity?: number,
     announcementLabels?: CartAnnouncementLabels,
-  ) => void;
+  ) => boolean;
   setQuantity: (variantId: string, quantity: number) => void;
   removeItem: (variantId: string) => void;
   clearCart: () => void;
@@ -66,24 +66,35 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [legacyItemCount, setLegacyItemCount] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const itemsRef = useRef<CartLine[]>([]);
+  const hydratedRef = useRef(false);
   const pendingAddAnnouncement = useRef<
     Readonly<{ variantId: string; labels: CartAnnouncementLabels }> | null
   >(null);
 
+  const hydrateCart = useCallback((): CartLine[] => {
+    if (hydratedRef.current) return itemsRef.current;
+
+    const loaded = loadCart(window.localStorage);
+    const nextItems = loaded.status === "ready" ? [...loaded.items] : [];
+    hydratedRef.current = true;
+    itemsRef.current = nextItems;
+    setItems(nextItems);
+    if (loaded.status === "ready") {
+      setLegacyItemCount(null);
+    } else {
+      setLegacyItemCount(loaded.legacyItemCount);
+    }
+    setHydrated(true);
+    return nextItems;
+  }, []);
+
   useEffect(() => {
     const hydration = window.setTimeout(() => {
-      const loaded = loadCart(window.localStorage);
-      if (loaded.status === "ready") {
-        setItems([...loaded.items]);
-        setLegacyItemCount(null);
-      } else {
-        setItems([]);
-        setLegacyItemCount(loaded.legacyItemCount);
-      }
-      setHydrated(true);
+      hydrateCart();
     }, 0);
     return () => window.clearTimeout(hydration);
-  }, []);
+  }, [hydrateCart]);
 
   useEffect(() => {
     if (hydrated && legacyItemCount === null) persistCart(window.localStorage, items);
@@ -94,12 +105,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
       if (event.key === CART_STORAGE_KEY || event.key === LEGACY_CART_STORAGE_KEY) {
         const loaded = loadCart(window.localStorage);
         if (loaded.status === "ready") {
-          setItems([...loaded.items]);
+          const nextItems = [...loaded.items];
+          itemsRef.current = nextItems;
+          setItems(nextItems);
           setLegacyItemCount(null);
         } else {
+          itemsRef.current = [];
           setItems([]);
           setLegacyItemCount(loaded.legacyItemCount);
         }
+        hydratedRef.current = true;
+        setHydrated(true);
       }
     }
     window.addEventListener("storage", synchronize);
@@ -112,13 +128,28 @@ export function CartProvider({ children }: { children: ReactNode }) {
       quantity = 1,
       announcementLabels: CartAnnouncementLabels = {},
     ) => {
+      const current = hydrateCart();
+      const previousQuantity = current.find(
+        (item) => item.variantId === variantId,
+      )?.quantity ?? 0;
+      const nextItems = normalizeCart([...current, { variantId, quantity }]);
+      const nextQuantity = nextItems.find(
+        (item) => item.variantId === variantId,
+      )?.quantity ?? 0;
+      if (nextQuantity <= previousQuantity) {
+        setAnnouncement("The cart was not changed.");
+        return false;
+      }
+
       pendingAddAnnouncement.current = {
         variantId,
         labels: announcementLabels,
       };
-      setItems((current) => normalizeCart([...current, { variantId, quantity }]));
+      itemsRef.current = nextItems;
+      setItems(nextItems);
+      return true;
     },
-    [],
+    [hydrateCart],
   );
 
   useEffect(() => {
@@ -136,41 +167,48 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [items]);
 
   const setQuantity = useCallback((variantId: string, quantity: number) => {
-    setItems((current) => {
-      const bounded = Math.min(MAX_CART_ITEM_QUANTITY, Math.floor(quantity));
-      const next =
-        bounded <= 0
-          ? current.filter((item) => item.variantId !== variantId)
-          : current.map((item) =>
-              item.variantId === variantId ? { ...item, quantity: bounded } : item,
-            );
-      setAnnouncement(
-        bounded <= 0
-          ? "Item removed from cart."
-          : `Quantity updated to ${bounded}.`,
-      );
-      return normalizeCart(next);
-    });
-  }, []);
+    const current = hydrateCart();
+    const bounded = Math.min(MAX_CART_ITEM_QUANTITY, Math.floor(quantity));
+    const next =
+      bounded <= 0
+        ? current.filter((item) => item.variantId !== variantId)
+        : current.map((item) =>
+            item.variantId === variantId ? { ...item, quantity: bounded } : item,
+          );
+    const nextItems = normalizeCart(next);
+    itemsRef.current = nextItems;
+    setItems(nextItems);
+    setAnnouncement(
+      bounded <= 0
+        ? "Item removed from cart."
+        : `Quantity updated to ${bounded}.`,
+    );
+  }, [hydrateCart]);
 
   const removeItem = useCallback((variantId: string) => {
-    setItems((current) =>
-      current.filter((item) => item.variantId !== variantId),
+    const nextItems = hydrateCart().filter(
+      (item) => item.variantId !== variantId,
     );
+    itemsRef.current = nextItems;
+    setItems(nextItems);
     setAnnouncement("Item removed from cart.");
-  }, []);
+  }, [hydrateCart]);
 
   const clearCart = useCallback(() => {
+    hydrateCart();
+    itemsRef.current = [];
     setItems([]);
     setAnnouncement("Cart cleared.");
-  }, []);
+  }, [hydrateCart]);
 
   const acknowledgeLegacyReselection = useCallback(() => {
+    hydrateCart();
     acknowledgeLegacyCartReselection(window.localStorage);
     setLegacyItemCount(null);
+    itemsRef.current = [];
     setItems([]);
     setAnnouncement("Choose a variant again to add it to your cart.");
-  }, []);
+  }, [hydrateCart]);
 
   const value = useMemo<CartContextValue>(
     () => ({

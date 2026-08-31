@@ -144,6 +144,7 @@ export function resolvePublicVariantPrice(input: Readonly<{
 
 export function selectCardVariant(input: Readonly<{ product: { kind: "canonical"; id: string; variants: readonly PublicStorefrontVariant[]; defaultVariantId: string }; pricing: PublicStorefrontPricingContext }>): PublicStorefrontVariant | null {
   const candidates = input.product.variants.flatMap((variant) => {
+    if (variant.availability !== "available") return [];
     const presentation = resolvePublicVariantPrice({ variant, productId: input.product.id, quantity: 1, pricing: input.pricing });
     return presentation.state === "priced" ? [{ variant, amount: presentation.price.effectiveUnitMinor }] : [];
   });

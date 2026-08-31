@@ -16,6 +16,7 @@ import { AddToCartButton } from "./add-to-cart-button";
 describe("AddToCartButton", () => {
   beforeEach(() => {
     addVariantMock.mockReset();
+    addVariantMock.mockReturnValue(true);
   });
 
   it("requires explicit add authorization in its public prop contract", () => {
@@ -66,6 +67,29 @@ describe("AddToCartButton", () => {
     expect(addVariantMock).toHaveBeenCalledWith("variant-5mg", 25, {
       productName: "Synthetic Product Alpha",
     });
+  });
+
+  it("does not report success when cart normalization rejects the add", async () => {
+    const user = userEvent.setup();
+    const onAdded = vi.fn();
+    addVariantMock.mockReturnValue(false);
+    render(
+      <AddToCartButton
+        canAdd
+        onAdded={onAdded}
+        productName="Synthetic Product Alpha"
+        variantId="variant-51"
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Add Synthetic Product Alpha to cart",
+      }),
+    );
+
+    expect(addVariantMock).toHaveBeenCalledTimes(1);
+    expect(onAdded).not.toHaveBeenCalled();
   });
 
   it.each([0, -1, 1.5, 26, Number.NaN])(

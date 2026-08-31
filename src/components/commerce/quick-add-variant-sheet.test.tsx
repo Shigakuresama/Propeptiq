@@ -45,6 +45,7 @@ function renderTrigger(
 describe("QuickAddVariantSheet", () => {
   beforeEach(() => {
     addVariantMock.mockReset();
+    addVariantMock.mockReturnValue(true);
   });
 
   it("accepts one pricing context and exposes no contradictory mode prop", () => {
@@ -109,6 +110,50 @@ describe("QuickAddVariantSheet", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(trigger).toHaveFocus();
     expect(addVariantMock).not.toHaveBeenCalled();
+  });
+
+  it("stays open when the cart rejects a normalized add", async () => {
+    const user = userEvent.setup();
+    addVariantMock.mockReturnValue(false);
+    renderTrigger();
+
+    await user.click(
+      screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Choose a variant for Synthetic Product Alpha",
+    });
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Add Synthetic Product Alpha to cart",
+      }),
+    );
+
+    expect(addVariantMock).toHaveBeenCalledTimes(1);
+    expect(dialog).toBeVisible();
+  });
+
+  it("contains an owner-approved unbroken variant label on a narrow sheet", async () => {
+    const user = userEvent.setup();
+    const longLabel = "SYNTHETICUNBROKENVARIANTLABEL".repeat(8);
+    renderTrigger(
+      testCanonicalProduct([
+        testPublicVariant({
+          id: "variant-long-label",
+          label: longLabel,
+        }),
+      ], {
+        defaultVariantId: "variant-long-label",
+      }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }),
+    );
+    const label = within(screen.getByRole("dialog")).getByText(longLabel);
+    const copyColumn = label.parentElement;
+    expect(copyColumn).not.toBeNull();
+    expect(copyColumn).toHaveClass("min-w-0", "[overflow-wrap:anywhere]");
   });
 
   it("renders shared price semantics and disables unavailable or malformed pending rows", async () => {
