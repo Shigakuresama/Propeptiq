@@ -243,19 +243,25 @@ describe("public storefront projection", () => {
   });
 
   it("recursively excludes loose provider, payment, and inventory fields from approved content", () => {
-    const looseControlledContent: readonly ControlledContentRecord[] = controlledContent.map(
+    const looseControlledContent = controlledContent.map(
       (record) => record.id === approvedFirstId
         ? {
             ...record,
             stripePriceId: "price_private_content_fixture",
             availableQuantity: 12,
+            sourceReferences: [{
+              stripePriceId: "price_nested_private_content_fixture",
+            }],
+            approvalNote: {
+              providerToken: "provider_nested_private_content_fixture",
+            },
             provider: {
               name: "private-provider-fixture",
               stripeProductId: "prod_private_content_fixture",
             },
           }
         : record,
-    );
+    ) as unknown as readonly ControlledContentRecord[];
     const product = findPublicStorefrontProduct(
       buildFixtureCatalog({ controlledContent: looseControlledContent }),
       "tirzepatide",
@@ -263,10 +269,12 @@ describe("public storefront projection", () => {
     if (product?.kind !== "canonical") throw new Error("expected canonical fixture");
 
     const keys = recursivelyCollectKeys(product.content);
+    expect(product.content.map((record) => record.id)).toEqual([approvedSecondId]);
     expect(keys).not.toContain("stripePriceId");
     expect(keys).not.toContain("availableQuantity");
     expect(keys).not.toContain("provider");
     expect(keys).not.toContain("stripeProductId");
+    expect(keys).not.toContain("providerToken");
   });
 
   it("allowlist-maps variants and recursively excludes server-only mappings and inventory facts", () => {

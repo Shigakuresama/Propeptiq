@@ -84,6 +84,76 @@ describe("storefront controlled content", () => {
     }]);
   });
 
+  it.each([
+    [
+      "objects in required ID strings",
+      {
+        ...records[0],
+        id: { providerToken: "provider_nested_id_fixture" },
+      },
+    ],
+    [
+      "unknown content kinds",
+      {
+        ...records[0],
+        kind: "provider_private_fixture",
+      },
+    ],
+    [
+      "objects in required title strings",
+      {
+        ...records[0],
+        title: { providerToken: "provider_nested_title_fixture" },
+      },
+    ],
+    [
+      "objects in required body strings",
+      {
+        ...records[0],
+        body: { providerToken: "provider_nested_body_fixture" },
+      },
+    ],
+    [
+      "non-array source references",
+      {
+        ...records[0],
+        sourceReferences: { stripePriceId: "price_nested_nonarray_fixture" },
+      },
+    ],
+    [
+      "object entries in source references",
+      {
+        ...records[0],
+        sourceReferences: [{ stripePriceId: "price_nested_private_fixture" }],
+      },
+    ],
+    [
+      "objects in nullable string fields",
+      {
+        ...records[0],
+        approvalNote: { providerToken: "provider_nested_private_fixture" },
+      },
+    ],
+    [
+      "objects in reviewed timestamps",
+      {
+        ...records[0],
+        reviewedAt: { providerToken: "provider_nested_reviewed_fixture" },
+      },
+    ],
+    [
+      "objects in effective timestamps",
+      {
+        ...records[0],
+        effectiveAt: { providerToken: "provider_nested_effective_fixture" },
+      },
+    ],
+  ])("omits an approved runtime record with %s", (_label, looseRecord) => {
+    const runtimeRecords = [looseRecord] as unknown as readonly ControlledContentRecord[];
+
+    expect(getApprovedStorefrontContent(runtimeRecords)).toEqual([]);
+  });
+
   it("keeps the production controlled-content registry empty until owner approval", async () => {
     const { storefrontContentRecords } = await import("./storefront-content");
 
