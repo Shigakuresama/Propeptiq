@@ -74,6 +74,11 @@ describe("database-backed product page rewards", () => {
     );
 
     expect(screen.getByText("Earn 112 points")).toBeVisible();
+    const addButton = screen.getByRole("button", {
+      name: "Reference record unavailable",
+    });
+    expect(addButton).toBeDisabled();
+    expect(addButton).toHaveTextContent("Choose a variant before adding this item.");
   });
 
   it.each(["inactive", "read_error"] as const)(

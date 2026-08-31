@@ -1,6 +1,7 @@
 import "server-only";
 
 import { connection } from "next/server";
+import { cache } from "react";
 
 import { hasProductionIdentity, type ServerEnv } from "@/config/env-schema";
 import { storefrontContentRecords, type ControlledContentRecord } from "@/content/storefront-content";
@@ -24,7 +25,10 @@ import {
   type PublicStorefrontCatalog,
   type VerifiedStorefrontImageMetadata,
 } from "./storefront-public";
-import { projectAutomaticStorefrontPromotions } from "./storefront-promotion-projection";
+import {
+  projectAutomaticStorefrontPromotions,
+  type PromotionProjectionDiagnostic,
+} from "./storefront-promotion-projection";
 import type { PricePresentationMode, PublicStorefrontPricingContext } from "./storefront-price-presentation";
 
 export type PublicStorefrontView = Readonly<{ catalog: PublicStorefrontCatalog; pricing: PublicStorefrontPricingContext }>;
@@ -49,13 +53,22 @@ export type StorefrontPublicServerDependencies = Readonly<{
   ) => Promise<DatabaseCatalogRecordSet>;
   now?: () => Date;
   nodeEnv?: string;
-  reportPromotionDiagnostic?: (diagnostic: unknown) => void;
+  reportPromotionDiagnostic?: (diagnostic: PromotionProjectionDiagnostic) => void;
 }>;
 
 async function defaultDatabaseLoader(
   environment: ServerEnv,
 ): Promise<DatabaseCatalogRecordSet> {
   return withRuntimeTransaction(environment, loadDatabaseCatalogRecords);
+}
+
+function defaultPromotionDiagnosticReporter(
+  diagnostic: PromotionProjectionDiagnostic,
+): void {
+  console.warn("storefront_promotion_omitted", {
+    code: diagnostic.code,
+    campaignKey: diagnostic.campaignKey,
+  });
 }
 
 export async function loadPublicStorefrontCatalog(
@@ -87,7 +100,9 @@ export async function loadPublicStorefrontView(
   let runtimeVariantFacts = [] as ReturnType<
     typeof buildRuntimeVariantPresentationFacts
   >;
-  let automaticPromotions = [] as PublicStorefrontPricingContext["automaticPromotions"];
+  let automaticPromotions = Object.freeze(
+    [],
+  ) as PublicStorefrontPricingContext["automaticPromotions"];
   if (shouldLoadDatabase) {
     const records = await (
       dependencies.loadDatabaseRecords ?? defaultDatabaseLoader
@@ -102,7 +117,11 @@ export async function loadPublicStorefrontView(
     });
     const promotionProjection = projectAutomaticStorefrontPromotions({ records, now });
     automaticPromotions = promotionProjection.promotions;
-    for (const diagnostic of promotionProjection.diagnostics) dependencies.reportPromotionDiagnostic?.(diagnostic);
+    const reportPromotionDiagnostic =
+      dependencies.reportPromotionDiagnostic ?? defaultPromotionDiagnosticReporter;
+    for (const diagnostic of promotionProjection.diagnostics) {
+      reportPromotionDiagnostic(diagnostic);
+    }
   }
   const catalog = buildPublicStorefrontCatalog({
     configuredPublicationId: environment.BROWSE_CATALOG_PUBLICATION,
@@ -118,14 +137,39 @@ export async function loadPublicStorefrontView(
   });
 }
 
-export async function getPublicStorefrontCatalog(): Promise<PublicStorefrontCatalog> {
-  await connection();
-  const environment = readServerEnv();
-  return loadPublicStorefrontCatalog(environment);
+type PublicStorefrontViewCache = (
+  acquire: () => Promise<PublicStorefrontView>,
+) => () => Promise<PublicStorefrontView>;
+
+export type PublicStorefrontRequestAccessorDependencies = Readonly<{
+  connect?: () => Promise<unknown>;
+  readEnvironment?: () => ServerEnv;
+  loadView?: (environment: ServerEnv) => Promise<PublicStorefrontView>;
+  cacheView?: PublicStorefrontViewCache;
+}>;
+
+export function createPublicStorefrontRequestAccessors(
+  dependencies: PublicStorefrontRequestAccessorDependencies = {},
+): Readonly<{
+  getView: () => Promise<PublicStorefrontView>;
+  getCatalog: () => Promise<PublicStorefrontCatalog>;
+}> {
+  const acquire = async (): Promise<PublicStorefrontView> => {
+    await (dependencies.connect ?? connection)();
+    const environment = (dependencies.readEnvironment ?? readServerEnv)();
+    return (dependencies.loadView ?? ((currentEnvironment) =>
+      loadPublicStorefrontView(currentEnvironment, {
+        nodeEnv: process.env.NODE_ENV,
+      })))(environment);
+  };
+  const getView = (dependencies.cacheView ?? ((currentAcquire) =>
+    cache(currentAcquire)))(acquire);
+  const getCatalog = async (): Promise<PublicStorefrontCatalog> =>
+    (await getView()).catalog;
+  return Object.freeze({ getView, getCatalog });
 }
 
-export async function getPublicStorefrontView(): Promise<PublicStorefrontView> {
-  await connection();
-  const environment = readServerEnv();
-  return loadPublicStorefrontView(environment, { nodeEnv: process.env.NODE_ENV });
-}
+const publicStorefrontRequestAccessors = createPublicStorefrontRequestAccessors();
+
+export const getPublicStorefrontView = publicStorefrontRequestAccessors.getView;
+export const getPublicStorefrontCatalog = publicStorefrontRequestAccessors.getCatalog;

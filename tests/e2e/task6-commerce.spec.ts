@@ -49,8 +49,10 @@ async function inspectCommerce(request: APIRequestContext): Promise<Inspection> 
 async function signInAs(page: Page, actor: string) {
   await page.goto("/sign-in");
   await page.getByRole("radio", { name: actor }).check();
-  await page.getByRole("button", { name: "Continue to checkout" }).click();
-  await expect(page).toHaveURL(/\/checkout$/u);
+  await Promise.all([
+    page.waitForURL(/\/checkout$/u),
+    page.getByRole("button", { name: "Continue to checkout" }).click(),
+  ]);
 }
 
 async function seedCart(page: Page, quantity = 2) {
@@ -376,10 +378,13 @@ test("staff refund, hold, handoff, delivery, and exception commands have once-on
   await page.goto("/admin/refunds");
   const refundForm = page.getByRole("form", { name: /Submit or recover refund/ });
   await refundForm.getByRole("button", { name: "Submit guarded command" }).click();
-  await expect(page.getByRole("status")).toContainText(/awaiting a signed provider event|recorded/i);
+  const refundStatus = page.getByRole("status").filter({
+    hasText: /awaiting a signed provider event|recorded/i,
+  });
+  await expect(refundStatus).toContainText(/awaiting a signed provider event|recorded/i);
   const refunded = await inspectCommerce(request);
   await page.getByRole("form", { name: /Submit or recover refund/ }).getByRole("button", { name: "Submit guarded command" }).click();
-  await expect(page.getByRole("status")).toBeVisible();
+  await expect(refundStatus).toBeVisible();
   expect(await inspectCommerce(request)).toEqual(refunded);
 
   await page.goto("/admin/orders");
@@ -392,11 +397,15 @@ test("staff refund, hold, handoff, delivery, and exception commands have once-on
   await expect(failedCommand).toBeFocused();
   await page.goto("/admin/orders");
   await page.getByRole("form", { name: /Clear fulfillment hold/ }).getByRole("button", { name: "Submit guarded command" }).click();
-  await expect(page.getByRole("status")).toContainText(/hold was cleared once/i);
+  await expect(
+    page.getByRole("status").filter({ hasText: /hold was cleared once/i }),
+  ).toContainText(/hold was cleared once/i);
   const cleared = await inspectCommerce(request);
   await page.goto("/admin/shipments");
   await page.getByRole("form", { name: /Handoff shipment/ }).getByRole("button", { name: "Submit guarded command" }).click();
-  await expect(page.getByRole("status")).toContainText(/handed off once/i);
+  await expect(
+    page.getByRole("status").filter({ hasText: /handed off once/i }),
+  ).toContainText(/handed off once/i);
   const handedOff = await inspectCommerce(request);
   expect(handedOff.releaseCount).toBe(cleared.releaseCount + 1);
   expect(handedOff.shipmentHandoffCount).toBe(cleared.shipmentHandoffCount + 1);
@@ -404,20 +413,28 @@ test("staff refund, hold, handoff, delivery, and exception commands have once-on
   await page.screenshot({ path: path.join(screenshotDirectory, "admin-shipment-actions-1024.png"), fullPage: true });
 
   await page.getByRole("form", { name: /Mark shipment delivered/ }).getByRole("button", { name: "Submit guarded command" }).click();
-  await expect(page.getByRole("status")).toContainText(/marked delivered once/i);
+  await expect(
+    page.getByRole("status").filter({ hasText: /marked delivered once/i }),
+  ).toContainText(/marked delivered once/i);
   const delivered = await inspectCommerce(request);
   expect(delivered.deliveryCount).toBe(handedOff.deliveryCount + 1);
 
   await resetCommerce(request);
   await page.goto("/admin/orders");
   await page.getByRole("form", { name: /Clear fulfillment hold/ }).getByRole("button", { name: "Submit guarded command" }).click();
-  await expect(page.getByRole("status")).toContainText(/hold was cleared once/i);
+  await expect(
+    page.getByRole("status").filter({ hasText: /hold was cleared once/i }),
+  ).toContainText(/hold was cleared once/i);
   await page.goto("/admin/shipments");
   await page.getByRole("form", { name: /Handoff shipment/ }).getByRole("button", { name: "Submit guarded command" }).click();
-  await expect(page.getByRole("status")).toContainText(/handed off once/i);
+  await expect(
+    page.getByRole("status").filter({ hasText: /handed off once/i }),
+  ).toContainText(/handed off once/i);
   const beforeException = await inspectCommerce(request);
   await page.getByRole("form", { name: /Record shipment exception/ }).getByRole("button", { name: "Submit guarded command" }).click();
-  await expect(page.getByRole("status")).toContainText(/exception was recorded once/i);
+  await expect(
+    page.getByRole("status").filter({ hasText: /exception was recorded once/i }),
+  ).toContainText(/exception was recorded once/i);
   const excepted = await inspectCommerce(request);
   expect(excepted.exceptionCount).toBe(beforeException.exceptionCount + 1);
   await page.reload();

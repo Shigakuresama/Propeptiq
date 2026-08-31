@@ -1,14 +1,15 @@
 import { render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { testPricingContext } from "@/components/commerce/storefront-test-fixtures";
 
-const { getPublicStorefrontCatalogMock, getPublicGrowthProjectionMock } = vi.hoisted(() => ({
-  getPublicStorefrontCatalogMock: vi.fn(),
+const { getPublicStorefrontViewMock, getPublicGrowthProjectionMock } = vi.hoisted(() => ({
+  getPublicStorefrontViewMock: vi.fn(),
   getPublicGrowthProjectionMock: vi.fn(),
 }));
 
 vi.mock("@/catalog/storefront-public-server", () => ({
-  getPublicStorefrontCatalog: getPublicStorefrontCatalogMock,
+  getPublicStorefrontView: getPublicStorefrontViewMock,
 }));
 vi.mock("@/growth/public-growth-server", () => ({
   getPublicGrowthProjection: getPublicGrowthProjectionMock,
@@ -46,10 +47,12 @@ const activeReferralPolicy = {
 };
 
 describe("public home growth projection", () => {
+  const pricing = testPricingContext("test");
+
   it("shows the program strip only from an active server projection", async () => {
-    getPublicStorefrontCatalogMock.mockResolvedValue({
-      products: [],
-      displayConfigurationCount: 103,
+    getPublicStorefrontViewMock.mockResolvedValue({
+      catalog: { products: [], displayConfigurationCount: 103 },
+      pricing,
     });
     getPublicGrowthProjectionMock.mockResolvedValue({
       status: "active",
@@ -74,6 +77,7 @@ describe("public home growth projection", () => {
     expect(within(explainer).getByRole("link", { name: "Refer a lab" })).toHaveAttribute("href", "/account/referrals");
     expect(within(explainer).getByRole("link", { name: "Share a research set" })).toHaveAttribute("href", "/research-sets");
     expect(explainer).not.toHaveTextContent(/\$|%|save|member|limited|hurry|popular/iu);
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledTimes(1);
     const highlights = screen.getByText("Catalog highlights");
     const quality = screen.getByRole("heading", { name: "Follow the record, not an unsupported claim." });
     expect(highlights.compareDocumentPosition(explainer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -81,9 +85,9 @@ describe("public home growth projection", () => {
   });
 
   it("omits referral and shared-set entries when only loyalty is active", async () => {
-    getPublicStorefrontCatalogMock.mockResolvedValue({
-      products: [],
-      displayConfigurationCount: 103,
+    getPublicStorefrontViewMock.mockResolvedValue({
+      catalog: { products: [], displayConfigurationCount: 103 },
+      pricing,
     });
     getPublicGrowthProjectionMock.mockResolvedValue({
       status: "active",
@@ -106,9 +110,9 @@ describe("public home growth projection", () => {
   it.each(["inactive", "read_error"] as const)(
     "omits the program strip when the growth read is %s",
     async (status) => {
-      getPublicStorefrontCatalogMock.mockResolvedValue({
-        products: [],
-        displayConfigurationCount: 103,
+      getPublicStorefrontViewMock.mockResolvedValue({
+        catalog: { products: [], displayConfigurationCount: 103 },
+        pricing,
       });
       getPublicGrowthProjectionMock.mockResolvedValue({ status });
 

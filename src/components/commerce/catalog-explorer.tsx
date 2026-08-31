@@ -38,7 +38,7 @@ export function CatalogExplorer({
   pricing,
 }: {
   products: readonly PublicStorefrontProduct[];
-  pricing?: PublicStorefrontPricingContext | undefined;
+  pricing: PublicStorefrontPricingContext;
 }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<ExactFilters>(emptyFilters);

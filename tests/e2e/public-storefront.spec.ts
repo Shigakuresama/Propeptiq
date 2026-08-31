@@ -45,8 +45,8 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("every public route renders the shared restriction and passes axe", async ({ page }) => {
-  for (const route of publicRoutes) {
+for (const route of publicRoutes) {
+  test(`public route ${route} renders the shared restriction and passes axe`, async ({ page }) => {
     await page.goto(route);
     await expect(page.locator("main#main-content")).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -55,8 +55,8 @@ test("every public route renders the shared restriction and passes axe", async (
     ).toBeVisible();
     const accessibility = await new AxeBuilder({ page }).analyze();
     expect(accessibility.violations, `${route} axe violations`).toEqual([]);
-  }
-});
+  });
+}
 
 test("synthetic commerce pages still identify every displayed record as fictional demo data", async ({
   page,

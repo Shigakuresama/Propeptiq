@@ -8,6 +8,11 @@ import {
   storefrontImageMetadata,
 } from "@/catalog/storefront-public";
 import { PublicHome } from "@/components/site/public-home";
+import { CartProvider } from "@/cart/cart-provider";
+import {
+  testCanonicalProduct,
+  testPricingContext,
+} from "@/components/commerce/storefront-test-fixtures";
 import type { LoyaltyPolicy } from "@/domain/rewards";
 
 import { ProofRail } from "./proof-rail";
@@ -32,6 +37,7 @@ const publicCatalog = buildPublicStorefrontCatalog({
   controlledContent: [],
   verifiedImageMetadata: storefrontImageMetadata,
 });
+const pricing = testPricingContext("test");
 
 describe("public storefront semantics", () => {
   it("presents the owner-supplied catalog without inventing commerce facts", () => {
@@ -39,6 +45,7 @@ describe("public storefront semantics", () => {
       <PublicHome
         products={publicCatalog.products}
         variantCount={publicCatalog.displayConfigurationCount}
+        pricing={pricing}
       />,
     );
 
@@ -99,6 +106,7 @@ describe("public storefront semantics", () => {
         loyaltyPolicy={activeLoyaltyPolicy}
         products={publicCatalog.products}
         variantCount={publicCatalog.displayConfigurationCount}
+        pricing={pricing}
       />,
     );
 
@@ -106,5 +114,21 @@ describe("public storefront semantics", () => {
     const rail = screen.getByRole("list", { name: "Evidence relationship" });
     const highlights = screen.getByText("Catalog highlights");
     expect(rail.compareDocumentPosition(highlights) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("uses neutral catalog snapshot copy when canonical commerce rows exist", () => {
+    render(
+      <CartProvider>
+        <PublicHome
+          products={[testCanonicalProduct()]}
+          variantCount={1}
+          pricing={pricing}
+        />
+      </CartProvider>,
+    );
+
+    expect(screen.getAllByText(/current price and availability snapshots are displayed where configured and revalidated before checkout/iu).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/purchasing and operational availability remain separate from this browse-only collection/iu)).toBeNull();
+    expect(screen.queryByText(/prices are intentionally excluded/iu)).toBeNull();
   });
 });

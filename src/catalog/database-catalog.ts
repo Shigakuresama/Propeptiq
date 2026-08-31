@@ -9,6 +9,7 @@ import type {
   CatalogPromotionVariantTargetRecord,
   CatalogRecordSet,
 } from "./types";
+import { isStrictStorefrontPromotionInstant } from "./storefront-promotion-projection";
 
 export type CatalogQueryPort = Readonly<{
   query: <T extends object>(
@@ -55,7 +56,7 @@ export type DatabaseCatalogRecordSet = Omit<
     prices: readonly DatabaseCatalogPriceRecord[];
     lots: readonly DatabaseCatalogLotRecord[];
     promotions: readonly DatabaseCatalogPromotionRecord[];
-    promotionVariantTargets?: readonly CatalogPromotionVariantTargetRecord[];
+    promotionVariantTargets: readonly CatalogPromotionVariantTargetRecord[];
   }>;
 type RawVariant = Omit<
   DatabaseCatalogVariantRecord,
@@ -103,12 +104,25 @@ function toOptionalIso(value: Date | string | null): string | null {
   return value === null ? null : toIso(value);
 }
 
+function toPromotionOptionalIso(value: Date | string | null): string | null {
+  if (value === null) return null;
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : value.toString();
+  }
+  return isStrictStorefrontPromotionInstant(value) ? toIso(value) : value;
+}
+
 function toSafeInteger(value: string | number): number {
   const numberValue = typeof value === "number" ? value : Number(value);
   if (!Number.isSafeInteger(numberValue)) {
     throw new Error("Database catalog contains an unsafe monetary value");
   }
   return numberValue;
+}
+
+function toPromotionIntegerOrInvalid(value: string | number): number {
+  const numberValue = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(numberValue) ? numberValue : Number.NaN;
 }
 
 export async function loadDatabaseCatalogRecords(
@@ -215,9 +229,9 @@ export async function loadDatabaseCatalogRecords(
       amountMinor:
         promotion.amountMinor === null
           ? null
-          : toSafeInteger(promotion.amountMinor),
-      startsAt: toOptionalIso(promotion.startsAt),
-      endsAt: toOptionalIso(promotion.endsAt),
+          : toPromotionIntegerOrInvalid(promotion.amountMinor),
+      startsAt: toPromotionOptionalIso(promotion.startsAt),
+      endsAt: toPromotionOptionalIso(promotion.endsAt),
     })),
     promotionTargets: promotionTargets.rows,
     promotionVariantTargets: promotionVariantTargets.rows,

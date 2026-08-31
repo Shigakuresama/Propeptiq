@@ -116,7 +116,11 @@ test("one capable administrator can mutate a local resource and read its redacte
   const productCommand = page.getByRole("form", { name: "Activate one verified product" });
   await productCommand.getByRole("button", { name: "Submit guarded command" }).click();
   await expect(page).toHaveURL(/\/admin\/products\?result=saved$/);
-  await expect(page.getByRole("status")).toContainText("confirm the resource or audit read-back");
+  await expect(
+    page.getByRole("status").filter({
+      hasText: "confirm the resource or audit read-back",
+    }),
+  ).toContainText("confirm the resource or audit read-back");
   await page.goto("/admin/audit");
   await expect(page.getByRole("list", { name: "Redacted audit history" })).toContainText("catalog.product.activated");
 });

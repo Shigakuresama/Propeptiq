@@ -33,9 +33,21 @@ export type PublicStorefrontPricingContext = Readonly<{
 }>;
 
 export type PricePresentation =
-  | Readonly<{ state: "priced"; price: EffectiveLinePrice }>
-  | Readonly<{ state: "pending"; reason: "pricing_coming_soon" }>
-  | Readonly<{ state: "unavailable"; reason: "unavailable" | "checkout_unavailable" }>;
+  | Readonly<{
+      state: "priced";
+      purchaseState: "ready" | "checkout_unavailable" | "local_preview";
+      price: Omit<EffectiveLinePrice, "checkoutReady">;
+    }>
+  | Readonly<{
+      state: "pending";
+      purchaseState: "pricing_pending";
+      reason: "pricing_coming_soon";
+    }>
+  | Readonly<{
+      state: "unavailable";
+      purchaseState: "unavailable";
+      reason: "unavailable";
+    }>;
 
 export function canAddPublicVariant(
   variant: Pick<PublicStorefrontVariant, "availability" | "priceStatus" | "baseUnitMinor" | "currency" | "checkoutReady">,
@@ -64,14 +76,37 @@ export function resolvePublicVariantPrice(input: Readonly<{
   pricing: PublicStorefrontPricingContext;
 }>): PricePresentation {
   const { variant, pricing } = input;
-  if (variant.availability === "unavailable") return { state: "unavailable", reason: "unavailable" };
-  const previewZero = variant.priceStatus === "pending" && pricing.mode !== "production" &&
-    variant.baseUnitMinor === 0 && variant.currency === "USD";
-  if (variant.baseUnitMinor === null || variant.currency === null ||
-      (variant.priceStatus !== "active" && !previewZero) ||
-      (variant.priceStatus === "active" && (!Number.isSafeInteger(variant.baseUnitMinor) || variant.baseUnitMinor <= 0 || variant.currency !== "USD"))) {
-    return { state: "pending", reason: "pricing_coming_soon" };
+  if (variant.availability === "unavailable") {
+    return {
+      state: "unavailable",
+      purchaseState: "unavailable",
+      reason: "unavailable",
+    };
   }
+
+  const activePrice =
+    variant.priceStatus === "active" &&
+    variant.availability === "available" &&
+    variant.baseUnitMinor !== null &&
+    Number.isSafeInteger(variant.baseUnitMinor) &&
+    variant.baseUnitMinor > 0 &&
+    variant.currency === "USD";
+  const previewZero =
+    variant.priceStatus === "pending" &&
+    variant.availability === "preview_only" &&
+    variant.baseUnitMinor === 0 &&
+    variant.currency === "USD" &&
+    variant.checkoutReady === false &&
+    pricing.mode !== "production";
+
+  if (!activePrice && !previewZero) {
+    return {
+      state: "pending",
+      purchaseState: "pricing_pending",
+      reason: "pricing_coming_soon",
+    };
+  }
+
   const eligiblePromotions = pricing.automaticPromotions
     .filter((promotion) => promotionApplies(promotion, { id: variant.id, productId: input.productId }))
     .map((promotion) => ({ id: promotion.id, discountBps: promotion.discountBps }));
@@ -79,19 +114,67 @@ export function resolvePublicVariantPrice(input: Readonly<{
     quantityDiscountBps: quantityDiscountBps(input.quantity),
     eligiblePromotions,
   });
-  return { state: "priced", price: calculateVariantLinePrice({
+  const calculated = calculateVariantLinePrice({
     variantId: variant.id,
     baseUnitMinor: variant.baseUnitMinor,
     quantity: input.quantity,
     priceStatus: variant.priceStatus,
     effectiveDiscount,
-  }) };
+  });
+  const publicPrice: Omit<EffectiveLinePrice, "checkoutReady"> = Object.freeze({
+    variantId: calculated.variantId,
+    quantity: calculated.quantity,
+    baseUnitMinor: calculated.baseUnitMinor,
+    effectiveDiscountBps: calculated.effectiveDiscountBps,
+    effectiveUnitMinor: calculated.effectiveUnitMinor,
+    lineSubtotalMinor: calculated.lineSubtotalMinor,
+    lineSavingsMinor: calculated.lineSavingsMinor,
+    appliedPromotionIds: calculated.appliedPromotionIds,
+  });
+  return {
+    state: "priced",
+    purchaseState: previewZero
+      ? "local_preview"
+      : variant.checkoutReady === true
+        ? "ready"
+        : "checkout_unavailable",
+    price: publicPrice,
+  };
 }
 
 export function selectCardVariant(input: Readonly<{ product: { kind: "canonical"; id: string; variants: readonly PublicStorefrontVariant[]; defaultVariantId: string }; pricing: PublicStorefrontPricingContext }>): PublicStorefrontVariant | null {
   const candidates = input.product.variants.flatMap((variant) => {
     const presentation = resolvePublicVariantPrice({ variant, productId: input.product.id, quantity: 1, pricing: input.pricing });
-    return presentation.state === "priced" && variant.availability === "available" ? [{ variant, amount: presentation.price.effectiveUnitMinor }] : [];
+    return presentation.state === "priced" ? [{ variant, amount: presentation.price.effectiveUnitMinor }] : [];
   });
   return [...candidates].sort((a, b) => a.amount - b.amount || a.variant.label.localeCompare(b.variant.label, "en-US") || a.variant.id.localeCompare(b.variant.id))[0]?.variant ?? input.product.variants.find((variant) => variant.id === input.product.defaultVariantId) ?? null;
+}
+
+export function summarizePublicStorefrontVariants(
+  variants: readonly Pick<PublicStorefrontVariant, "label" | "amount">[],
+): string {
+  if (variants.length === 1) {
+    const only = variants[0]!;
+    return only.amount === null
+      ? only.label
+      : `${only.amount.value} ${only.amount.unit}`;
+  }
+
+  const amounts = variants.map((variant) => variant.amount);
+  const unit = amounts[0]?.unit;
+  if (
+    variants.length === 0 ||
+    unit === undefined ||
+    amounts.some(
+      (amount) =>
+        amount === null ||
+        amount.unit !== unit ||
+        !Number.isFinite(amount.value) ||
+        amount.value <= 0,
+    )
+  ) {
+    return "Multiple options";
+  }
+
+  return `From ${Math.min(...amounts.map((amount) => amount!.value))} ${unit}`;
 }

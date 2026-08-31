@@ -187,7 +187,9 @@ test("lets an active owner create one code and one pending partner application",
   const referralForm = page.getByRole("form", { name: "Activate referral code" });
   await referralForm.getByRole("checkbox").check();
   await referralForm.getByRole("button", { name: "Activate referral code" }).click();
-  await expect(page.getByRole("status")).toContainText("Referral code activated");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Referral code activated" }),
+  ).toContainText("Referral code activated");
   await expect(page.getByText(/\/r\/ref_LocalOwner/u)).toBeVisible();
   expect((await inspectGrowth(request)).referralCodeCount).toBe(2);
 
@@ -197,7 +199,9 @@ test("lets an active owner create one code and one pending partner application",
   await partnerForm.getByLabel("Promotion method").selectOption("website");
   await partnerForm.getByRole("checkbox").check();
   await partnerForm.getByRole("button", { name: "Submit partner application" }).click();
-  await expect(page.getByRole("status")).toContainText("Partner application submitted");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Partner application submitted" }),
+  ).toContainText("Partner application submitted");
   await expect(page.getByText("Pending", { exact: true })).toBeVisible();
   expect((await inspectGrowth(request)).affiliateProfileCount).toBe(2);
 });
@@ -234,7 +238,9 @@ test("projects a privacy-safe product-only shared set without inventing variant 
   expect(html).not.toMatch(/commission|payout|available points/i);
   const cartBefore = await page.evaluate(() => localStorage.getItem("propeptiq.cart.v2"));
   await expect(page.getByRole("button", { name: "Variant selection unavailable" })).toBeDisabled();
-  await expect(page.getByRole("status")).toContainText(
+  await expect(page.getByRole("status").filter({
+    hasText: "Select exact variants before adding a research set",
+  })).toContainText(
     "Select exact variants before adding a research set",
   );
   expect(await page.evaluate(() => localStorage.getItem("propeptiq.cart.v2")))

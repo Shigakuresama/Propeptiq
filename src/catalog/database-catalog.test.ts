@@ -7,6 +7,7 @@ import {
   type DatabaseCatalogRecordSet,
 } from "./database-catalog";
 import { buildRuntimeVariantPresentationFacts } from "./storefront-public";
+import { projectAutomaticStorefrontPromotions } from "./storefront-promotion-projection";
 
 const productId = "10000000-0000-4000-8000-000000000001";
 const variantId = "20000000-0000-4000-8000-000000000001";
@@ -83,6 +84,7 @@ function databaseRecords(
     claims: [],
     promotions: [],
     promotionTargets: [],
+    promotionVariantTargets: [],
     ...overrides,
   };
 }
@@ -157,6 +159,112 @@ describe("database catalog loader", () => {
     expect(observedSql.find((sql) => sql.includes("FROM product_variants"))).toMatch(
       /stripe_product_id AS "stripeProductId"[\s\S]*stripe_price_id AS "stripePriceId"/u,
     );
+    expect(observedSql.find((sql) => sql.includes("FROM promotion_variant_targets"))).toMatch(
+      /ORDER BY promotion_id, variant_id/u,
+    );
+    expect(records.promotionVariantTargets).toEqual([]);
+  });
+
+  it("preserves malformed promotion timestamps for fail-soft projection", async () => {
+    const malformed = "08/31/2026 12:00:00";
+    const invalidDate = new Date(Number.NaN);
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM promotions\n")) {
+        return { rows: [{
+          id: "promotion-record",
+          campaignKey: "malformed-time",
+          code: "BADTIME",
+          version: 1,
+          name: "Malformed time fixture",
+          kind: "discount",
+          status: "active",
+          enabled: true,
+          timezone: "America/Los_Angeles",
+          applicationMode: "automatic",
+          scope: "sitewide",
+          amountMinor: null,
+          basisPoints: 1_000,
+          currency: null,
+          startsAt: malformed,
+          endsAt: null,
+          configuration: {},
+        }, {
+          id: "promotion-invalid-date-record",
+          campaignKey: "invalid-date",
+          code: "INVALIDDATE",
+          version: 1,
+          name: "Invalid Date fixture",
+          kind: "discount",
+          status: "active",
+          enabled: true,
+          timezone: "America/Los_Angeles",
+          applicationMode: "automatic",
+          scope: "sitewide",
+          amountMinor: null,
+          basisPoints: 1_000,
+          currency: null,
+          startsAt: invalidDate,
+          endsAt: null,
+          configuration: {},
+        }] };
+      }
+      return { rows: [] };
+    });
+
+    const loaded = await loadDatabaseCatalogRecords({ query } as CatalogQueryPort);
+    expect(loaded.promotions).toEqual([
+      expect.objectContaining({ campaignKey: "malformed-time", startsAt: malformed }),
+      expect.objectContaining({ campaignKey: "invalid-date", startsAt: "Invalid Date" }),
+    ]);
+    expect(loaded.products).toEqual([]);
+  });
+
+  it("preserves a malformed promotion amount so projection omits only that campaign", async () => {
+    const promotionRow = (overrides: Record<string, unknown> = {}) => ({
+      id: "promotion-valid-record",
+      campaignKey: "valid30",
+      code: "VALID30",
+      version: 1,
+      name: "Valid synthetic campaign",
+      kind: "discount",
+      status: "active",
+      enabled: true,
+      timezone: "America/Los_Angeles",
+      applicationMode: "automatic",
+      scope: "sitewide",
+      amountMinor: null,
+      basisPoints: 3_000,
+      currency: null,
+      startsAt: null,
+      endsAt: null,
+      configuration: {},
+      ...overrides,
+    });
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes("FROM promotions\n")) {
+        return {
+          rows: [
+            promotionRow(),
+            promotionRow({
+              id: "promotion-malformed-record",
+              campaignKey: "malformed_amount",
+              code: "MALFORMED",
+              name: "Malformed synthetic campaign",
+              amountMinor: "not-an-integer",
+            }),
+          ],
+        };
+      }
+      return { rows: [] };
+    });
+
+    const loaded = await loadDatabaseCatalogRecords({ query } as CatalogQueryPort);
+    const projected = projectAutomaticStorefrontPromotions({ records: loaded, now });
+
+    expect(projected.promotions.map((promotion) => promotion.id)).toEqual(["valid30"]);
+    expect(projected.diagnostics).toEqual([
+      { code: "invalid_campaign", campaignKey: "malformed_amount" },
+    ]);
   });
 });
 

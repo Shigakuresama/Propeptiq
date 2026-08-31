@@ -117,6 +117,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
               Tax, shipping, and final discounts are calculated later.
             </p>
             <AddToCartButton
+              canAdd={false}
+              disabledReason="Choose a variant before adding this item."
               variantId={null}
               productName={product.name}
               className="mt-7 w-full"

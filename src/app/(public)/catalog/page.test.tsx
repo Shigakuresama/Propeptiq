@@ -8,17 +8,22 @@ import {
   buildPublicStorefrontCatalog,
   storefrontImageMetadata,
 } from "@/catalog/storefront-public";
+import { CartProvider } from "@/cart/cart-provider";
+import {
+  testCanonicalProduct,
+  testPricingContext,
+} from "@/components/commerce/storefront-test-fixtures";
 
-const { getPublicBrowseCatalogMock, getPublicStorefrontCatalogMock } = vi.hoisted(() => ({
+const { getPublicBrowseCatalogMock, getPublicStorefrontViewMock } = vi.hoisted(() => ({
   getPublicBrowseCatalogMock: vi.fn(),
-  getPublicStorefrontCatalogMock: vi.fn(),
+  getPublicStorefrontViewMock: vi.fn(),
 }));
 
 vi.mock("@/catalog/browse-catalog-server", () => ({
   getPublicBrowseCatalog: getPublicBrowseCatalogMock,
 }));
 vi.mock("@/catalog/storefront-public-server", () => ({
-  getPublicStorefrontCatalog: getPublicStorefrontCatalogMock,
+  getPublicStorefrontView: getPublicStorefrontViewMock,
 }));
 vi.mock("@/components/site/page-transition", () => ({
   PageTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -35,11 +40,13 @@ const projectedCatalog = buildPublicStorefrontCatalog({
 });
 
 describe("retained browse catalog route", () => {
+  const pricing = testPricingContext("test");
+
   beforeEach(() => {
     getPublicBrowseCatalogMock.mockRejectedValue(
       new Error("legacy browse loader must not own the retained route"),
     );
-    getPublicStorefrontCatalogMock.mockResolvedValue(projectedCatalog);
+    getPublicStorefrontViewMock.mockResolvedValue({ catalog: projectedCatalog, pricing });
   });
 
   it("renders all 56 projected products and describes all 103 display configurations", async () => {
@@ -49,7 +56,22 @@ describe("retained browse catalog route", () => {
     expect(
       screen.getByText(/56 product families and 103 supplied package configurations/iu),
     ).toBeVisible();
-    expect(getPublicStorefrontCatalogMock).toHaveBeenCalledTimes(1);
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledTimes(1);
     expect(getPublicBrowseCatalogMock).not.toHaveBeenCalled();
+  });
+
+  it("uses neutral snapshot copy when a canonical product is present", async () => {
+    getPublicStorefrontViewMock.mockResolvedValue({
+      catalog: {
+        publicationId: projectedCatalog.publicationId,
+        products: [testCanonicalProduct()],
+        displayConfigurationCount: 1,
+      },
+      pricing,
+    });
+
+    render(<CartProvider>{await CatalogPage()}</CartProvider>);
+    expect(screen.getByText(/current catalog price and availability snapshots are displayed where configured and revalidated before checkout/iu)).toBeVisible();
+    expect(screen.queryByText(/prices and availability are intentionally excluded/iu)).toBeNull();
   });
 });

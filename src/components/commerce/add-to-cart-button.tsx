@@ -3,40 +3,69 @@
 import { ShoppingBag } from "lucide-react";
 
 import { useCart } from "@/cart/cart-provider";
+import {
+  isValidCartVariantId,
+  MAX_CART_ITEM_QUANTITY,
+} from "@/cart/cart-storage";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export function AddToCartButton({
   variantId,
   productName,
+  variantLabel,
   quantity = 1,
-  canAdd = false,
-  disabledReason = variantId === null ? "Choose a variant before adding this item." : undefined,
+  canAdd,
+  disabledReason,
   className,
+  onAdded,
 }: {
   variantId: string | null;
   productName: string;
+  variantLabel?: string;
   quantity?: number;
-  canAdd?: boolean;
+  canAdd: boolean;
   disabledReason?: string;
   className?: string;
+  onAdded?: () => void;
 }) {
   const { addVariant } = useCart();
-  const unavailable = variantId === null || !canAdd;
+  const validIdentity = isValidCartVariantId(variantId);
+  const validQuantity =
+    Number.isInteger(quantity) && quantity >= 1 && quantity <= MAX_CART_ITEM_QUANTITY;
+  const unavailable = !canAdd || !validIdentity || !validQuantity;
+  const resolvedDisabledReason =
+    disabledReason ??
+    (variantId === null
+      ? "Choose a variant before adding this item."
+      : "This item is unavailable.");
 
   return (
     <Button
       type="button"
-      className={cn("action-primary", className)}
+      className={cn("action-primary whitespace-normal text-center", className)}
       aria-label={unavailable ? `${productName} unavailable` : `Add ${productName} to cart`}
-      title={unavailable ? disabledReason : undefined}
+      title={unavailable ? resolvedDisabledReason : undefined}
       disabled={unavailable}
       onClick={() => {
-        if (variantId !== null && canAdd) addVariant(variantId, quantity);
+        if (
+          !canAdd ||
+          !isValidCartVariantId(variantId) ||
+          !Number.isInteger(quantity) ||
+          quantity < 1 ||
+          quantity > MAX_CART_ITEM_QUANTITY
+        ) {
+          return;
+        }
+        addVariant(variantId, quantity, {
+          productName,
+          ...(variantLabel === undefined ? {} : { variantLabel }),
+        });
+        onAdded?.();
       }}
     >
       <ShoppingBag aria-hidden="true" />
-      {unavailable ? (disabledReason ?? "Unavailable") : "Add to cart"}
+      {unavailable ? resolvedDisabledReason : "Add to cart"}
     </Button>
   );
 }

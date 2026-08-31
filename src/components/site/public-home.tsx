@@ -25,8 +25,9 @@ export function PublicHome({
   syntheticLocal?: boolean;
   products: readonly PublicStorefrontProduct[];
   variantCount: number;
-  pricing?: PublicStorefrontPricingContext | undefined;
+  pricing: PublicStorefrontPricingContext;
 }) {
+  const allBrowseOnly = products.every((product) => product.kind === "browse_only");
   const growthPrograms = [
     ...(loyaltyPolicy?.status === "active" ? [{
       title: "Earn points",
@@ -63,8 +64,9 @@ export function PublicHome({
               Research materials, documented for laboratory work.
             </h1>
             <p className="mt-6 max-w-[64ch] text-pretty text-lg leading-8 text-muted-ink sm:text-xl">
-              Explore the owner-supplied product catalog and package configurations.
-              Purchasing and operational availability remain separate from this browse-only collection.
+              {allBrowseOnly
+                ? "Explore the owner-supplied product catalog and package configurations. Purchasing and operational availability remain separate from this browse-only collection."
+                : "Explore the owner-supplied product catalog and package configurations. Current price and availability snapshots are displayed where configured and revalidated before checkout."}
             </p>
             <div className="restriction-copy mt-7 border-l-2 border-moss pl-4 text-sm leading-6 sm:text-base">
               <p>{researchRestrictions[0]}</p>
@@ -89,8 +91,9 @@ export function PublicHome({
               {products.length.toString().padStart(2, "0")}
             </p>
             <p className="mt-3 max-w-[34ch] text-base leading-7 text-muted-ink">
-              Product families spanning {variantCount} supplied package configurations.
-              Prices are intentionally excluded.
+              Product families spanning {variantCount} supplied package configurations. {allBrowseOnly
+                ? "Prices are intentionally excluded."
+                : "Current price and availability snapshots are displayed where configured and revalidated before checkout."}
             </p>
           </div>
         </div>

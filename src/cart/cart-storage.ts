@@ -17,6 +17,10 @@ export type { CartLoadResult } from "./cart-migration";
 
 const validVariantId = /^[A-Za-z0-9_-]{1,128}$/;
 
+export function isValidCartVariantId(value: unknown): value is string {
+  return typeof value === "string" && validVariantId.test(value);
+}
+
 export function normalizeCart(input: unknown): CartLine[] {
   if (!Array.isArray(input)) return [];
 
@@ -26,8 +30,7 @@ export function normalizeCart(input: unknown): CartLine[] {
     const variantId = Reflect.get(value, "variantId");
     const quantity = Reflect.get(value, "quantity");
     if (
-      typeof variantId !== "string" ||
-      !validVariantId.test(variantId) ||
+      !isValidCartVariantId(variantId) ||
       typeof quantity !== "number" ||
       !Number.isInteger(quantity) ||
       quantity <= 0

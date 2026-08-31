@@ -4,30 +4,97 @@ import { ArrowRight } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 
-import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
-import { canAddPublicVariant, resolvePublicVariantPrice, selectCardVariant, type PricePresentationMode, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import type {
+  CanonicalPublicStorefrontProduct,
+  PublicStorefrontProduct,
+} from "@/catalog/storefront-public";
+import {
+  canAddPublicVariant,
+  resolvePublicVariantPrice,
+  selectCardVariant,
+  summarizePublicStorefrontVariants,
+  type PricePresentation,
+  type PublicStorefrontPricingContext,
+} from "@/catalog/storefront-price-presentation";
+
 import { AddToCartButton } from "./add-to-cart-button";
 import { ProductPrice } from "./product-price";
 import { VariantAddTrigger } from "./quick-add-variant-sheet";
 
 const CARD_VARIANT_LIMIT = 3;
 
+function presentationStatus(presentation: PricePresentation): string {
+  if (presentation.state === "pending") return "Pricing coming soon";
+  if (presentation.state === "unavailable") return "Unavailable";
+  if (presentation.purchaseState === "ready") return "Available";
+  if (presentation.purchaseState === "local_preview") return "Local cart preview";
+  return "Checkout unavailable";
+}
+
+function aggregateVariantStatus(
+  product: CanonicalPublicStorefrontProduct,
+  pricing: PublicStorefrontPricingContext,
+): string {
+  const presentations = product.variants.map((variant) =>
+    resolvePublicVariantPrice({
+      variant,
+      productId: product.id,
+      quantity: 1,
+      pricing,
+    }),
+  );
+  if (
+    presentations.some(
+      (presentation) =>
+        presentation.state === "priced" &&
+        (presentation.purchaseState === "ready" ||
+          presentation.purchaseState === "local_preview"),
+    )
+  ) {
+    return "Options available";
+  }
+  if (
+    presentations.some(
+      (presentation) =>
+        presentation.state === "priced" &&
+        presentation.purchaseState === "checkout_unavailable",
+    )
+  ) {
+    return "Checkout unavailable";
+  }
+  if (presentations.some((presentation) => presentation.state === "pending")) {
+    return "Pricing coming soon";
+  }
+  return "Unavailable";
+}
+
 export function CatalogListingCard({
   product,
   priority = false,
   pricing,
-  pricingMode,
 }: {
   product: PublicStorefrontProduct;
   priority?: boolean;
-  pricing?: PublicStorefrontPricingContext | undefined;
-  pricingMode?: PricePresentationMode;
+  pricing: PublicStorefrontPricingContext;
 }) {
-  const mode = pricing?.mode ?? pricingMode ?? "production";
-  const pricingContext = pricing ?? { mode, evaluatedAt: "1970-01-01T00:00:00.000Z", automaticPromotions: [] };
-  const selectedVariant = product.kind === "canonical" ? selectCardVariant({ product, pricing: pricingContext }) : null;
+  const selectedVariant =
+    product.kind === "canonical"
+      ? selectCardVariant({ product, pricing })
+      : null;
+  const selectedPresentation =
+    product.kind === "canonical" && selectedVariant
+      ? resolvePublicVariantPrice({
+          variant: selectedVariant,
+          productId: product.id,
+          quantity: 1,
+          pricing,
+        })
+      : null;
   const headingId = `catalog-${product.slug}`;
-  const visibleConfigurations = product.displayConfigurations.slice(0, CARD_VARIANT_LIMIT);
+  const visibleConfigurations = product.displayConfigurations.slice(
+    0,
+    CARD_VARIANT_LIMIT,
+  );
   const remainingConfigurationCount =
     product.displayConfigurations.length - visibleConfigurations.length;
 
@@ -45,7 +112,10 @@ export function CatalogListingCard({
           sizes="(min-width: 1280px) 28vw, (min-width: 768px) 45vw, calc(100vw - 2rem)"
           src={product.image.src}
         />
-        {product.kind === "canonical" && selectedVariant ? <CardDiscountBadge product={product} variant={selectedVariant} pricing={pricingContext} /> : null}
+        {selectedPresentation?.state === "priced" &&
+        selectedPresentation.price.effectiveDiscountBps > 0 ? (
+          <CardDiscountBadge presentation={selectedPresentation} />
+        ) : null}
         <p className="catalog-image-disclosure">Illustrative product presentation</p>
       </div>
 
@@ -77,9 +147,40 @@ export function CatalogListingCard({
           </p>
         ) : null}
 
-        {product.kind === "canonical" && selectedVariant ? <div className="mt-5"><p className="text-sm text-muted-ink">{product.variants.length > 1 ? `From ${selectedVariant.amount?.value ?? selectedVariant.label} ${selectedVariant.amount?.unit ?? ""}` : selectedVariant.label}</p><ProductPrice productId={product.id} variant={selectedVariant} pricing={pricingContext} /></div> : <p className="mt-5 text-sm font-medium text-muted-ink">Pricing coming soon</p>}
+        {product.kind === "canonical" && selectedVariant && selectedPresentation ? (
+          <div className="mt-5">
+            <p className="text-sm text-muted-ink">
+              {summarizePublicStorefrontVariants(product.variants)}
+            </p>
+            <ProductPrice
+              productId={product.id}
+              variant={selectedVariant}
+              pricing={pricing}
+              showPurchaseStatus={false}
+            />
+            <p className="mt-2 text-sm text-muted-ink">
+              {product.variants.length > 1
+                ? aggregateVariantStatus(product, pricing)
+                : presentationStatus(selectedPresentation)}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-5 text-sm font-medium text-muted-ink">Pricing coming soon</p>
+        )}
 
-        {product.kind === "canonical" ? (product.variants.length > 1 ? <VariantAddTrigger product={product} mode={mode} pricing={pricingContext} /> : selectedVariant ? <><p className="mt-2 text-sm text-muted-ink">{selectedVariant.availability === "available" && selectedVariant.checkoutReady ? "Available" : "Checkout unavailable"}</p><AddToCartButton variantId={selectedVariant.id} productName={product.name} canAdd={canAddPublicVariant(selectedVariant, mode)} disabledReason="This product is not currently available for cart testing." className="mt-5 min-h-11" /></> : null) : null}
+        {product.kind === "canonical" ? (
+          product.variants.length > 1 ? (
+            <VariantAddTrigger product={product} pricing={pricing} />
+          ) : selectedVariant ? (
+            <AddToCartButton
+              variantId={selectedVariant.id}
+              productName={product.name}
+              canAdd={canAddPublicVariant(selectedVariant, pricing.mode)}
+              disabledReason="This product is not currently available for cart testing."
+              className="mt-5 min-h-11"
+            />
+          ) : null
+        ) : null}
 
         <Link
           aria-label={`View catalog item: ${product.name}`}
@@ -95,7 +196,18 @@ export function CatalogListingCard({
   );
 }
 
-function CardDiscountBadge({ product, variant, pricing }: { product: Extract<PublicStorefrontProduct, { kind: "canonical" }>; variant: import("@/catalog/storefront-public").PublicStorefrontVariant; pricing: PublicStorefrontPricingContext }) {
-  const result = resolvePublicVariantPrice({ variant, productId: product.id, quantity: 1, pricing });
-  return result.state === "priced" && result.price.effectiveDiscountBps > 0 ? <span className="absolute left-3 top-3 rounded-full bg-moss px-3 py-1 text-xs font-semibold text-white" aria-label={`-${result.price.effectiveDiscountBps / 100}%`}>-{result.price.effectiveDiscountBps / 100}%</span> : null;
+function CardDiscountBadge({
+  presentation,
+}: {
+  presentation: Extract<PricePresentation, { state: "priced" }>;
+}) {
+  const discountPercent = presentation.price.effectiveDiscountBps / 100;
+  return (
+    <span
+      aria-label={`-${discountPercent}%`}
+      className="absolute left-3 top-3 rounded-full bg-moss px-3 py-1 text-xs font-semibold text-white"
+    >
+      -{discountPercent}%
+    </span>
+  );
 }

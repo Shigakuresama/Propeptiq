@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -21,12 +22,21 @@ import {
   persistCart,
 } from "./cart-storage";
 
+export type CartAnnouncementLabels = Readonly<{
+  productName?: string;
+  variantLabel?: string;
+}>;
+
 type CartContextValue = {
   items: readonly CartLine[];
   itemCount: number;
   hydrated: boolean;
   legacyItemCount: number | null;
-  addVariant: (variantId: string, quantity?: number) => void;
+  addVariant: (
+    variantId: string,
+    quantity?: number,
+    announcementLabels?: CartAnnouncementLabels,
+  ) => void;
   setQuantity: (variantId: string, quantity: number) => void;
   removeItem: (variantId: string) => void;
   clearCart: () => void;
@@ -39,11 +49,26 @@ function itemCount(items: readonly CartLine[]): number {
   return items.reduce((total, item) => total + item.quantity, 0);
 }
 
+function safeAnnouncementLabel(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  const normalized = value.trim().replace(/\s+/gu, " ").slice(0, 100);
+  return normalized.length > 0 ? normalized : null;
+}
+
+function announcementSubject(labels: CartAnnouncementLabels): string {
+  const productName = safeAnnouncementLabel(labels.productName);
+  const variantLabel = safeAnnouncementLabel(labels.variantLabel);
+  return [productName, variantLabel].filter((value) => value !== null).join(", ") || "This item";
+}
+
 export function CartProvider({ children }: { children: ReactNode }) {
   const [items, setItems] = useState<CartLine[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [legacyItemCount, setLegacyItemCount] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const pendingAddAnnouncement = useRef<
+    Readonly<{ variantId: string; labels: CartAnnouncementLabels }> | null
+  >(null);
 
   useEffect(() => {
     const hydration = window.setTimeout(() => {
@@ -81,18 +106,34 @@ export function CartProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("storage", synchronize);
   }, []);
 
-  const addVariant = useCallback((variantId: string, quantity = 1) => {
-    setItems((current) => {
-      const next = normalizeCart([...current, { variantId, quantity }]);
-      const added = next.find((item) => item.variantId === variantId)?.quantity;
-      setAnnouncement(
-        added
-          ? `Cart updated. ${added} unit${added === 1 ? "" : "s"} requested for this record.`
-          : "The cart was not changed.",
-      );
-      return next;
-    });
-  }, []);
+  const addVariant = useCallback(
+    (
+      variantId: string,
+      quantity = 1,
+      announcementLabels: CartAnnouncementLabels = {},
+    ) => {
+      pendingAddAnnouncement.current = {
+        variantId,
+        labels: announcementLabels,
+      };
+      setItems((current) => normalizeCart([...current, { variantId, quantity }]));
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const pending = pendingAddAnnouncement.current;
+    if (pending === null) return;
+    pendingAddAnnouncement.current = null;
+    const normalizedQuantity = items.find(
+      (item) => item.variantId === pending.variantId,
+    )?.quantity;
+    setAnnouncement(
+      normalizedQuantity === undefined
+        ? "The cart was not changed."
+        : `Cart updated. ${announcementSubject(pending.labels)}: ${normalizedQuantity} unit${normalizedQuantity === 1 ? "" : "s"} in cart.`,
+    );
+  }, [items]);
 
   const setQuantity = useCallback((variantId: string, quantity: number) => {
     setItems((current) => {
@@ -149,7 +190,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
   return (
     <CartContext.Provider value={value}>
       {children}
-      <p className="sr-only" aria-live="polite" aria-atomic="true">
+      <p
+        aria-atomic="true"
+        aria-label="Cart updates"
+        aria-live="polite"
+        className="sr-only"
+        role="status"
+      >
         {announcement}
       </p>
     </CartContext.Provider>

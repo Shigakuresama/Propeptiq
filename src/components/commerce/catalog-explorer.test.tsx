@@ -7,10 +7,12 @@ import {
   buildPublicStorefrontCatalog,
   storefrontImageMetadata,
 } from "@/catalog/storefront-public";
+import { testPricingContext } from "@/components/commerce/storefront-test-fixtures";
 
 import { CatalogExplorer } from "./catalog-explorer";
 
 describe("CatalogExplorer", () => {
+  const pricing = testPricingContext("production");
   const products = buildPublicStorefrontCatalog({
     configuredPublicationId: browseCatalogPublicationId,
     catalogData: storefrontCatalogData,
@@ -20,7 +22,7 @@ describe("CatalogExplorer", () => {
   }).products;
 
   it("provides labeled search and exact source-name, code, and package-unit filters", () => {
-    render(<CatalogExplorer products={products} />);
+    render(<CatalogExplorer products={products} pricing={pricing} />);
 
     expect(screen.getByRole("searchbox", { name: "Search catalog" })).toBeVisible();
     const sourceFilter = screen.getByRole("combobox", { name: "Source name" });
@@ -32,7 +34,7 @@ describe("CatalogExplorer", () => {
 
   it("finds source ambiguities without changing the immutable catalog rows", () => {
     const snapshot = JSON.stringify(products);
-    render(<CatalogExplorer products={products} />);
+    render(<CatalogExplorer products={products} pricing={pricing} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Source code" }), {
       target: { value: "LPC" },
@@ -45,7 +47,7 @@ describe("CatalogExplorer", () => {
   });
 
   it("searches exact source facts and reports an accessible empty result", () => {
-    render(<CatalogExplorer products={products} />);
+    render(<CatalogExplorer products={products} pricing={pricing} />);
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search catalog" }), {
       target: { value: "PN5" },
@@ -60,7 +62,7 @@ describe("CatalogExplorer", () => {
   });
 
   it("filters a distinct exact source Name to its one matching card", () => {
-    render(<CatalogExplorer products={products} />);
+    render(<CatalogExplorer products={products} pricing={pricing} />);
 
     fireEvent.change(screen.getByRole("combobox", { name: "Source name" }), {
       target: { value: "BPC 10mg + TB 10mg" },
