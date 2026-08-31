@@ -1,18 +1,46 @@
 import type { Result } from "@/domain/result";
+import type { SafeCartPreview } from "@/cart/preview-types";
 
-export type CheckoutRequest = Readonly<{
-  items: readonly Readonly<{ productId: string; quantity: number }>[];
-  destination: Readonly<{
-    recipientName: string;
-    line1: string;
-    line2: string | null;
-    city: string;
-    stateCode: string;
-    postalCode: string;
-    countryCode: "US";
-  }>;
-  promotionIds: readonly string[];
+export type CheckoutDestination = Readonly<{
+  recipientName: string;
+  line1: string;
+  line2: string | null;
+  city: string;
+  stateCode: string;
+  postalCode: string;
+  countryCode: "US";
+}>;
+
+export type CheckoutLineRequest = Readonly<{
+  variantId: string;
+  quantity: number;
+}>;
+
+export type CheckoutQuoteRequest = Readonly<{
+  items: readonly CheckoutLineRequest[];
+  destination: CheckoutDestination;
   rewardRedemptionPoints?: number;
+}>;
+
+export type CheckoutRequest = CheckoutQuoteRequest &
+  Readonly<{ pricingRevision: string }>;
+
+export type CheckoutUnavailable = Readonly<{
+  status: "CHECKOUT_UNAVAILABLE";
+  reasons: readonly Readonly<{
+    variantId: string;
+    code:
+      | "pricing_coming_soon"
+      | "payment_mapping_missing"
+      | "unavailable"
+      | "invalid_currency";
+  }>[];
+}>;
+
+export type PriceChanged = Readonly<{
+  status: "PRICE_CHANGED";
+  pricingRevision: string;
+  cart: SafeCartPreview;
 }>;
 
 export type CheckoutRequestError = Readonly<{
@@ -20,12 +48,11 @@ export type CheckoutRequestError = Readonly<{
     | "invalid_request"
     | "unexpected_field"
     | "invalid_items"
-    | "invalid_product_id"
+    | "invalid_variant_id"
     | "invalid_quantity"
-    | "duplicate_product"
+    | "duplicate_variant"
     | "invalid_destination"
-    | "invalid_promotion_id"
-    | "duplicate_promotion"
+    | "invalid_pricing_revision"
     | "invalid_reward_redemption_points";
   field: string;
 }>;
@@ -37,6 +64,7 @@ const US_STATE_CODES = new Set(
 );
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f-\u009f]/u;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -101,9 +129,10 @@ function normalizedText(
     : null;
 }
 
-export function parseCheckoutRequest(
+function parseRequest(
   input: unknown,
-): Result<CheckoutRequest, CheckoutRequestError> {
+  requirePricingRevision: boolean,
+): Result<CheckoutQuoteRequest | CheckoutRequest, CheckoutRequestError> {
   const fail = (code: CheckoutRequestError["code"], field: string) =>
     Object.freeze({
       ok: false as const,
@@ -111,13 +140,13 @@ export function parseCheckoutRequest(
     });
 
   if (!isRecord(input)) return fail("invalid_request", "request");
-
-  const unexpectedRequestField = firstUnexpectedField(input, [
+  const allowed = [
     "items",
     "destination",
-    "promotionIds",
+    ...(requirePricingRevision ? ["pricingRevision"] : []),
     "rewardRedemptionPoints",
-  ]);
+  ];
+  const unexpectedRequestField = firstUnexpectedField(input, allowed);
   if (unexpectedRequestField !== null) {
     return fail(
       "unexpected_field",
@@ -135,16 +164,15 @@ export function parseCheckoutRequest(
   ) {
     return fail("invalid_items", "items");
   }
-
-  const items: Array<{ productId: string; quantity: number }> = [];
-  const productIds = new Set<string>();
+  const items: Array<{ variantId: string; quantity: number }> = [];
+  const variantIds = new Set<string>();
   for (let index = 0; index < input.items.length; index += 1) {
     const item = input.items[index];
     if (!isRecord(item)) {
-      return fail("invalid_product_id", `items[${index}].productId`);
+      return fail("invalid_variant_id", `items[${index}].variantId`);
     }
     const unexpectedItemField = firstUnexpectedField(item, [
-      "productId",
+      "variantId",
       "quantity",
     ]);
     if (unexpectedItemField !== null) {
@@ -156,17 +184,17 @@ export function parseCheckoutRequest(
       );
     }
     if (
-      !Object.hasOwn(item, "productId") ||
-      typeof item.productId !== "string" ||
-      !UUID_PATTERN.test(item.productId)
+      !Object.hasOwn(item, "variantId") ||
+      typeof item.variantId !== "string" ||
+      !UUID_PATTERN.test(item.variantId)
     ) {
-      return fail("invalid_product_id", `items[${index}].productId`);
+      return fail("invalid_variant_id", `items[${index}].variantId`);
     }
-    const productId = item.productId.toLowerCase();
-    if (productIds.has(productId)) {
-      return fail("duplicate_product", `items[${index}].productId`);
+    const variantId = item.variantId.toLowerCase();
+    if (variantIds.has(variantId)) {
+      return fail("duplicate_variant", `items[${index}].variantId`);
     }
-    productIds.add(productId);
+    variantIds.add(variantId);
     if (
       !Object.hasOwn(item, "quantity") ||
       !Number.isSafeInteger(item.quantity) ||
@@ -175,13 +203,10 @@ export function parseCheckoutRequest(
     ) {
       return fail("invalid_quantity", `items[${index}].quantity`);
     }
-    items.push({ productId, quantity: item.quantity as number });
+    items.push({ variantId, quantity: item.quantity as number });
   }
 
-  if (
-    !Object.hasOwn(input, "destination") ||
-    !isRecord(input.destination)
-  ) {
+  if (!Object.hasOwn(input, "destination") || !isRecord(input.destination)) {
     return fail("invalid_destination", "destination");
   }
   const destination = input.destination;
@@ -217,7 +242,6 @@ export function parseCheckoutRequest(
     Object.hasOwn(destination, "line1") &&
     normalizedText(destination.line1, 1, 120);
   if (!line1) return fail("invalid_destination", "destination.line1");
-
   if (!Object.hasOwn(destination, "line2")) {
     return fail("invalid_destination", "destination.line2");
   }
@@ -228,12 +252,10 @@ export function parseCheckoutRequest(
   if (destination.line2 !== null && line2 === null) {
     return fail("invalid_destination", "destination.line2");
   }
-
   const city =
     Object.hasOwn(destination, "city") &&
     normalizedText(destination.city, 1, 100);
   if (!city) return fail("invalid_destination", "destination.city");
-
   if (
     !Object.hasOwn(destination, "stateCode") ||
     typeof destination.stateCode !== "string" ||
@@ -245,7 +267,6 @@ export function parseCheckoutRequest(
   if (!US_STATE_CODES.has(stateCode)) {
     return fail("invalid_destination", "destination.stateCode");
   }
-
   if (
     !Object.hasOwn(destination, "postalCode") ||
     typeof destination.postalCode !== "string" ||
@@ -265,29 +286,13 @@ export function parseCheckoutRequest(
   }
 
   if (
-    !Object.hasOwn(input, "promotionIds") ||
-    !isDenseArray(input.promotionIds)
+    requirePricingRevision &&
+    (!Object.hasOwn(input, "pricingRevision") ||
+      typeof input.pricingRevision !== "string" ||
+      !SHA256_PATTERN.test(input.pricingRevision))
   ) {
-    return fail("invalid_promotion_id", "promotionIds");
+    return fail("invalid_pricing_revision", "pricingRevision");
   }
-  const promotionIds: string[] = [];
-  const seenPromotionIds = new Set<string>();
-  for (let index = 0; index < input.promotionIds.length; index += 1) {
-    const candidate = input.promotionIds[index];
-    if (typeof candidate !== "string" || !UUID_PATTERN.test(candidate)) {
-      return fail("invalid_promotion_id", `promotionIds[${index}]`);
-    }
-    const promotionId = candidate.toLowerCase();
-    if (seenPromotionIds.has(promotionId)) {
-      return fail("duplicate_promotion", `promotionIds[${index}]`);
-    }
-    seenPromotionIds.add(promotionId);
-    promotionIds.push(promotionId);
-  }
-  if (promotionIds.length > 1) {
-    return fail("invalid_promotion_id", "promotionIds");
-  }
-
   const hasRewardRedemptionPoints = Object.hasOwn(
     input,
     "rewardRedemptionPoints",
@@ -303,32 +308,42 @@ export function parseCheckoutRequest(
     );
   }
 
-  items.sort((left, right) =>
-    left.productId < right.productId
-      ? -1
-      : left.productId > right.productId
-        ? 1
-        : 0,
-  );
-  promotionIds.sort();
-
-  return Object.freeze({
-    ok: true,
-    value: deepFreeze({
-      items,
-      destination: {
-        recipientName,
-        line1,
-        line2,
-        city,
-        stateCode,
-        postalCode,
-        countryCode: "US" as const,
-      },
-      promotionIds,
-      ...(hasRewardRedemptionPoints
-        ? { rewardRedemptionPoints: input.rewardRedemptionPoints as number }
-        : {}),
-    }),
+  items.sort((left, right) => left.variantId.localeCompare(right.variantId));
+  const value = deepFreeze({
+    items,
+    destination: {
+      recipientName,
+      line1,
+      line2,
+      city,
+      stateCode,
+      postalCode,
+      countryCode: "US" as const,
+    },
+    ...(requirePricingRevision
+      ? { pricingRevision: input.pricingRevision as string }
+      : {}),
+    ...(hasRewardRedemptionPoints
+      ? { rewardRedemptionPoints: input.rewardRedemptionPoints as number }
+      : {}),
   });
+  return Object.freeze({ ok: true as const, value });
+}
+
+export function parseCheckoutQuoteRequest(
+  input: unknown,
+): Result<CheckoutQuoteRequest, CheckoutRequestError> {
+  return parseRequest(input, false) as Result<
+    CheckoutQuoteRequest,
+    CheckoutRequestError
+  >;
+}
+
+export function parseCheckoutRequest(
+  input: unknown,
+): Result<CheckoutRequest, CheckoutRequestError> {
+  return parseRequest(input, true) as Result<
+    CheckoutRequest,
+    CheckoutRequestError
+  >;
 }

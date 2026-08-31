@@ -40,6 +40,9 @@ const ids = {
   affiliateProfile: "20000000-0000-4000-8000-000000000019",
   affiliatePolicy: "20000000-0000-4000-8000-000000000020",
   affiliateUser: "20000000-0000-4000-8000-000000000021",
+  variant: "20000000-0000-4000-8000-000000000022",
+  variant2: "20000000-0000-4000-8000-000000000023",
+  promotion: "20000000-0000-4000-8000-000000000024",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -916,4 +919,307 @@ describe("authoritative checkout service", () => {
       expect(taxQuote).not.toHaveBeenCalled();
     },
   );
+});
+
+const variantRequest = {
+  items: [{ variantId: ids.variant, quantity: 2 }],
+  destination: request.destination,
+};
+
+const variantFacts = Object.freeze({
+  buyer: facts.buyer,
+  items: Object.freeze([Object.freeze({
+    variantId: ids.variant,
+    productId: ids.product,
+    sku: "TEST-ALPHA-5MG",
+    variantLabel: "5 mg test fixture",
+    productName: "Synthetic Reference A",
+    packageForm: "Sealed test unit",
+    policyGroupId: ids.group,
+    productActive: true,
+    policyGroupActive: true,
+    variantActive: true,
+    availabilityRevision: "variant-revision-1",
+    inventoryRevision: "inventory-revision-1",
+    price: Object.freeze({
+      id: ids.price,
+      version: 1,
+      status: "active" as const,
+      amountMinor: 5_000,
+      currency: "USD",
+      effectiveAt: "2026-08-01T00:00:00.000Z",
+    }),
+    stripeProductId: "prod_synthetic_task5",
+    stripePriceId: "price_synthetic_task5",
+    destination: facts.items[0]!.destination,
+    eligibleLots: facts.items[0]!.eligibleLots,
+  })]),
+  automaticPromotions: Object.freeze([]),
+});
+
+function automaticPromotion(change: Record<string, unknown> = {}) {
+  return Object.freeze({
+    recordId: ids.promotion,
+    campaignKey: "winter30",
+    version: 1,
+    id: "winter30",
+    displayName: "Winter Sale",
+    displayCode: "WINTER30",
+    discountBps: 3_000,
+    enabled: true,
+    startAt: null,
+    endAt: null,
+    timezone: "America/Los_Angeles",
+    scope: Object.freeze({ kind: "sitewide" as const }),
+    applicationMode: "automatic" as const,
+    ...change,
+  });
+}
+
+function setupVariant(
+  factChanges: Record<string, unknown> = {},
+  options: Readonly<{
+    referralDiscountMinor?: number;
+    rewardsQuoteResult?: CheckoutRewardsQuote;
+  }> = {},
+) {
+  const loadedFacts = Object.freeze({ ...variantFacts, ...factChanges });
+  const repository = {
+    findAttempt: vi.fn(async () => null),
+    loadVariantFacts: vi.fn(async () => ({ ok: true as const, value: loadedFacts })),
+    findExactReview: vi.fn(async () => null),
+    prepare: vi.fn(async (plan: { decision: { reviewRequired: boolean }; identity: { orderId: string; attemptId: string }; browserQuote: unknown }) => ({
+      status: plan.decision.reviewRequired ? "review_required" as const : "prepared" as const,
+      orderId: plan.identity.orderId,
+      attemptId: plan.identity.attemptId,
+      reviewRequestId: null,
+      quote: plan.browserQuote,
+    })),
+    releaseDefiniteFailure: vi.fn(async () => ({ status: "released" as const })),
+  };
+  const shippingQuote = vi.fn(async (input: { bindingHash: string }) => ({
+    status: "ready" as const,
+    bindingHash: input.bindingHash,
+    reference: "ship_variant_synthetic",
+    service: "Synthetic Ground",
+    amountMinor: 700,
+    currency: "USD" as const,
+  }));
+  const taxQuote = vi.fn(async (input: { bindingHash: string }) => ({
+    status: "ready" as const,
+    bindingHash: input.bindingHash,
+    reference: "tax_variant_synthetic",
+    amountMinor: 325,
+    currency: "USD" as const,
+  }));
+  const referralService = {
+    quoteCustomerReferral: vi.fn(async () => options.referralDiscountMinor === undefined
+      ? Object.freeze({ status: "unavailable" as const, reason: "attribution_invalid" as const })
+      : Object.freeze({
+          status: "eligible" as const,
+          code: "ref_task5_variant",
+          referralCodeId: ids.referralCode,
+          referrerUserId: ids.referrer,
+          clickedAt: "2026-08-20T12:00:00.000Z",
+          expiresAt: "2026-09-19T12:00:00.000Z",
+          referralPolicyId: ids.referralPolicy,
+          referralPolicyVersion: 1,
+          referralDiscountMinor: options.referralDiscountMinor,
+        })),
+  };
+  const rewardsService = {
+    quoteCheckoutRewards: vi.fn(async () => options.rewardsQuoteResult ?? Object.freeze({
+      status: "unavailable" as const,
+      reason: "configuration_unavailable" as const,
+    })),
+    reserveCheckoutRewards: vi.fn(async () => ({ status: "reserved" as const })),
+  };
+  const service = createCheckoutService({
+    repository: repository as never,
+    shippingQuotePort: { quoteShipping: shippingQuote },
+    taxQuotePort: { quoteTax: taxQuote },
+    sha256,
+    clock: () => new Date(now),
+    keyedUuid(label) {
+      if (label.endsWith(":order")) return ids.order;
+      if (label.endsWith(":attempt")) return ids.attempt;
+      return "20000000-0000-4000-8000-000000000099";
+    },
+    moneyPolicy: {
+      allowedCurrencies: ["USD"],
+      maximumLineCount: 50,
+      maximumQuantityPerLine: 25,
+      maximumOrderAmountMinor: 1_000_000,
+    },
+    referralService,
+    affiliateService: {
+      quoteAffiliateAttribution: vi.fn(async () => Object.freeze({
+        status: "unavailable" as const,
+        reason: "attribution_invalid" as const,
+      })),
+    },
+    rewardsService,
+  });
+  return { service, repository, shippingQuote, taxQuote, rewardsService };
+}
+
+describe("authoritative canonical variant quote lifecycle", () => {
+  it.each([
+    ["disabled", automaticPromotion({ enabled: false }), 9_200],
+    ["scheduled", automaticPromotion({ startAt: "2026-08-25T12:00:00.001Z" }), 9_200],
+    ["expired", automaticPromotion({ endAt: now.toISOString() }), 9_200],
+    ["partial scope", automaticPromotion({ scope: { kind: "variants", variantIds: [ids.variant2] } }), 9_200],
+    ["active inclusive start", automaticPromotion({ startAt: now.toISOString() }), 7_000],
+  ] as const)("resolves %s promotion only from server time and scope", async (_label, promotion, expectedSubtotal) => {
+    const { service } = setupVariant({ automaticPromotions: [promotion] });
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: { lines: [{ totalMinor: expectedSubtotal }] },
+    });
+  });
+
+  it("chooses the best overlapping promotion deterministically", async () => {
+    const { service } = setupVariant({
+      automaticPromotions: [
+        automaticPromotion({ id: "spring20", campaignKey: "spring20", discountBps: 2_000 }),
+        automaticPromotion(),
+      ],
+    });
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: { promotionDiscountMinor: 3_000, discountMinor: 3_000 },
+    });
+  });
+
+  it.each([
+    ["pending price", { price: { ...variantFacts.items[0]!.price, status: "pending", amountMinor: 0 } }, "pricing_coming_soon"],
+    ["zero price", { price: { ...variantFacts.items[0]!.price, amountMinor: 0 } }, "pricing_coming_soon"],
+    ["missing mapping", { stripePriceId: null }, "payment_mapping_missing"],
+    ["invalid currency", { price: { ...variantFacts.items[0]!.price, currency: "EUR" } }, "invalid_currency"],
+    ["unavailable inventory", { eligibleLots: [], inventoryRevision: "inventory-revision-2" }, "unavailable"],
+  ] as const)("returns CHECKOUT_UNAVAILABLE for %s before quotes or writes", async (_label, change, code) => {
+    const { service, repository, shippingQuote, taxQuote } = setupVariant({
+      items: [{ ...variantFacts.items[0]!, ...change }],
+    });
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code }],
+    });
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("returns PRICE_CHANGED with refreshed safe cart before reservation on a stale session", async () => {
+    const first = setupVariant({ automaticPromotions: [automaticPromotion()] });
+    const quoted = await first.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    expect(quoted.status).toBe("quoted");
+    if (quoted.status !== "quoted") throw new Error("expected initial quote");
+
+    const changed = setupVariant({
+      items: [{
+        ...variantFacts.items[0]!,
+        price: { ...variantFacts.items[0]!.price, version: 2, amountMinor: 6_000 },
+      }],
+      automaticPromotions: [automaticPromotion()],
+    });
+    const result = await (changed.service as unknown as { quoteForSession: (input: unknown) => Promise<unknown> }).quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    expect(result).toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      cart: {
+        items: [{ variantId: ids.variant, unitAmountMinor: 4_200 }],
+      },
+    });
+    expect(changed.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("does not trust a claimed inactive WINTER30 or a mixed claimed product/variant relationship", async () => {
+    const { service, repository } = setupVariant({
+      automaticPromotions: [automaticPromotion({ enabled: false })],
+    });
+    for (const hostile of [
+      { ...variantRequest, promotionIds: ["winter30"] },
+      { ...variantRequest, items: [{ variantId: ids.variant, productId: ids.product, quantity: 2 }] },
+    ]) {
+      await expect(service.quote({
+        buyerUserId: ids.buyer,
+        idempotencyKey: ids.key,
+        paymentProviderAvailable: true,
+        request: hostile,
+      })).resolves.toEqual({ status: "invalid_request", reason: "checkout_input_invalid" });
+    }
+    expect(repository.loadVariantFacts).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [2_000, 3_000, 0],
+    [4_000, 0, 4_000],
+  ] as const)("selects one storefront/referral winner at %i referral minor", async (referralMinor, promotionMinor, referralExpected) => {
+    const rewardsQuoteResult = Object.freeze({
+      status: "applied" as const,
+      rewardAccountId: ids.rewardAccount,
+      loyaltyPolicyId: ids.loyaltyPolicy,
+      loyaltyPolicyVersion: 1,
+      termsVersionId: ids.growthTerms,
+      termsContentHash: "a".repeat(64),
+      redemptionPoints: 500,
+      redemptionMinor: 500,
+      maximumPoints: 1_000,
+      eligibleMerchandiseMinor: 6_000,
+      pendingBaseEarnPoints: 100,
+    });
+    const { service } = setupVariant(
+      { automaticPromotions: [automaticPromotion()] },
+      { referralDiscountMinor: referralMinor, rewardsQuoteResult },
+    );
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      attributionCookie: "signed-referral-cookie",
+      request: { ...variantRequest, rewardRedemptionPoints: 500 },
+    });
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: {
+        promotionDiscountMinor: promotionMinor,
+        referralDiscountMinor: referralExpected,
+        rewardRedemptionMinor: 500,
+        discountMinor: Math.max(3_000, referralMinor) + 500,
+      },
+    });
+    if (result.status !== "quoted") throw new Error("expected acquisition quote");
+    expect(projectAuthoritativeCheckoutPlan(result.plan)?.rewardsQuote).toMatchObject({
+      status: "applied",
+      redemptionPoints: 500,
+    });
+  });
 });

@@ -6,7 +6,11 @@ import Stripe from "stripe";
 import type { QueryResultRow } from "pg";
 
 import type { RequestIdentity } from "@/auth/server";
-import { createCheckoutService, type CheckoutQuoteResult } from "@/commerce/checkout-service";
+import {
+  createCheckoutService,
+  type CheckoutQuoteResult,
+  type CheckoutSessionQuoteResult,
+} from "@/commerce/checkout-service";
 import { createProviderCheckoutOrchestrator, type ProviderCheckoutRouteResult } from "@/commerce/provider-checkout-orchestration";
 import { createProviderExecutionContextV1 } from "@/commerce/provider-context";
 import { createProviderEventServiceV1 } from "@/commerce/provider-event-service";
@@ -58,7 +62,10 @@ export type CheckoutServerRuntimeV1 = Readonly<{
     idempotencyKey: string;
     request: unknown;
     attributionCookie?: string | null;
-  }>) => Promise<ProviderCheckoutRouteResult>;
+  }>) => Promise<ProviderCheckoutRouteResult | Extract<
+    CheckoutSessionQuoteResult,
+    Readonly<{ status: "PRICE_CHANGED" | "CHECKOUT_UNAVAILABLE" }>
+  >>;
 }>;
 
 export type StripeWebhookServerRuntimeV1 = Readonly<{

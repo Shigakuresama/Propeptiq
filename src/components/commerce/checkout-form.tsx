@@ -34,9 +34,11 @@ type SafeQuote = Readonly<{
   rewardsBenefitAvailable: boolean;
   rewardsUnavailableReason: string | null;
   lines: readonly Readonly<{
-    productId: string;
+    variantId: string;
+    sku: string;
+    variantLabel: string;
     productName: string;
-    packageForm: string;
+    packageForm?: string;
     quantity: number;
     unitAmountMinor: number;
     subtotalMinor: number;
@@ -48,6 +50,7 @@ type SafeQuote = Readonly<{
 type QuoteView = Readonly<{
   fingerprint: string;
   body: string;
+  pricingRevision: string;
   quote: SafeQuote;
 }>;
 
@@ -145,15 +148,20 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     return null;
   }
   const lines: Array<SafeQuote["lines"][number]> = [];
-  const productIds = new Set<string>();
+  const variantIds = new Set<string>();
   let lineSubtotal = 0;
   let lineDiscount = 0;
   for (const line of value.lines) {
-    if (!exactRecord(line, [
-      "productId", "productName", "packageForm", "quantity", "unitAmountMinor",
+    if (!recordWithRequiredAndAllowedKeys(line, [
+      "variantId", "sku", "variantLabel", "productName", "quantity", "unitAmountMinor",
       "subtotalMinor", "discountMinor", "totalMinor",
-    ]) || !isCanonicalUuid(line.productId) || productIds.has(line.productId) ||
-      !boundedText(line.productName) || !boundedText(line.packageForm) ||
+    ], new Set([
+      "variantId", "sku", "variantLabel", "productName", "packageForm", "quantity",
+      "unitAmountMinor", "subtotalMinor", "discountMinor", "totalMinor",
+    ])) || !isCanonicalUuid(line.variantId) || variantIds.has(line.variantId) ||
+      !boundedText(line.sku, 120) || !boundedText(line.variantLabel) ||
+      !boundedText(line.productName) ||
+      (Object.hasOwn(line, "packageForm") && !boundedText(line.packageForm)) ||
       !Number.isSafeInteger(line.quantity) || (line.quantity as number) < 1 || (line.quantity as number) > 25 ||
       !safeMoney(line.unitAmountMinor) || !safeMoney(line.subtotalMinor) ||
       !safeMoney(line.discountMinor) || !safeMoney(line.totalMinor) ||
@@ -161,13 +169,17 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
       line.discountMinor > line.subtotalMinor ||
       line.totalMinor !== line.subtotalMinor - line.discountMinor
     ) return null;
-    productIds.add(line.productId);
+    variantIds.add(line.variantId);
     lineSubtotal += line.subtotalMinor;
     lineDiscount += line.discountMinor;
     lines.push({
-      productId: line.productId,
+      variantId: line.variantId,
+      sku: line.sku,
+      variantLabel: line.variantLabel,
       productName: line.productName,
-      packageForm: line.packageForm,
+      ...(Object.hasOwn(line, "packageForm")
+        ? { packageForm: line.packageForm as string }
+        : {}),
       quantity: line.quantity as number,
       unitAmountMinor: line.unitAmountMinor,
       subtotalMinor: line.subtotalMinor,
@@ -211,11 +223,17 @@ function safeIso(value: unknown): value is string {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
 }
 
+function safePricingRevision(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
 function responseMessage(status: unknown, component?: unknown): string {
   if (status === "rate_limited") return "Too many checkout requests. Wait briefly, then retry with the same unchanged request.";
   if (status === "review_required") return "Manual review is required before a hosted payment session can open.";
   if (status === "denied") return "Checkout is not permitted for the current authoritative facts.";
   if (status === "invalid_request") return "The checkout request is invalid. Review the destination and cart, then try again.";
+  if (status === "PRICE_CHANGED") return "The authoritative price changed. Review and calculate the current total again before continuing.";
+  if (status === "CHECKOUT_UNAVAILABLE") return "One or more variants cannot be checked out with the current authoritative facts.";
   if (status === "quote_unavailable" && component === "shipping") return "Shipping facts are temporarily unavailable. No total or paid state is being claimed.";
   if (status === "quote_unavailable" && component === "tax") return "Tax facts are temporarily unavailable. No total or paid state is being claimed.";
   if (status === "facts_changed_retry") return "Checkout facts changed. Calculate a new authoritative total before retrying.";
@@ -239,7 +257,6 @@ function rewardsUnavailableCopy(reason: string | null): string | null {
 }
 
 export function CheckoutForm({
-  promotions,
   syntheticLocal = false,
   navigate = (url) => window.location.assign(url),
 }: {
@@ -249,7 +266,6 @@ export function CheckoutForm({
 }) {
   const { items, hydrated } = useCart();
   const [destination, setDestination] = useState(initialDestination);
-  const [promotionId, setPromotionId] = useState("");
   const [rewardRedemptionPoints, setRewardRedemptionPoints] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [quoteView, setQuoteView] = useState<QuoteView | null>(null);
@@ -293,11 +309,10 @@ export function CheckoutForm({
       postalCode: destination.postalCode.trim(),
       countryCode: "US" as const,
     },
-    promotionIds: promotionId ? [promotionId.toLowerCase()] : [],
     ...(hasValidRequestedRewardPoints
       ? { rewardRedemptionPoints: requestedRewardPoints }
       : {}),
-  }), [checkoutItems, destination, hasValidRequestedRewardPoints, promotionId, requestedRewardPoints]);
+  }), [checkoutItems, destination, hasValidRequestedRewardPoints, requestedRewardPoints]);
   const fingerprint = useMemo(() => JSON.stringify(normalizedRequest), [normalizedRequest]);
   const cartKey = useMemo(() => JSON.stringify(checkoutItems), [checkoutItems]);
   const currentFeedback = feedback?.fingerprint === fingerprint ? feedback : null;
@@ -402,7 +417,6 @@ export function CheckoutForm({
 
   function validate(): boolean {
     const next: Errors = {};
-    if (items.length > 0) next.items = "Checkout is temporarily unavailable while variant checkout is being connected.";
     if (items.length < 1) next.items = "Add at least one available catalog record";
     if (!normalizedRequest.destination.recipientName || normalizedRequest.destination.recipientName.length > 120) next.recipientName = "Enter a recipient name";
     if (!normalizedRequest.destination.line1 || normalizedRequest.destination.line1.length > 120) next.line1 = "Enter address line 1";
@@ -425,14 +439,6 @@ export function CheckoutForm({
 
   async function submitQuote(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (items.length > 0) {
-      setFeedback({
-        fingerprint,
-        message: "Checkout is temporarily unavailable while canonical variant checkout is being connected. Your browser-saved cart has not been cleared.",
-        lastFailed: null,
-      });
-      return;
-    }
     if (!previewCanContinue) {
       setFeedback({
         fingerprint,
@@ -456,11 +462,17 @@ export function CheckoutForm({
         body,
       });
       const value: unknown = await response.json();
-      if (exactRecord(value, ["status", "quote"]) &&
+      if (exactRecord(value, ["status", "pricingRevision", "quote"]) &&
+        safePricingRevision(value.pricingRevision) &&
         (value.status === "quoted" || value.status === "review_required")) {
         const quote = parseSafeQuote(value.quote);
         if (quote !== null) {
-          setQuoteView({ fingerprint, body, quote });
+          setQuoteView({
+            fingerprint,
+            body,
+            pricingRevision: value.pricingRevision,
+            quote,
+          });
           setFeedback({
             fingerprint,
             message: quote.status === "ready"
@@ -500,13 +512,26 @@ export function CheckoutForm({
       const response = await fetch("/api/checkout/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey() },
-        body: quoteView.body,
+        body: JSON.stringify({
+          ...normalizedRequest,
+          pricingRevision: quoteView.pricingRevision,
+        }),
       });
       const value: unknown = await response.json();
       if (exactRecord(value, ["status", "orderId", "hostedUrl", "expiresAt"]) &&
         value.status === "open" && isCanonicalUuid(value.orderId) &&
         safeHostedUrl(value.hostedUrl) && safeIso(value.expiresAt)) {
         navigate(value.hostedUrl);
+        return;
+      }
+      if (typeof value === "object" && value !== null &&
+        Reflect.get(value, "status") === "PRICE_CHANGED") {
+        setQuoteView(null);
+        setFeedback({
+          fingerprint,
+          message: responseMessage("PRICE_CHANGED"),
+          lastFailed: "quote",
+        });
         return;
       }
       setFeedback({
@@ -534,7 +559,7 @@ export function CheckoutForm({
       <p className="eyebrow">Authoritative checkout</p>
       <h2 id="checkout-form-heading" className="mt-3 font-heading text-3xl">Destination and totals</h2>
       <p className="mt-3 text-base leading-7 text-muted-ink">
-        Your browser-saved cart contains canonical variant identifiers and quantities. Variant checkout is temporarily unavailable while the server checkout boundary is being connected.
+        Your browser sends only canonical variant identifiers, quantities, destination, and optional reward points. Current prices and automatic promotions are resolved by the server.
       </p>
       {syntheticLocal ? (
         <p className="warning-record mt-5 font-semibold">Synthetic local test only</p>
@@ -625,16 +650,9 @@ export function CheckoutForm({
             <input id="postalCode" name="postalCode" className="form-input" autoComplete="postal-code" inputMode="numeric" maxLength={10} required aria-required="true" value={destination.postalCode} aria-invalid={Boolean(errors.postalCode)} aria-describedby={errors.postalCode ? "postalCode-error" : undefined} onChange={(event) => updateField("postalCode", event.currentTarget.value)} />
           </Field>
         </div>
-        <Field id="promotionId" label="Promotion (optional)">
-          <select id="promotionId" name="promotionId" className="form-input" value={promotionId} onChange={(event) => {
-            setPromotionId(event.currentTarget.value);
-            setQuoteView(null);
-            setFeedback(null);
-          }}>
-            <option value="">No promotion</option>
-            {promotions.map((promotion) => <option key={promotion.id} value={promotion.id}>{promotion.name}</option>)}
-          </select>
-        </Field>
+        <p className="info-record text-base leading-7">
+          Eligible automatic promotions are selected from current server facts; no promotion claim is sent by this form.
+        </p>
         <Field
           id="rewardRedemptionPoints"
           label="Points to redeem (optional)"
@@ -656,8 +674,12 @@ export function CheckoutForm({
           />
         </Field>
         {errors.items ? <p id="items-error" className="error-record text-base" role="alert">{errors.items}</p> : null}
-        <Button type="submit" className="action-primary min-h-12 w-full sm:w-auto" disabled={true}>
-          {busy === "quote" ? "Getting authoritative quote…" : "Variant checkout unavailable"}
+        <Button
+          type="submit"
+          className="action-primary min-h-12 w-full sm:w-auto"
+          disabled={busy !== null || !previewCanContinue}
+        >
+          {busy === "quote" ? "Getting authoritative quote…" : "Calculate authoritative total"}
         </Button>
       </form>
 
@@ -679,8 +701,8 @@ export function CheckoutForm({
           <h3 id="authoritative-total-heading" className="mt-3 font-heading text-3xl">Authoritative total</h3>
           <ul className="mt-5 grid gap-3 p-0">
             {quoteView.quote.lines.map((line) => (
-              <li key={line.productId} className="flex flex-wrap justify-between gap-3 border-b border-border pb-3">
-                <span><strong>{line.productName}</strong><span className="block text-base text-muted-ink">{line.packageForm} · {line.quantity} × {money(line.unitAmountMinor)}</span></span>
+              <li key={line.variantId} className="flex flex-wrap justify-between gap-3 border-b border-border pb-3">
+                <span><strong>{line.productName}</strong><span className="block text-base text-muted-ink">{line.variantLabel} · {line.quantity} × {money(line.unitAmountMinor)}</span></span>
                 <span className="tabular-nums">{money(line.totalMinor)}</span>
               </li>
             ))}

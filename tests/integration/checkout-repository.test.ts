@@ -231,6 +231,146 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     return { ...setupResult, quoted, prepared };
   }
 
+  const variantRequest = {
+    items: [{ variantId: ids.variantA, quantity: 2 }],
+    destination: request.destination,
+  } as const;
+
+  async function seedCheckoutReadyVariant() {
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status, stripe_product_id, stripe_price_id,
+         updated_at)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'SYNTHETIC-VARIANT-5MG',
+        '5 mg synthetic checkout fixture', 5, 'mg', 1, 'active',
+        'prod_synthetic_variant_a', 'price_synthetic_variant_a',
+        '2026-08-24T00:00:00.000Z');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.variantPriceA}', '${ids.productA}', '${ids.variantA}',
+        1, 'active', 5000, 'USD', '2026-08-01T00:00:00.000Z');
+      INSERT INTO lots
+        (id, product_id, variant_id, supplier_name, supplier_lot_code,
+         received_quantity, available_quantity, status, expires_at,
+         updated_at)
+      VALUES ('${ids.variantLotA}', '${ids.productA}', '${ids.variantA}',
+        'Synthetic supplier', 'SYN-VARIANT-ACTIVE', 5, 5, 'released',
+        '2026-12-01T00:00:00.000Z', '2026-08-24T00:00:00.000Z');
+      INSERT INTO promotions
+        (id, code, version, name, kind, status, basis_points, configuration,
+         starts_at, ends_at, campaign_key, enabled, timezone,
+         application_mode, scope)
+      VALUES ('${ids.variantPromotion}', 'WINTER30', 1, 'Winter Sale',
+        'discount', 'active', 3000, '{}'::jsonb, NULL, NULL, 'winter30',
+        true, 'America/Los_Angeles', 'automatic', 'sitewide');
+    `);
+  }
+
+  it("returns PRICE_CHANGED before writes when locked canonical variant price facts change", async () => {
+    await seedCheckoutReadyVariant();
+    const { service } = setup();
+    const key = "30000000-0000-4000-8000-000000000121";
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    expect(quoted).toMatchObject({ status: "quoted" });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical variant quote");
+    }
+    await client.exec(`
+      UPDATE product_prices SET amount_minor = 5200
+      WHERE id = '${ids.variantPriceA}';
+    `);
+    const stale = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    expect(stale).toMatchObject({
+      status: "PRICE_CHANGED",
+      cart: { items: [{ variantId: ids.variantA, unitAmountMinor: 3640 }] },
+    });
+    const writes = await client.query<{ orders: number; reservations: number }>(`
+      SELECT (SELECT count(*)::int FROM orders) AS orders,
+             (SELECT count(*)::int FROM inventory_reservations) AS reservations
+    `);
+    expect(writes.rows[0]).toEqual({ orders: 0, reservations: 0 });
+  });
+
+  it("locks, snapshots, and reserves the canonical variant without using legacy null-variant inventory", async () => {
+    await seedCheckoutReadyVariant();
+    const transactionSql: string[] = [];
+    const { service } = setup({ transactionSql });
+    const key = "30000000-0000-4000-8000-000000000122";
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical variant quote");
+    }
+    const sessionQuote = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (sessionQuote.status !== "quoted") throw new Error("expected acknowledged quote");
+    const prepared = await service.prepare(sessionQuote.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${sessionQuote.plan.identity.attemptId}`,
+      providerRequestHash: "f".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "synthetic.variant.buyer@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    });
+    expect(prepared).toMatchObject({ status: "prepared" });
+    const snapshots = await client.query<{
+      variantId: string;
+      productId: string;
+      remainingVariant: number;
+      remainingLegacy: number;
+      promotionId: string;
+      reservationCount: number;
+    }>(`
+      SELECT oi.variant_id::text AS "variantId", oi.product_id::text AS "productId",
+        (SELECT available_quantity FROM lots WHERE id = '${ids.variantLotA}') AS "remainingVariant",
+        (SELECT available_quantity FROM lots WHERE id = '${ids.lotA1}') AS "remainingLegacy",
+        (SELECT promotion_id::text FROM order_promotion_applications
+          WHERE order_id = oi.order_id) AS "promotionId",
+        (SELECT count(*)::int FROM inventory_reservations
+          WHERE order_id = oi.order_id) AS "reservationCount"
+      FROM order_items oi
+      WHERE oi.order_id = '${sessionQuote.plan.identity.orderId}'
+    `);
+    expect(snapshots.rows[0]).toEqual({
+      variantId: ids.variantA,
+      productId: ids.productA,
+      remainingVariant: 3,
+      remainingLegacy: 1,
+      promotionId: ids.variantPromotion,
+      reservationCount: 1,
+    });
+    expect(transactionSql.some((sql) =>
+      sql.includes("FROM product_variants") && sql.includes("FOR UPDATE OF v, p, g"),
+    )).toBe(true);
+    expect(transactionSql.some((sql) =>
+      sql.includes("FROM lots") && sql.includes("variant_id = ANY") && sql.includes("FOR UPDATE"),
+    )).toBe(true);
+  });
+
   it("returns only explicitly bound canonical variant checkout facts", async () => {
     const { repository } = setup();
     await expect(repository.getCheckoutVariantFacts(ids.productA)).resolves.toBeNull();

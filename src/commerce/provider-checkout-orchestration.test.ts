@@ -320,6 +320,70 @@ function setup(reviewRequired = false) {
 }
 
 describe("provider Checkout orchestration", () => {
+  it("returns canonical PRICE_CHANGED before preparation, reservation, or provider creation", async () => {
+    const provider = providerWith((exactRequest) => ({
+      status: "open",
+      session: normalizedSession(exactRequest),
+    }));
+    const prepare = vi.fn();
+    const quoteForSession = vi.fn(async () => ({
+      status: "PRICE_CHANGED" as const,
+      pricingRevision: "b".repeat(64),
+      cart: {
+        items: [{
+          variantId: ids.product,
+          quantity: 2,
+          available: true,
+          name: "Synthetic changed variant",
+          packageForm: "Synthetic sealed vial",
+          variantLabel: "5 mg test fixture",
+          sku: "SYNTHETIC-5MG",
+          unitAmountMinor: 3500,
+          lineSubtotalMinor: 7000,
+          currency: "USD",
+        }],
+        subtotalMinor: 7000,
+        currency: "USD",
+        taxMinor: null,
+        shippingMinor: null,
+        finalDiscountMinor: null,
+      },
+    }));
+    const sessions = {
+      load: vi.fn(),
+      recordOpen: vi.fn(),
+      recordUnknown: vi.fn(),
+    };
+    const orchestrator = createProviderCheckoutOrchestrator({
+      checkoutService: {
+        quote: vi.fn(),
+        quoteForSession,
+        prepare,
+      },
+      providerSessionRepository: sessions,
+      releaseDefiniteFailure: vi.fn(),
+      sha256,
+    });
+    const context = await localContext(provider);
+    const canonicalRequest = {
+      items: [{ variantId: ids.product, quantity: 2 }],
+      destination: request.destination,
+      pricingRevision: "a".repeat(64),
+    };
+    await expect(orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: canonicalRequest,
+    })).resolves.toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: "b".repeat(64),
+    });
+    expect(quoteForSession).toHaveBeenCalledTimes(1);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(sessions.load).not.toHaveBeenCalled();
+    expect(provider.createCheckoutSession).not.toHaveBeenCalled();
+  });
+
   it("prepares once, calls the provider outside transactions, and exactly recovers a DB failure", async () => {
     let trace: string[] = [];
     const provider = providerWith((exactRequest) => {

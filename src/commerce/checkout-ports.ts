@@ -1,6 +1,8 @@
 import { isSha256 } from "@/commerce/checkout-identity";
 import {
+  parseCheckoutQuoteRequest,
   parseCheckoutRequest,
+  type CheckoutQuoteRequest,
   type CheckoutRequest,
 } from "@/domain/checkout";
 
@@ -97,8 +99,14 @@ export type ProviderPreparation = Readonly<{
   providerScope: string;
 }>;
 
-export type RewardsCheckoutRequest = CheckoutRequest &
-  Readonly<{ rewardRedemptionPoints?: number }>;
+export type RewardsCheckoutQuoteRequest = CheckoutQuoteRequest;
+export type RewardsCheckoutRequest = CheckoutRequest;
+export type LegacyRewardsCheckoutRequest = Readonly<{
+  items: readonly Readonly<{ productId: string; quantity: number }>[];
+  destination: CheckoutQuoteRequest["destination"];
+  promotionIds: readonly string[];
+  rewardRedemptionPoints?: number;
+}>;
 
 export const LOCAL_PAYMENT_PROVIDER_SCOPE =
   "local_test:synthetic-propeptiq-v1" as const;
@@ -218,38 +226,75 @@ function fail(field: string): ContractResult<never> {
 export function parseRewardsCheckoutRequest(
   value: unknown,
 ): ContractResult<RewardsCheckoutRequest> {
+  const parsed = parseCheckoutRequest(value);
+  return parsed.ok
+    ? Object.freeze({ ok: true, value: parsed.value })
+    : fail(parsed.error.field);
+}
+
+export function parseRewardsCheckoutQuoteRequest(
+  value: unknown,
+): ContractResult<RewardsCheckoutQuoteRequest> {
+  const parsed = parseCheckoutQuoteRequest(value);
+  return parsed.ok
+    ? Object.freeze({ ok: true, value: parsed.value })
+    : fail(parsed.error.field);
+}
+
+export function parseLegacyRewardsCheckoutRequest(
+  value: unknown,
+): ContractResult<LegacyRewardsCheckoutRequest> {
   if (!isRecord(value)) return fail("request");
   const hasRewards = Object.hasOwn(value, "rewardRedemptionPoints");
-  const expected = [
+  if (!exactKeys(value, [
     "items",
     "destination",
     "promotionIds",
     ...(hasRewards ? ["rewardRedemptionPoints"] : []),
-  ];
-  if (!exactKeys(value, expected)) return fail("request");
-  if (
-    hasRewards &&
-    (!Number.isSafeInteger(value.rewardRedemptionPoints) ||
-      (value.rewardRedemptionPoints as number) <= 0)
-  ) {
-    return fail("request.rewardRedemptionPoints");
+  ]) || !Array.isArray(value.items) || !Array.isArray(value.promotionIds)) {
+    return fail("request");
   }
-  const base = parseCheckoutRequest({
-    items: value.items,
+  const items: Array<{ productId: string; quantity: number }> = [];
+  for (const candidate of value.items) {
+    if (!isRecord(candidate) || !exactKeys(candidate, ["productId", "quantity"])) {
+      return fail("request");
+    }
+    items.push({
+      productId: candidate.productId as string,
+      quantity: candidate.quantity as number,
+    });
+  }
+  const quote = parseCheckoutQuoteRequest({
+    items: items.map((item) => ({
+      variantId: item.productId,
+      quantity: item.quantity,
+    })),
     destination: value.destination,
-    promotionIds: value.promotionIds,
+    ...(hasRewards
+      ? { rewardRedemptionPoints: value.rewardRedemptionPoints }
+      : {}),
   });
-  if (!base.ok) return fail("request");
+  if (!quote.ok || value.promotionIds.length > 1) return fail("request");
+  const promotionIds: string[] = [];
+  for (const promotionId of value.promotionIds) {
+    if (typeof promotionId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(promotionId)) {
+      return fail("request");
+    }
+    promotionIds.push(promotionId.toLowerCase());
+  }
   return Object.freeze({
     ok: true,
-    value: Object.freeze(
-      hasRewards
-        ? {
-            ...base.value,
-            rewardRedemptionPoints: value.rewardRedemptionPoints as number,
-          }
-        : base.value,
-    ),
+    value: Object.freeze({
+      items: Object.freeze(quote.value.items.map((item) => Object.freeze({
+        productId: item.variantId,
+        quantity: item.quantity,
+      }))),
+      destination: quote.value.destination,
+      promotionIds: Object.freeze(promotionIds),
+      ...(hasRewards
+        ? { rewardRedemptionPoints: quote.value.rewardRedemptionPoints! }
+        : {}),
+    }),
   });
 }
 

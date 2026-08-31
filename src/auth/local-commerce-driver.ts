@@ -248,7 +248,7 @@ function successFromPlan(plan: NonNullable<ReturnType<typeof projectAuthoritativ
     createdAt: plan.authoritativeAt.toISOString(),
     updatedAt: plan.authoritativeAt.toISOString(),
     items: Object.freeze(quote.lines.map((line) => Object.freeze({
-      id: plan.identity.keyedUuid(`order-item:${line.productId}`),
+      id: plan.identity.keyedUuid(`order-item:${line.productId ?? line.variantId}`),
       productName: line.productName,
       packageForm: line.packageForm,
       quantity: line.quantity,
@@ -479,7 +479,7 @@ export function createLocalCommerceDriverV1(
         currency: "USD",
         destination: plan.request.destination,
         lines: Object.freeze(plan.browserQuote.lines.map((line) => Object.freeze({
-          productId: line.productId,
+          productId: line.productId ?? line.variantId!,
           productName: line.productName,
           packageForm: line.packageForm,
           purchasedQuantity: line.quantity,

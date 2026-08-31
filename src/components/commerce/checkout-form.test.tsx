@@ -31,6 +31,34 @@ function preview({
   };
 }
 function response(value: unknown): Response { return new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } }); }
+const pricingRevision = "d".repeat(64);
+function authoritativeQuote(revision = pricingRevision) {
+  return {
+    status: "quoted",
+    pricingRevision: revision,
+    quote: {
+      status: "ready", reviewRequired: false, reasons: [], currency: "USD",
+      subtotalMinor: 4800, discountMinor: 1440, shippingMinor: 500, taxMinor: 300,
+      totalMinor: 4160, promotionDiscountMinor: 1440, referralDiscountMinor: 0,
+      rewardRedemptionPoints: 0, rewardRedemptionMinor: 0, pendingBaseEarnPoints: 67,
+      rewardsBenefitAvailable: false, rewardsUnavailableReason: "not_requested",
+      lines: [{
+        variantId, sku: "SYNTHETIC-ALPHA-5MG", variantLabel: "5 mg test fixture",
+        productName: "Synthetic local test only — Alpha", packageForm: "Research vial",
+        quantity: 2, unitAmountMinor: 2400, subtotalMinor: 4800,
+        discountMinor: 1440, totalMinor: 3360,
+      }],
+    },
+  };
+}
+
+async function fillDestination(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText("Recipient name"), "Synthetic Research Buyer");
+  await user.type(screen.getByLabelText("Address line 1"), "100 Test Way");
+  await user.type(screen.getByLabelText("City"), "Los Angeles");
+  await user.selectOptions(screen.getByLabelText("State or district"), "CA");
+  await user.type(screen.getByLabelText("Postal code"), "90001");
+}
 
 describe("CheckoutForm", () => {
   beforeEach(() => {
@@ -38,13 +66,27 @@ describe("CheckoutForm", () => {
     fetchMock.mockResolvedValue(response(preview())); vi.stubGlobal("fetch", fetchMock); window.sessionStorage.clear();
   });
 
-  it("fails closed before sending a product-keyed checkout request for a v2 cart", async () => {
+  it("sends only variant authority and destination when requesting a quote", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockReset()
+      .mockResolvedValueOnce(response(preview()))
+      .mockResolvedValueOnce(response(authoritativeQuote()));
     render(<CheckoutForm promotions={[]} />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/catalog/preview", expect.objectContaining({ method: "POST" })));
     expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ items: [{ variantId, quantity: 2 }] });
-    expect(screen.getByRole("button", { name: "Variant checkout unavailable" })).toBeDisabled();
-    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain("/api/checkout/quote");
-    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain("/api/checkout/sessions");
+    await fillDestination(user);
+    await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
+    await screen.findByRole("heading", { name: "Authoritative total" });
+    const quoteCall = fetchMock.mock.calls.find(([url]) => url === "/api/checkout/quote")!;
+    const body = JSON.parse(String((quoteCall[1] as RequestInit).body));
+    expect(body).toEqual({
+      items: [{ variantId, quantity: 2 }],
+      destination: {
+        recipientName: "Synthetic Research Buyer", line1: "100 Test Way", line2: null,
+        city: "Los Angeles", stateCode: "CA", postalCode: "90001", countryCode: "US",
+      },
+    });
+    expect(JSON.stringify(body)).not.toMatch(/productId|price|total|currency|promotion/iu);
   });
 
   it("retries the same variant preview request without opening checkout", async () => {
@@ -57,7 +99,6 @@ describe("CheckoutForm", () => {
     await user.click(screen.getByRole("button", { name: "Try server preview again" }));
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeRetry));
     expect(JSON.parse(String((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body))).toEqual(first);
-    expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain("/api/checkout/quote");
   });
 
   it("shows changed variant preview copy without replacing the v2 cart identity", async () => {
@@ -72,22 +113,41 @@ describe("CheckoutForm", () => {
     expect(screen.getByText("Your requested variant identifiers and quantities were not replaced. Review the current server facts before checkout.")).toBeVisible();
   });
 
-  it("acknowledges changed variant facts without reopening the Task 5 checkout gate", async () => {
+  it("requires a fresh reviewed quote after the session boundary reports PRICE_CHANGED", async () => {
     const user = userEvent.setup();
     fetchMock.mockReset()
-      .mockResolvedValueOnce(response(preview({ previewToken: "b".repeat(64) })))
-      .mockResolvedValueOnce(response(preview({ quantity: 3, previewToken: "c".repeat(64), requiresAcknowledgement: true, reasons: ["server_facts_changed"] })));
-    const { rerender } = render(<CheckoutForm promotions={[]} />);
-    await screen.findByText("This is the current authoritative baseline; no earlier same-tab server preview was available.");
-    useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity: 3 }] });
-    rerender(<CheckoutForm promotions={[]} />);
-    await user.click(await screen.findByRole("button", { name: "Acknowledge current server facts" }));
-    expect(await screen.findByText("Current server facts acknowledged.")).toHaveAttribute("role", "status");
-    expect(screen.queryByRole("button", { name: "Acknowledge current server facts" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Variant checkout unavailable" })).toBeDisabled();
+      .mockResolvedValueOnce(response(preview()))
+      .mockResolvedValueOnce(response(authoritativeQuote()))
+      .mockResolvedValueOnce(response({
+        status: "PRICE_CHANGED", pricingRevision: "e".repeat(64),
+        cart: preview(),
+      }))
+      .mockResolvedValueOnce(response(authoritativeQuote("e".repeat(64))));
+    render(<CheckoutForm promotions={[]} />);
+    await screen.findByRole("status");
+    await fillDestination(user);
+    await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
+    await user.click(await screen.findByRole("button", { name: "Continue to hosted payment" }));
+    expect(await screen.findByText(/authoritative price changed/iu)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Continue to hosted payment" })).toBeNull();
+    const sessionCall = fetchMock.mock.calls.find(([url]) => url === "/api/checkout/sessions")!;
+    expect(JSON.parse(String((sessionCall[1] as RequestInit).body))).toEqual({
+      items: [{ variantId, quantity: 2 }],
+      destination: {
+        recipientName: "Synthetic Research Buyer", line1: "100 Test Way", line2: null,
+        city: "Los Angeles", stateCode: "CA", postalCode: "90001", countryCode: "US",
+      },
+      pricingRevision,
+    });
+    await user.click(screen.getByRole("button", { name: "Try authoritative quote again" }));
+    expect(await screen.findByRole("button", { name: "Continue to hosted payment" })).toBeVisible();
+    const quoteCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/checkout/quote");
+    expect((quoteCalls[0]![1] as RequestInit).headers).toEqual(
+      (quoteCalls[1]![1] as RequestInit).headers,
+    );
   });
 
-  it("retains accessible destination labels while the variant checkout gate is disabled", async () => {
+  it("retains accessible required destination controls", async () => {
     render(<CheckoutForm promotions={[]} />);
     await screen.findByRole("status");
     for (const label of ["Recipient name", "Address line 1", "Address line 2 (optional)", "City", "State or district", "Postal code"]) {
@@ -98,6 +158,6 @@ describe("CheckoutForm", () => {
       expect(field).toBeRequired();
       expect(field).toHaveAttribute("aria-required", "true");
     }
-    expect(screen.getByRole("button", { name: "Variant checkout unavailable" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Calculate authoritative total" })).toBeEnabled();
   });
 });

@@ -1,4 +1,4 @@
-import type { CheckoutRequest } from "@/domain/checkout";
+import type { CheckoutQuoteRequest } from "@/domain/checkout";
 import type { BuyerStatus } from "@/domain/eligibility";
 
 export type Sha256Hasher = (
@@ -20,9 +20,13 @@ export type ReviewSnapshotHashInput = Readonly<{
   buyerStatus: BuyerStatus;
   acceptedAttestationVersionId: string;
   currentAttestationVersionId: string;
-  items: readonly Readonly<{ productId: string; quantity: number }>[];
-  promotionIds: readonly string[];
-  destination: CheckoutRequest["destination"];
+  items: readonly Readonly<
+    | { variantId: string; quantity: number }
+    | { productId: string; quantity: number }
+  >[];
+  automaticPromotions?: readonly Readonly<{ id: string; version: number }>[];
+  promotionIds?: readonly string[];
+  destination: CheckoutQuoteRequest["destination"];
   reviewPolicies: readonly Readonly<{ id: string; version: string }>[];
 }>;
 
@@ -160,7 +164,7 @@ export function createCheckoutIdentity(input: Readonly<{
 }
 
 export function hashCheckoutRequest(
-  request: CheckoutRequest,
+  request: unknown,
   sha256: Sha256Hasher,
 ): Promise<string> {
   return hashCanonicalEnvelope(
@@ -182,10 +186,22 @@ export function hashReviewSnapshot(
       buyerStatus: input.buyerStatus,
       acceptedAttestationVersionId: input.acceptedAttestationVersionId,
       currentAttestationVersionId: input.currentAttestationVersionId,
-      items: input.items.toSorted((left, right) =>
-        left.productId.localeCompare(right.productId),
-      ),
-      promotionIds: input.promotionIds.toSorted(),
+      items: input.items.toSorted((left, right) => {
+        const leftId = "variantId" in left ? left.variantId : left.productId;
+        const rightId = "variantId" in right ? right.variantId : right.productId;
+        return leftId.localeCompare(rightId);
+      }),
+      ...(input.automaticPromotions === undefined
+        ? {}
+        : {
+            automaticPromotions: input.automaticPromotions.toSorted(
+              (left, right) =>
+                left.id.localeCompare(right.id) || left.version - right.version,
+            ),
+          }),
+      ...(input.promotionIds === undefined
+        ? {}
+        : { promotionIds: input.promotionIds.toSorted() }),
       destination: input.destination,
       reviewPolicies: canonicalReviewPolicies(input.reviewPolicies),
     },

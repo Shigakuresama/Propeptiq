@@ -54,7 +54,7 @@ const previewEnvironment = parseServerEnv({
   PAYMENTS_LIVE_CAPABILITY: "disabled",
 });
 const body = {
-  items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }],
+  items: [{ variantId: "20000000-0000-4000-8000-000000000001", quantity: 2 }],
   destination: {
     recipientName: "Synthetic Research Buyer",
     line1: "100 Test Way",
@@ -64,8 +64,8 @@ const body = {
     postalCode: "90001",
     countryCode: "US",
   },
-  promotionIds: ["66000000-0000-4000-8000-000000000001"],
 };
+const pricingRevision = "a".repeat(64);
 
 function request(
   payload: unknown = body,
@@ -100,6 +100,7 @@ describe("POST /api/checkout/quote", () => {
     });
     quoteCheckout.mockResolvedValue({
       status: "quoted",
+      pricingRevision,
       quote: {
         status: "ready",
         reviewRequired: false,
@@ -118,9 +119,10 @@ describe("POST /api/checkout/quote", () => {
         rewardsBenefitAvailable: false,
         rewardsUnavailableReason: "loyalty_policy_unavailable",
         lines: [{
-          productId: "61000000-0000-4000-8000-000000000001",
+          variantId: "20000000-0000-4000-8000-000000000001",
           productName: "Synthetic local test only — Alpha",
-          packageForm: "Research vial",
+          variantLabel: "5 mg test fixture",
+          sku: "TEST-ALPHA-5MG",
           quantity: 2,
           unitAmountMinor: 2_400,
           subtotalMinor: 4_800,
@@ -142,10 +144,13 @@ describe("POST /api/checkout/quote", () => {
     const response = await POST(request());
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
+    const result = await response.json();
+    expect(result).toMatchObject({
       status: "quoted",
+      pricingRevision,
       quote: { totalMinor: 5_621 },
     });
+    expect(JSON.stringify(result)).not.toMatch(/stripe|provider|productId/iu);
     expect(quoteCheckout).toHaveBeenCalledWith({
       buyerUserId,
       idempotencyKey,
@@ -153,6 +158,48 @@ describe("POST /api/checkout/quote", () => {
       attributionCookie: null,
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it.each([
+    ["productId", "20000000-0000-4000-8000-000000000010"],
+    ["baseUnitMinor", 2_400],
+    ["discountBps", 3_000],
+    ["totalMinor", 3_360],
+    ["stripePriceId", "price_browser_claim"],
+    ["currency", "USD"],
+    ["promotionIds", ["winter30"]],
+    ["automaticPromotionIds", ["winter30"]],
+  ])("rejects hostile browser field %s before runtime delegation", async (field, value) => {
+    const response = await POST(request({ ...body, [field]: value }));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ status: "invalid_request" });
+    expect(quoteCheckout).not.toHaveBeenCalled();
+  });
+
+  it("returns exact safe checkout-unavailable reasons without leaking mappings", async () => {
+    quoteCheckout.mockResolvedValueOnce({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [
+        {
+          variantId: "20000000-0000-4000-8000-000000000001",
+          code: "payment_mapping_missing",
+        },
+      ],
+    });
+
+    const response = await POST(request());
+    expect(response.status).toBe(409);
+    const result = await response.json();
+    expect(result).toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [
+        {
+          variantId: "20000000-0000-4000-8000-000000000001",
+          code: "payment_mapping_missing",
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toMatch(/stripe|provider/iu);
   });
 
   it("fails closed without a coherent runtime", async () => {

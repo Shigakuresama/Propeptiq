@@ -6,7 +6,10 @@ import type {
   CheckoutQuoteResult,
 } from "@/commerce/checkout-service";
 import type { ProviderCheckoutRouteResult } from "@/commerce/provider-checkout-orchestration";
-import { parseCheckoutRequest } from "@/domain/checkout";
+import {
+  parseCheckoutQuoteRequest,
+  parseCheckoutRequest,
+} from "@/domain/checkout";
 import { ATTRIBUTION_COOKIE_NAME } from "@/growth/attribution-cookie";
 import { assertMutationOrigin } from "@/security/origin";
 import {
@@ -117,7 +120,23 @@ function boundedText(value: unknown, maximum = 240): value is string {
   return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= maximum && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
-function safeQuote(value: unknown): BrowserCheckoutQuote | null {
+type PublicCheckoutQuote = Omit<BrowserCheckoutQuote, "lines"> & Readonly<{
+  lines: readonly Readonly<{
+    productId?: string;
+    variantId?: string;
+    sku?: string;
+    variantLabel?: string;
+    productName: string;
+    packageForm?: string;
+    quantity: number;
+    unitAmountMinor: number;
+    subtotalMinor: number;
+    discountMinor: number;
+    totalMinor: number;
+  }>[];
+}>;
+
+function safeQuote(value: unknown): PublicCheckoutQuote | null {
   try {
     const baseKeys = [
       "status", "reviewRequired", "reasons", "currency", "subtotalMinor",
@@ -165,11 +184,26 @@ function safeQuote(value: unknown): BrowserCheckoutQuote | null {
     let lineDiscount = 0;
     const seen = new Set<string>();
     const lines = value.lines.map((candidate) => {
-      if (!plainRecord(candidate) || !exactOwnKeys(candidate, [
-        "productId", "productName", "packageForm", "quantity", "unitAmountMinor",
-        "subtotalMinor", "discountMinor", "totalMinor",
-      ]) || !isCanonicalUuid(candidate.productId) || seen.has(candidate.productId) ||
-        !boundedText(candidate.productName) || !boundedText(candidate.packageForm) ||
+      if (!plainRecord(candidate)) throw new Error("unsafe quote line");
+      const isVariant = Object.hasOwn(candidate, "variantId");
+      const allowedLineKeys = new Set(isVariant
+        ? ["productId", "variantId", "sku", "variantLabel", "productName", "packageForm",
+            "quantity", "unitAmountMinor", "subtotalMinor", "discountMinor", "totalMinor"]
+        : ["productId", "productName", "packageForm", "quantity", "unitAmountMinor",
+            "subtotalMinor", "discountMinor", "totalMinor"]);
+      const requiredLineKeys = isVariant
+        ? ["variantId", "sku", "variantLabel", "productName", "quantity", "unitAmountMinor",
+            "subtotalMinor", "discountMinor", "totalMinor"]
+        : [...allowedLineKeys];
+      const identifier = isVariant ? candidate.variantId : candidate.productId;
+      if (requiredLineKeys.some((key) => !Object.hasOwn(candidate, key)) ||
+        Reflect.ownKeys(candidate).some((key) => typeof key !== "string" || !allowedLineKeys.has(key)) ||
+        !isCanonicalUuid(identifier) || seen.has(identifier) ||
+        (!isVariant && !isCanonicalUuid(candidate.productId)) ||
+        (Object.hasOwn(candidate, "productId") && !isCanonicalUuid(candidate.productId)) ||
+        !boundedText(candidate.productName) ||
+        (Object.hasOwn(candidate, "packageForm") && !boundedText(candidate.packageForm)) ||
+        (isVariant && (!boundedText(candidate.sku, 120) || !boundedText(candidate.variantLabel))) ||
         !Number.isSafeInteger(candidate.quantity) || (candidate.quantity as number) < 1 || (candidate.quantity as number) > 25 ||
         !safeMoney(candidate.unitAmountMinor) || !safeMoney(candidate.subtotalMinor) ||
         !safeMoney(candidate.discountMinor) || !safeMoney(candidate.totalMinor) ||
@@ -177,13 +211,21 @@ function safeQuote(value: unknown): BrowserCheckoutQuote | null {
         candidate.discountMinor > candidate.subtotalMinor ||
         candidate.totalMinor !== candidate.subtotalMinor - candidate.discountMinor
       ) throw new Error("unsafe quote line");
-      seen.add(candidate.productId);
+      seen.add(identifier as string);
       lineSubtotal += candidate.subtotalMinor;
       lineDiscount += candidate.discountMinor;
       return Object.freeze({
-        productId: candidate.productId,
-        productName: candidate.productName,
-        packageForm: candidate.packageForm,
+        ...(isVariant
+          ? {
+              variantId: candidate.variantId as string,
+              sku: candidate.sku as string,
+              variantLabel: candidate.variantLabel as string,
+            }
+          : { productId: candidate.productId as string }),
+        productName: candidate.productName as string,
+        ...(Object.hasOwn(candidate, "packageForm")
+          ? { packageForm: candidate.packageForm as string }
+          : {}),
         quantity: candidate.quantity as number,
         unitAmountMinor: candidate.unitAmountMinor,
         subtotalMinor: candidate.subtotalMinor,
@@ -216,6 +258,108 @@ function safeQuote(value: unknown): BrowserCheckoutQuote | null {
   }
 }
 
+const unavailableCodes = new Set([
+  "pricing_coming_soon",
+  "payment_mapping_missing",
+  "unavailable",
+  "invalid_currency",
+]);
+
+function safeUnavailableReasons(value: unknown): readonly Readonly<{
+  variantId: string;
+  code: "pricing_coming_soon" | "payment_mapping_missing" | "unavailable" | "invalid_currency";
+}>[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 50) return null;
+  const seen = new Set<string>();
+  const reasons = value.map((candidate) => {
+    if (!plainRecord(candidate) || !exactOwnKeys(candidate, ["variantId", "code"]) ||
+      !isCanonicalUuid(candidate.variantId) || seen.has(candidate.variantId) ||
+      typeof candidate.code !== "string" || !unavailableCodes.has(candidate.code)) {
+      throw new Error("unsafe checkout-unavailable reason");
+    }
+    seen.add(candidate.variantId);
+    return Object.freeze({
+      variantId: candidate.variantId,
+      code: candidate.code as "pricing_coming_soon" | "payment_mapping_missing" | "unavailable" | "invalid_currency",
+    });
+  });
+  return Object.freeze(reasons);
+}
+
+function safePricingRevision(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function safeCartCurrency(value: unknown): value is string | null {
+  return value === null ||
+    (typeof value === "string" && /^[A-Z]{3,8}$/u.test(value));
+}
+
+function safeCart(value: unknown): Readonly<Record<string, unknown>> | null {
+  if (!plainRecord(value) || !exactOwnKeys(value, [
+    "items", "subtotalMinor", "currency", "taxMinor", "shippingMinor", "finalDiscountMinor",
+  ]) || !Array.isArray(value.items) || value.items.length < 1 || value.items.length > 50 ||
+    !safeMoney(value.subtotalMinor) ||
+    !safeCartCurrency(value.currency) ||
+    value.taxMinor !== null || value.shippingMinor !== null || value.finalDiscountMinor !== null) return null;
+  const seen = new Set<string>();
+  let subtotal = 0;
+  const items = value.items.map((candidate) => {
+    if (!plainRecord(candidate)) throw new Error("unsafe cart item");
+    const allowed = new Set([
+      "variantId", "quantity", "available", "name", "packageForm", "variantLabel", "sku",
+      "unitAmountMinor", "lineSubtotalMinor", "currency",
+    ]);
+    const required = [
+      "variantId", "quantity", "available", "name", "variantLabel", "unitAmountMinor",
+      "lineSubtotalMinor", "currency",
+    ];
+    if (required.some((key) => !Object.hasOwn(candidate, key)) ||
+      Reflect.ownKeys(candidate).some((key) => typeof key !== "string" || !allowed.has(key)) ||
+      !isCanonicalUuid(candidate.variantId) || seen.has(candidate.variantId) ||
+      !Number.isSafeInteger(candidate.quantity) || (candidate.quantity as number) < 1 || (candidate.quantity as number) > 25 ||
+      typeof candidate.available !== "boolean" ||
+      (candidate.name !== null && !boundedText(candidate.name)) ||
+      (Object.hasOwn(candidate, "packageForm") && candidate.packageForm !== null && !boundedText(candidate.packageForm)) ||
+      (candidate.variantLabel !== null && !boundedText(candidate.variantLabel)) ||
+      (Object.hasOwn(candidate, "sku") && candidate.sku !== null && !boundedText(candidate.sku, 120)) ||
+      (candidate.unitAmountMinor !== null && !safeMoney(candidate.unitAmountMinor)) ||
+      (candidate.lineSubtotalMinor !== null && !safeMoney(candidate.lineSubtotalMinor)) ||
+      !safeCartCurrency(candidate.currency) ||
+      (candidate.unitAmountMinor !== null && candidate.lineSubtotalMinor !== null &&
+        candidate.lineSubtotalMinor !== candidate.unitAmountMinor * (candidate.quantity as number))) {
+      throw new Error("unsafe cart item");
+    }
+    seen.add(candidate.variantId);
+    subtotal += candidate.lineSubtotalMinor ?? 0;
+    return Object.freeze({
+      variantId: candidate.variantId,
+      quantity: candidate.quantity,
+      available: candidate.available,
+      name: candidate.name,
+      packageForm: Object.hasOwn(candidate, "packageForm") ? candidate.packageForm : null,
+      variantLabel: candidate.variantLabel,
+      sku: Object.hasOwn(candidate, "sku") ? candidate.sku : null,
+      unitAmountMinor: candidate.unitAmountMinor,
+      lineSubtotalMinor: candidate.lineSubtotalMinor,
+      currency: candidate.currency,
+    });
+  });
+  if (subtotal !== value.subtotalMinor) return null;
+  const currencies = new Set(items.flatMap((item) =>
+    item.currency === null ? [] : [item.currency as string]));
+  const coherentCurrency = currencies.size === 1 ? [...currencies][0]! : null;
+  if (value.currency !== coherentCurrency) return null;
+  return Object.freeze({
+    items: Object.freeze(items),
+    subtotalMinor: value.subtotalMinor,
+    currency: value.currency,
+    taxMinor: null,
+    shippingMinor: null,
+    finalDiscountMinor: null,
+  });
+}
+
 function safeReasons(value: unknown): readonly string[] | null {
   if (!Array.isArray(value) || value.length < 1 || value.length > 12) return null;
   const reasons = value.map((reason) =>
@@ -234,9 +378,21 @@ function quoteResponse(result: unknown): Response {
     if (result.status === "quoted") {
       const projected = safeQuote(result.quote);
       if (projected === null) return response(503, { status: "quote_unavailable", component: "commerce" });
+      const canonical = projected.lines.some((line) => line.variantId !== undefined);
+      if (canonical && !safePricingRevision(result.pricingRevision)) {
+        return response(503, { status: "quote_unavailable", component: "commerce" });
+      }
       return projected.status === "ready"
-        ? response(200, { status: "quoted", quote: projected })
-        : response(200, { status: "review_required", quote: projected });
+        ? response(200, {
+            status: "quoted",
+            ...(canonical ? { pricingRevision: result.pricingRevision } : {}),
+            quote: projected,
+          })
+        : response(200, {
+            status: "review_required",
+            ...(canonical ? { pricingRevision: result.pricingRevision } : {}),
+            quote: projected,
+          });
     }
     if (result.status === "loaded") {
       const projected = safeQuote(result.quoteSnapshot);
@@ -246,6 +402,12 @@ function quoteResponse(result: unknown): Response {
         : response(200, { status: "review_required", quote: projected });
     }
     if (result.status === "review_rejected") return response(403, { status: "denied", reasons: ["review_rejected"] });
+    if (result.status === "CHECKOUT_UNAVAILABLE") {
+      const reasons = safeUnavailableReasons(result.reasons);
+      return reasons === null
+        ? response(503, { status: "quote_unavailable", component: "commerce" })
+        : response(409, { status: "CHECKOUT_UNAVAILABLE", reasons });
+    }
     if (result.status === "denied") {
       const reasons = safeReasons(result.reasons);
       return reasons === null
@@ -283,6 +445,18 @@ function safeIso(value: unknown): value is string {
 function sessionResponse(result: unknown): Response {
   try {
     if (!plainRecord(result) || typeof result.status !== "string") return response(503, { status: "unavailable" });
+    if (result.status === "PRICE_CHANGED") {
+      const cart = safeCart(result.cart);
+      return safePricingRevision(result.pricingRevision) && cart !== null
+        ? response(409, { status: "PRICE_CHANGED", pricingRevision: result.pricingRevision, cart })
+        : response(503, { status: "unavailable" });
+    }
+    if (result.status === "CHECKOUT_UNAVAILABLE") {
+      const reasons = safeUnavailableReasons(result.reasons);
+      return reasons === null
+        ? response(503, { status: "unavailable" })
+        : response(409, { status: "CHECKOUT_UNAVAILABLE", reasons });
+    }
     if (result.status === "open") {
       if (!exactOwnKeys(result, ["status", "orderId", "url", "expiresAt"]) ||
         !isCanonicalUuid(result.orderId) || !safeHostedUrl(result.url) || !safeIso(result.expiresAt)) {
@@ -371,8 +545,10 @@ async function parseRequest(
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_BODY_BYTES) return { ok: false, response: response(400, { status: "invalid_request" }) };
     const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     const body = JSON.parse(decoded) as unknown;
-    const parsed = parseCheckoutRequest(body);
-    if (!parsed.ok || parsed.value.promotionIds.length > 1) return { ok: false, response: response(400, { status: "invalid_request" }) };
+    const parsed = operation === "checkout.quote"
+      ? parseCheckoutQuoteRequest(body)
+      : parseCheckoutRequest(body);
+    if (!parsed.ok) return { ok: false, response: response(400, { status: "invalid_request" }) };
     return {
       ok: true,
       actor,

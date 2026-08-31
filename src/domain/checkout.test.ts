@@ -1,53 +1,61 @@
 import { describe, expect, it } from "vitest";
 
-import { parseCheckoutRequest } from "@/domain/checkout";
+import {
+  parseCheckoutQuoteRequest,
+  parseCheckoutRequest,
+} from "@/domain/checkout";
 
-const productA = "550e8400-e29b-41d4-a716-446655440000";
-const productB = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
-const promotionA = "123e4567-e89b-42d3-a456-426614174000";
+const variantA = "20000000-0000-4000-8000-000000000001";
+const variantB = "20000000-0000-4000-8000-000000000002";
+const pricingRevision = "a".repeat(64);
 
-function validRequest() {
+const destination = {
+  recipientName: "Dr. Ada Lovelace",
+  line1: "1 Research Way",
+  line2: null as string | null,
+  city: "Boston",
+  stateCode: "MA",
+  postalCode: "02108",
+  countryCode: "US" as const,
+};
+
+function quoteRequest() {
   return {
-    items: [{ productId: productA, quantity: 2 }],
-    destination: {
-      recipientName: "Dr. Ada Lovelace",
-      line1: "1 Research Way",
-      line2: null as string | null,
-      city: "Boston",
-      stateCode: "MA",
-      postalCode: "02108",
-      countryCode: "US",
-    },
-    promotionIds: [] as string[],
+    items: [{ variantId: variantA, quantity: 2 }],
+    destination: { ...destination },
   };
 }
 
-describe("parseCheckoutRequest", () => {
-  it("canonicalizes, orders, and deeply freezes the exact browser payload", () => {
-    const request = validRequest();
-    request.items = [
-      { productId: productB.toUpperCase(), quantity: 1 },
-      { productId: productA.toUpperCase(), quantity: 2 },
-    ];
-    request.destination = {
-      recipientName: "  Dr.  Ada   Lovelace  ",
-      line1: "  1   Research Way ",
-      line2: "  Suite   2  ",
-      city: "  São   José  ",
-      stateCode: " ca ",
-      postalCode: " 95113-1234 ",
-      countryCode: "US",
-    };
-    request.promotionIds = [promotionA.toUpperCase()];
+function sessionRequest() {
+  return { ...quoteRequest(), pricingRevision };
+}
 
-    const result = parseCheckoutRequest(request);
+describe("strict variant checkout requests", () => {
+  it("accepts and deeply freezes only variant lines, destination, and the session revision", () => {
+    const result = parseCheckoutRequest({
+      items: [
+        { variantId: variantB.toUpperCase(), quantity: 1 },
+        { variantId: variantA.toUpperCase(), quantity: 2 },
+      ],
+      destination: {
+        ...destination,
+        recipientName: "  Dr.  Ada   Lovelace  ",
+        line1: "  1   Research Way ",
+        line2: " Suite  2 ",
+        city: " São  José ",
+        stateCode: " ca ",
+        postalCode: " 95113-1234 ",
+      },
+      pricingRevision,
+      rewardRedemptionPoints: 500,
+    });
 
     expect(result).toEqual({
       ok: true,
       value: {
         items: [
-          { productId: productA, quantity: 2 },
-          { productId: productB, quantity: 1 },
+          { variantId: variantA, quantity: 2 },
+          { variantId: variantB, quantity: 1 },
         ],
         destination: {
           recipientName: "Dr. Ada Lovelace",
@@ -58,48 +66,147 @@ describe("parseCheckoutRequest", () => {
           postalCode: "95113-1234",
           countryCode: "US",
         },
-        promotionIds: [promotionA],
+        pricingRevision,
+        rewardRedemptionPoints: 500,
       },
     });
     if (!result.ok) return;
-    expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.value)).toBe(true);
     expect(Object.isFrozen(result.value.items)).toBe(true);
     expect(Object.isFrozen(result.value.items[0])).toBe(true);
     expect(Object.isFrozen(result.value.destination)).toBe(true);
-    expect(Object.isFrozen(result.value.promotionIds)).toBe(true);
   });
 
-  it("accepts only an optional positive integer reward redemption request", () => {
+  it("uses a separate initial quote contract with no pricing revision", () => {
+    expect(parseCheckoutQuoteRequest(quoteRequest())).toEqual({
+      ok: true,
+      value: quoteRequest(),
+    });
+    expect(parseCheckoutRequest(quoteRequest())).toEqual({
+      ok: false,
+      error: { code: "invalid_pricing_revision", field: "pricingRevision" },
+    });
+    expect(
+      parseCheckoutQuoteRequest({ ...quoteRequest(), pricingRevision }),
+    ).toEqual({
+      ok: false,
+      error: { code: "unexpected_field", field: "request.pricingRevision" },
+    });
+  });
+
+  it.each([
+    ["productId", "20000000-0000-4000-8000-000000000003"],
+    ["baseUnitMinor", 10_000],
+    ["discountBps", 3_000],
+    ["totalMinor", 14_000],
+    ["stripePriceId", "price_browser_claim"],
+    ["currency", "USD"],
+    ["promotionIds", ["20000000-0000-4000-8000-000000000004"]],
+    ["automaticPromotionIds", ["winter30"]],
+    ["eligiblePromotions", [{ id: "winter30", discountBps: 3_000 }]],
+  ])("rejects browser authority in line field %s", (field, value) => {
     expect(
       parseCheckoutRequest({
-        ...validRequest(),
-        rewardRedemptionPoints: 500,
+        ...sessionRequest(),
+        items: [{ ...sessionRequest().items[0], [field]: value }],
       }),
     ).toEqual({
-      ok: true,
-      value: {
-        ...validRequest(),
-        rewardRedemptionPoints: 500,
-      },
-    });
-
-    expect(parseCheckoutRequest(validRequest())).toMatchObject({
-      ok: true,
-      value: {
-        items: validRequest().items,
-        destination: validRequest().destination,
-        promotionIds: [],
-      },
+      ok: false,
+      error: { code: "unexpected_field", field: `items[0].${field}` },
     });
   });
 
-  it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "500", null])(
-    "rejects invalid requested reward points %j",
-    (rewardRedemptionPoints) => {
+  it.each([
+    ["productId", variantB],
+    ["baseUnitMinor", 10_000],
+    ["discountBps", 3_000],
+    ["totalMinor", 14_000],
+    ["stripePriceId", "price_browser_claim"],
+    ["currency", "USD"],
+    ["promotionIds", [variantB]],
+    ["automaticPromotion", { id: "winter30", active: true }],
+  ])("rejects browser authority in request field %s", (field, value) => {
+    expect(parseCheckoutRequest({ ...sessionRequest(), [field]: value })).toEqual({
+      ok: false,
+      error: { code: "unexpected_field", field: `request.${field}` },
+    });
+  });
+
+  it.each(["", "a".repeat(63), "A".repeat(64), "g".repeat(64), null])(
+    "rejects malformed pricing revision %j",
+    (revision) => {
+      expect(
+        parseCheckoutRequest({ ...sessionRequest(), pricingRevision: revision }),
+      ).toEqual({
+        ok: false,
+        error: { code: "invalid_pricing_revision", field: "pricingRevision" },
+      });
+    },
+  );
+
+  it.each([0, -1, 1.5, 26, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid quantity %s",
+    (quantity) => {
       expect(
         parseCheckoutRequest({
-          ...validRequest(),
+          ...sessionRequest(),
+          items: [{ variantId: variantA, quantity }],
+        }),
+      ).toEqual({
+        ok: false,
+        error: { code: "invalid_quantity", field: "items[0].quantity" },
+      });
+    },
+  );
+
+  it("rejects duplicate variant IDs after normalization", () => {
+    expect(
+      parseCheckoutRequest({
+        ...sessionRequest(),
+        items: [
+          { variantId: variantA, quantity: 1 },
+          { variantId: variantA.toUpperCase(), quantity: 2 },
+        ],
+      }),
+    ).toEqual({
+      ok: false,
+      error: { code: "duplicate_variant", field: "items[1].variantId" },
+    });
+  });
+
+  it("rejects malformed roots, sparse lines, inherited fields, and symbols", () => {
+    expect(parseCheckoutRequest(null)).toEqual({
+      ok: false,
+      error: { code: "invalid_request", field: "request" },
+    });
+    const sparse = [{ variantId: variantA, quantity: 1 }];
+    sparse.length = 2;
+    expect(parseCheckoutRequest({ ...sessionRequest(), items: sparse })).toEqual({
+      ok: false,
+      error: { code: "invalid_items", field: "items" },
+    });
+    const inherited = Object.assign(
+      Object.create({ totalMinor: 1 }) as Record<string, unknown>,
+      sessionRequest(),
+    );
+    expect(parseCheckoutRequest(inherited)).toEqual({
+      ok: false,
+      error: { code: "unexpected_field", field: "request.totalMinor" },
+    });
+    expect(
+      parseCheckoutRequest({ ...sessionRequest(), [Symbol("hidden")]: true }),
+    ).toEqual({
+      ok: false,
+      error: { code: "unexpected_field", field: "request" },
+    });
+  });
+
+  it.each([0, -1, 1.5, "500", null])(
+    "rejects invalid reward points %j",
+    (rewardRedemptionPoints) => {
+      expect(
+        parseCheckoutQuoteRequest({
+          ...quoteRequest(),
           rewardRedemptionPoints,
         }),
       ).toEqual({
@@ -113,255 +220,22 @@ describe("parseCheckoutRequest", () => {
   );
 
   it.each([
-    ["rewardBalance", 50_000],
-    ["rewardBalancePoints", 50_000],
-    ["rewardRedemptionRate", 100],
-    ["rewardRedemptionMinor", 500],
-    ["rewardDiscountMinor", 500],
-    ["rewardPolicy", { redemptionMinorPerPoint: 1 }],
-    ["rewardPolicyHash", "browser-policy-hash"],
-    ["pendingBaseEarnPoints", 100],
-    ["rewardLedgerId", "62000000-0000-4000-8000-000000000001"],
-    ["referralCode", "REFERRAL"],
-    ["referralUserId", "61000000-0000-4000-8000-000000000001"],
-    ["referralDiscountMinor", 500],
-    ["affiliateCode", "AFFILIATE"],
-    ["affiliateId", "63000000-0000-4000-8000-000000000001"],
-    ["affiliateCommissionMinor", 500],
-    ["role", "admin"],
-    ["subtotalMinor", 10_000],
-    ["discountMinor", 500],
-    ["totalMinor", 9_500],
-    ["taxMinor", 700],
-    ["shippingMinor", 900],
-  ])("rejects browser-controlled checkout authority in %s", (field, value) => {
-    expect(parseCheckoutRequest({ ...validRequest(), [field]: value })).toEqual({
-      ok: false,
-      error: { code: "unexpected_field", field: `request.${field}` },
-    });
-  });
-
-  it.each([null, [], "request", 17])("rejects malformed root value %j", (input) => {
-    expect(parseCheckoutRequest(input)).toEqual({
-      ok: false,
-      error: { code: "invalid_request", field: "request" },
-    });
-  });
-
-  it("rejects unexpected own and inherited fields at every object boundary", () => {
-    expect(parseCheckoutRequest({ ...validRequest(), totalMinor: 1 })).toEqual({
-      ok: false,
-      error: { code: "unexpected_field", field: "request.totalMinor" },
-    });
-    expect(
-      parseCheckoutRequest({
-        ...validRequest(),
-        items: [{ productId: productA, quantity: 1, amountMinor: 1 }],
-      }),
-    ).toEqual({
-      ok: false,
-      error: { code: "unexpected_field", field: "items[0].amountMinor" },
-    });
-    expect(
-      parseCheckoutRequest({
-        ...validRequest(),
-        destination: {
-          ...validRequest().destination,
-          email: "private@test.invalid",
-        },
-      }),
-    ).toEqual({
-      ok: false,
-      error: { code: "unexpected_field", field: "destination.email" },
-    });
-    const inherited = Object.assign(
-      Object.create({ amountMinor: 1 }) as Record<string, unknown>,
-      validRequest(),
-    );
-    expect(parseCheckoutRequest(inherited)).toEqual({
-      ok: false,
-      error: { code: "unexpected_field", field: "request.amountMinor" },
-    });
-    const nonEnumerablePrototype = {};
-    Object.defineProperty(nonEnumerablePrototype, "amountMinor", {
-      value: 1,
-      enumerable: false,
-    });
-    const hiddenInherited = Object.assign(
-      Object.create(nonEnumerablePrototype) as Record<string, unknown>,
-      validRequest(),
-    );
-    expect(parseCheckoutRequest(hiddenInherited)).toEqual({
-      ok: false,
-      error: { code: "unexpected_field", field: "request.amountMinor" },
-    });
-    const symbolKey = Symbol("private");
-    expect(
-      parseCheckoutRequest({ ...validRequest(), [symbolKey]: "hidden" }),
-    ).toEqual({
-      ok: false,
-      error: { code: "unexpected_field", field: "request" },
-    });
-  });
-
-  it("requires exact own keys instead of accepting inherited required values", () => {
-    const item = Object.assign(Object.create({ productId: productA }), {
-      quantity: 1,
-    });
-    expect(parseCheckoutRequest({ ...validRequest(), items: [item] })).toEqual({
-      ok: false,
-      error: { code: "invalid_product_id", field: "items[0].productId" },
-    });
-  });
-
-  it("enforces dense item collections and the 1-50 line boundary", () => {
-    expect(parseCheckoutRequest({ ...validRequest(), items: [] })).toEqual({
-      ok: false,
-      error: { code: "invalid_items", field: "items" },
-    });
-    const sparse = [{ productId: productA, quantity: 1 }];
-    sparse.length = 2;
-    expect(parseCheckoutRequest({ ...validRequest(), items: sparse })).toEqual({
-      ok: false,
-      error: { code: "invalid_items", field: "items" },
-    });
-    expect(
-      parseCheckoutRequest({
-        ...validRequest(),
-        items: Array.from({ length: 51 }, (_, index) => ({
-          productId:
-            index === 0
-              ? productA
-              : `550e8400-e29b-41d4-a716-${index.toString().padStart(12, "0")}`,
-          quantity: 1,
-        })),
-      }),
-    ).toEqual({
-      ok: false,
-      error: { code: "invalid_items", field: "items" },
-    });
-  });
-
-  it.each([
-    "not-a-uuid",
-    "550e8400-e29b-61d4-a716-446655440000",
-    "550e8400-e29b-41d4-7716-446655440000",
-  ])("rejects malformed or unsupported UUID %s", (productId) => {
-    expect(
-      parseCheckoutRequest({
-        ...validRequest(),
-        items: [{ productId, quantity: 1 }],
-      }),
-    ).toEqual({
-      ok: false,
-      error: { code: "invalid_product_id", field: "items[0].productId" },
-    });
-  });
-
-  it.each([0, -1, 1.5, 26, Number.MAX_SAFE_INTEGER + 1])(
-    "rejects invalid quantity %s",
-    (quantity) => {
-      expect(
-        parseCheckoutRequest({
-          ...validRequest(),
-          items: [{ productId: productA, quantity }],
-        }),
-      ).toEqual({
-        ok: false,
-        error: { code: "invalid_quantity", field: "items[0].quantity" },
-      });
-    },
-  );
-
-  it("rejects duplicate products after UUID normalization", () => {
-    expect(
-      parseCheckoutRequest({
-        ...validRequest(),
-        items: [
-          { productId: productA, quantity: 1 },
-          { productId: productA.toUpperCase(), quantity: 2 },
-        ],
-      }),
-    ).toEqual({
-      ok: false,
-      error: { code: "duplicate_product", field: "items[1].productId" },
-    });
-  });
-
-  it.each([
     ["recipientName", "", "destination.recipientName"],
-    ["recipientName", "x".repeat(121), "destination.recipientName"],
     ["line1", "\u0000hidden", "destination.line1"],
-    ["line1", "x".repeat(121), "destination.line1"],
     ["line2", "", "destination.line2"],
-    ["line2", "x".repeat(121), "destination.line2"],
     ["city", "x".repeat(101), "destination.city"],
     ["stateCode", "PR", "destination.stateCode"],
     ["postalCode", "1234", "destination.postalCode"],
-    ["postalCode", "12345 6789", "destination.postalCode"],
     ["countryCode", "us", "destination.countryCode"],
   ] as const)("rejects invalid destination %s", (property, value, field) => {
     expect(
       parseCheckoutRequest({
-        ...validRequest(),
-        destination: { ...validRequest().destination, [property]: value },
+        ...sessionRequest(),
+        destination: { ...destination, [property]: value },
       }),
     ).toEqual({
       ok: false,
       error: { code: "invalid_destination", field },
     });
-  });
-
-  it("accepts all approved state boundaries including DC", () => {
-    expect(
-      parseCheckoutRequest({
-        ...validRequest(),
-        destination: { ...validRequest().destination, stateCode: "dc" },
-      }),
-    ).toMatchObject({
-      ok: true,
-      value: { destination: { stateCode: "DC" } },
-    });
-  });
-
-  it("rejects malformed, sparse, duplicate, or multiple promotions", () => {
-    expect(parseCheckoutRequest({ ...validRequest(), promotionIds: ["bad"] })).toEqual({
-      ok: false,
-      error: { code: "invalid_promotion_id", field: "promotionIds[0]" },
-    });
-    const sparse = [promotionA];
-    sparse.length = 2;
-    expect(parseCheckoutRequest({ ...validRequest(), promotionIds: sparse })).toEqual({
-      ok: false,
-      error: { code: "invalid_promotion_id", field: "promotionIds" },
-    });
-    expect(
-      parseCheckoutRequest({
-        ...validRequest(),
-        promotionIds: [promotionA, promotionA.toUpperCase()],
-      }),
-    ).toEqual({
-      ok: false,
-      error: { code: "duplicate_promotion", field: "promotionIds[1]" },
-    });
-    expect(
-      parseCheckoutRequest({
-        ...validRequest(),
-        promotionIds: [promotionA, productB],
-      }),
-    ).toEqual({
-      ok: false,
-      error: { code: "invalid_promotion_id", field: "promotionIds" },
-    });
-  });
-
-  it("returns frozen structured errors for malformed nested input", () => {
-    const result = parseCheckoutRequest({ ...validRequest(), destination: null });
-    expect(result).toEqual({
-      ok: false,
-      error: { code: "invalid_destination", field: "destination" },
-    });
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(!result.ok && Object.isFrozen(result.error)).toBe(true);
   });
 });

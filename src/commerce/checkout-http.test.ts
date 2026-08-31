@@ -7,8 +7,10 @@ import { createCheckoutHttpHandlers } from "@/commerce/checkout-http";
 const buyerId = "61000000-0000-4000-8000-000000000001";
 const key = "6a000000-0000-4000-8000-000000000002";
 const origin = "http://127.0.0.1:4631";
+const variantId = "55000000-0000-4000-8000-000000000001";
+const pricingRevision = "a".repeat(64);
 const requestBody = {
-  items: [{ productId: "55000000-0000-4000-8000-000000000001", quantity: 2 }],
+  items: [{ variantId, quantity: 2 }],
   destination: {
     recipientName: "Synthetic Research Buyer",
     line1: "100 Test Way",
@@ -18,8 +20,8 @@ const requestBody = {
     postalCode: "90001",
     countryCode: "US",
   },
-  promotionIds: ["66000000-0000-4000-8000-000000000001"],
 } as const;
+const sessionRequestBody = { ...requestBody, pricingRevision } as const;
 
 const quote: BrowserCheckoutQuote = Object.freeze({
   status: "ready",
@@ -39,7 +41,9 @@ const quote: BrowserCheckoutQuote = Object.freeze({
   rewardsBenefitAvailable: true,
   rewardsUnavailableReason: null,
   lines: Object.freeze([Object.freeze({
-    productId: requestBody.items[0].productId,
+    variantId,
+    sku: "SYNTHETIC-ALPHA-5MG",
+    variantLabel: "Synthetic 5 mg fixture",
     productName: "Synthetic Alpha Reference",
     packageForm: "Synthetic sealed vial",
     quantity: 2,
@@ -76,7 +80,7 @@ function withoutQuoteFields(...fields: readonly string[]): Record<string, unknow
 
 function request(
   path: string,
-  body: unknown = requestBody,
+  body?: unknown,
   headers: Record<string, string> = {},
 ) {
   return new Request(`${origin}${path}`, {
@@ -87,7 +91,7 @@ function request(
       "idempotency-key": key,
       ...headers,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(body ?? (path.endsWith("/sessions") ? sessionRequestBody : requestBody)),
   });
 }
 
@@ -95,7 +99,11 @@ function fixture(overrides: Partial<Parameters<typeof createCheckoutHttpHandlers
   let count = 0;
   const quoteCheckout = vi.fn<(
     input: Readonly<{ buyerUserId: string; idempotencyKey: string; request: unknown; attributionCookie: string | null }>,
-  ) => Promise<CheckoutQuoteResult>>(async () => ({ status: "quoted", quote } as CheckoutQuoteResult));
+  ) => Promise<CheckoutQuoteResult>>(async () => ({
+    status: "quoted",
+    pricingRevision,
+    quote,
+  } as CheckoutQuoteResult));
   const startSession = vi.fn<(
     input: Readonly<{ buyerUserId: string; idempotencyKey: string; request: unknown; attributionCookie: string | null }>,
   ) => Promise<ProviderCheckoutRouteResult>>(async () => ({
@@ -129,7 +137,7 @@ describe("checkout HTTP controllers", () => {
     }));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await json(response)).toEqual({ status: "quoted", quote });
+    expect(await json(response)).toEqual({ status: "quoted", pricingRevision, quote });
     expect(quoteCheckout).toHaveBeenCalledWith({
       buyerUserId: buyerId,
       idempotencyKey: key,
@@ -141,13 +149,13 @@ describe("checkout HTTP controllers", () => {
   it("projects an inactive complete-zero growth envelope without omitting authority fields", async () => {
     const { handlers } = fixture({
       quoteCheckout: async () =>
-        ({ status: "quoted", quote: allZeroQuote }) as CheckoutQuoteResult,
+        ({ status: "quoted", pricingRevision, quote: allZeroQuote }) as CheckoutQuoteResult,
     });
 
     const response = await handlers.quote(request("/api/checkout/quote"));
 
     expect(response.status).toBe(200);
-    expect(await json(response)).toEqual({ status: "quoted", quote: allZeroQuote });
+    expect(await json(response)).toEqual({ status: "quoted", pricingRevision, quote: allZeroQuote });
   });
 
   it.each([
@@ -165,7 +173,7 @@ describe("checkout HTTP controllers", () => {
     )],
   ])("fails closed for a %s quote envelope", async (_label, unsafeQuote) => {
     const { handlers } = fixture({
-      quoteCheckout: async () => ({ status: "quoted", quote: unsafeQuote } as never),
+      quoteCheckout: async () => ({ status: "quoted", pricingRevision, quote: unsafeQuote } as never),
     });
 
     const response = await handlers.quote(request("/api/checkout/quote"));

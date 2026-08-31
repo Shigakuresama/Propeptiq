@@ -6,6 +6,7 @@ import {
   type AuthoritativeCheckoutPlanData,
   type CheckoutPrepareResult,
   type CheckoutQuoteResult,
+  type CheckoutSessionQuoteResult,
   type DefiniteFailureReleaseInput,
   type DefiniteFailureReleaseResult,
 } from "@/commerce/checkout-service";
@@ -23,6 +24,7 @@ import type {
   ProviderSessionRepository,
 } from "@/db/repositories/provider-session-repository";
 import type { Sha256Hasher } from "@/commerce/checkout-identity";
+import { parseCheckoutRequest } from "@/domain/checkout";
 
 type CheckoutServicePort = Readonly<{
   quote: (input: Readonly<{
@@ -32,6 +34,13 @@ type CheckoutServicePort = Readonly<{
     request: unknown;
     attributionCookie?: string | null;
   }>) => Promise<CheckoutQuoteResult>;
+  quoteForSession?: (input: Readonly<{
+    buyerUserId: string;
+    idempotencyKey: string;
+    paymentProviderAvailable: boolean;
+    request: unknown;
+    attributionCookie?: string | null;
+  }>) => Promise<CheckoutSessionQuoteResult>;
   prepare: (
     plan: AuthoritativeCheckoutPlan,
     providerPreparation: unknown,
@@ -57,7 +66,9 @@ export type ProviderCheckoutRouteResult =
   | Readonly<{ status: "idempotency_conflict" }>
   | Readonly<{ status: "invalid" }>
   | Readonly<{ status: "unavailable" }>
-  | Readonly<{ status: "conflict" }>;
+  | Readonly<{ status: "conflict" }>
+  | Extract<CheckoutSessionQuoteResult,
+      Readonly<{ status: "PRICE_CHANGED" | "CHECKOUT_UNAVAILABLE" }>>;
 
 function requestFromPlan(
   plan: AuthoritativeCheckoutPlanData,
@@ -81,7 +92,7 @@ function requestFromPlan(
     currency: "USD",
     destination: plan.request.destination,
     lines: plan.browserQuote.lines.map((line) => ({
-      productId: line.productId,
+      productId: line.productId ?? line.variantId!,
       productName: line.productName,
       packageForm: line.packageForm,
       purchasedQuantity: line.quantity,
@@ -354,7 +365,12 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
       const context = projectProviderExecutionContextV1(startInput.context);
       if (context === null) return Object.freeze({ status: "invalid" });
       for (let quoteAttempt = 0; quoteAttempt < 3; quoteAttempt += 1) {
-        const quote = await input.checkoutService.quote({
+        const canonicalSessionRequest = parseCheckoutRequest(startInput.request).ok;
+        const quoteOperation = canonicalSessionRequest &&
+          input.checkoutService.quoteForSession !== undefined
+          ? input.checkoutService.quoteForSession
+          : input.checkoutService.quote;
+        const quote = await quoteOperation({
           buyerUserId: context.buyerUserId,
           idempotencyKey: startInput.idempotencyKey,
           paymentProviderAvailable: context.checkoutCreationAvailable,
@@ -363,9 +379,12 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
             ? {}
             : { attributionCookie: startInput.attributionCookie }),
         });
+        if (quote.status === "invalid_request") return Object.freeze({ status: "invalid" });
+        if (quote.status === "PRICE_CHANGED" || quote.status === "CHECKOUT_UNAVAILABLE") {
+          return quote;
+        }
         const terminal = terminalLoaded(quote);
         if (terminal !== null) return terminal;
-        if (quote.status === "invalid_request") return Object.freeze({ status: "invalid" });
         if (quote.status === "idempotency_conflict") {
           return Object.freeze({ status: "idempotency_conflict" });
         }

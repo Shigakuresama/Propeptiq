@@ -8,16 +8,28 @@ import {
 } from "@/domain/storefront-pricing";
 
 import { normalizeCart } from "./cart-storage";
-import type { CartPreview, CartPreviewItem } from "./preview-types";
+import type {
+  CartPreview,
+  CartPreviewItem,
+  SafeCartPreview,
+  SafeCartPreviewItem,
+} from "./preview-types";
 
 export { canContinueFromPreview } from "./preview-types";
-export type { CartPreview, CartPreviewItem } from "./preview-types";
+export type {
+  CartPreview,
+  CartPreviewItem,
+  SafeCartPreview,
+  SafeCartPreviewItem,
+} from "./preview-types";
 
 export type CartPreviewVariant = Readonly<{
   variantId: string;
   productId: string;
   name: string;
   packageForm: string;
+  variantLabel?: string;
+  sku?: string;
   baseUnitMinor: number;
   currency: "USD";
   priceStatus: "pending" | "active" | "unavailable";
@@ -105,4 +117,24 @@ export function buildCartPreview(
     requiresAcknowledgement: factsChanged || unavailable,
     reasons,
   };
+}
+
+export function buildSafeCartPreview(
+  items: readonly SafeCartPreviewItem[],
+): SafeCartPreview {
+  const frozenItems = Object.freeze(items.map((item) => Object.freeze({ ...item })));
+  const currencies = new Set(
+    frozenItems.flatMap((item) => item.currency === null ? [] : [item.currency]),
+  );
+  return Object.freeze({
+    items: frozenItems,
+    subtotalMinor: frozenItems.reduce(
+      (sum, item) => sum + (item.lineSubtotalMinor ?? 0),
+      0,
+    ),
+    currency: currencies.size === 1 ? [...currencies][0]! : null,
+    taxMinor: null,
+    shippingMinor: null,
+    finalDiscountMinor: null,
+  });
 }
