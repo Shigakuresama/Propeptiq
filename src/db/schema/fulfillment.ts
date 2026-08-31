@@ -56,6 +56,11 @@ export const reviewRequests = pgTable(
   },
   (table) => [
     unique("review_requests_id_order_unique").on(table.id, table.orderId),
+    unique("review_requests_id_order_snapshot_unique").on(
+      table.id,
+      table.orderId,
+      table.snapshotHash,
+    ),
     unique("review_requests_snapshot_hash_unique").on(table.snapshotHash),
     foreignKey({
       columns: [table.orderId, table.userId],
@@ -74,6 +79,46 @@ export const reviewRequests = pgTable(
             and ${table.coversBuyerReview} is null)
           or (${table.outcome} is not null and ${table.decidedByUserId} is not null and ${table.decidedAt} is not null
             and ${table.coversBuyerReview} is not null)`,
+    ),
+  ],
+);
+
+export const checkoutAttemptReviewBindings = pgTable(
+  "checkout_attempt_review_bindings",
+  {
+    checkoutAttemptId: uuid("checkout_attempt_id").primaryKey(),
+    orderId: uuid("order_id").notNull(),
+    reviewRequestId: uuid("review_request_id").notNull(),
+    reviewSnapshotHash: text("review_snapshot_hash").notNull(),
+    boundAt: timestamp("bound_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.checkoutAttemptId, table.orderId],
+      foreignColumns: [checkoutAttempts.id, checkoutAttempts.orderId],
+      name: "checkout_attempt_review_bindings_attempt_order_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [
+        table.reviewRequestId,
+        table.orderId,
+        table.reviewSnapshotHash,
+      ],
+      foreignColumns: [
+        reviewRequests.id,
+        reviewRequests.orderId,
+        reviewRequests.snapshotHash,
+      ],
+      name: "checkout_attempt_review_bindings_review_identity_fk",
+    }).onDelete("restrict"),
+    check(
+      "checkout_attempt_review_bindings_snapshot_hash",
+      sha256(table.reviewSnapshotHash),
+    ),
+    index("checkout_attempt_review_bindings_review_idx").on(
+      table.reviewRequestId,
     ),
   ],
 );

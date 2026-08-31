@@ -338,6 +338,14 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
         options.coversBuyerReview ?? true,
       ],
     );
+    await client.query(
+      `INSERT INTO checkout_attempt_review_bindings
+        (checkout_attempt_id, order_id, review_request_id,
+         review_snapshot_hash, bound_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4,
+               '2026-08-25T12:00:00.000Z')`,
+      [ids.attempt, ids.order, ids.review, reviewHash],
+    );
     return reviewInput;
   }
 
@@ -1361,10 +1369,15 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
   ])("denies reuse after exact %s drift without selecting another review", async (_label, mutation) => {
     await seedBuyerReview();
     await client.exec(mutation);
-    await expect(setup().handoff(command())).resolves.toMatchObject({
-      status: "held",
-      reasons: expect.arrayContaining(["buyer_review_not_covered"]),
-    });
+    const result = await setup().handoff(command());
+    if (_label === "review buyer coverage") {
+      expect(result).toMatchObject({
+        status: "held",
+        reasons: expect.arrayContaining(["buyer_review_not_covered"]),
+      });
+    } else {
+      expect(result).toEqual({ status: "conflict" });
+    }
     expect((await client.query(`
       SELECT
         (SELECT count(*)::int FROM fulfillment_releases) AS releases,

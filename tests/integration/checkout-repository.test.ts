@@ -4,6 +4,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hashReviewSnapshot } from "@/commerce/checkout-identity";
+import { createCheckoutHttpHandlers } from "@/commerce/checkout-http";
 import { createCheckoutService } from "@/commerce/checkout-service";
 import {
   createPostgresCheckoutRepository,
@@ -633,7 +634,7 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     });
   });
 
-  it("carries exact canonical variant and automatic-promotion review identity through payment and fulfillment", async () => {
+  it("binds fulfillment to the exact approved canonical review instead of historical review rows", async () => {
     await seedCheckoutReadyVariant();
     await client.exec(`
       INSERT INTO promotions
@@ -653,6 +654,37 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     `);
     const { service } = setup();
     const key = "30000000-0000-4000-8000-000000000132";
+    const firstQuoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (
+      firstQuoted.status !== "quoted" ||
+      firstQuoted.pricingRevision === undefined
+    ) {
+      throw new Error("expected first canonical review quote");
+    }
+    const firstReview = await service.prepare(firstQuoted.plan, null);
+    if (
+      firstReview.status !== "review_required" ||
+      firstReview.reviewRequestId === null
+    ) {
+      throw new Error("expected first canonical review request");
+    }
+    const firstReviewIdentity = await client.query<{ snapshotHash: string }>(
+      `SELECT snapshot_hash AS "snapshotHash"
+       FROM review_requests WHERE id = $1::uuid`,
+      [firstReview.reviewRequestId],
+    );
+
+    await client.exec(`
+      UPDATE buyer_profiles SET status = 'active'
+      WHERE user_id = '${ids.buyer}';
+      UPDATE destination_policies SET result = 'review', version = 2
+      WHERE id = '${ids.policyA}';
+    `);
     const quoted = await service.quote({
       buyerUserId: ids.buyer,
       idempotencyKey: key,
@@ -660,18 +692,29 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       request: variantRequest,
     });
     if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
-      throw new Error("expected canonical review quote");
+      throw new Error("expected later canonical review quote");
     }
     const review = await service.prepare(quoted.plan, null);
     if (review.status !== "review_required" || review.reviewRequestId === null) {
-      throw new Error("expected canonical review request");
+      throw new Error("expected later canonical review request");
     }
+    expect(review.reviewRequestId).not.toBe(firstReview.reviewRequestId);
+    const reviewIdentity = await client.query<{ snapshotHash: string }>(
+      `SELECT snapshot_hash AS "snapshotHash"
+       FROM review_requests WHERE id = $1::uuid`,
+      [review.reviewRequestId],
+    );
     await client.query(
       `UPDATE review_requests
        SET outcome = 'approved', decided_by_user_id = $2::uuid,
-           decided_at = $3::timestamptz, covers_buyer_review = true
+           decided_at = $3::timestamptz, covers_buyer_review = false
        WHERE id = $1::uuid`,
       [review.reviewRequestId, ids.buyer2, now.toISOString()],
+    );
+    await client.query(
+      `UPDATE review_request_destination_policies SET covered = true
+       WHERE review_request_id = $1::uuid`,
+      [review.reviewRequestId],
     );
     const approved = await service.quoteForSession({
       buyerUserId: ids.buyer,
@@ -696,6 +739,20 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       providerScope: "local_test:synthetic-propeptiq-v1",
     });
     if (prepared.status !== "prepared") throw new Error("expected prepared");
+    const reviewBinding = await client.query<{
+      reviewRequestId: string;
+      reviewSnapshotHash: string;
+    }>(
+      `SELECT review_request_id::text AS "reviewRequestId",
+              review_snapshot_hash AS "reviewSnapshotHash"
+       FROM checkout_attempt_review_bindings
+       WHERE checkout_attempt_id = $1::uuid`,
+      [prepared.attemptId],
+    );
+    expect(reviewBinding.rows).toEqual([{
+      reviewRequestId: review.reviewRequestId,
+      reviewSnapshotHash: reviewIdentity.rows[0]!.snapshotHash,
+    }]);
     const order = await client.query<{ totalMinor: number }>(
       `SELECT total_minor AS "totalMinor" FROM orders WHERE id = $1::uuid`,
       [prepared.orderId],
@@ -786,6 +843,65 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       },
     });
 
+    await expect(client.query(
+      `UPDATE checkout_attempt_review_bindings
+       SET review_snapshot_hash = $2
+       WHERE checkout_attempt_id = $1::uuid`,
+      [prepared.attemptId, "0".repeat(64)],
+    )).rejects.toThrow(/checkout_attempt_review_bindings_review_identity_fk/iu);
+    await client.query(
+      `DELETE FROM checkout_attempt_review_bindings
+       WHERE checkout_attempt_id = $1::uuid`,
+      [prepared.attemptId],
+    );
+    await expect(fulfillment.handoff({
+      actorUserId: ids.buyer2,
+      actorClerkUserId: "clerk-synthetic-buyer-b",
+      orderId: prepared.orderId,
+      now,
+      correlationId: "canonical-review-missing-binding-task5",
+    })).resolves.toEqual({ status: "conflict" });
+    await client.query(
+      `INSERT INTO checkout_attempt_review_bindings
+        (checkout_attempt_id, order_id, review_request_id,
+         review_snapshot_hash, bound_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::timestamptz)`,
+      [
+        prepared.attemptId,
+        prepared.orderId,
+        review.reviewRequestId,
+        reviewIdentity.rows[0]!.snapshotHash,
+        now.toISOString(),
+      ],
+    );
+    await client.query(
+      `UPDATE checkout_attempt_review_bindings
+       SET review_request_id = $2::uuid, review_snapshot_hash = $3
+       WHERE checkout_attempt_id = $1::uuid`,
+      [
+        prepared.attemptId,
+        firstReview.reviewRequestId,
+        firstReviewIdentity.rows[0]!.snapshotHash,
+      ],
+    );
+    await expect(fulfillment.handoff({
+      actorUserId: ids.buyer2,
+      actorClerkUserId: "clerk-synthetic-buyer-b",
+      orderId: prepared.orderId,
+      now,
+      correlationId: "canonical-review-wrong-binding-task5",
+    })).resolves.toEqual({ status: "conflict" });
+    await client.query(
+      `UPDATE checkout_attempt_review_bindings
+       SET review_request_id = $2::uuid, review_snapshot_hash = $3
+       WHERE checkout_attempt_id = $1::uuid`,
+      [
+        prepared.attemptId,
+        review.reviewRequestId,
+        reviewIdentity.rows[0]!.snapshotHash,
+      ],
+    );
+
     await expect(fulfillment.handoff({
       actorUserId: ids.buyer2,
       actorClerkUserId: "clerk-synthetic-buyer-b",
@@ -800,6 +916,7 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         { id: "winter30", version: 1 },
       ],
     }));
+    expect(reviewInputs).toHaveLength(2);
   });
 
   it.each([
@@ -907,6 +1024,96 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     }
   });
 
+  it("fails closed through repository, service, and HTTP for a pre-replay canonical attempt", async () => {
+    await seedCheckoutReadyVariant();
+    await client.exec(
+      `DELETE FROM promotions WHERE id = '${ids.variantPromotion}'`,
+    );
+    const { repository, service } = setup();
+    const key = "30000000-0000-4000-8000-000000000136";
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical quote");
+    }
+    const session = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (session.status !== "quoted") throw new Error("expected session quote");
+    const prepared = await service.prepare(session.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${session.plan.identity.attemptId}`,
+      providerRequestHash: "e".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "canonical.pre-replay@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    });
+    if (prepared.status !== "prepared") throw new Error("expected prepared");
+    await client.query(
+      `UPDATE checkout_attempts
+       SET canonical_pricing_revision = NULL, canonical_quote_snapshot = NULL
+       WHERE id = $1::uuid`,
+      [prepared.attemptId],
+    );
+
+    await expect(repository.findAttempt({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+    })).rejects.toThrow(/stored canonical checkout replay is invalid/iu);
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    })).rejects.toThrow(/stored canonical checkout replay is invalid/iu);
+
+    let rateCount = 0;
+    const handlers = createCheckoutHttpHandlers({
+      environment: {
+        APP_ENV: "local",
+        APP_ORIGIN: "http://127.0.0.1:3000",
+      },
+      resolveActor: async () => ({ buyerUserId: ids.buyer }),
+      rateLimitSecret: "task5-round2-http-secret-at-least-32-characters",
+      rateLimitStore: { increment: async () => ++rateCount },
+      now: () => new Date(now),
+      quoteCheckout: (input) => service.quote({
+        buyerUserId: input.buyerUserId,
+        idempotencyKey: input.idempotencyKey,
+        paymentProviderAvailable: true,
+        request: input.request,
+      }),
+      startSession: async () => ({ status: "unavailable" }),
+    });
+    const response = await handlers.quote(new Request(
+      "http://127.0.0.1:3000/api/checkout/quote",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": key,
+          origin: "http://127.0.0.1:3000",
+        },
+        body: JSON.stringify(variantRequest),
+      },
+    ));
+    const body = await response.json();
+    expect(response.status).toBe(503);
+    expect(body).toEqual({ status: "quote_unavailable", component: "commerce" });
+    expect(JSON.stringify(body)).not.toMatch(/productId|pricingRevision/iu);
+  });
+
   it("keeps legacy attempts null-compatible and rejects incoherent canonical replay fields", async () => {
     const prepared = await quoteAndPrepare(
       "30000000-0000-4000-8000-000000000135",
@@ -925,12 +1132,60 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       pricingRevision: null,
       quoteSnapshot: null,
     });
+    await expect(prepared.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: "30000000-0000-4000-8000-000000000135",
+      paymentProviderAvailable: true,
+      request,
+    })).resolves.toMatchObject({
+      status: "loaded",
+      pricingRevision: null,
+      quoteSnapshot: {
+        lines: [
+          { productId: ids.productA },
+          { productId: ids.productB },
+        ],
+      },
+    });
     await expect(client.query(
       `UPDATE checkout_attempts
        SET canonical_pricing_revision = $2
        WHERE id = $1::uuid`,
       [prepared.prepared.attemptId, "a".repeat(64)],
     )).rejects.toThrow(/checkout_attempts_canonical_replay_coherent/iu);
+  });
+
+  it("fails closed instead of using legacy replay for mixed variant identity", async () => {
+    const key = "30000000-0000-4000-8000-000000000137";
+    const prepared = await quoteAndPrepare(key);
+    if (prepared.prepared.status !== "prepared") throw new Error("expected prepared");
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'SYNTHETIC-MIXED-5MG',
+        '5 mg mixed replay fixture', 5, 'mg', 1, 'active');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.variantPriceA}', '${ids.productA}', '${ids.variantA}',
+        1, 'active', 5000, 'USD', '2026-08-01T00:00:00.000Z');
+      UPDATE order_items SET variant_id = '${ids.variantA}',
+                             product_price_id = '${ids.variantPriceA}'
+      WHERE order_id = '${prepared.prepared.orderId}'
+        AND product_id = '${ids.productA}';
+    `);
+
+    await expect(prepared.repository.findAttempt({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+    })).rejects.toThrow(/stored canonical checkout replay is invalid/iu);
+    await expect(prepared.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request,
+    })).rejects.toThrow(/stored canonical checkout replay is invalid/iu);
   });
 
   it("returns only explicitly bound canonical variant checkout facts", async () => {
@@ -1603,6 +1858,26 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       status: "prepared",
       reviewRequestId: created.reviewRequestId,
     });
+    const legacyBinding = await client.query<{
+      reviewRequestId: string;
+      boundHash: string;
+      reviewHash: string;
+    }>(
+      `SELECT binding.review_request_id::text AS "reviewRequestId",
+              binding.review_snapshot_hash AS "boundHash",
+              review.snapshot_hash AS "reviewHash"
+       FROM checkout_attempt_review_bindings binding
+       JOIN review_requests review ON review.id = binding.review_request_id
+       WHERE binding.checkout_attempt_id = $1::uuid`,
+      [created.attemptId],
+    );
+    expect(legacyBinding.rows).toHaveLength(1);
+    expect(legacyBinding.rows[0]).toMatchObject({
+      reviewRequestId: created.reviewRequestId,
+    });
+    expect(legacyBinding.rows[0]!.boundHash).toBe(
+      legacyBinding.rows[0]!.reviewHash,
+    );
     expect(
       (await client.query<{ count: number }>(
         `SELECT count(*)::int AS count FROM inventory_reservations`,

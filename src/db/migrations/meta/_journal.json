@@ -197,6 +197,13 @@
       "when": 1788153574267,
       "tag": "0027_task5-canonical-replay",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788157813983,
+      "tag": "0028_task5-exact-review-binding",
+      "breakpoints": true
     }
   ]
 }

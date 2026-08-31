@@ -1603,6 +1603,7 @@ async function storedAttemptFromClient(
   const row = attempt.rows[0]!;
   type ItemRow = {
     productId: string;
+    variantId: string | null;
     productName: string;
     packageForm: string;
     quantity: number | string;
@@ -1613,6 +1614,7 @@ async function storedAttemptFromClient(
   };
   const items = await client.query<ItemRow>(
     `SELECT product_id::text AS "productId",
+            variant_id::text AS "variantId",
             product_name_snapshot AS "productName",
             package_form_snapshot AS "packageForm", quantity,
             unit_amount_minor AS "unitAmountMinor",
@@ -1625,18 +1627,24 @@ async function storedAttemptFromClient(
   const canonicalQuoteSnapshot = parseCanonicalReplaySnapshot(
     row.canonicalQuoteSnapshot,
   );
-  if (
-    (row.canonicalPricingRevision === null) !==
-      (row.canonicalQuoteSnapshot === null) ||
-    (row.canonicalPricingRevision !== null &&
-      (!/^[0-9a-f]{64}$/u.test(row.canonicalPricingRevision) ||
-        canonicalQuoteSnapshot === null))
-  ) {
+  const variantCount = items.rows.filter(
+    (item) => item.variantId !== null,
+  ).length;
+  const legacyIdentity = items.rows.length > 0 && variantCount === 0;
+  const canonicalIdentity =
+    items.rows.length > 0 && variantCount === items.rows.length;
+  if (!legacyIdentity && !canonicalIdentity) {
     throw new Error("Stored canonical checkout replay is invalid");
   }
-  const quoteSnapshot: BrowserCheckoutQuote | null =
-    canonicalQuoteSnapshot ??
-    (row.currency === "USD" &&
+  let quoteSnapshot: BrowserCheckoutQuote | null;
+  if (legacyIdentity) {
+    if (
+      row.canonicalPricingRevision !== null ||
+      row.canonicalQuoteSnapshot !== null
+    ) {
+      throw new Error("Stored canonical checkout replay is invalid");
+    }
+    quoteSnapshot = row.currency === "USD" &&
     items.rows.length > 0 &&
     safeInteger(row.discountMinor) === 0
       ? Object.freeze({
@@ -1671,7 +1679,36 @@ async function storedAttemptFromClient(
             ),
           ),
         })
-      : null);
+      : null;
+  } else {
+    if (
+      row.canonicalPricingRevision === null ||
+      row.canonicalQuoteSnapshot === null ||
+      !/^[0-9a-f]{64}$/u.test(row.canonicalPricingRevision) ||
+      canonicalQuoteSnapshot === null
+    ) {
+      throw new Error("Stored canonical checkout replay is invalid");
+    }
+    const persistedByVariant = new Map(
+      items.rows.map((item) => [item.variantId!, item]),
+    );
+    if (
+      persistedByVariant.size !== items.rows.length ||
+      canonicalQuoteSnapshot.lines.length !== items.rows.length ||
+      canonicalQuoteSnapshot.lines.some((line) => {
+        const item = persistedByVariant.get(line.variantId!);
+        return item === undefined ||
+          line.quantity !== safeInteger(item.quantity) ||
+          line.unitAmountMinor !== safeInteger(item.unitAmountMinor) ||
+          line.subtotalMinor !== safeInteger(item.subtotalMinor) ||
+          line.discountMinor !== safeInteger(item.discountMinor) ||
+          line.totalMinor !== safeInteger(item.totalMinor);
+      })
+    ) {
+      throw new Error("Stored canonical checkout replay is invalid");
+    }
+    quoteSnapshot = canonicalQuoteSnapshot;
+  }
   return Object.freeze({
     orderId: row.orderId,
     attemptId: row.attemptId,
@@ -2103,6 +2140,58 @@ async function writeCommercialSnapshots(
     );
   }
   return itemIds;
+}
+
+async function bindExactApprovedReview(
+  client: CheckoutSqlClient,
+  plan: AuthoritativeCheckoutPlanData,
+  review: ExactReviewDecision,
+): Promise<boolean> {
+  if (
+    review.outcome !== "approved" ||
+    review.reviewSnapshotHash !== plan.reviewSnapshotHash
+  ) {
+    return false;
+  }
+  const inserted = await client.query<{ reviewRequestId: string }>(
+    `INSERT INTO checkout_attempt_review_bindings
+       (checkout_attempt_id, order_id, review_request_id,
+        review_snapshot_hash, bound_at)
+     SELECT $1::uuid, $2::uuid, review.id, review.snapshot_hash,
+            $5::timestamptz
+     FROM review_requests review
+     WHERE review.id = $3::uuid AND review.order_id = $2::uuid
+       AND review.snapshot_hash = $4 AND review.outcome = 'approved'
+       AND review.decided_by_user_id IS NOT NULL
+       AND review.decided_at IS NOT NULL
+       AND review.covers_buyer_review IS NOT NULL
+     ON CONFLICT (checkout_attempt_id) DO NOTHING
+     RETURNING review_request_id::text AS "reviewRequestId"`,
+    [
+      plan.identity.attemptId,
+      plan.identity.orderId,
+      review.reviewRequestId,
+      review.reviewSnapshotHash,
+      plan.authoritativeAt.toISOString(),
+    ],
+  );
+  if (inserted.rows.length === 1) return true;
+  const existing = await client.query<{
+    orderId: string;
+    reviewRequestId: string;
+    reviewSnapshotHash: string;
+  }>(
+    `SELECT order_id::text AS "orderId",
+            review_request_id::text AS "reviewRequestId",
+            review_snapshot_hash AS "reviewSnapshotHash"
+     FROM checkout_attempt_review_bindings
+     WHERE checkout_attempt_id = $1::uuid FOR UPDATE`,
+    [plan.identity.attemptId],
+  );
+  return existing.rows.length === 1 &&
+    existing.rows[0]!.orderId === plan.identity.orderId &&
+    existing.rows[0]!.reviewRequestId === review.reviewRequestId &&
+    existing.rows[0]!.reviewSnapshotHash === review.reviewSnapshotHash;
 }
 
 async function createOrLoadPendingReview(
@@ -2564,6 +2653,12 @@ async function prepareInTransaction(
     existing,
   );
   if (itemIds === null) return { status: "facts_changed_retry" };
+  if (
+    finalReview !== null &&
+    !(await bindExactApprovedReview(client, plan, finalReview))
+  ) {
+    return { status: "facts_changed_retry" };
+  }
   if (plan.referralQuote !== null && plan.affiliateQuote !== null) {
     throw new AffiliateBindingConflict();
   }
