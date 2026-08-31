@@ -2,7 +2,7 @@ import "server-only";
 
 import { connection } from "next/server";
 
-import type { ServerEnv } from "@/config/env-schema";
+import { hasProductionIdentity, type ServerEnv } from "@/config/env-schema";
 import { storefrontContentRecords, type ControlledContentRecord } from "@/content/storefront-content";
 import { withRuntimeTransaction } from "@/db/runtime";
 import { readServerEnv } from "@/env";
@@ -33,7 +33,7 @@ export function resolvePricePresentationMode(
   environment: Pick<ServerEnv, "APP_ENV" | "VERCEL_ENV" | "VERCEL_TARGET_ENV">,
   runtime: Readonly<{ nodeEnv: string | undefined }>,
 ): PricePresentationMode {
-  const production = environment.APP_ENV === "production" || environment.VERCEL_ENV === "production" || environment.VERCEL_TARGET_ENV === "production";
+  const production = hasProductionIdentity(environment);
   if (production) return "production";
   if (runtime.nodeEnv === "test") return "test";
   if (environment.APP_ENV === "preview") return "preview";
