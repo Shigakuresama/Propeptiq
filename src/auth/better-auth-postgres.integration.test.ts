@@ -6,7 +6,13 @@ import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createBetterAuthForEnvironment } from "@/auth/better-auth-server";
+import { projectBetterAuthIdentity } from "@/auth/identity";
 import { parseServerEnv } from "@/config/env-schema";
+import {
+  projectPrincipalFromIdentity,
+  type PrincipalQueryPort,
+} from "@/db/repositories/principal-repository";
+import { preparePostgresConnectionUrl } from "@/db/postgres-connection-url";
 import { resolveTestDatabase } from "../../tests/integration/helpers/database";
 
 type DeliveredEmail = Readonly<{
@@ -47,6 +53,15 @@ async function cleanupSyntheticIdentity(
     );
     const userIds = users.rows.map((row) => row.id);
     if (userIds.length > 0) {
+      const applicationUsers = await client.query<{ usersTable: string | null }>(
+        `SELECT to_regclass('public.users')::text AS "usersTable"`,
+      );
+      if (applicationUsers.rows[0]?.usersTable) {
+        await client.query(
+          "DELETE FROM public.users WHERE clerk_id = ANY($1::text[])",
+          [userIds],
+        );
+      }
       await client.query(
         'DELETE FROM neon_auth."session" WHERE "userId" = ANY($1::uuid[])',
         [userIds],
@@ -70,6 +85,46 @@ async function cleanupSyntheticIdentity(
     throw error;
   } finally {
     client.release();
+  }
+}
+
+async function assertApplicationPrincipalSchema(database: Pool): Promise<void> {
+  const result = await database.query<{
+    migrationHistory: boolean;
+    users: boolean;
+    buyerProfiles: boolean;
+    staffRoles: boolean;
+  }>(`
+    SELECT
+      to_regclass('drizzle.__propeptiq_migrations') IS NOT NULL
+        AS "migrationHistory",
+      to_regclass('public.users') IS NOT NULL
+        AND to_regclass('users') = to_regclass('public.users') AS users,
+      to_regclass('public.buyer_profiles') IS NOT NULL
+        AND to_regclass('buyer_profiles') = to_regclass('public.buyer_profiles')
+        AS "buyerProfiles",
+      to_regclass('public.staff_roles') IS NOT NULL
+        AND to_regclass('staff_roles') = to_regclass('public.staff_roles')
+        AS "staffRoles"
+  `);
+  const schema = result.rows[0];
+  if (
+    !schema?.migrationHistory ||
+    !schema.users ||
+    !schema.buyerProfiles ||
+    !schema.staffRoles
+  ) {
+    throw new Error(
+      "Application migrations 0000-0022 must be applied to the isolated TEST_DATABASE_URL before principal projection testing",
+    );
+  }
+  const migrationHistory = await database.query<{ count: number }>(
+    "SELECT COUNT(*)::int AS count FROM drizzle.__propeptiq_migrations",
+  );
+  if ((migrationHistory.rows[0]?.count ?? 0) < 23) {
+    throw new Error(
+      "Application migrations 0000-0022 must be applied to the isolated TEST_DATABASE_URL before principal projection testing",
+    );
   }
 }
 
@@ -284,6 +339,189 @@ describe.skipIf(!integrationEnabled)(
         "DELETE FROM propeptiq_auth.rate_limit_windows",
       );
       fixtureEmail = null;
+    });
+
+    it("projects a verified Better Auth user into a persisted application principal", async () => {
+      const target = resolveTestDatabase(process.env);
+      const messages: DeliveredEmail[] = [];
+      const pendingDeliveries = new Set<Promise<void>>();
+      const email = `codex-principal-${randomUUID()}@example.test`;
+      const password = "Synthetic-principal-password-5!";
+      const authDatabases: Pool[] = [];
+      const environment = parseServerEnv({
+        APP_ENV: "preview",
+        APP_ORIGIN: "https://auth-test.propeptiq.example.invalid",
+        AUTH_MODE: "test",
+        BETTER_AUTH_SECRET:
+          "synthetic-principal-better-auth-secret-0123456789ABCDEF",
+        RATE_LIMIT_SECRET:
+          "synthetic-principal-rate-limit-secret-0123456789ABCDEF",
+        DATABASE_MODE: "test",
+        TEST_DATABASE_URL: target.url,
+        TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+        EMAIL_MODE: "test",
+        RESEND_API_KEY: "re_synthetic_principal_only",
+        RESEND_FROM: "accounts@example.test",
+      });
+      const applicationDatabase = new Pool({
+        connectionString: preparePostgresConnectionUrl(target.url),
+        max: 1,
+        idleTimeoutMillis: 10_000,
+        connectionTimeoutMillis: 5_000,
+        allowExitOnIdle: true,
+      });
+      let cleanupCompleted = false;
+      const flushDeliveries = async () => {
+        while (pendingDeliveries.size > 0) {
+          await Promise.all([...pendingDeliveries]);
+        }
+      };
+
+      try {
+        await assertApplicationPrincipalSchema(applicationDatabase);
+        const auth = createBetterAuthForEnvironment(environment, {
+          createPool(configuration) {
+            const database = new Pool(configuration);
+            authDatabases.push(database);
+            return database;
+          },
+          createAuth: (options) => betterAuth(options),
+          createResend: () => ({
+            emails: {
+              async send(message) {
+                messages.push(message);
+                return { error: null };
+              },
+            },
+          }),
+          schedule(work) {
+            const delivery = work();
+            pendingDeliveries.add(delivery);
+            void delivery.then(
+              () => pendingDeliveries.delete(delivery),
+              () => pendingDeliveries.delete(delivery),
+            );
+          },
+        });
+        const databasePool = authDatabases[0];
+        if (!auth || !databasePool) {
+          throw new Error("Better Auth principal test runtime was not created");
+        }
+
+        await applyAuthSupportMigration(databasePool);
+        await cleanupSyntheticIdentity(databasePool, email);
+        await databasePool.query(
+          "DELETE FROM propeptiq_auth.rate_limit_windows",
+        );
+        await auth.api.signUpEmail({
+          body: { name: "Synthetic Principal Projection", email, password },
+        });
+        await flushDeliveries();
+        const verification = await auth.api.verifyEmailOTP({
+          body: { email, otp: extractOtp(messages) },
+        });
+        const projectionTime = new Date();
+        const identity = projectBetterAuthIdentity(
+          verification.user,
+          projectionTime,
+        );
+        if (!identity) throw new Error("Verified Better Auth identity was not projected");
+        const applicationClient = await applicationDatabase.connect();
+        let principal;
+        try {
+          await applicationClient.query("BEGIN");
+          const queryPort: PrincipalQueryPort = {
+            async query<T extends object>(sql: string, params: unknown[] = []) {
+              const result = await applicationClient.query(sql, params);
+              return { rows: result.rows as T[] };
+            },
+          };
+          principal = await projectPrincipalFromIdentity(
+            queryPort,
+            identity,
+            projectionTime,
+          );
+          await applicationClient.query("COMMIT");
+        } catch (error) {
+          await applicationClient.query("ROLLBACK");
+          throw error;
+        } finally {
+          applicationClient.release();
+        }
+
+        expect(principal).toMatchObject({
+          clerkUserId: verification.user.id,
+          buyerStatus: null,
+          capabilities: [],
+          mfaSatisfied: false,
+        });
+        const persisted = await applicationDatabase.query<{
+          actorId: string;
+          clerkId: string;
+          emailVerifiedAt: Date | null;
+        }>(
+          `SELECT id::text AS "actorId", clerk_id AS "clerkId",
+                  email_verified_at AS "emailVerifiedAt"
+             FROM public.users
+            WHERE clerk_id = $1`,
+          [verification.user.id],
+        );
+        expect(persisted.rows).toHaveLength(1);
+        expect(persisted.rows[0]).toMatchObject({
+          actorId: principal?.actorId,
+          clerkId: verification.user.id,
+        });
+        expect(persisted.rows[0]?.emailVerifiedAt?.getTime()).toBe(
+          projectionTime.getTime(),
+        );
+
+        await cleanupSyntheticIdentity(databasePool, email);
+        await databasePool.query(
+          "DELETE FROM propeptiq_auth.rate_limit_windows",
+        );
+        const remainingApplicationUser = await applicationDatabase.query<{
+          count: string;
+        }>(
+          "SELECT COUNT(*)::text AS count FROM public.users WHERE clerk_id = $1",
+          [verification.user.id],
+        );
+        const remainingAuth = await databasePool.query<{
+          users: string;
+          verifications: string;
+          rateLimits: string;
+        }>(
+          `SELECT
+             (SELECT COUNT(*)::text FROM neon_auth."user" WHERE email = $1)
+               AS users,
+             (SELECT COUNT(*)::text FROM neon_auth.verification
+               WHERE identifier LIKE '%' || $1) AS verifications,
+             (SELECT COUNT(*)::text FROM propeptiq_auth.rate_limit_windows)
+               AS "rateLimits"`,
+          [email],
+        );
+        expect(remainingApplicationUser.rows[0]?.count).toBe("0");
+        expect(remainingAuth.rows[0]).toEqual({
+          users: "0",
+          verifications: "0",
+          rateLimits: "0",
+        });
+        cleanupCompleted = true;
+      } finally {
+        const databasePool = authDatabases[0];
+        try {
+          if (databasePool && !cleanupCompleted) {
+            await cleanupSyntheticIdentity(databasePool, email);
+            await databasePool.query(
+              "DELETE FROM propeptiq_auth.rate_limit_windows",
+            );
+          }
+        } finally {
+          await Promise.allSettled([
+            ...authDatabases.map((database) => database.end()),
+            applicationDatabase.end(),
+          ]);
+        }
+      }
     });
 
     it.skipIf(!managedCompatibilityEnabled)(
