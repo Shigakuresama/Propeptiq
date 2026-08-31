@@ -303,18 +303,24 @@ async function getAutomaticStorefrontPromotions(
   const result: PersistedStorefrontPromotion[] = [];
   for (const row of parents.rows) {
     type TargetRow = {
-      targetKind: "product" | "policy_group" | "variant";
+      targetKind: "product" | "policy_group";
       productId: string | null;
       policyGroupId: string | null;
-      variantId: string | null;
     };
     const targets = await client.query<TargetRow>(
       `SELECT target_kind AS "targetKind", product_id::text AS "productId",
-              policy_group_id::text AS "policyGroupId",
-              variant_id::text AS "variantId"
+              policy_group_id::text AS "policyGroupId"
        FROM promotion_targets
        WHERE promotion_id = $1::uuid
-       ORDER BY target_kind, COALESCE(product_id, policy_group_id, variant_id)`,
+       ORDER BY target_kind, COALESCE(product_id, policy_group_id)`,
+      [row.recordId],
+    );
+    type VariantTargetRow = { variantId: string };
+    const variantTargets = await client.query<VariantTargetRow>(
+      `SELECT variant_id::text AS "variantId"
+       FROM promotion_variant_targets
+       WHERE promotion_id = $1::uuid
+       ORDER BY variant_id`,
       [row.recordId],
     );
     const discountBps =
@@ -335,11 +341,16 @@ async function getAutomaticStorefrontPromotions(
     }
 
     let scope: StorefrontPromotionScope | null = null;
-    if (row.scope === "sitewide" && targets.rows.length === 0) {
+    if (
+      row.scope === "sitewide" &&
+      targets.rows.length === 0 &&
+      variantTargets.rows.length === 0
+    ) {
       scope = Object.freeze({ kind: "sitewide" });
     } else if (
       row.scope === "products" &&
       targets.rows.length > 0 &&
+      variantTargets.rows.length === 0 &&
       targets.rows.every(
         (target) =>
           target.targetKind === "product" &&
@@ -355,18 +366,14 @@ async function getAutomaticStorefrontPromotions(
       });
     } else if (
       row.scope === "variants" &&
-      targets.rows.length > 0 &&
-      targets.rows.every(
-        (target) =>
-          target.targetKind === "variant" &&
-          target.variantId !== null &&
-          isCanonicalUuid(target.variantId),
-      )
+      targets.rows.length === 0 &&
+      variantTargets.rows.length > 0 &&
+      variantTargets.rows.every((target) => isCanonicalUuid(target.variantId))
     ) {
       scope = Object.freeze({
         kind: "variants",
         variantIds: Object.freeze(
-          targets.rows.map((target) => target.variantId!),
+          variantTargets.rows.map((target) => target.variantId),
         ),
       });
     }
@@ -495,6 +502,7 @@ async function readProductCores(
               superseded_at AS "supersededAt"
        FROM product_prices
        WHERE product_id = $1::uuid AND currency = 'USD'
+         AND variant_id IS NULL AND price_status = 'active'
          AND effective_at <= $2::timestamptz AND superseded_at IS NULL
        ORDER BY version, id${lockSuffix(lock)}`,
       [productId, now.toISOString()],
@@ -696,7 +704,7 @@ async function readLots(
             expires_at AS "expiresAt"
      FROM lots
      WHERE product_id = ANY($1::uuid[]) AND status = 'released'
-       AND available_quantity > 0
+       AND variant_id IS NULL AND available_quantity > 0
        AND (expires_at IS NULL OR expires_at > $2::timestamptz)
      ORDER BY id${lockSuffix(lock)}`,
     [[...productIds], now.toISOString()],
@@ -1516,7 +1524,7 @@ async function reserveInventory(
         `UPDATE lots SET available_quantity = available_quantity - $2,
                          updated_at = $3::timestamptz
          WHERE id = $1::uuid AND status = 'released'
-           AND available_quantity >= $2
+           AND variant_id IS NULL AND available_quantity >= $2
          RETURNING available_quantity AS "balanceAfter"`,
         [lot.id, allocation, plan.authoritativeAt.toISOString()],
       );

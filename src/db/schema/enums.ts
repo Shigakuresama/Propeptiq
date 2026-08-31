@@ -61,7 +61,6 @@ export const promotionStatusEnum = pgEnum("promotion_status", [
 export const promotionTargetKindEnum = pgEnum("promotion_target_kind", [
   "product",
   "policy_group",
-  "variant",
 ]);
 export const promotionApplicationModeEnum = pgEnum(
   "promotion_application_mode",

@@ -433,19 +433,12 @@ export const promotionTargets = pgTable(
       () => productPolicyGroups.id,
       { onDelete: "restrict" },
     ),
-    variantId: uuid("variant_id").references(() => productVariants.id, {
-      onDelete: "restrict",
-    }),
   },
   (table) => [
     check(
       "promotion_targets_target_scope_coherent",
-      sql`(${table.targetKind} = 'product' and ${table.productId} is not null
-            and ${table.policyGroupId} is null and ${table.variantId} is null)
-          or (${table.targetKind} = 'policy_group' and ${table.productId} is null
-            and ${table.policyGroupId} is not null and ${table.variantId} is null)
-          or (${table.targetKind} = 'variant' and ${table.productId} is null
-            and ${table.policyGroupId} is null and ${table.variantId} is not null)`,
+      sql`(${table.targetKind} = 'product' and ${table.productId} is not null and ${table.policyGroupId} is null)
+          or (${table.targetKind} = 'policy_group' and ${table.productId} is null and ${table.policyGroupId} is not null)`,
     ),
     uniqueIndex("promotion_targets_product_unique")
       .on(table.promotionId, table.productId)
@@ -453,8 +446,24 @@ export const promotionTargets = pgTable(
     uniqueIndex("promotion_targets_group_unique")
       .on(table.promotionId, table.policyGroupId)
       .where(sql`${table.policyGroupId} is not null`),
-    uniqueIndex("promotion_targets_variant_unique")
-      .on(table.promotionId, table.variantId)
-      .where(sql`${table.variantId} is not null`),
+  ],
+);
+
+export const promotionVariantTargets = pgTable(
+  "promotion_variant_targets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    promotionId: uuid("promotion_id")
+      .notNull()
+      .references(() => promotions.id, { onDelete: "cascade" }),
+    variantId: uuid("variant_id")
+      .notNull()
+      .references(() => productVariants.id, { onDelete: "restrict" }),
+  },
+  (table) => [
+    unique("promotion_variant_targets_promotion_variant_unique").on(
+      table.promotionId,
+      table.variantId,
+    ),
   ],
 );

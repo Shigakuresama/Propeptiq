@@ -1,5 +1,5 @@
 {
-  "id": "ea688584-49c7-4946-bf8d-b8b3ae81164f",
+  "id": "701c40ab-abbd-4cc2-8adc-7f21376c8168",
   "prevId": "61282909-5711-48b7-a285-51ef39c1a516",
   "version": "7",
   "dialect": "postgresql",
@@ -1766,12 +1766,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
-        },
-        "variant_id": {
-          "name": "variant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {
@@ -1818,28 +1812,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "promotion_targets_variant_unique": {
-          "name": "promotion_targets_variant_unique",
-          "columns": [
-            {
-              "expression": "promotion_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "variant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"promotion_targets\".\"variant_id\" is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -1881,10 +1853,61 @@
           ],
           "onDelete": "restrict",
           "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "promotion_targets_target_scope_coherent": {
+          "name": "promotion_targets_target_scope_coherent",
+          "value": "(\"promotion_targets\".\"target_kind\" = 'product' and \"promotion_targets\".\"product_id\" is not null and \"promotion_targets\".\"policy_group_id\" is null)\n          or (\"promotion_targets\".\"target_kind\" = 'policy_group' and \"promotion_targets\".\"product_id\" is null and \"promotion_targets\".\"policy_group_id\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.promotion_variant_targets": {
+      "name": "promotion_variant_targets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
         },
-        "promotion_targets_variant_id_product_variants_id_fk": {
-          "name": "promotion_targets_variant_id_product_variants_id_fk",
-          "tableFrom": "promotion_targets",
+        "promotion_id": {
+          "name": "promotion_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "variant_id": {
+          "name": "variant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "promotion_variant_targets_promotion_id_promotions_id_fk": {
+          "name": "promotion_variant_targets_promotion_id_promotions_id_fk",
+          "tableFrom": "promotion_variant_targets",
+          "tableTo": "promotions",
+          "columnsFrom": [
+            "promotion_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "promotion_variant_targets_variant_id_product_variants_id_fk": {
+          "name": "promotion_variant_targets_variant_id_product_variants_id_fk",
+          "tableFrom": "promotion_variant_targets",
           "tableTo": "product_variants",
           "columnsFrom": [
             "variant_id"
@@ -1897,14 +1920,18 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "promotion_targets_target_scope_coherent": {
-          "name": "promotion_targets_target_scope_coherent",
-          "value": "(\"promotion_targets\".\"target_kind\" = 'product' and \"promotion_targets\".\"product_id\" is not null\n            and \"promotion_targets\".\"policy_group_id\" is null and \"promotion_targets\".\"variant_id\" is null)\n          or (\"promotion_targets\".\"target_kind\" = 'policy_group' and \"promotion_targets\".\"product_id\" is null\n            and \"promotion_targets\".\"policy_group_id\" is not null and \"promotion_targets\".\"variant_id\" is null)\n          or (\"promotion_targets\".\"target_kind\" = 'variant' and \"promotion_targets\".\"product_id\" is null\n            and \"promotion_targets\".\"policy_group_id\" is null and \"promotion_targets\".\"variant_id\" is not null)"
+      "uniqueConstraints": {
+        "promotion_variant_targets_promotion_variant_unique": {
+          "name": "promotion_variant_targets_promotion_variant_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "promotion_id",
+            "variant_id"
+          ]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.promotions": {
@@ -8852,8 +8879,7 @@
       "schema": "public",
       "values": [
         "product",
-        "policy_group",
-        "variant"
+        "policy_group"
       ]
     },
     "public.provider_event_status": {

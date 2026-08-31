@@ -55,6 +55,7 @@ const variantFixture = {
   variantA: "68000000-0000-4000-8000-000000000004",
   variantB: "68000000-0000-4000-8000-000000000005",
   priceA: "68000000-0000-4000-8000-000000000006",
+  priceB: "68000000-0000-4000-8000-000000000007",
 } as const;
 
 const hashA = "a".repeat(64);
@@ -326,6 +327,63 @@ describe("Task 6 schema boundary", () => {
          '${variantFixture.priceA}', '68000000-0000-4000-8000-000000000014',
          'Variant fixture B', 'sealed unit', 'USD', 1000, 1, 1000, 0, 1000)`,
     );
+  });
+
+  it("rejects a same-product order item whose price belongs to another variant", async () => {
+    client = await createMigratedPglite();
+    await insertVariantProducts(client);
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${variantFixture.variantA}', '${variantFixture.productA}',
+         'TEST-FIXTURE-5', '5 mg synthetic unit', 5, 'mg', 1, 'active'),
+        ('${variantFixture.variantB}', '${variantFixture.productA}',
+         'TEST-FIXTURE-10', '10 mg synthetic unit', 10, 'mg', 1, 'active');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES
+        ('${variantFixture.priceB}', '${variantFixture.productA}',
+         '${variantFixture.variantB}', 1, 'active', 1000, 'USD', now());
+      INSERT INTO users (id, clerk_id, email_verified_at)
+      VALUES ('68000000-0000-4000-8000-000000000021', 'same-product-price-buyer', now());
+      INSERT INTO attestation_versions
+        (id, version, content_hash, policy_text, effective_at)
+      VALUES ('68000000-0000-4000-8000-000000000022', 1, '${hashA}',
+        'Same-product price fixture attestation', now());
+      INSERT INTO attestation_acceptances
+        (id, user_id, attestation_version_id, accepted_at)
+      VALUES ('68000000-0000-4000-8000-000000000023',
+        '68000000-0000-4000-8000-000000000021',
+        '68000000-0000-4000-8000-000000000022', now());
+      INSERT INTO destination_policies
+        (id, scope_kind, product_id, state_code, result, version, active,
+         effective_at)
+      VALUES ('68000000-0000-4000-8000-000000000024', 'product',
+        '${variantFixture.productA}', 'CA', 'allowed', 1, true, now());
+      INSERT INTO orders
+        (id, buyer_user_id, buyer_status_snapshot, attestation_acceptance_id,
+         destination_state_code, currency, subtotal_minor, discount_minor,
+         tax_minor, shipping_minor, total_minor, state)
+      VALUES ('68000000-0000-4000-8000-000000000025',
+        '68000000-0000-4000-8000-000000000021', 'active',
+        '68000000-0000-4000-8000-000000000023', 'CA', 'USD',
+        1000, 0, 0, 0, 1000, 'checkout_pending');
+    `);
+
+    await expect(
+      client.exec(`INSERT INTO order_items
+        (order_id, product_id, variant_id, product_price_id,
+         destination_policy_id, product_name_snapshot, package_form_snapshot,
+         currency, unit_amount_minor, quantity, subtotal_minor,
+         discount_minor, total_minor)
+       VALUES ('68000000-0000-4000-8000-000000000025',
+         '${variantFixture.productA}', '${variantFixture.variantA}',
+         '${variantFixture.priceB}', '68000000-0000-4000-8000-000000000024',
+         'Variant fixture A', 'sealed unit', 'USD', 1000, 1, 1000, 0, 1000)`),
+    ).rejects.toThrow(/order_items_price_variant_fk/);
   });
 
   it("rejects a WINTER30 campaign with any percentage other than 3000 basis points", async () => {

@@ -38,6 +38,7 @@ const ids = {
   variantLotA: "30000000-0000-4000-8000-000000000023",
   variantPromotion: "30000000-0000-4000-8000-000000000024",
   variantPromotionTarget: "30000000-0000-4000-8000-000000000025",
+  variantB: "30000000-0000-4000-8000-000000000026",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -305,10 +306,10 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       VALUES ('${ids.variantPromotion}', 'variant15', 'VARIANT15',
         'Synthetic variant offer', 'discount', 'active', 1500, '{}'::jsonb,
         true, 'America/Los_Angeles', 'automatic', 'variants');
-      INSERT INTO promotion_targets
-        (id, promotion_id, target_kind, variant_id)
+      INSERT INTO promotion_variant_targets
+        (id, promotion_id, variant_id)
       VALUES ('${ids.variantPromotionTarget}', '${ids.variantPromotion}',
-        'variant', '${ids.variantA}');
+        '${ids.variantA}');
     `);
 
     await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([
@@ -318,6 +319,109 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         scope: { kind: "variants", variantIds: [ids.variantA] },
       }),
     ]);
+  });
+
+  it("denies product-keyed checkout when only variant-bound prices exist", async () => {
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${ids.variantA}', '${ids.productA}', 'TEST-FIXTURE-5',
+         '5 mg synthetic unit', 5, 'mg', 1, 'active'),
+        ('${ids.variantB}', '${ids.productB}', 'TEST-FIXTURE-10',
+         '10 mg synthetic unit', 10, 'mg', 1, 'active');
+      UPDATE product_prices
+      SET variant_id = CASE product_id
+        WHEN '${ids.productA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END;
+    `);
+    const { service } = setup();
+    const denied = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: "30000000-0000-4000-8000-000000000401",
+      paymentProviderAvailable: true,
+      request,
+    });
+
+    expect(denied).toEqual({
+      status: "denied",
+      reasons: ["product_catalog_incomplete"],
+    });
+    const writes = await client.query<{
+      orders: number;
+      attempts: number;
+      reservations: number;
+    }>(`SELECT
+      (SELECT count(*)::int FROM orders) AS orders,
+      (SELECT count(*)::int FROM checkout_attempts) AS attempts,
+      (SELECT count(*)::int FROM inventory_reservations) AS reservations`);
+    expect(writes.rows).toEqual([{ orders: 0, attempts: 0, reservations: 0 }]);
+  });
+
+  it("denies product-keyed checkout when the legacy price is not active", async () => {
+    await client.exec(`UPDATE product_prices SET price_status = 'unavailable'`);
+    const { service } = setup();
+    const denied = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: "30000000-0000-4000-8000-000000000403",
+      paymentProviderAvailable: true,
+      request,
+    });
+
+    expect(denied).toEqual({
+      status: "denied",
+      reasons: ["product_catalog_incomplete"],
+    });
+    const writes = await client.query<{
+      orders: number;
+      attempts: number;
+      reservations: number;
+    }>(`SELECT
+      (SELECT count(*)::int FROM orders) AS orders,
+      (SELECT count(*)::int FROM checkout_attempts) AS attempts,
+      (SELECT count(*)::int FROM inventory_reservations) AS reservations`);
+    expect(writes.rows).toEqual([{ orders: 0, attempts: 0, reservations: 0 }]);
+  });
+
+  it("denies product-keyed checkout when only variant-bound inventory exists", async () => {
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${ids.variantA}', '${ids.productA}', 'TEST-FIXTURE-5',
+         '5 mg synthetic unit', 5, 'mg', 1, 'active'),
+        ('${ids.variantB}', '${ids.productB}', 'TEST-FIXTURE-10',
+         '10 mg synthetic unit', 10, 'mg', 1, 'active');
+      UPDATE lots
+      SET variant_id = CASE product_id
+        WHEN '${ids.productA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END;
+    `);
+    const { service } = setup();
+    const denied = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: "30000000-0000-4000-8000-000000000402",
+      paymentProviderAvailable: true,
+      request,
+    });
+
+    expect(denied).toEqual({
+      status: "denied",
+      reasons: ["inventory_unavailable"],
+    });
+    const writes = await client.query<{
+      orders: number;
+      attempts: number;
+      reservations: number;
+    }>(`SELECT
+      (SELECT count(*)::int FROM orders) AS orders,
+      (SELECT count(*)::int FROM checkout_attempts) AS attempts,
+      (SELECT count(*)::int FROM inventory_reservations) AS reservations`);
+    expect(writes.rows).toEqual([{ orders: 0, attempts: 0, reservations: 0 }]);
   });
 
   it("persists authoritative snapshots and allocates earliest-expiry lots atomically with idempotent replay", async () => {
@@ -374,6 +478,25 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         expires_at: "2026-08-25T13:00:00.000Z",
       },
     ]);
+    const legacyVariantBindings = await client.query<{
+      itemVariantId: string | null;
+      lotVariantId: string | null;
+    }>(`SELECT
+          oi.variant_id::text AS "itemVariantId",
+          l.variant_id::text AS "lotVariantId"
+        FROM inventory_reservations r
+        JOIN order_items oi ON oi.id = r.order_item_id
+        JOIN lots l ON l.id = r.lot_id
+        WHERE r.order_id = '${prepared.orderId}'
+        ORDER BY r.id`);
+    expect(legacyVariantBindings.rows).toHaveLength(3);
+    expect(legacyVariantBindings.rows).toEqual(
+      expect.arrayContaining([
+        { itemVariantId: null, lotVariantId: null },
+        { itemVariantId: null, lotVariantId: null },
+        { itemVariantId: null, lotVariantId: null },
+      ]),
+    );
     const counts = await client.query<{
       orders: number;
       attempts: number;
