@@ -72,13 +72,32 @@ describe("CheckoutForm", () => {
     expect(screen.getByText("Your requested variant identifiers and quantities were not replaced. Review the current server facts before checkout.")).toBeVisible();
   });
 
+  it("acknowledges changed variant facts without reopening the Task 5 checkout gate", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockReset()
+      .mockResolvedValueOnce(response(preview({ previewToken: "b".repeat(64) })))
+      .mockResolvedValueOnce(response(preview({ quantity: 3, previewToken: "c".repeat(64), requiresAcknowledgement: true, reasons: ["server_facts_changed"] })));
+    const { rerender } = render(<CheckoutForm promotions={[]} />);
+    await screen.findByText("This is the current authoritative baseline; no earlier same-tab server preview was available.");
+    useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity: 3 }] });
+    rerender(<CheckoutForm promotions={[]} />);
+    await user.click(await screen.findByRole("button", { name: "Acknowledge current server facts" }));
+    expect(await screen.findByText("Current server facts acknowledged.")).toHaveAttribute("role", "status");
+    expect(screen.queryByRole("button", { name: "Acknowledge current server facts" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Variant checkout unavailable" })).toBeDisabled();
+  });
+
   it("retains accessible destination labels while the variant checkout gate is disabled", async () => {
     render(<CheckoutForm promotions={[]} />);
     await screen.findByRole("status");
     for (const label of ["Recipient name", "Address line 1", "Address line 2 (optional)", "City", "State or district", "Postal code"]) {
       expect(screen.getByLabelText(label)).toBeVisible();
     }
-    expect(screen.getByLabelText("Recipient name")).toHaveAttribute("aria-required", "true");
+    for (const label of ["Recipient name", "Address line 1", "City", "State or district", "Postal code"]) {
+      const field = screen.getByLabelText(label);
+      expect(field).toBeRequired();
+      expect(field).toHaveAttribute("aria-required", "true");
+    }
     expect(screen.getByRole("button", { name: "Variant checkout unavailable" })).toBeDisabled();
   });
 });
