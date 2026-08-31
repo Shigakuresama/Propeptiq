@@ -3,6 +3,7 @@ import type { Route } from "next";
 import Link from "next/link";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
+import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
 import { ProgramStrip } from "@/components/growth/program-strip";
 import { ProofRail } from "@/components/site/proof-rail";
@@ -17,12 +18,14 @@ export function PublicHome({
   syntheticLocal = false,
   products,
   variantCount,
+  pricing,
 }: {
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
   syntheticLocal?: boolean;
   products: readonly PublicStorefrontProduct[];
   variantCount: number;
+  pricing?: PublicStorefrontPricingContext | undefined;
 }) {
   const growthPrograms = [
     ...(loyaltyPolicy?.status === "active" ? [{
@@ -114,7 +117,7 @@ export function PublicHome({
           <ul className="catalog-grid mt-8">
             {products.slice(0, 3).map((product, index) => (
               <li key={product.slug}>
-                <CatalogListingCard product={product} priority={index === 0} />
+                <CatalogListingCard product={product} priority={index === 0} pricing={pricing} />
               </li>
             ))}
           </ul>

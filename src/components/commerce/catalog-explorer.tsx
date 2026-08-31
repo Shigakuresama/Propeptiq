@@ -4,6 +4,7 @@ import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
+import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
 
 type ExactFilters = Readonly<{
@@ -34,8 +35,10 @@ function sortedUnique(values: readonly string[]): readonly string[] {
 
 export function CatalogExplorer({
   products,
+  pricing,
 }: {
   products: readonly PublicStorefrontProduct[];
+  pricing?: PublicStorefrontPricingContext | undefined;
 }) {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<ExactFilters>(emptyFilters);
@@ -155,7 +158,7 @@ export function CatalogExplorer({
         <ul aria-label="Catalog results" className="catalog-grid">
           {visibleProducts.map((product, index) => (
             <li key={product.slug}>
-              <CatalogListingCard product={product} priority={index < 3} />
+              <CatalogListingCard product={product} priority={index < 3} pricing={pricing} />
             </li>
           ))}
         </ul>

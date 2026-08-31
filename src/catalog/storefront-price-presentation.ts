@@ -88,7 +88,10 @@ export function resolvePublicVariantPrice(input: Readonly<{
   }) };
 }
 
-export function selectCardVariant(product: { kind: "canonical"; variants: readonly PublicStorefrontVariant[]; defaultVariantId: string }): PublicStorefrontVariant | null {
-  const candidates = product.variants.filter((variant) => variant.availability !== "unavailable" && variant.baseUnitMinor !== null && variant.currency !== null);
-  return [...candidates].sort((a, b) => (a.baseUnitMinor! - b.baseUnitMinor!) || a.label.localeCompare(b.label, "en-US") || a.id.localeCompare(b.id))[0] ?? product.variants.find((variant) => variant.id === product.defaultVariantId) ?? null;
+export function selectCardVariant(input: Readonly<{ product: { kind: "canonical"; id: string; variants: readonly PublicStorefrontVariant[]; defaultVariantId: string }; pricing: PublicStorefrontPricingContext }>): PublicStorefrontVariant | null {
+  const candidates = input.product.variants.flatMap((variant) => {
+    const presentation = resolvePublicVariantPrice({ variant, productId: input.product.id, quantity: 1, pricing: input.pricing });
+    return presentation.state === "priced" && variant.availability === "available" ? [{ variant, amount: presentation.price.effectiveUnitMinor }] : [];
+  });
+  return [...candidates].sort((a, b) => a.amount - b.amount || a.variant.label.localeCompare(b.variant.label, "en-US") || a.variant.id.localeCompare(b.variant.id))[0]?.variant ?? input.product.variants.find((variant) => variant.id === input.product.defaultVariantId) ?? null;
 }

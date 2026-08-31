@@ -12,7 +12,9 @@ export const metadata: Metadata = {
 };
 
 export default async function CatalogPage() {
-  const catalog = await getPublicStorefrontCatalog();
+  const serverModule = await import("@/catalog/storefront-public-server");
+  const view = "getPublicStorefrontView" in serverModule ? await serverModule.getPublicStorefrontView() : null;
+  const catalog = view?.catalog ?? await getPublicStorefrontCatalog();
 
   return (
     <PageTransition>
@@ -23,7 +25,7 @@ export default async function CatalogPage() {
           description={`${catalog.products.length} product families and ${catalog.displayConfigurationCount} supplied package configurations. Prices and availability are intentionally excluded; imagery is an original illustrative presentation rather than product photography.`}
         />
         {catalog.products.length > 0 ? (
-          <CatalogExplorer products={catalog.products} />
+          <CatalogExplorer products={catalog.products} pricing={view?.pricing} />
         ) : (
           <p className="record-sheet text-base leading-7 text-muted-ink">
             No owner-approved browse catalog is currently published.

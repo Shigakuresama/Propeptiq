@@ -10,7 +10,7 @@ export function AddToCartButton({
   variantId,
   productName,
   quantity = 1,
-  canAdd = variantId !== null,
+  canAdd = false,
   disabledReason = variantId === null ? "Choose a variant before adding this item." : undefined,
   className,
 }: {

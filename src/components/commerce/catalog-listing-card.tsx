@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
-import { canAddPublicVariant, selectCardVariant, type PricePresentationMode, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import { canAddPublicVariant, resolvePublicVariantPrice, selectCardVariant, type PricePresentationMode, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 import { AddToCartButton } from "./add-to-cart-button";
 import { ProductPrice } from "./product-price";
 import { VariantAddTrigger } from "./quick-add-variant-sheet";
@@ -20,12 +20,12 @@ export function CatalogListingCard({
 }: {
   product: PublicStorefrontProduct;
   priority?: boolean;
-  pricing?: PublicStorefrontPricingContext;
+  pricing?: PublicStorefrontPricingContext | undefined;
   pricingMode?: PricePresentationMode;
 }) {
-  const mode = pricing?.mode ?? pricingMode ?? "local";
-  const pricingContext = pricing ?? { mode, evaluatedAt: new Date(0).toISOString(), automaticPromotions: [] };
-  const selectedVariant = product.kind === "canonical" ? selectCardVariant(product) : null;
+  const mode = pricing?.mode ?? pricingMode ?? "production";
+  const pricingContext = pricing ?? { mode, evaluatedAt: "1970-01-01T00:00:00.000Z", automaticPromotions: [] };
+  const selectedVariant = product.kind === "canonical" ? selectCardVariant({ product, pricing: pricingContext }) : null;
   const headingId = `catalog-${product.slug}`;
   const visibleConfigurations = product.displayConfigurations.slice(0, CARD_VARIANT_LIMIT);
   const remainingConfigurationCount =
@@ -45,7 +45,7 @@ export function CatalogListingCard({
           sizes="(min-width: 1280px) 28vw, (min-width: 768px) 45vw, calc(100vw - 2rem)"
           src={product.image.src}
         />
-        {selectedVariant && pricingContext.automaticPromotions.length > 0 ? <span className="absolute left-3 top-3 rounded-full bg-moss px-3 py-1 text-xs font-semibold text-white" aria-label="Promotion available">SALE</span> : null}
+        {product.kind === "canonical" && selectedVariant ? <CardDiscountBadge product={product} variant={selectedVariant} pricing={pricingContext} /> : null}
         <p className="catalog-image-disclosure">Illustrative product presentation</p>
       </div>
 
@@ -79,7 +79,7 @@ export function CatalogListingCard({
 
         {product.kind === "canonical" && selectedVariant ? <div className="mt-5"><p className="text-sm text-muted-ink">{product.variants.length > 1 ? `From ${selectedVariant.amount?.value ?? selectedVariant.label} ${selectedVariant.amount?.unit ?? ""}` : selectedVariant.label}</p><ProductPrice productId={product.id} variant={selectedVariant} pricing={pricingContext} /></div> : <p className="mt-5 text-sm font-medium text-muted-ink">Pricing coming soon</p>}
 
-        {product.kind === "canonical" ? (product.variants.length > 1 ? <VariantAddTrigger product={product} mode={mode} /> : selectedVariant ? <AddToCartButton variantId={selectedVariant.id} productName={product.name} canAdd={canAddPublicVariant(selectedVariant, mode)} disabledReason="This product is not currently available for cart testing." className="mt-5 min-h-11" /> : null) : null}
+        {product.kind === "canonical" ? (product.variants.length > 1 ? <VariantAddTrigger product={product} mode={mode} pricing={pricingContext} /> : selectedVariant ? <><p className="mt-2 text-sm text-muted-ink">{selectedVariant.availability === "available" && selectedVariant.checkoutReady ? "Available" : "Checkout unavailable"}</p><AddToCartButton variantId={selectedVariant.id} productName={product.name} canAdd={canAddPublicVariant(selectedVariant, mode)} disabledReason="This product is not currently available for cart testing." className="mt-5 min-h-11" /></> : null) : null}
 
         <Link
           aria-label={`View catalog item: ${product.name}`}
@@ -93,4 +93,9 @@ export function CatalogListingCard({
       </div>
     </article>
   );
+}
+
+function CardDiscountBadge({ product, variant, pricing }: { product: Extract<PublicStorefrontProduct, { kind: "canonical" }>; variant: import("@/catalog/storefront-public").PublicStorefrontVariant; pricing: PublicStorefrontPricingContext }) {
+  const result = resolvePublicVariantPrice({ variant, productId: product.id, quantity: 1, pricing });
+  return result.state === "priced" && result.price.effectiveDiscountBps > 0 ? <span className="absolute left-3 top-3 rounded-full bg-moss px-3 py-1 text-xs font-semibold text-white" aria-label={`-${result.price.effectiveDiscountBps / 100}%`}>-{result.price.effectiveDiscountBps / 100}%</span> : null;
 }
