@@ -22,6 +22,13 @@
 - The concentration calculator is disabled in production until the server setting is `approved` and the binding content policy is updated.
 - Local task commits are authorized for this execution. Do not migrate, merge, deploy, or activate products without the corresponding separate business-data and release authorization.
 
+### Repository-discovery amendment at the review-clean commerce-foundation head
+
+- The public projection is a discriminated union: canonical rows have stable canonical/default/variant identities; browse-only rows retain owner-published display configurations with null canonical/default identity and no purchasable variant. Never create slug/code-derived IDs or SKUs.
+- Task 1 creates the shared controlled-content lifecycle module specified by the public-content plan, with an empty production registry. The later public-content phase consumes and extends that module.
+- `/catalog/items/[slug]` remains the canonical linked browse route. Do not redirect `/catalog/[slug]` during Task 1: current demo/database transactional slugs and semantics are not equivalent to the 56-row browse source, and production parity cannot be proven from the repository. Task 1 adds an explicit tested convergence assessment while preserving the legacy route unchanged.
+- The binding execution details and exact sources/consumer adaptations are recorded in `.superpowers/sdd/2026-08-31-propeptiq-catalog-product-ui/task-1-brief.md`. For Task 1, that reviewed brief **supersedes in full** the earlier single-shape interface sample, its non-null pending-price fields, its omission of browse display configurations, and its immediate-redirect instruction. The corrected public contract is a canonical/browse-only discriminated union, `baseUnitMinor` and `currency` are nullable when no authoritative current price exists, every row retains `displayConfigurations`, and `/catalog/[slug]` remains unchanged until the separately tested convergence gate and fresh production census pass.
+
 ---
 
 ## File structure
@@ -57,14 +64,31 @@
 
 - Create: `src/catalog/storefront-public.ts`
 - Create: `src/catalog/storefront-public.test.ts`
+- Create: `src/catalog/storefront-public-server.ts`
+- Create: `src/catalog/storefront-public-server.test.ts`
+- Create: `src/content/storefront-content.ts`
+- Create: `src/content/storefront-content.test.ts`
+- Modify: `src/catalog/types.ts`
+- Modify: `src/catalog/database-catalog.ts`
+- Create: `src/catalog/database-catalog.test.ts`
+- Modify: `src/catalog/public-catalog.ts`
+- Modify: `src/catalog/public-catalog.test.ts`
+- Modify: `src/db/repositories/checkout-repository.ts`
+- Modify: `tests/integration/checkout-repository.test.ts`
 - Modify: `src/app/(public)/catalog/page.tsx`
 - Modify: `src/app/(public)/catalog/items/[slug]/page.tsx`
-- Modify: `src/app/(public)/catalog/[slug]/page.tsx`
+- Create: `src/app/(public)/catalog/page.test.tsx`
+- Create: `src/app/(public)/catalog/items/[slug]/page.test.tsx`
+- Preserve: `src/app/(public)/catalog/[slug]/page.tsx` and its existing `page.test.tsx`
+- Modify: `src/components/commerce/catalog-explorer.tsx` and `.test.tsx`
+- Modify: `src/components/commerce/catalog-listing-card.tsx` and `.test.tsx`
+- Modify: `src/components/commerce/catalog-item-detail.tsx` and `.test.tsx`
 
 **Interfaces:**
 
-- Consumes: canonical products/variants and pricing results from the commerce foundation
-- Produces: `PublicStorefrontProduct`, `getPublicStorefrontCatalog(options)`, `findPublicStorefrontProduct(slug, options)`
+- Consumes: the owner-published browse catalog, canonical products and validated bindings, variant-scoped runtime price/availability facts, verified image metadata, and controlled content.
+- Produces: a canonical/browse-only `PublicStorefrontProduct` discriminated union, a pure projection/lookup API, a server-only route loader, and a typed legacy-route convergence assessment.
+- The reviewed SDD Task 1 brief is the binding implementation contract for field-level types, source acquisition, fail-closed behavior, and route scope.
 
 - [ ] **Step 1: Write failing projection tests**
 
@@ -96,45 +120,30 @@ Expected: FAIL because the safe projection does not exist.
 
 - [ ] **Step 3: Define the public projection**
 
-```ts
-export type PublicStorefrontVariant = Readonly<{
-  id: string;
-  sku: string;
-  label: string;
-  availability: "preview_only" | "available" | "unavailable";
-  priceStatus: "pending" | "active" | "unavailable";
-  baseUnitMinor: number;
-  currency: "USD";
-}>;
+The original single-shape type sample and redirect instruction are superseded. Implement the exact reviewed SDD contract instead:
 
-export type PublicStorefrontProduct = Readonly<{
-  id: string;
-  slug: string;
-  name: string;
-  category: string;
-  image: Readonly<{ src: string; alt: string; width: number; height: number }>;
-  aliases: readonly string[];
-  popularityRank: number;
-  releasedAt: string;
-  defaultVariantId: string;
-  variants: readonly PublicStorefrontVariant[];
-  relatedProductIds: readonly string[];
-  content: readonly ApprovedPublicContent[];
-}>;
-```
-
-Make `/catalog/items/[slug]` render this unified product. Convert `/catalog/[slug]` into a permanent route-level redirect to `/catalog/items/[slug]` only after tests prove every current transactional slug resolves. Retain unknown-slug `notFound()` behavior and current catalog links.
+- canonical products have a stable non-null product ID, explicit non-null default variant, safe allowlisted canonical variants, configured related IDs, approved referenced content, and the owner-published display configurations;
+- browse-only products have `id: null`, `defaultVariantId: null`, no canonical variants or SKU, `pricingState: "pricing_pending"`, and all owner-published display configurations;
+- public variant `baseUnitMinor` is `number | null`, `currency` is `"USD" | null`, and `checkoutReady` is a safe boolean only; no authoritative current variant price or exact server mapping agreement means checkout readiness is false;
+- neither union member exposes payment-provider mappings, internal price/version IDs, inventory internals, or private binding keys;
+- `/catalog` and `/catalog/items/[slug]` consume the safe projection while preserving their current browse behavior and retained-route 404s;
+- `/catalog/[slug]` keeps its current demo/database transaction and rewards behavior in Task 1. Only the pure typed convergence assessment is added; no redirect or link migration occurs.
 
 - [ ] **Step 4: Run projection and route tests**
 
-Run: `npm test -- src/catalog/storefront-public.test.ts src/components/commerce/catalog-item-detail.test.tsx src/components/site/public-shell.test.tsx`
+Run:
 
-Expected: PASS.
+```powershell
+npm test -- src/content/storefront-content.test.ts src/catalog/database-catalog.test.ts src/catalog/public-catalog.test.ts src/catalog/storefront-public.test.ts src/catalog/storefront-public-server.test.ts 'src/app/(public)/catalog/page.test.tsx' 'src/app/(public)/catalog/items/[slug]/page.test.tsx' 'src/app/(public)/catalog/[slug]/page.test.tsx' src/components/commerce/catalog-explorer.test.tsx src/components/commerce/catalog-listing-card.test.tsx src/components/commerce/catalog-item-detail.test.tsx src/components/site/public-shell.test.tsx src/components/site/public-semantics.test.tsx
+npm run test:integration -- tests/integration/checkout-repository.test.ts
+```
+
+Expected: PASS, including pending-null preservation, active-positive projection, legacy null-price fail-closed behavior, and checkout facts that reject null rather than coercing it to zero.
 
 - [ ] **Step 5: Review and authorized commit**
 
 ```powershell
-git add src/catalog/storefront-public.ts src/catalog/storefront-public.test.ts 'src/app/(public)/catalog' src/components/commerce/catalog-item-detail.tsx src/components/commerce/catalog-item-detail.test.tsx
+git add src/catalog/types.ts src/catalog/database-catalog.ts src/catalog/database-catalog.test.ts src/catalog/public-catalog.ts src/catalog/public-catalog.test.ts src/catalog/storefront-public.ts src/catalog/storefront-public.test.ts src/catalog/storefront-public-server.ts src/catalog/storefront-public-server.test.ts src/content/storefront-content.ts src/content/storefront-content.test.ts src/db/repositories/checkout-repository.ts tests/integration/checkout-repository.test.ts 'src/app/(public)/catalog/page.tsx' 'src/app/(public)/catalog/page.test.tsx' 'src/app/(public)/catalog/items/[slug]/page.tsx' 'src/app/(public)/catalog/items/[slug]/page.test.tsx' src/components/commerce/catalog-explorer.tsx src/components/commerce/catalog-explorer.test.tsx src/components/commerce/catalog-listing-card.tsx src/components/commerce/catalog-listing-card.test.tsx src/components/commerce/catalog-item-detail.tsx src/components/commerce/catalog-item-detail.test.tsx
 git commit -m "feat(catalog): unify public product projection"
 ```
 
@@ -151,7 +160,7 @@ git commit -m "feat(catalog): unify public product projection"
 
 **Interfaces:**
 
-- Consumes: public product, `calculateVariantLinePrice`, runtime price-presentation mode, cart `addVariant`
+- Consumes: public product with nullable price fields and safe `checkoutReady`, `calculateVariantLinePrice`, runtime price-presentation mode, cart `addVariant`
 - Produces: card price/availability display and explicit quick-add selection
 
 - [ ] **Step 1: Write failing card and quick-add tests**
@@ -185,14 +194,43 @@ Expected: FAIL because price and selection components do not exist.
 - [ ] **Step 3: Implement presentation and quick add**
 
 ```ts
-export type PricePresentationMode = "development" | "test" | "preview" | "production";
+export type PricePresentationMode = "local" | "test" | "preview" | "production";
 
 export function canShowPendingSalePreview(mode: PricePresentationMode): boolean {
   return mode !== "production";
 }
+
+export function canAddPublicVariant(
+  variant: Pick<PublicStorefrontVariant,
+    "availability" | "priceStatus" | "baseUnitMinor" | "currency" | "checkoutReady">,
+  mode: PricePresentationMode,
+): boolean {
+  if (variant.availability === "unavailable") return false;
+  if (mode === "production") return variant.checkoutReady;
+  return variant.checkoutReady || (
+    variant.priceStatus === "pending" &&
+    variant.baseUnitMinor === 0 &&
+    variant.currency === "USD"
+  );
+}
 ```
 
 Use the existing Radix Sheet for variant choice, radio-group semantics for the selected variant, explicit availability copy, and a polite `Added {quantity} × {variant label} to cart` announcement. A one-variant product may add its explicit `defaultVariantId`; a multi-variant product always opens the Sheet.
+
+`ProductPrice` receives the allowlisted variant price fields, quantity, resolved effective discount, and `PricePresentationMode`. `AddToCartButton` gains an explicit `canAdd` boolean plus a safe human-readable disabled reason; the quick-add/purchase-panel parent computes `canAddPublicVariant` and the button must check it before calling `addVariant`. Do not pass Stripe data or derive readiness inside the button.
+
+Branch before calling `calculateVariantLinePrice`: when `baseUnitMinor` or `currency` is null, render pending/unavailable copy and do not perform money arithmetic. Never coerce null to zero. Only an explicitly persisted pending `baseUnitMinor: 0` may call the pricing helper for `$0.00` layout math, and only when mode is `local`, `test`, or `preview`. Treat `EffectiveLinePrice.checkoutReady` as an arithmetic-price readiness detail only; it does not include inventory, currency acquisition, or payment mappings and must never replace the public variant's mapping-aware `checkoutReady` purchase gate. The existing `/api/catalog/preview` use is a guarded synthetic-local harness, not the production public-product control path. The server remains authoritative and revalidates readiness at quote/checkout time.
+
+Required presentation/control matrix:
+
+| Variant state | Presentation | ADD |
+|---|---|---|
+| active positive USD, available, `checkoutReady: true` | calculate/render standard, effective, savings, subtotal | enabled |
+| active positive USD, otherwise available, `checkoutReady: false` | render price plus honest checkout-unavailable copy | disabled |
+| pending explicit `0`/USD in local/test/preview | render the explicit `$0.00` preview treatment; no fake successful checkout | enabled only for local cart testing |
+| pending in production, pending positive, null/null, unavailable, or malformed active zero | `Pricing coming soon` or unavailable copy; no sale arithmetic for null/malformed data | disabled |
+
+Test each row, including an active/available mapping-missing variant, and assert `addVariant` is not called whenever `canAdd` is false.
 
 - [ ] **Step 4: Run card and quick-add tests**
 
@@ -243,7 +281,7 @@ await user.type(screen.getByRole("spinbutton", { name: "Exact quantity" }), "11"
 expect(screen.getByText("30% discount")).toBeVisible();
 ```
 
-Assert minus/plus controls work from 1 through 25, preset selection does not remove normal quantity controls, changing variant updates price/availability/subtotal without navigation, and add-to-cart is disabled for unavailable variants but allowed for pending-price local preview carts.
+Assert minus/plus controls work from 1 through 25, preset selection does not remove normal quantity controls, and changing variant updates price/availability/subtotal without navigation. Add-to-cart is disabled for unavailable variants and for every null-price state. The only pending-price cart exception is an explicitly persisted `priceStatus: "pending"`, `baseUnitMinor: 0`, `currency: "USD"` fixture when `PricePresentationMode` is `local`, `test`, or `preview`; it still cannot checkout. Production ADD requires `checkoutReady: true`.
 
 - [ ] **Step 2: Run focused tests and verify failures**
 
@@ -431,4 +469,4 @@ git commit -m "feat(product): add gated laboratory concentration math"
 
 ## Catalog/product completion gate
 
-This phase is complete when cards and product pages share canonical data and pricing, every multi-variant ADD requires an explicit choice, quantity and variant changes update announced totals without navigation, pending production prices are honest, related products are configured and non-autoplay, only approved content renders, the calculator is math-only and production-disabled by default, and the prior browse-only/transactional route split no longer exposes contradictory customer behavior.
+This phase is complete when cards and retained product pages share the safe projection and canonical pricing where an approved binding exists, every multi-variant ADD requires an explicit choice, quantity and variant changes update announced totals without navigation, pending production prices are honest, related products are configured and non-autoplay, only approved content renders, and the calculator is math-only and production-disabled by default. The still-intentional browse/transactional route split, its link ownership, and its non-redirect convergence guard must remain documented and tested; actual convergence remains blocked on exhaustive identity/semantic parity plus a fresh production census.

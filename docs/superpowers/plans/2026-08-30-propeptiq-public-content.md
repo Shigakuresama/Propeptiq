@@ -22,6 +22,7 @@
 - Test success and duplicate newsletter states only with explicit in-memory test doubles.
 - Initialize Instagram, TikTok, X, and Facebook URLs to `/` and render all four accessible icon links as owner-requested placeholders. Identify them as placeholders in the owner guide and handoff.
 - Preserve existing public routes and unrelated rewards/affiliate/footer behavior.
+- The catalog/product phase creates the shared `src/content/storefront-content.ts` lifecycle type, approval projection, tests, and empty production registry. This plan consumes and extends that exact module; it must not create a duplicate content model.
 - Local task commits are authorized for this execution. Do not merge, deploy, publish unapproved copy, or configure external providers without separate authorization.
 
 ---
@@ -30,7 +31,6 @@
 
 ### Create
 
-- `src/content/storefront-content.ts` and `.test.ts` — controlled public content and link/social configuration
 - `src/content/public-information.ts` and `.test.ts` — approved public page and section destinations for search
 - `src/components/site/promotion-bar.tsx` and `.test.tsx`
 - `src/components/site/why-choose-propeptiq.tsx` and `.test.tsx`
@@ -45,6 +45,7 @@
 
 ### Modify
 
+- `src/content/storefront-content.ts` and `.test.ts` — extend the shared lifecycle seam with public-page records and configuration
 - `src/lib/site-content.ts`
 - `src/app/(public)/layout.tsx`
 - `src/components/site/public-home.tsx`
@@ -57,8 +58,8 @@
 
 **Files:**
 
-- Create: `src/content/storefront-content.ts`
-- Create: `src/content/storefront-content.test.ts`
+- Modify: `src/content/storefront-content.ts`
+- Modify: `src/content/storefront-content.test.ts`
 - Create: `src/content/public-information.ts`
 - Create: `src/content/public-information.test.ts`
 - Create: `src/components/site/promotion-bar.tsx`
@@ -105,7 +106,7 @@ it("renders nothing without an active server promotion", () => {
 
 Run: `npm test -- src/content/storefront-content.test.ts src/content/public-information.test.ts src/components/site/promotion-bar.test.tsx src/search/storefront-index.test.ts`
 
-Expected: FAIL.
+Expected: FAIL because the public-information and promotion-bar modules do not exist; the shared controlled-content lifecycle already exists from the catalog/product phase.
 
 - [ ] **Step 3: Implement strict controlled records and banner**
 
@@ -138,7 +139,7 @@ export type PublicInformationEntry = Readonly<{
 }>;
 ```
 
-Filter approval on the server before passing content to public components or the search index. Validate information hrefs as same-origin public paths and include the existing public pages plus verified section anchors; never synthesize an anchor from draft content. Mount the promotion bar immediately after `SiteHeader` in the public layout. Reuse the existing clipboard error/success pattern, add a decorative snowflake with `aria-hidden="true"`, and keep the full campaign sentence as text rather than icon-only content.
+Extend the existing shared controlled-content registry without changing its lifecycle semantics or creating a second type. Filter approval on the server before passing content to public components or the search index. Validate information hrefs as same-origin public paths and include the existing public pages plus verified section anchors; never synthesize an anchor from draft content. Mount the promotion bar immediately after `SiteHeader` in the public layout. Reuse the existing clipboard error/success pattern, add a decorative snowflake with `aria-hidden="true"`, and keep the full campaign sentence as text rather than icon-only content.
 
 - [ ] **Step 4: Run content, banner, and shell tests**
 
