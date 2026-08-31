@@ -7,10 +7,57 @@ import {
   browseCatalogProducts,
   browseCatalogVariantCount,
   findBrowseCatalogProduct,
+  projectBrowseCatalogCompatibility,
   validateBrowseCatalogProduct,
 } from "./browse-catalog";
+import { parseStorefrontBindings } from "./storefront-bindings";
+import { storefrontCatalogData } from "./storefront-catalog-data";
 
 describe("browse-only supplier catalog", () => {
+  it("projects the empty canonical seam without changing legacy browse output", () => {
+    const projection = projectBrowseCatalogCompatibility(
+      storefrontCatalogData.bindings,
+    );
+
+    expect(projection.products).toBe(browseCatalogProducts);
+    expect(projection.variantCount).toBe(103);
+    expect(projection.products[0]).not.toHaveProperty("id");
+    expect(projection.products[0]).not.toHaveProperty("stripePriceId");
+  });
+
+  it("requires explicit browse slug and code bindings without parsing labels", () => {
+    const bindings = parseStorefrontBindings({
+      products: [{
+        id: "10000000-0000-4000-8000-000000000001",
+        browseSlug: "tirzepatide",
+        popularityRank: 1,
+        releasedAt: "2026-08-30T00:00:00.000Z",
+        defaultVariantId: "20000000-0000-4000-8000-000000000001",
+        relatedProductIds: [],
+        contentIds: [],
+      }],
+      variants: [{
+        id: "20000000-0000-4000-8000-000000000001",
+        productId: "10000000-0000-4000-8000-000000000001",
+        browseCode: "NOT-A-LEGACY-CODE",
+        sku: "TEST-NOT-A-LEGACY-CODE",
+        label: "A deliberately nonmatching test label",
+        amount: { value: 5, unit: "mg" },
+        packageQuantity: 1,
+        currency: "USD",
+        baseUnitMinor: 0,
+        priceStatus: "pending",
+        availability: "preview_only",
+        stripeProductId: null,
+        stripePriceId: null,
+      }],
+    });
+
+    expect(() => projectBrowseCatalogCompatibility(bindings)).toThrow(
+      "Storefront binding browse code does not match a legacy browse variant",
+    );
+  });
+
   it("preserves every price-free PDF row while grouping package variants", () => {
     expect(browseCatalogProducts).toHaveLength(56);
     expect(browseCatalogVariantCount).toBe(103);

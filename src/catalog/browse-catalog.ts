@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { scanPublicCopy } from "@/domain/content-policy";
 
+import type { StorefrontBinding } from "./storefront-types";
+
 export const browseCatalogCategories = [
   "metabolic",
   "repair",
@@ -354,6 +356,51 @@ export const browseCatalogVariantCount = browseCatalogProducts.reduce(
   (total, entry) => total + entry.variants.length,
   0,
 );
+
+export type BrowseCatalogCompatibilityProjection = Readonly<{
+  products: readonly BrowseCatalogProduct[];
+  variantCount: number;
+}>;
+
+/**
+ * Verifies explicit future storefront-to-browse bindings while retaining the
+ * owner-pinned browse records until canonical display data is approved.
+ */
+export function projectBrowseCatalogCompatibility(
+  bindings: StorefrontBinding,
+): BrowseCatalogCompatibilityProjection {
+  const productsBySlug = new Map(
+    browseCatalogProducts.map((entry) => [entry.slug, entry] as const),
+  );
+  const bindingProductsById = new Map(
+    bindings.products.map((product) => [product.id, product] as const),
+  );
+
+  for (const bindingProduct of bindings.products) {
+    if (!productsBySlug.has(bindingProduct.browseSlug)) {
+      throw new Error("Storefront binding browse slug does not match a legacy browse product");
+    }
+  }
+
+  for (const bindingVariant of bindings.variants) {
+    const bindingProduct = bindingProductsById.get(bindingVariant.productId);
+    const browseProduct = bindingProduct
+      ? productsBySlug.get(bindingProduct.browseSlug)
+      : undefined;
+    if (
+      !browseProduct?.variants.some(
+        (browseVariant) => browseVariant.code === bindingVariant.browseCode,
+      )
+    ) {
+      throw new Error("Storefront binding browse code does not match a legacy browse variant");
+    }
+  }
+
+  return Object.freeze({
+    products: browseCatalogProducts,
+    variantCount: browseCatalogVariantCount,
+  });
+}
 
 export function findBrowseCatalogProduct(
   slug: string,
