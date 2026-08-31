@@ -1,4 +1,10 @@
 export type CatalogSource = "production" | "synthetic-demo";
+
+export type {
+  PriceStatus,
+  StorefrontProduct,
+  VariantAvailability,
+} from "./storefront-types";
 export type ProductStatus = "draft" | "active" | "retired";
 export type LotStatus =
   | "draft"
