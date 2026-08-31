@@ -13,13 +13,36 @@ const {
   getPublicBrowseCatalogMock,
   getPublicStorefrontCatalogMock,
   notFoundMock,
+  requestCacheState,
 } = vi.hoisted(() => ({
   getPublicBrowseCatalogMock: vi.fn(),
   getPublicStorefrontCatalogMock: vi.fn(),
   notFoundMock: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
+  requestCacheState: { generation: 0 },
 }));
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    cache: <Args extends unknown[], Result>(
+      loader: (...args: Args) => Result,
+    ) => {
+      let cached: { generation: number; result: Result } | undefined;
+      return (...args: Args): Result => {
+        if (!cached || cached.generation !== requestCacheState.generation) {
+          cached = {
+            generation: requestCacheState.generation,
+            result: loader(...args),
+          };
+        }
+        return cached.result;
+      };
+    },
+  };
+});
 
 vi.mock("@/catalog/browse-catalog-server", () => ({
   getPublicBrowseCatalog: getPublicBrowseCatalogMock,
@@ -44,6 +67,8 @@ const projectedCatalog = buildPublicStorefrontCatalog({
 
 describe("retained catalog item route", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    requestCacheState.generation += 1;
     getPublicBrowseCatalogMock.mockRejectedValue(
       new Error("legacy browse loader must not own the retained route"),
     );
@@ -58,6 +83,15 @@ describe("retained catalog item route", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
     expect(getPublicStorefrontCatalogMock).toHaveBeenCalledTimes(1);
     expect(getPublicBrowseCatalogMock).not.toHaveBeenCalled();
+  });
+
+  it("shares one catalog acquisition between metadata and page rendering per request", async () => {
+    const params = Promise.resolve({ slug: "tirzepatide" });
+
+    await generateMetadata({ params });
+    render(await CatalogItemPage({ params }));
+
+    expect(getPublicStorefrontCatalogMock).toHaveBeenCalledOnce();
   });
 
   it("keeps unknown slugs on the not-found path", async () => {

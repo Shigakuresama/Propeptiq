@@ -21,6 +21,22 @@ export type ApprovedStorefrontContent = ControlledContentRecord &
 export const storefrontContentRecords: readonly ControlledContentRecord[] =
   Object.freeze([]);
 
+function projectApprovedStorefrontContent(
+  record: ControlledContentRecord & Readonly<{ status: "approved" }>,
+): ApprovedStorefrontContent {
+  return Object.freeze({
+    id: record.id,
+    kind: record.kind,
+    status: "approved",
+    title: record.title,
+    body: record.body,
+    sourceReferences: Object.freeze([...record.sourceReferences]),
+    approvalNote: record.approvalNote,
+    reviewedAt: record.reviewedAt,
+    effectiveAt: record.effectiveAt,
+  });
+}
+
 export function getApprovedStorefrontContent(
   records: readonly ControlledContentRecord[] = storefrontContentRecords,
 ): readonly ApprovedStorefrontContent[] {
@@ -28,6 +44,6 @@ export function getApprovedStorefrontContent(
     records.filter(
       (record): record is ApprovedStorefrontContent =>
         record.status === "approved",
-    ),
+    ).map(projectApprovedStorefrontContent),
   );
 }

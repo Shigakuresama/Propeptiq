@@ -63,6 +63,27 @@ describe("storefront controlled content", () => {
     expect(JSON.stringify(records)).toBe(before);
   });
 
+  it("allowlist-projects approved runtime records instead of returning loose fields", () => {
+    const looseApprovedRecord = {
+      ...records[0],
+      stripePriceId: "price_private_content_fixture",
+      availableQuantity: 12,
+      provider: { name: "private-provider-fixture" },
+    };
+
+    expect(getApprovedStorefrontContent([looseApprovedRecord])).toEqual([{
+      id: "30000000-0000-4000-8000-000000000001",
+      kind: "product_information",
+      status: "approved",
+      title: "Approved first fixture",
+      body: "Neutral approved laboratory fixture copy.",
+      sourceReferences: ["fixture-source-a"],
+      approvalNote: "Approved test fixture",
+      reviewedAt: "2026-08-30T00:00:00.000Z",
+      effectiveAt: null,
+    }]);
+  });
+
   it("keeps the production controlled-content registry empty until owner approval", async () => {
     const { storefrontContentRecords } = await import("./storefront-content");
 

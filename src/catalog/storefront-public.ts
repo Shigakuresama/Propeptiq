@@ -550,6 +550,7 @@ function canonicalPublicProduct(input: Readonly<{
     variantsById.size !== input.bindingVariants.length ||
     input.bindingVariants.some((variant) => variant.productId !== input.canonical.id) ||
     input.canonical.variantIds.length !== input.bindingVariants.length ||
+    new Set(input.canonical.variantIds).size !== input.canonical.variantIds.length ||
     input.canonical.variantIds.some((variantId) => !variantsById.has(variantId)) ||
     !input.canonical.variantIds.includes(input.canonical.defaultVariantId)
   ) {

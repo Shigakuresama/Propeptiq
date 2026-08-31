@@ -242,6 +242,33 @@ describe("public storefront projection", () => {
     expect(product.content.every((entry) => entry.status === "approved")).toBe(true);
   });
 
+  it("recursively excludes loose provider, payment, and inventory fields from approved content", () => {
+    const looseControlledContent: readonly ControlledContentRecord[] = controlledContent.map(
+      (record) => record.id === approvedFirstId
+        ? {
+            ...record,
+            stripePriceId: "price_private_content_fixture",
+            availableQuantity: 12,
+            provider: {
+              name: "private-provider-fixture",
+              stripeProductId: "prod_private_content_fixture",
+            },
+          }
+        : record,
+    );
+    const product = findPublicStorefrontProduct(
+      buildFixtureCatalog({ controlledContent: looseControlledContent }),
+      "tirzepatide",
+    );
+    if (product?.kind !== "canonical") throw new Error("expected canonical fixture");
+
+    const keys = recursivelyCollectKeys(product.content);
+    expect(keys).not.toContain("stripePriceId");
+    expect(keys).not.toContain("availableQuantity");
+    expect(keys).not.toContain("provider");
+    expect(keys).not.toContain("stripeProductId");
+  });
+
   it("allowlist-maps variants and recursively excludes server-only mappings and inventory facts", () => {
     const serialized = JSON.parse(JSON.stringify(buildFixtureCatalog())) as unknown;
     const keys = recursivelyCollectKeys(serialized);
@@ -334,6 +361,30 @@ describe("public storefront projection", () => {
       expect.objectContaining<Partial<StorefrontProjectionError>>({
         name: "StorefrontProjectionError",
         code: "binding_product_mismatch",
+      }),
+    );
+  });
+
+  it("rejects duplicate canonical variant IDs even when binding membership lengths match", () => {
+    const duplicatedCanonicalData: StorefrontCatalogData = {
+      products: [{
+        ...canonicalProduct,
+        defaultVariantId: firstVariantId,
+        variantIds: [firstVariantId, firstVariantId],
+      }],
+      bindings: parseStorefrontBindings({
+        products: bindings.products.map((product) => ({
+          ...product,
+          defaultVariantId: firstVariantId,
+        })),
+        variants: bindings.variants,
+      }),
+    };
+
+    expect(() => buildFixtureCatalog({ catalogData: duplicatedCanonicalData })).toThrowError(
+      expect.objectContaining<Partial<StorefrontProjectionError>>({
+        name: "StorefrontProjectionError",
+        code: "binding_variant_mismatch",
       }),
     );
   });

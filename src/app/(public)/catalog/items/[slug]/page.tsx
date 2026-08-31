@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 
 import {
   findPublicStorefrontProduct,
@@ -12,11 +13,13 @@ type CatalogItemPageProps = {
   params: Promise<{ slug: string }>;
 };
 
+const getPublicStorefrontCatalogForRequest = cache(getPublicStorefrontCatalog);
+
 export async function generateMetadata({
   params,
 }: CatalogItemPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const catalog = await getPublicStorefrontCatalog();
+  const catalog = await getPublicStorefrontCatalogForRequest();
   const product = findPublicStorefrontProduct(catalog, slug);
   return product
     ? {
@@ -28,7 +31,7 @@ export async function generateMetadata({
 
 export default async function CatalogItemPage({ params }: CatalogItemPageProps) {
   const { slug } = await params;
-  const catalog = await getPublicStorefrontCatalog();
+  const catalog = await getPublicStorefrontCatalogForRequest();
   const product = findPublicStorefrontProduct(catalog, slug);
   if (!product) notFound();
 
