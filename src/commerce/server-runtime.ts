@@ -435,6 +435,7 @@ export async function createCheckoutServerRuntime(
   });
   const checkoutService = createCheckoutService({
     repository: driver.commerce.checkoutRepository,
+    configuredPromotions: Object.freeze([]),
     shippingQuotePort: driver.commerce.shippingQuotePort,
     taxQuotePort: driver.commerce.taxQuotePort,
     sha256,

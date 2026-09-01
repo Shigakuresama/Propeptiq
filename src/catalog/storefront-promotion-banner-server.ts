@@ -1,5 +1,7 @@
 import "server-only";
 
+import { connection } from "next/server";
+
 import {
   resolveActiveConfiguredAutomaticPromotions,
   STOREFRONT_PROMOTIONS,
@@ -14,6 +16,7 @@ export const STOREFRONT_PROMOTION_UNAVAILABLE =
   "STOREFRONT_PROMOTION_UNAVAILABLE" as const;
 
 export type PromotionBannerServerDependencies = Readonly<{
+  connect?: () => Promise<unknown>;
   loadConfiguredPromotions?: () => unknown | Promise<unknown>;
   now?: () => Date;
   reportUnavailable?: (
@@ -45,6 +48,11 @@ export async function getStorefrontPromotionBannerView(
 ): Promise<Winter30PromotionView | null> {
   const reportUnavailable =
     dependencies.reportUnavailable ?? reportPromotionUnavailable;
+  try {
+    await (dependencies.connect ?? connection)();
+  } catch {
+    return unavailable(reportUnavailable);
+  }
   const loadConfiguredPromotions =
     dependencies.loadConfiguredPromotions ?? (() => STOREFRONT_PROMOTIONS);
   const now = dependencies.now ?? (() => new Date());

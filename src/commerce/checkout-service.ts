@@ -25,6 +25,10 @@ import {
   type RewardsCheckoutQuoteRequest,
 } from "@/commerce/checkout-ports";
 import { buildSafeCartPreview, type SafeCartPreview } from "@/cart/preview";
+import {
+  resolveUnreconciledActiveConfiguredAutomaticPromotions,
+  STOREFRONT_PROMOTIONS,
+} from "@/config/storefront-promotions";
 import type {
   CheckoutQuoteRequest,
   CheckoutUnavailable,
@@ -870,6 +874,7 @@ export function createCheckoutService(dependencies: Readonly<{
       now: Date;
     }>) => Promise<AffiliateCheckoutQuote>;
   }>;
+  configuredPromotions?: unknown;
 }>) {
   async function quoteCanonicalVariant(
     input: Readonly<{
@@ -931,7 +936,45 @@ export function createCheckoutService(dependencies: Readonly<{
       return { status: "denied", reasons: ["authoritative_facts_invalid"] };
     }
 
+    const unreconciled =
+      resolveUnreconciledActiveConfiguredAutomaticPromotions(
+        dependencies.configuredPromotions ?? STOREFRONT_PROMOTIONS,
+        facts.automaticPromotions,
+        authoritativeAt,
+      );
+    if (unreconciled === null) {
+      return Object.freeze({
+        status: "CHECKOUT_UNAVAILABLE" as const,
+        reasons: Object.freeze(request.items.map((item) => Object.freeze({
+          variantId: item.variantId,
+          code: "pricing_coming_soon" as const,
+        }))),
+      });
+    }
+
     const factByVariant = new Map(facts.items.map((fact) => [fact.variantId, fact]));
+    const unreconciledReasons = request.items.flatMap((requested) => {
+      const fact = factByVariant.get(requested.variantId)!;
+      const affected = unreconciled.some((promotion) =>
+        promotionApplies(promotion, {
+          productId: fact.productId,
+          variantId: fact.variantId,
+        }),
+      );
+      return affected
+        ? [Object.freeze({
+            variantId: fact.variantId,
+            code: "pricing_coming_soon" as const,
+          })]
+        : [];
+    });
+    if (unreconciledReasons.length > 0) {
+      return Object.freeze({
+        status: "CHECKOUT_UNAVAILABLE" as const,
+        reasons: Object.freeze(unreconciledReasons),
+      });
+    }
+
     const activeByVariant = new Map<string, AuthoritativeAutomaticPromotion[]>();
     const priced = [] as Array<Readonly<{
       variantId: string;

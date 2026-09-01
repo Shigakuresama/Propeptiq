@@ -732,6 +732,7 @@ function canonicalSetup(
   };
   const checkoutService = createCheckoutService({
     repository: checkoutRepository as never,
+    configuredPromotions: Object.freeze([]),
     shippingQuotePort: { quoteShipping: async (input) => ({
       status: "ready", bindingHash: input.bindingHash, reference: "ship_canonical",
       service: "Synthetic Ground", amountMinor: 700, currency: "USD",

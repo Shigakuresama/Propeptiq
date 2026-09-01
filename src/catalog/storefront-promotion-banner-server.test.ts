@@ -1,4 +1,10 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { defaultConnect } = vi.hoisted(() => ({
+  defaultConnect: vi.fn(async () => undefined),
+}));
+
+vi.mock("next/server", () => ({ connection: defaultConnect }));
 
 import {
   STOREFRONT_PROMOTIONS,
@@ -31,6 +37,10 @@ function configuredPromotion(
 }
 
 describe("storefront promotion banner server boundary", () => {
+  beforeEach(() => {
+    defaultConnect.mockClear();
+  });
+
   it("uses the active owner configuration by default even without a catalog view", async () => {
     await expect(getStorefrontPromotionBannerView()).resolves.toEqual({
       id: "winter30",
@@ -38,19 +48,35 @@ describe("storefront promotion banner server boundary", () => {
       code: "WINTER30",
       percentage: 30,
     });
+    expect(defaultConnect).toHaveBeenCalledOnce();
   });
 
   it("loads configured promotions once, evaluates one server-owned instant, and exposes only the safe view", async () => {
     const loadConfiguredPromotions = vi.fn(() => STOREFRONT_PROMOTIONS);
     const evaluateNow = vi.fn(() => new Date(now));
+    const order: string[] = [];
+    const connect = vi.fn(async () => {
+      order.push("connect");
+    });
+    loadConfiguredPromotions.mockImplementation(() => {
+      order.push("load");
+      return STOREFRONT_PROMOTIONS;
+    });
+    evaluateNow.mockImplementation(() => {
+      order.push("clock");
+      return new Date(now);
+    });
 
     const selected = await getStorefrontPromotionBannerView({
+      connect,
       loadConfiguredPromotions,
       now: evaluateNow,
     });
 
+    expect(connect).toHaveBeenCalledOnce();
     expect(loadConfiguredPromotions).toHaveBeenCalledOnce();
     expect(evaluateNow).toHaveBeenCalledOnce();
+    expect(order).toEqual(["connect", "load", "clock"]);
     expect(selected).toEqual({
       id: "winter30",
       displayName: "Winter Sale",
@@ -60,6 +86,28 @@ describe("storefront promotion banner server boundary", () => {
     expect(JSON.stringify(selected)).not.toMatch(
       /scope|enabled|application|record|version|uuid|provider|catalog/iu,
     );
+  });
+
+  it.each([
+    ["synchronous", () => { throw new Error("private synchronous connection detail"); }],
+    ["asynchronous", () => Promise.reject(new Error("private asynchronous connection detail"))],
+  ] as const)("fails closed when the %s request-time connection fails before loader or clock", async (_label, connect) => {
+    const loadConfiguredPromotions = vi.fn(() => STOREFRONT_PROMOTIONS);
+    const evaluateNow = vi.fn(() => new Date(now));
+    const reportUnavailable = vi.fn();
+
+    await expect(getStorefrontPromotionBannerView({
+      connect,
+      loadConfiguredPromotions,
+      now: evaluateNow,
+      reportUnavailable,
+    })).resolves.toBeNull();
+    expect(reportUnavailable.mock.calls).toEqual([
+      [STOREFRONT_PROMOTION_UNAVAILABLE],
+    ]);
+    expect(loadConfiguredPromotions).not.toHaveBeenCalled();
+    expect(evaluateNow).not.toHaveBeenCalled();
+    expect(JSON.stringify(reportUnavailable.mock.calls)).not.toContain("private");
   });
 
   it.each([

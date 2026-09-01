@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { hashCheckoutRequest } from "@/commerce/checkout-identity";
+import type { StorefrontPromotionConfiguration } from "@/config/storefront-promotions";
 import {
   createCheckoutService,
   projectAuthoritativeCheckoutPlan,
@@ -25,6 +26,7 @@ const ids = {
   order: "20000000-0000-4000-8000-000000000003",
   attempt: "20000000-0000-4000-8000-000000000004",
   product: "20000000-0000-4000-8000-000000000005",
+  product2: "20000000-0000-4000-8000-000000000025",
   group: "20000000-0000-4000-8000-000000000006",
   price: "20000000-0000-4000-8000-000000000007",
   lot: "20000000-0000-4000-8000-000000000008",
@@ -985,6 +987,8 @@ function setupVariant(
   options: Readonly<{
     referralDiscountMinor?: number;
     rewardsQuoteResult?: CheckoutRewardsQuote;
+    configuredPromotions?: unknown;
+    useDefaultConfiguredPromotions?: boolean;
   }> = {},
 ) {
   const loadedFacts = Object.freeze({ ...variantFacts, ...factChanges });
@@ -1063,11 +1067,267 @@ function setupVariant(
       })),
     },
     rewardsService,
+    ...(options.useDefaultConfiguredPromotions
+      ? {}
+      : {
+          configuredPromotions:
+            options.configuredPromotions ?? Object.freeze([]),
+        }),
   });
   return { service, repository, shippingQuote, taxQuote, rewardsService };
 }
 
 describe("authoritative canonical variant quote lifecycle", () => {
+  it("fails the real default active WINTER30 closed before quote or write work when authority is absent", async () => {
+    const { service, repository, shippingQuote, taxQuote, rewardsService } = setupVariant(
+      { automaticPromotions: Object.freeze([]) },
+      { useDefaultConfiguredPromotions: true },
+    );
+
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code: "pricing_coming_soon" }],
+    });
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+    expect(rewardsService.quoteCheckoutRewards).not.toHaveBeenCalled();
+    expect(repository.findExactReview).not.toHaveBeenCalled();
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["discount drift", automaticPromotion({ discountBps: 2_999 })],
+    ["disabled", automaticPromotion({ enabled: false })],
+    ["scheduled", automaticPromotion({ startAt: "2026-08-25T12:00:00.001Z" })],
+    ["expired", automaticPromotion({ endAt: now.toISOString() })],
+  ] as const)("fails default WINTER30 closed for a %s same-ID fact", async (_label, promotion) => {
+    const { service, repository, shippingQuote, taxQuote } = setupVariant(
+      { automaticPromotions: [promotion] },
+      { useDefaultConfiguredPromotions: true },
+    );
+
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code: "pricing_coming_soon" }],
+    });
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("permits the real default when exact persisted WINTER30 retains database identity and gives 30%", async () => {
+    const { service } = setupVariant(
+      { automaticPromotions: [automaticPromotion()] },
+      { useDefaultConfiguredPromotions: true },
+    );
+
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: {
+        promotionDiscountMinor: 3_000,
+        lines: [{ totalMinor: 7_000 }],
+      },
+    });
+    if (result.status !== "quoted") throw new Error("expected exact configured quote");
+    const projected = projectAuthoritativeCheckoutPlan(result.plan);
+    expect(projected).toMatchObject({
+      activeAutomaticPromotions: [{ id: "winter30", version: 1 }],
+      facts: {
+        automaticPromotions: [{
+          id: "winter30",
+          recordId: ids.promotion,
+          version: 1,
+        }],
+      },
+    });
+  });
+
+  it.each([
+    [
+      "product",
+      {
+        id: "product20",
+        displayName: "Product Offer",
+        displayCode: null,
+        discountBps: 2_000,
+        enabled: true,
+        startAt: null,
+        endAt: null,
+        timezone: "America/Los_Angeles",
+        applicationMode: "automatic",
+        scope: { kind: "products", productIds: [ids.product] },
+      } satisfies StorefrontPromotionConfiguration,
+    ],
+    [
+      "variant",
+      {
+        id: "variant20",
+        displayName: "Variant Offer",
+        displayCode: null,
+        discountBps: 2_000,
+        enabled: true,
+        startAt: null,
+        endAt: null,
+        timezone: "America/Los_Angeles",
+        applicationMode: "automatic",
+        scope: { kind: "variants", variantIds: [ids.variant] },
+      } satisfies StorefrontPromotionConfiguration,
+    ],
+  ] as const)("blocks only the requested line affected by missing %s-scoped authority", async (_label, configuration) => {
+    const secondItem = Object.freeze({
+      ...variantFacts.items[0]!,
+      variantId: ids.variant2,
+      productId: ids.product2,
+      sku: "TEST-BETA-5MG",
+      variantLabel: "5 mg second fixture",
+      price: Object.freeze({
+        ...variantFacts.items[0]!.price,
+        id: "20000000-0000-4000-8000-000000000026",
+      }),
+      stripeProductId: "prod_synthetic_task5_second",
+      stripePriceId: "price_synthetic_task5_second",
+      availabilityRevision: "variant-revision-2",
+      inventoryRevision: "inventory-revision-2",
+      eligibleLots: Object.freeze([Object.freeze({
+        ...variantFacts.items[0]!.eligibleLots[0]!,
+        id: "20000000-0000-4000-8000-000000000027",
+      })]),
+    });
+    const mixedRequest = {
+      ...variantRequest,
+      items: [
+        { variantId: ids.variant, quantity: 2 },
+        { variantId: ids.variant2, quantity: 2 },
+      ],
+    };
+    const mixed = setupVariant(
+      { items: [variantFacts.items[0]!, secondItem] },
+      { configuredPromotions: [configuration] },
+    );
+
+    await expect(mixed.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: mixedRequest,
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code: "pricing_coming_soon" }],
+    });
+    expect(mixed.shippingQuote).not.toHaveBeenCalled();
+    expect(mixed.taxQuote).not.toHaveBeenCalled();
+    expect(mixed.repository.prepare).not.toHaveBeenCalled();
+
+    const unrelated = setupVariant(
+      { items: [secondItem] },
+      { configuredPromotions: [configuration] },
+    );
+    await expect(unrelated.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: {
+        ...variantRequest,
+        items: [{ variantId: ids.variant2, quantity: 2 }],
+      },
+    })).resolves.toMatchObject({ status: "quoted" });
+  });
+
+  it("blocks every requested variant for invalid owner input", async () => {
+    const secondItem = Object.freeze({
+      ...variantFacts.items[0]!,
+      variantId: ids.variant2,
+      productId: ids.product2,
+      sku: "TEST-BETA-5MG",
+      price: Object.freeze({
+        ...variantFacts.items[0]!.price,
+        id: "20000000-0000-4000-8000-000000000026",
+      }),
+      availabilityRevision: "variant-revision-2",
+      inventoryRevision: "inventory-revision-2",
+      eligibleLots: Object.freeze([Object.freeze({
+        ...variantFacts.items[0]!.eligibleLots[0]!,
+        id: "20000000-0000-4000-8000-000000000027",
+      })]),
+    });
+    const { service, shippingQuote, taxQuote, repository } = setupVariant(
+      { items: [variantFacts.items[0]!, secondItem] },
+      { configuredPromotions: {} },
+    );
+
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: {
+        ...variantRequest,
+        items: [
+          { variantId: ids.variant, quantity: 2 },
+          { variantId: ids.variant2, quantity: 2 },
+        ],
+      },
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [
+        { variantId: ids.variant, code: "pricing_coming_soon" },
+        { variantId: ids.variant2, code: "pricing_coming_soon" },
+      ],
+    });
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("fails the locked session path closed before prepare when configured authority disappears", async () => {
+    const exact = setupVariant(
+      { automaticPromotions: [automaticPromotion()] },
+      { useDefaultConfiguredPromotions: true },
+    );
+    const quoted = await exact.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted") throw new Error("expected exact initial quote");
+
+    const missing = setupVariant(
+      { automaticPromotions: [] },
+      { useDefaultConfiguredPromotions: true },
+    );
+    await expect((missing.service as unknown as {
+      quoteForSession: (input: unknown) => Promise<unknown>;
+    }).quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code: "pricing_coming_soon" }],
+    });
+    expect(missing.shippingQuote).not.toHaveBeenCalled();
+    expect(missing.taxQuote).not.toHaveBeenCalled();
+    expect(missing.repository.prepare).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["disabled", automaticPromotion({ enabled: false }), 9_200],
     ["scheduled", automaticPromotion({ startAt: "2026-08-25T12:00:00.001Z" }), 9_200],

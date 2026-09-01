@@ -50,6 +50,8 @@ const configurationKeys = Object.freeze([
   "scope",
 ] as const);
 const MAX_CONFIGURED_PROMOTIONS = 100;
+/** Caps one server-owned promotion snapshot before any reconciliation work. */
+const MAX_AUTHORITATIVE_PROMOTIONS = 1_000;
 const MAX_SCOPE_TARGETS = 1_000;
 const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
 
@@ -238,8 +240,12 @@ function normalizeConfiguration(
     entry.discountBps < 1 ||
     entry.discountBps > 10_000 ||
     typeof entry.enabled !== "boolean" ||
-    (entry.startAt !== null && !isStrictStorefrontPromotionInstant(entry.startAt)) ||
-    (entry.endAt !== null && !isStrictStorefrontPromotionInstant(entry.endAt)) ||
+    (entry.startAt !== null &&
+      (!isStrictStorefrontPromotionInstant(entry.startAt) ||
+        !isPersistenceCompatibleOwnerInstant(entry.startAt))) ||
+    (entry.endAt !== null &&
+      (!isStrictStorefrontPromotionInstant(entry.endAt) ||
+        !isPersistenceCompatibleOwnerInstant(entry.endAt))) ||
     !isValidStorefrontPromotionTimezone(entry.timezone) ||
     (entry.applicationMode !== "automatic" && entry.applicationMode !== "code_required") ||
     scope === null
@@ -342,6 +348,11 @@ function strictInstantEpochNanoseconds(value: unknown): bigint | null {
   );
 }
 
+function isPersistenceCompatibleOwnerInstant(value: unknown): boolean {
+  const instant = strictInstantEpochNanoseconds(value);
+  return instant !== null && instant % NANOSECONDS_PER_MILLISECOND === 0n;
+}
+
 function instantsMatch(candidate: unknown, configured: string | null): boolean {
   if (candidate === null || configured === null) return candidate === configured;
   const candidateInstant = strictInstantEpochNanoseconds(candidate);
@@ -397,6 +408,57 @@ export function storefrontPromotionMatchesConfiguration(
     );
   } catch {
     return false;
+  }
+}
+
+function promotionCandidateId(value: unknown): string | null {
+  try {
+    if (!isRuntimeObject(value)) return null;
+    const id = ownData(value, "id");
+    return id.ok && typeof id.value === "string" ? id.value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveUnreconciledActiveConfiguredAutomaticPromotions(
+  configurations: unknown,
+  authoritativePromotions: unknown,
+  now: Date,
+): readonly StorefrontPromotionConfiguration[] | null {
+  try {
+    const active = resolveActiveConfiguredAutomaticPromotions(
+      configurations,
+      now,
+    );
+    if (active === null) return null;
+    const candidates = denseArraySnapshot(
+      authoritativePromotions,
+      MAX_AUTHORITATIVE_PROMOTIONS,
+    );
+    if (candidates === null) return null;
+
+    const unreconciled = active.filter((configuration) => {
+      let sameIdCount = 0;
+      let exactMatch = false;
+      for (const candidate of candidates) {
+        if (promotionCandidateId(candidate) !== configuration.id) continue;
+        sameIdCount += 1;
+        exactMatch = storefrontPromotionMatchesConfiguration(
+          candidate,
+          configuration,
+        );
+      }
+      return sameIdCount !== 1 || !exactMatch;
+    });
+
+    return Object.freeze(
+      [...unreconciled].sort((left, right) =>
+        left.id.localeCompare(right.id, "en-US"),
+      ),
+    );
+  } catch {
+    return null;
   }
 }
 

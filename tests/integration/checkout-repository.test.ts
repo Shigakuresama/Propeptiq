@@ -146,6 +146,7 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       failTransactions?: number;
       transactionSql?: string[];
       transactionQueries?: Array<{ sql: string; params: readonly unknown[] }>;
+      configuredPromotions?: unknown;
     }> = {},
   ) {
     let transactionAttempts = 0;
@@ -205,6 +206,9 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         maximumQuantityPerLine: 25,
         maximumOrderAmountMinor: 1_000_000,
       },
+      ...(options.configuredPromotions === undefined
+        ? {}
+        : { configuredPromotions: options.configuredPromotions }),
     });
     return {
       repository,
@@ -531,7 +535,10 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       sql: string;
       params: readonly unknown[];
     }> = [];
-    const { service } = setup({ transactionQueries });
+    const { service } = setup({
+      transactionQueries,
+      configuredPromotions: Object.freeze([]),
+    });
     const key = "30000000-0000-4000-8000-000000000134";
     const quoted = await service.quote({
       buyerUserId: ids.buyer,
@@ -611,7 +618,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       UPDATE buyer_profiles SET status = 'review'
       WHERE user_id = '${ids.buyer}';
     `);
-    const { service } = setup();
+    const { service } = setup(
+      keepWinter30
+        ? {}
+        : { configuredPromotions: Object.freeze([]) },
+    );
     const key = keepWinter30
       ? "30000000-0000-4000-8000-000000000128"
       : "30000000-0000-4000-8000-000000000129";
@@ -967,7 +978,11 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         `DELETE FROM promotions WHERE id = '${ids.variantPromotion}'`,
       );
     }
-    const { service } = setup();
+    const { service } = setup(
+      automaticPromotion
+        ? {}
+        : { configuredPromotions: Object.freeze([]) },
+    );
     const replayRequest = {
       ...variantRequest,
       items: [{ variantId: ids.variantA, quantity }],
@@ -1057,7 +1072,9 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     await client.exec(
       `DELETE FROM promotions WHERE id = '${ids.variantPromotion}'`,
     );
-    const { repository, service } = setup();
+    const { repository, service } = setup({
+      configuredPromotions: Object.freeze([]),
+    });
     const key = "30000000-0000-4000-8000-000000000136";
     const quoted = await service.quote({
       buyerUserId: ids.buyer,

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isStrictStorefrontPromotionInstant,
   resolveActiveConfiguredAutomaticPromotions,
+  resolveUnreconciledActiveConfiguredAutomaticPromotions,
   STOREFRONT_PROMOTIONS,
   storefrontPromotionMatchesConfiguration,
   storefrontPromotionMatchesOwnerConfiguration,
@@ -27,6 +29,12 @@ function configuredPromotion(
     scope: { kind: "sitewide" },
     ...overrides,
   };
+}
+
+function authoritativePromotion(
+  overrides: Partial<StorefrontPromotionConfiguration> = {},
+): StorefrontPromotionConfiguration {
+  return configuredPromotion(overrides);
 }
 
 describe("storefront promotion owner configuration", () => {
@@ -100,45 +108,17 @@ describe("storefront promotion owner configuration", () => {
     ).toEqual(["ends-later", "starts-now"]);
   });
 
-  it("keeps a campaign inactive before a start one nanosecond after the sampled instant", () => {
-    expect(
-      resolveActiveConfiguredAutomaticPromotions(
-        [
-          configuredPromotion({
-            id: "starts-one-nanosecond-later",
-            startAt: "2026-09-01T12:00:00.000000001Z",
-          }),
-        ],
-        now,
-      ),
-    ).toEqual([]);
-  });
-
-  it("keeps a campaign active before an end one nanosecond after the sampled instant", () => {
-    expect(
-      resolveActiveConfiguredAutomaticPromotions(
-        [
-          configuredPromotion({
-            id: "ends-one-nanosecond-later",
-            endAt: "2026-09-01T12:00:00.000000001Z",
-          }),
-        ],
-        now,
-      )?.map((promotion) => promotion.id),
-    ).toEqual(["ends-one-nanosecond-later"]);
-  });
-
-  it("keeps starts inclusive and ends exclusive at the exact nanosecond sample", () => {
+  it("keeps starts inclusive and ends exclusive at the exact persisted millisecond sample", () => {
     expect(
       resolveActiveConfiguredAutomaticPromotions(
         [
           configuredPromotion({
             id: "starts-exactly",
-            startAt: "2026-09-01T12:00:00.000000000Z",
+            startAt: "2026-09-01T12:00:00.000Z",
           }),
           configuredPromotion({
             id: "ends-exactly",
-            endAt: "2026-09-01T12:00:00.000000000Z",
+            endAt: "2026-09-01T12:00:00.000Z",
           }),
         ],
         now,
@@ -146,56 +126,50 @@ describe("storefront promotion owner configuration", () => {
     ).toEqual(["starts-exactly"]);
   });
 
-  it("uses the same nanosecond boundary rules before the Unix epoch", () => {
-    const beforeEpoch = new Date("1969-12-31T23:59:59.000Z");
-
-    expect(
-      resolveActiveConfiguredAutomaticPromotions(
-        [
-          configuredPromotion({
-            id: "negative-starts-one-nanosecond-later",
-            startAt: "1969-12-31T23:59:59.000000001Z",
-          }),
-          configuredPromotion({
-            id: "negative-ends-one-nanosecond-later",
-            endAt: "1969-12-31T23:59:59.000000001Z",
-          }),
-        ],
-        beforeEpoch,
-      )?.map((promotion) => promotion.id),
-    ).toEqual(["negative-ends-one-nanosecond-later"]);
-  });
-
-  it("accepts an otherwise-valid promotion interval shorter than one millisecond", () => {
-    expect(
-      storefrontPromotionMatchesConfiguration(
-        configuredPromotion({
-          startAt: "2026-09-01T12:00:00.000000001Z",
-          endAt: "2026-09-01T12:00:00.000000002Z",
-        }),
-        configuredPromotion({
-          startAt: "2026-09-01T12:00:00.000000001Z",
-          endAt: "2026-09-01T12:00:00.000000002Z",
-        }),
-      ),
-    ).toBe(true);
+  it.each([
+    "2026-09-01T12:00:00.1Z",
+    "2026-09-01T12:00:00.12Z",
+    "2026-09-01T12:00:00.123Z",
+    "2026-09-01T12:00:00.1234Z",
+    "2026-09-01T12:00:00.12345Z",
+    "2026-09-01T12:00:00.123456Z",
+    "2026-09-01T12:00:00.1234567Z",
+    "2026-09-01T12:00:00.12345678Z",
+    "2026-09-01T12:00:00.123456789Z",
+  ])("keeps the strict input parser's 1-9 digit grammar for %s", (instant) => {
+    expect(isStrictStorefrontPromotionInstant(instant)).toBe(true);
   });
 
   it.each([
-    [
-      "empty",
-      "2026-09-01T12:00:00.000000002Z",
-      "2026-09-01T12:00:00.000000002Z",
-    ],
-    [
-      "reversed",
-      "2026-09-01T12:00:00.000000002Z",
-      "2026-09-01T12:00:00.000000001Z",
-    ],
-  ] as const)("rejects a sub-millisecond %s interval", (_label, startAt, endAt) => {
+    ["omitted fraction", "2026-09-01T12:00:00Z"],
+    ["one digit", "2026-09-01T12:00:00.1Z"],
+    ["two digits", "2026-09-01T12:00:00.12Z"],
+    ["three digits", "2026-09-01T12:00:00.123Z"],
+    ["zero-padded nine digits", "2026-09-01T12:00:00.123000000Z"],
+    ["offset", "2026-09-01T05:00:00.123000000-07:00"],
+  ] as const)("accepts persistence-compatible owner %s", (_label, startAt) => {
     expect(
       resolveActiveConfiguredAutomaticPromotions(
-        [configuredPromotion({ startAt, endAt })],
+        [configuredPromotion({ startAt })],
+        new Date("2026-09-01T12:00:00.123Z"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    ["start", { startAt: "2026-09-01T12:00:00.123000001Z" }],
+    ["end", { endAt: "2026-09-01T12:00:00.123000001Z" }],
+    [
+      "short interval",
+      {
+        startAt: "2026-09-01T12:00:00.000000001Z",
+        endAt: "2026-09-01T12:00:00.000000002Z",
+      },
+    ],
+  ] as const)("rejects nonzero sub-millisecond owner %s without rounding", (_label, overrides) => {
+    expect(
+      resolveActiveConfiguredAutomaticPromotions(
+        [configuredPromotion(overrides)],
         now,
       ),
     ).toBeNull();
@@ -291,13 +265,13 @@ describe("storefront promotion owner configuration", () => {
 
   it.each([
     [
-      "different nanoseconds within the first microsecond",
+      "a candidate one nanosecond after the configured millisecond",
+      "2026-09-01T12:00:00.000Z",
       "2026-09-01T12:00:00.000000001Z",
-      "2026-09-01T12:00:00.000000999Z",
     ],
     [
-      "different fourth-through-ninth fractional digits",
-      "2026-09-01T12:00:00.123000001Z",
+      "a candidate with nonzero fourth-through-ninth digits",
+      "2026-09-01T12:00:00.123000000Z",
       "2026-09-01T12:00:00.123999999Z",
     ],
   ] as const)("rejects %s", (_label, configuredStart, candidateStart) => {
@@ -313,12 +287,12 @@ describe("storefront promotion owner configuration", () => {
     expect(
       storefrontPromotionMatchesConfiguration(
         configuredPromotion({
-          startAt: "2026-09-01T12:00:00.123456789Z",
-          endAt: "2026-10-01T00:00:00.987654321Z",
+          startAt: "2026-09-01T12:00:00.123000000Z",
+          endAt: "2026-10-01T00:00:00.987000000Z",
         }),
         configuredPromotion({
-          startAt: "2026-09-01T05:00:00.123456789-07:00",
-          endAt: "2026-09-30T17:00:00.987654321-07:00",
+          startAt: "2026-09-01T05:00:00.123-07:00",
+          endAt: "2026-09-30T17:00:00.987-07:00",
         }),
       ),
     ).toBe(true);
@@ -328,10 +302,10 @@ describe("storefront promotion owner configuration", () => {
     expect(
       storefrontPromotionMatchesConfiguration(
         configuredPromotion({
-          startAt: "1969-12-31T23:59:59.123456789Z",
+          startAt: "1969-12-31T23:59:59.123000000Z",
         }),
         configuredPromotion({
-          startAt: "1969-12-31T15:59:59.123456789-08:00",
+          startAt: "1969-12-31T15:59:59.123-08:00",
         }),
       ),
     ).toBe(true);
@@ -444,5 +418,158 @@ describe("storefront promotion owner configuration", () => {
     expect(Object.isFrozen((result?.[0]?.scope as { productIds?: unknown }).productIds)).toBe(true);
     expect(result?.[0]).not.toBe(entry);
     expect(result?.[0]?.scope).not.toBe(scope);
+  });
+
+  describe("active owner-to-authority reconciliation", () => {
+    it("accepts exactly one matching candidate while ignoring a differently named valid campaign", () => {
+      const result = resolveUnreconciledActiveConfiguredAutomaticPromotions(
+        [configuredPromotion()],
+        [
+          authoritativePromotion({
+            id: "spring15",
+            displayName: "Spring Offer",
+            displayCode: "SPRING15",
+            discountBps: 1_500,
+          }),
+          authoritativePromotion(),
+        ],
+        now,
+      );
+
+      expect(result).toEqual([]);
+      expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it.each([
+      ["absent", []],
+      ["duplicate", [authoritativePromotion(), authoritativePromotion()]],
+      ["malformed", [{ ...authoritativePromotion(), displayName: "" }]],
+      ["disabled", [authoritativePromotion({ enabled: false })]],
+      ["scheduled", [authoritativePromotion({ startAt: "2026-09-01T12:00:00.001Z" })]],
+      ["expired", [authoritativePromotion({ endAt: "2026-09-01T12:00:00.000Z" })]],
+      ["name drift", [authoritativePromotion({ displayName: "Changed" })]],
+      ["code drift", [authoritativePromotion({ displayCode: "CHANGED30" })]],
+      ["discount drift", [authoritativePromotion({ discountBps: 2_999 })]],
+      ["start drift", [authoritativePromotion({ startAt: "2026-08-01T00:00:00.000Z" })]],
+      ["end drift", [authoritativePromotion({ endAt: "2026-10-01T00:00:00.000Z" })]],
+      ["timezone drift", [authoritativePromotion({ timezone: "UTC" })]],
+      ["mode drift", [authoritativePromotion({ applicationMode: "code_required" })]],
+      ["product scope drift", [authoritativePromotion({ scope: { kind: "products", productIds: ["product-a"] } })]],
+      ["variant scope drift", [authoritativePromotion({ scope: { kind: "variants", variantIds: ["variant-a"] } })]],
+    ] as const)("leaves an active configured campaign unreconciled when its candidate is %s", (_label, candidates) => {
+      expect(
+        resolveUnreconciledActiveConfiguredAutomaticPromotions(
+          [configuredPromotion()],
+          candidates,
+          now,
+        ),
+      ).toEqual([configuredPromotion()]);
+    });
+
+    it.each([
+      configuredPromotion({ enabled: false }),
+      configuredPromotion({ applicationMode: "code_required" }),
+      configuredPromotion({ startAt: "2026-09-01T12:00:00.001Z" }),
+      configuredPromotion({ endAt: "2026-09-01T12:00:00.000Z" }),
+    ])("does not require authority for an inactive or nonautomatic owner entry", (configuration) => {
+      expect(
+        resolveUnreconciledActiveConfiguredAutomaticPromotions(
+          [configuration],
+          [],
+          now,
+        ),
+      ).toEqual([]);
+    });
+
+    it("returns a sorted deeply frozen clone without mutating inputs", () => {
+      const scoped = configuredPromotion({
+        id: "alpha10",
+        displayName: "Alpha Offer",
+        displayCode: null,
+        discountBps: 1_000,
+        scope: { kind: "products", productIds: ["product-b", "product-a"] },
+      });
+      const sitewide = configuredPromotion({ id: "zulu30" });
+      const configurations = [sitewide, scoped];
+      const candidates = [authoritativePromotion({ id: "unconfigured" })];
+      const before = JSON.stringify({ configurations, candidates });
+
+      const result = resolveUnreconciledActiveConfiguredAutomaticPromotions(
+        configurations,
+        candidates,
+        now,
+      );
+
+      expect(JSON.stringify({ configurations, candidates })).toBe(before);
+      expect(result?.map((entry) => entry.id)).toEqual(["alpha10", "zulu30"]);
+      expect(result?.[0]?.scope).toEqual({
+        kind: "products",
+        productIds: ["product-a", "product-b"],
+      });
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(Object.isFrozen(result?.[0])).toBe(true);
+      expect(Object.isFrozen(result?.[0]?.scope)).toBe(true);
+      expect(Object.isFrozen((result?.[0]?.scope as { productIds?: unknown }).productIds)).toBe(true);
+      expect(result?.[0]).not.toBe(scoped);
+    });
+
+    it("fails closed for malformed or hostile authority array boundaries", () => {
+      const sparse = new Array<StorefrontPromotionConfiguration>(1);
+      const overridden = [authoritativePromotion()] as StorefrontPromotionConfiguration[] & {
+        map?: unknown;
+      };
+      overridden.map = () => [];
+      const iteratorOverride = [authoritativePromotion()];
+      Object.defineProperty(iteratorOverride, Symbol.iterator, {
+        value() {
+          throw new Error("private iterator detail");
+        },
+      });
+      const accessor = [authoritativePromotion()];
+      Object.defineProperty(accessor, "0", {
+        get() {
+          throw new Error("private getter detail");
+        },
+      });
+      const hostileProxy = new Proxy([authoritativePromotion()], {
+        ownKeys() {
+          throw new Error("private proxy detail");
+        },
+      });
+
+      for (const boundary of [
+        {},
+        sparse,
+        overridden,
+        iteratorOverride,
+        accessor,
+        hostileProxy,
+      ]) {
+        expect(
+          resolveUnreconciledActiveConfiguredAutomaticPromotions(
+            [configuredPromotion()],
+            boundary,
+            now,
+          ),
+        ).toBeNull();
+      }
+    });
+
+    it("fails closed for malformed owner input or evaluation instant", () => {
+      expect(
+        resolveUnreconciledActiveConfiguredAutomaticPromotions(
+          {},
+          [],
+          now,
+        ),
+      ).toBeNull();
+      expect(
+        resolveUnreconciledActiveConfiguredAutomaticPromotions(
+          [configuredPromotion()],
+          [],
+          new Date(Number.NaN),
+        ),
+      ).toBeNull();
+    });
   });
 });

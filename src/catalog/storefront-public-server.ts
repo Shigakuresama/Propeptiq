@@ -4,9 +4,14 @@ import { connection } from "next/server";
 import { cache } from "react";
 
 import { hasProductionIdentity, type ServerEnv } from "@/config/env-schema";
+import {
+  resolveUnreconciledActiveConfiguredAutomaticPromotions,
+  STOREFRONT_PROMOTIONS,
+} from "@/config/storefront-promotions";
 import { storefrontContentRecords, type ControlledContentRecord } from "@/content/storefront-content";
 import { withRuntimeTransaction } from "@/db/runtime";
 import { readServerEnv } from "@/env";
+import { promotionApplies } from "@/domain/storefront-pricing";
 
 import { resolvePublishedBrowseCatalog } from "./browse-catalog-publication";
 import {
@@ -54,6 +59,7 @@ export type StorefrontPublicServerDependencies = Readonly<{
   now?: () => Date;
   nodeEnv?: string;
   reportPromotionDiagnostic?: (diagnostic: PromotionProjectionDiagnostic) => void;
+  configuredPromotions?: unknown;
 }>;
 
 async function defaultDatabaseLoader(
@@ -123,6 +129,24 @@ export async function loadPublicStorefrontView(
       reportPromotionDiagnostic(diagnostic);
     }
   }
+  const unreconciled =
+    resolveUnreconciledActiveConfiguredAutomaticPromotions(
+      dependencies.configuredPromotions ?? STOREFRONT_PROMOTIONS,
+      automaticPromotions,
+      now,
+    );
+  runtimeVariantFacts = Object.freeze(
+    runtimeVariantFacts.filter((fact) => {
+      if (fact.priceStatus !== "active") return true;
+      if (unreconciled === null) return false;
+      return !unreconciled.some((promotion) =>
+        promotionApplies(promotion, {
+          productId: fact.productId,
+          variantId: fact.variantId,
+        }),
+      );
+    }),
+  );
   const catalog = buildPublicStorefrontCatalog({
     configuredPublicationId: environment.BROWSE_CATALOG_PUBLICATION,
     catalogData: { products: catalogData.products, bindings },
