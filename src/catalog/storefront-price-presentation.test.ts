@@ -102,6 +102,11 @@ describe("canAddPublicVariant", () => {
 });
 
 describe("public variant state equivalence", () => {
+  it("keeps the exact preview-zero production boundary closed", () => {
+    const input = variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, currency: "USD", checkoutReady: false });
+    expect(publicVariantPurchaseState(input, "production")).toBe("pricing_pending");
+    expect(resolvePublicVariantPrice({ variant: input, productId: "product-alpha", quantity: 1, pricing: pricing("production", []) }).state).toBe("pending");
+  });
   it.each([
     ["available active ready", variant(), "ready", "priced"],
     ["available active mapping missing", variant({ checkoutReady: false }), "checkout_unavailable", "priced"],

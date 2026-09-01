@@ -75,4 +75,8 @@ describe("public pricing snapshot propagation", () => {
     render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} />);
     expect(panelPricing).toHaveLength(1); expect(panelPricing[0]).toBe(pricing);
   });
+
+  it("does not replace the snapshot with a client mode", () => {
+    const pricing = testPricingContext("production"); render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} />); expect(panelPricing[0]).toBe(pricing);
+  });
 });

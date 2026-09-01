@@ -61,6 +61,7 @@ vi.mock("@/components/commerce/catalog-item-detail", () => ({
 }));
 
 import CatalogItemPage, { generateMetadata } from "./page";
+import { testCanonicalProduct } from "@/components/commerce/storefront-test-fixtures";
 
 const projectedCatalog = buildPublicStorefrontCatalog({
   configuredPublicationId: browseCatalogPublicationId,
@@ -125,6 +126,22 @@ describe("retained catalog item route", () => {
     getPublicStorefrontViewMock.mockResolvedValue({ catalog: projectedCatalog, pricing });
     await generateMetadata({ params: Promise.resolve({ slug: "tirzepatide" }) });
     render(await CatalogItemPage({ params: Promise.resolve({ slug: "tirzepatide" }) }));
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce(); expect(detailProps[0]?.pricing).toBe(pricing);
+  });
+
+  it("keeps a browse-only retained slug on the same snapshot route", async () => {
+    getPublicStorefrontViewMock.mockResolvedValue({ catalog: projectedCatalog, pricing: { mode: "test", evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] } });
+    render(await CatalogItemPage({ params: Promise.resolve({ slug: "pinealon" }) }));
+    expect(screen.getByRole("heading", { level: 1, name: "Pinealon" })).toBeVisible(); expect(screen.queryByRole("radio")).toBeNull();
+  });
+
+  it("uses a synthetic canonical view for exact metadata and panel-path pricing proof", async () => {
+    const pricing = { mode: "test" as const, evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] };
+    const canonical = testCanonicalProduct([], { slug: "synthetic-canonical" });
+    const catalog = { ...projectedCatalog, products: [canonical] };
+    getPublicStorefrontViewMock.mockResolvedValue({ catalog, pricing });
+    await expect(generateMetadata({ params: Promise.resolve({ slug: "synthetic-canonical" }) })).resolves.toMatchObject({ title: canonical.name });
+    render(await CatalogItemPage({ params: Promise.resolve({ slug: "synthetic-canonical" }) }));
     expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce(); expect(detailProps[0]?.pricing).toBe(pricing);
   });
 });

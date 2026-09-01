@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { testCanonicalProduct, testPricingContext, testPublicVariant } from "./storefront-test-fixtures";
 import { testWinter30 } from "./storefront-test-fixtures";
 import * as pricingPresentation from "@/catalog/storefront-price-presentation";
 import { CartProvider } from "@/cart/cart-provider";
+import { CART_STORAGE_KEY } from "@/cart/cart-storage";
 import { ProductPurchasePanel } from "./product-purchase-panel";
 describe("ProductPurchasePanel", () => {
   it("fails closed when default identity is not a member", () => {
@@ -63,5 +64,14 @@ describe("ProductPurchasePanel", () => {
   it("exposes exactly one panel summary and one global cart announcement", () => {
     render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct()} pricing={testPricingContext()} /></CartProvider>);
     expect(screen.getAllByRole("status", { name: "Purchase summary" })).toHaveLength(1); expect(screen.getAllByRole("status", { name: "Cart updates" })).toHaveLength(1);
+  });
+
+  it("forwards exact canonical identity, quantity, product, and variant labels to the cart", async () => {
+    window.localStorage.clear();
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext()} /></CartProvider>);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: "11" } });
+    fireEvent.click(screen.getByRole("button", { name: /add synthetic product alpha to cart/i }));
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "null").items).toEqual([{ variantId: "variant-5mg", quantity: 11 }]));
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("Synthetic Product Alpha, 5 mg");
   });
 });

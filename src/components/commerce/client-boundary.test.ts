@@ -35,6 +35,16 @@ function runtimeLocalImports(path: string): readonly string[] {
     .filter((specifier) => specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("@/"));
 }
 
+function resolveRuntimeLocalImportForTest(from: string, specifier: string): string {
+  const candidate = specifier.startsWith("@/") ? `src/${specifier.slice(2)}` : `${from.slice(0, from.lastIndexOf("/"))}/${specifier}`;
+  const extensions = ["", ".ts", ".tsx", ".js", ".jsx"];
+  for (const suffix of extensions) {
+    try { source(`${candidate}${suffix}`); return `${candidate}${suffix}`; } catch { /* continue */ }
+    for (const ext of extensions.slice(1)) { try { source(`${candidate}/index${ext}`); return `${candidate}/index${ext}`; } catch { /* continue */ } }
+  }
+  throw new Error(`Unresolved local runtime import: ${from} -> ${specifier}`);
+}
+
 describe("storefront client boundary", () => {
   it("enumerates every direct client entry and keeps server/env/database/payment code out", () => {
     for (const path of clientEntries) {
@@ -77,12 +87,14 @@ describe("storefront client boundary", () => {
       const contents = source(current); expect(contents, current).not.toMatch(/process\.env/u);
       for (const specifier of runtimeLocalImports(current)) {
         expect(specifier, current).not.toMatch(/server-only|stripe|checkout|@\/db|@\/env|payment-provider|provider-repositor/iu);
-        const candidate = specifier.startsWith("@/") ? `src/${specifier.slice(2)}` : `${current.slice(0, current.lastIndexOf("/"))}/${specifier}`;
-        const resolved = [candidate, `${candidate}.ts`, `${candidate}.tsx`].find((entry) => { try { source(entry); return true; } catch { return false; } });
-        if (resolved) pending.push(resolved);
+        pending.push(resolveRuntimeLocalImportForTest(current, specifier));
       }
     }
     expect(visited.size).toBeGreaterThan(3);
+  });
+
+  it("fails closed for an unresolved local runtime edge", () => {
+    expect(() => resolveRuntimeLocalImportForTest("src/components/commerce/product-purchase-panel.tsx", "./definitely-missing")).toThrow(/Unresolved local runtime import/u);
   });
 
   it("keeps panel pricing required and exposes no mode prop", () => {

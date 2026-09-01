@@ -7,6 +7,7 @@ describe("QuantityTierSelector", () => {
     expect(screen.getByRole("button", { name: "1 bottle" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "10 or more bottles" })).toBeVisible();
     expect(screen.getByRole("spinbutton", { name: "Exact quantity" })).toHaveAttribute("min", "1");
+    expect(screen.getByRole("spinbutton", { name: "Exact quantity" })).toHaveAttribute("max", "25"); expect(screen.getByRole("spinbutton", { name: "Exact quantity" })).toHaveAttribute("step", "1");
     expect(container.querySelector("input")?.className).toContain("min-h-11");
     fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "11" } }); expect(change).toHaveBeenCalledWith("11");
     expect(screen.getByRole("button", { name: "Decrease quantity" })).toBeDisabled();
