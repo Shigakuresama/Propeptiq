@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
+import ts from "typescript";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { ComponentProps } from "react";
 import type { ProductPurchasePanel } from "./product-purchase-panel";
@@ -68,8 +69,34 @@ function promotionBarAuthorityViolation(from: string, specifier: string): boolea
 }
 
 function runtimeImportSpecifiers(contents: string): readonly string[] {
-  return [...contents.matchAll(/^(?!\s*import\s+type)(?:import\s+[^;]+?\s+from\s+|import\s*)["']([^"']+)["']/gmu)]
-    .map((match) => match[1]!);
+  const parsed = ts.createSourceFile(
+    "client-boundary-fixture.tsx",
+    contents,
+    ts.ScriptTarget.Latest,
+    false,
+    ts.ScriptKind.TSX,
+  );
+
+  const specifiers: string[] = [];
+  for (const statement of parsed.statements) {
+    if (!ts.isImportDeclaration(statement) ||
+      !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+
+    const clause = statement.importClause;
+    if (clause?.isTypeOnly) continue;
+
+    const namedBindings = clause?.namedBindings;
+    const isAllTypeNamedImport =
+      namedBindings !== undefined &&
+      ts.isNamedImports(namedBindings) &&
+      namedBindings.elements.length > 0 &&
+      namedBindings.elements.every((element) => element.isTypeOnly) &&
+      clause?.name === undefined;
+    if (isAllTypeNamedImport) continue;
+
+    specifiers.push(statement.moduleSpecifier.text);
+  }
+  return specifiers;
 }
 
 function runtimeLocalImports(path: string): readonly string[] {
@@ -155,6 +182,43 @@ describe("storefront client boundary", () => {
     const fixture = 'import type { SyntheticAuthority } from "../../cart/cart-provider";';
 
     expect(runtimeImportSpecifiers(fixture)).toEqual([]);
+  });
+
+  it("allows an all-type named import without granting runtime authority", () => {
+    const fixture = 'import { type Winter30PromotionView } from "@/catalog/storefront-promotion-banner";';
+
+    expect(runtimeImportSpecifiers(fixture)).toEqual([]);
+  });
+
+  it.each([
+    [
+      "mixed named",
+      'import { type Winter30PromotionView, selectWinter30PromotionView } from "@/catalog/storefront-promotion-banner";',
+    ],
+    [
+      "default plus named type",
+      'import promotionSelector, { type Winter30PromotionView } from "@/catalog/storefront-promotion-banner";',
+    ],
+    [
+      "side effect",
+      'import "@/catalog/storefront-promotion-banner";',
+    ],
+    [
+      "multiline mixed named",
+      `import {
+        type Winter30PromotionView,
+        selectWinter30PromotionView,
+      } from "@/catalog/storefront-promotion-banner";`,
+    ],
+  ] as const)("detects and rejects a %s authoritative runtime import", (_label, fixture) => {
+    const specifier = "@/catalog/storefront-promotion-banner";
+    const runtimeSpecifiers = runtimeImportSpecifiers(fixture);
+
+    expect(runtimeSpecifiers).toEqual([specifier]);
+    expect(
+      runtimeSpecifiers.filter((candidate) =>
+        promotionBarAuthorityViolation(promotionBarPath, candidate)),
+    ).toEqual([specifier]);
   });
 
   it("keeps PromotionBar runtime imports free of mutation and server authorities", () => {
