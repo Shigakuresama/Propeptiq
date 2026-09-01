@@ -13,6 +13,13 @@ const fictionalPrivacyHref = projectApprovedNewsletterPrivacyHref(
   "/test-only-fictional-privacy",
   Object.freeze(["/test-only-fictional-privacy"]),
 )!;
+const forgedPrivacyHref = Object.freeze({
+  href: "/privacy-policy",
+  kind: "approved-newsletter-privacy-href",
+}) as never;
+const clonedFictionalPrivacyHref = JSON.parse(
+  JSON.stringify(fictionalPrivacyHref),
+) as never;
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -92,6 +99,26 @@ describe("NewsletterForm", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Newsletter signup is temporarily unavailable.",
     );
+  });
+
+  it.each([
+    ["forged plain object", forgedPrivacyHref],
+    ["JSON-cloned projected object", clonedFictionalPrivacyHref],
+  ] as const)("fails a %s closed without link, submit, or fetch", async (_label, privacyHref) => {
+    const user = userEvent.setup();
+    const submit = vi.fn<NewsletterSubmit>();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    render(<NewsletterForm privacyHref={privacyHref} submit={submit} />);
+
+    expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
+    expect(screen.queryByRole("link", { name: "Privacy Policy" })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Newsletter signup is temporarily unavailable.",
+    );
+    await user.click(screen.getByRole("button", { name: "Subscribe" }));
+    expect(submit).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("announces an invalid email and does not submit", async () => {

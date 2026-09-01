@@ -10,6 +10,7 @@ import {
   type NewsletterGateway,
 } from "@/newsletter/server";
 import {
+  isApprovedNewsletterPrivacyHref,
   newsletterConfiguration,
   newsletterPrivacyDestinations,
   projectApprovedNewsletterPrivacyHref,
@@ -25,6 +26,13 @@ const fictionalPrivacyHref = projectApprovedNewsletterPrivacyHref(
   "/test-only-fictional-privacy",
   fictionalPrivacyDestinations,
 )!;
+const forgedPrivacyHref = Object.freeze({
+  href: "/privacy-policy",
+  kind: "approved-newsletter-privacy-href",
+}) as never;
+const clonedFictionalPrivacyHref = JSON.parse(
+  JSON.stringify(fictionalPrivacyHref),
+) as never;
 
 function newsletterRequest({
   body = JSON.stringify({ email: fictionalEmail, consent: true }),
@@ -185,6 +193,22 @@ describe("approved newsletter privacy destination", () => {
     expect(newsletterConfiguration).toEqual({ privacyHref: null });
     expect(Object.isFrozen(newsletterConfiguration)).toBe(true);
   });
+
+  it("uses private projection identity, permits an exact explicit policy clone, and rejects revoked proxies", () => {
+    expect(isApprovedNewsletterPrivacyHref(fictionalPrivacyHref)).toBe(true);
+    expect(isApprovedNewsletterPrivacyHref(clonedFictionalPrivacyHref)).toBe(false);
+    expect(isApprovedNewsletterPrivacyHref(
+      clonedFictionalPrivacyHref,
+      fictionalPrivacyDestinations,
+    )).toBe(true);
+
+    const revocable = Proxy.revocable({
+      href: "/test-only-fictional-privacy",
+      kind: "approved-newsletter-privacy-href",
+    }, {});
+    revocable.revoke();
+    expect(isApprovedNewsletterPrivacyHref(revocable.proxy)).toBe(false);
+  });
 });
 
 describe("newsletter server boundary", () => {
@@ -201,6 +225,16 @@ describe("newsletter server boundary", () => {
       gateway: { subscribe: vi.fn() },
       attemptGate: { consume: vi.fn() },
       privacyHref: "/test-only-fictional-privacy" as never,
+    }],
+    ["forged branded privacy object", {
+      gateway: { subscribe: vi.fn() },
+      attemptGate: { consume: vi.fn() },
+      privacyHref: forgedPrivacyHref,
+    }],
+    ["JSON-cloned test projection", {
+      gateway: { subscribe: vi.fn() },
+      attemptGate: { consume: vi.fn() },
+      privacyHref: clonedFictionalPrivacyHref,
     }],
   ] as const)("fails closed before reading the body when %s is missing or invalid", async (_label, dependencies) => {
     const request = newsletterRequest();

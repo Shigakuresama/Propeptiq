@@ -10,6 +10,8 @@ export type ApprovedNewsletterPrivacyHref = Readonly<{
   [approvedNewsletterPrivacyHrefBrand]: true;
 }>;
 
+const projectedNewsletterPrivacyHrefs = new WeakSet<object>();
+
 export type NewsletterPrivacyDestinationPolicy = readonly `/${string}`[];
 
 const unsafeNewsletterHrefCharacters = /[\s\u0000-\u001f\u007f-\u009f\\?#%]/u;
@@ -81,22 +83,30 @@ function snapshotNewsletterPrivacyDestinations(
   }
 }
 
+function newsletterPrivacyPolicyContains(
+  value: `/${string}`,
+  policy: NewsletterPrivacyDestinationPolicy,
+): boolean {
+  const destinations = snapshotNewsletterPrivacyDestinations(policy);
+  if (destinations === null) return false;
+  for (let index = 0; index < destinations.length; index += 1) {
+    if (destinations[index] === value) return true;
+  }
+  return false;
+}
+
 export function projectApprovedNewsletterPrivacyHref(
   value: unknown,
   policy: NewsletterPrivacyDestinationPolicy,
 ): ApprovedNewsletterPrivacyHref | null {
   if (!isSafeNewsletterPrivacyPath(value)) return null;
-  const destinations = snapshotNewsletterPrivacyDestinations(policy);
-  if (destinations === null) return null;
-  for (let index = 0; index < destinations.length; index += 1) {
-    if (destinations[index] === value) {
-      return Object.freeze({
-        href: value,
-        kind: approvedNewsletterPrivacyHrefKind,
-      }) as ApprovedNewsletterPrivacyHref;
-    }
-  }
-  return null;
+  if (!newsletterPrivacyPolicyContains(value, policy)) return null;
+  const projected = Object.freeze({
+    href: value,
+    kind: approvedNewsletterPrivacyHrefKind,
+  }) as ApprovedNewsletterPrivacyHref;
+  projectedNewsletterPrivacyHrefs.add(projected);
+  return projected;
 }
 
 export function isApprovedNewsletterPrivacyHref(
@@ -123,8 +133,14 @@ export function isApprovedNewsletterPrivacyHref(
     ) {
       return false;
     }
-    return policy === undefined ||
-      projectApprovedNewsletterPrivacyHref(hrefDescriptor.value, policy) !== null;
+    if (policy !== undefined) {
+      return newsletterPrivacyPolicyContains(hrefDescriptor.value, policy);
+    }
+    return projectedNewsletterPrivacyHrefs.has(value) ||
+      newsletterPrivacyPolicyContains(
+        hrefDescriptor.value,
+        newsletterPrivacyDestinations,
+      );
   } catch {
     return false;
   }
