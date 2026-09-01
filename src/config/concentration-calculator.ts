@@ -28,26 +28,73 @@ export const concentrationCalculatorConfiguration: ControlledConcentrationCalcul
 
 const exactPublicCalculatorTitle = "Laboratory concentration calculator";
 
-const calculatorSpecificProhibitedPatterns: readonly RegExp[] = Object.freeze([
-  /\b(?:draw(?:n|s|ing)?|withdraw(?:n|s|ing)?)\b/u,
-  /\bsyringes?\b|\b\d+(?:\.\d+)?\s+units?\b/u,
-  /\b(?:daily|weekly|monthly|hourly|frequency|schedules?|protocols?)\b/u,
-  /\bevery\s+(?:day|week|month|hour)\b/u,
-  /\b(?:inject(?:ion|ed|ing)?|administration|administer(?:ed|ing)?)\b/u,
-  /\b(?:treat(?:s|ed|ing|ment)?|dosage|dosing|dose|advice|recommend(?:ation|ations|ed|ing|s)?)\b/u,
-  /\b(?:human|patient)\s+(?:use|dosage|dosing|dose|advice|guidance)\b/u,
+const neutralCalculatorBodyWords: ReadonlySet<string> = new Set([
+  "amount",
+  "amounts",
+  "and",
+  "are",
+  "arithmetic",
+  "bounded",
+  "calculate",
+  "calculates",
+  "calculation",
+  "calculations",
+  "calculator",
+  "concentration",
+  "concentrations",
+  "conversion",
+  "conversions",
+  "convert",
+  "converts",
+  "diluent",
+  "divided",
+  "equals",
+  "for",
+  "from",
+  "in",
+  "input",
+  "inputs",
+  "lab",
+  "laboratory",
+  "mathematical",
+  "mathematics",
+  "mcg",
+  "mg",
+  "ml",
+  "multiplied",
+  "only",
+  "optional",
+  "perform",
+  "performs",
+  "result",
+  "results",
+  "sample",
+  "samples",
+  "to",
+  "unit",
+  "units",
+  "value",
+  "values",
+  "vial",
+  "volume",
+  "volumes",
 ]);
 
 function calculatorCopyIsNeutral(title: string, body: string): boolean {
   if (title !== exactPublicCalculatorTitle) return false;
-  const normalizedCopy = `${title}\n${body}`
+  const normalizedBody = body
     .normalize("NFKC")
     .toLocaleLowerCase("en-US")
-    .replace(/[\p{Cc}\p{Cf}\p{P}\p{S}]+/gu, " ")
+    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
-  return !calculatorSpecificProhibitedPatterns.some((pattern) =>
-    pattern.test(normalizedCopy));
+  if (!/^[a-z0-9\s.,:;()/*+=-]+$/u.test(normalizedBody)) return false;
+  if (/\b\d+(?:,\d{3})*(?:\.\d+)?\s+units?\b/u.test(normalizedBody)) {
+    return false;
+  }
+  const tokens = normalizedBody.match(/[a-z]+|\d+(?:\.\d+)?/gu);
+  return tokens !== null && tokens.every((token) =>
+    /^\d+(?:\.\d+)?$/u.test(token) || neutralCalculatorBodyWords.has(token));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

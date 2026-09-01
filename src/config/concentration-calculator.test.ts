@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ControlledContentRecord } from "@/content/storefront-content";
+import { scanPublicCopy } from "@/domain/content-policy";
 
 import {
   concentrationCalculatorConfiguration,
@@ -76,6 +77,19 @@ describe("concentration calculator controlled projection", () => {
     });
   });
 
+  it.each([
+    "Calculate bounded concentration values.",
+    "Perform bounded arithmetic conversions only.",
+    "Laboratory arithmetic for concentration and unit conversions only.",
+    "10 mg / 2 mL = 5 mg/mL. Concentration conversion equals 5,000 mcg/mL.",
+    "Vial amount, diluent volume, and optional sample volume are calculation inputs.",
+  ])("allows bounded neutral calculator body %j", (body) => {
+    expect(resolve({ content: [{ ...approvedCopy, body }] })).toMatchObject({
+      title: "Laboratory concentration calculator",
+      body,
+    });
+  });
+
   it("rejects any title other than the exact neutral calculator title", () => {
     expect(
       resolve({
@@ -99,6 +113,39 @@ describe("concentration calculator controlled projection", () => {
   ] as const)("rejects calculator copy containing %s", (_label, body) => {
     expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
   });
+
+  it.each([
+    ["once-per-week direction", "Take 5 mg once per week."],
+    ["twice-each-week direction", "Take 5 mg twice each week."],
+    ["once", "Calculate concentration once."],
+    ["twice", "Calculate concentration twice."],
+    ["per", "Calculate concentration per sample."],
+    ["each", "Calculate concentration each sample."],
+    ["bare day", "Calculate concentration day."],
+    ["bare week", "Calculate concentration week."],
+    ["bare month", "Calculate concentration month."],
+    ["bare hour", "Calculate concentration hour."],
+    ["take", "Take 5 mg."],
+    ["use", "Use 5 mg."],
+    ["apply", "Apply 5 mg."],
+    ["consume", "Consume 5 mg."],
+    ["swallow", "Swallow 5 mg."],
+    ["numeric unit direction", "Calculate 10 units."],
+  ] as const)(
+    "rejects general-scanner-safe temporal or imperative wording: %s",
+    (_label, body) => {
+      expect(
+        scanPublicCopy(
+          {
+            text: `Laboratory concentration calculator\n${body}`,
+            claims: [],
+          },
+          approvedConfiguration.publicationPolicy,
+        ),
+      ).toMatchObject({ publishable: true, status: "pass", violations: [] });
+      expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
+    },
+  );
 
   it("permits preview only outside a production identity", () => {
     expect(resolve({ mode: "preview" })).not.toBeNull();
