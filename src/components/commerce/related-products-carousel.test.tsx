@@ -18,9 +18,9 @@ describe("RelatedProductsCarousel", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     if (originalScrollBy) Object.defineProperty(HTMLElement.prototype, "scrollBy", originalScrollBy);
-    else delete (HTMLElement.prototype as HTMLElement & { scrollBy?: unknown }).scrollBy;
+    else Reflect.deleteProperty(HTMLElement.prototype, "scrollBy");
     if (originalMatchMedia) Object.defineProperty(window, "matchMedia", originalMatchMedia);
-    else delete (window as Window & { matchMedia?: unknown }).matchMedia;
+    else Reflect.deleteProperty(window, "matchMedia");
   });
 
   it("omits the section for an empty relationship slice", () => {
