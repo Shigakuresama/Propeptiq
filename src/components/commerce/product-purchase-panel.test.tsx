@@ -58,6 +58,45 @@ describe("ProductPurchasePanel", () => {
     const summary = screen.getByRole("status", { name: "Purchase summary" }); expect(summary).toHaveTextContent("First"); expect(within(summary.querySelector("dl")!).getByText("Quantity").nextElementSibling).toHaveTextContent("11"); expect(summary).toHaveTextContent("$7.00"); expect(summary).not.toHaveTextContent("Checkout unavailable");
   });
 
+  it("keeps the 10+ interaction synchronized with pricing and exits through decrement", () => {
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext()} /></CartProvider>);
+    const exactQuantity = () => screen.getByRole("spinbutton", { name: "Exact quantity" });
+    const tenPlus = () => screen.getByRole("button", { name: "10 or more bottles" });
+    const summary = () => screen.getByRole("status", { name: "Purchase summary" });
+
+    fireEvent.click(tenPlus());
+    expect(exactQuantity()).toHaveValue(10);
+    expect(exactQuantity()).toHaveAttribute("min", "10");
+    expect(tenPlus()).toHaveAttribute("aria-pressed", "true");
+    expect(summary()).toHaveTextContent("30%");
+    expect(summary()).toHaveTextContent("$30.00");
+    expect(summary()).toHaveTextContent("$70.00");
+
+    fireEvent.click(screen.getByRole("button", { name: "Increase quantity" }));
+    expect(exactQuantity()).toHaveValue(11);
+    expect(exactQuantity()).toHaveAttribute("min", "10");
+    expect(tenPlus()).toHaveAttribute("aria-pressed", "true");
+    expect(summary()).toHaveTextContent("30%");
+    expect(summary()).toHaveTextContent("$33.00");
+    expect(summary()).toHaveTextContent("$77.00");
+
+    fireEvent.click(screen.getByRole("button", { name: "Decrease quantity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decrease quantity" }));
+    expect(exactQuantity()).toHaveValue(9);
+    expect(exactQuantity()).toHaveAttribute("min", "1");
+    expect(tenPlus()).toHaveAttribute("aria-pressed", "false");
+    expect(summary()).toHaveTextContent("10%");
+    expect(summary()).toHaveTextContent("$9.00");
+    expect(summary()).toHaveTextContent("$81.00");
+
+    fireEvent.click(screen.getByRole("button", { name: "2 bottles" }));
+    expect(exactQuantity()).toHaveValue(2);
+    expect(exactQuantity()).toHaveAttribute("min", "1");
+    expect(summary()).toHaveTextContent("8%");
+    expect(summary()).toHaveTextContent("$1.60");
+    expect(summary()).toHaveTextContent("$18.40");
+  });
+
   it.each([
     ["mapping missing", testPublicVariant({ checkoutReady: false }), "Checkout unavailable", true],
     ["unavailable", testPublicVariant({ availability: "unavailable", checkoutReady: false }), "Unavailable", false],
@@ -94,7 +133,11 @@ describe("ProductPurchasePanel", () => {
   it("forwards exact canonical identity, quantity, product, and variant labels to the cart", async () => {
     window.localStorage.clear();
     render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext()} /></CartProvider>);
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: "11" } });
+    fireEvent.click(screen.getByRole("button", { name: "10 or more bottles" }));
+    fireEvent.click(screen.getByRole("button", { name: "Increase quantity" }));
+    expect(screen.getByRole("spinbutton", { name: "Exact quantity" })).toHaveValue(11);
+    expect(screen.getByRole("spinbutton", { name: "Exact quantity" })).toHaveAttribute("min", "10");
+    expect(screen.getByRole("button", { name: "10 or more bottles" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(screen.getByRole("button", { name: /add synthetic product alpha to cart/i }));
     await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "null").items).toEqual([{ variantId: "variant-5mg", quantity: 11 }]));
     expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("Synthetic Product Alpha, 5 mg");
