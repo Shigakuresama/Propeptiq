@@ -7,12 +7,15 @@ const clientEntries = [
   "src/components/commerce/catalog-explorer.tsx",
   "src/components/commerce/catalog-listing-card.tsx",
   "src/components/commerce/quick-add-variant-sheet.tsx",
+  "src/components/commerce/product-purchase-panel.tsx",
   "src/cart/cart-provider.tsx",
 ] as const;
 
 const clientSafeDependencies = [
   "src/catalog/storefront-price-presentation.ts",
   "src/components/commerce/product-price.tsx",
+  "src/components/commerce/variant-selector.tsx",
+  "src/components/commerce/quantity-tier-selector.tsx",
 ] as const;
 
 function source(path: string): string {

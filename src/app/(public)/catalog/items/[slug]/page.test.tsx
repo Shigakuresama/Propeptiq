@@ -11,12 +11,12 @@ import {
 
 const {
   getPublicBrowseCatalogMock,
-  getPublicStorefrontCatalogMock,
+  getPublicStorefrontViewMock,
   notFoundMock,
   requestCacheState,
 } = vi.hoisted(() => ({
   getPublicBrowseCatalogMock: vi.fn(),
-  getPublicStorefrontCatalogMock: vi.fn(),
+  getPublicStorefrontViewMock: vi.fn(),
   notFoundMock: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
@@ -48,7 +48,7 @@ vi.mock("@/catalog/browse-catalog-server", () => ({
   getPublicBrowseCatalog: getPublicBrowseCatalogMock,
 }));
 vi.mock("@/catalog/storefront-public-server", () => ({
-  getPublicStorefrontCatalog: getPublicStorefrontCatalogMock,
+  getPublicStorefrontView: getPublicStorefrontViewMock,
 }));
 vi.mock("next/navigation", () => ({ notFound: notFoundMock }));
 vi.mock("@/components/site/page-transition", () => ({
@@ -72,7 +72,7 @@ describe("retained catalog item route", () => {
     getPublicBrowseCatalogMock.mockRejectedValue(
       new Error("legacy browse loader must not own the retained route"),
     );
-    getPublicStorefrontCatalogMock.mockResolvedValue(projectedCatalog);
+    getPublicStorefrontViewMock.mockResolvedValue({ catalog: projectedCatalog, pricing: { mode: "test", evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] } });
   });
 
   it("renders an owner-published product through the safe storefront projection", async () => {
@@ -81,7 +81,7 @@ describe("retained catalog item route", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
-    expect(getPublicStorefrontCatalogMock).toHaveBeenCalledTimes(1);
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledTimes(1);
     expect(getPublicBrowseCatalogMock).not.toHaveBeenCalled();
   });
 
@@ -91,7 +91,7 @@ describe("retained catalog item route", () => {
     await generateMetadata({ params });
     render(await CatalogItemPage({ params }));
 
-    expect(getPublicStorefrontCatalogMock).toHaveBeenCalledOnce();
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
   });
 
   it("keeps unknown slugs on the not-found path", async () => {

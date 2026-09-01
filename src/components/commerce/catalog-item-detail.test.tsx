@@ -10,6 +10,7 @@ import {
 } from "@/catalog/storefront-public";
 
 import { CatalogItemDetail } from "./catalog-item-detail";
+import { testPricingContext } from "./storefront-test-fixtures";
 
 describe("CatalogItemDetail", () => {
   const catalog = buildPublicStorefrontCatalog({
@@ -22,7 +23,7 @@ describe("CatalogItemDetail", () => {
 
   it("shows every supplied variant and exposes a normalized source label", () => {
     const product = findPublicStorefrontProduct(catalog, "pinealon")!;
-    render(<CatalogItemDetail product={product} />);
+    render(<CatalogItemDetail product={product} pricing={testPricingContext()} />);
 
     expect(screen.getByRole("heading", { level: 1, name: "Pinealon" })).toBeVisible();
     expect(screen.getByRole("img", { name: product.image.alt })).toBeVisible();
@@ -42,7 +43,7 @@ describe("CatalogItemDetail", () => {
     ["cjc-1295-no-dac-ipa-cp20", "CP20", "CJC-1295 NO DAC 10mg + IPA 10mg"],
   ])("keeps the exact supplied blend composition attached to %s", (slug, code, sourceName) => {
     const product = findPublicStorefrontProduct(catalog, slug)!;
-    render(<CatalogItemDetail product={product} />);
+    render(<CatalogItemDetail product={product} pricing={testPricingContext()} />);
 
     const variantRow = screen.getByText(code).closest("li");
     expect(variantRow).not.toBeNull();
