@@ -1,3 +1,5 @@
+import type { Route } from "next";
+
 export const siteName = "PROPEPTIQ LABS";
 
 declare const approvedNewsletterPrivacyHrefBrand: unique symbol;
@@ -164,6 +166,134 @@ export const publicNavigation = [
   { label: "Research Use", href: "/research-use-policy" },
   { label: "Rewards", href: "/rewards" },
 ] as const;
+
+export type FooterNavigationLink = Readonly<{
+  label: string;
+  href: Route | null;
+}>;
+
+export type FooterNavigationGroup = Readonly<{
+  label: string;
+  links: readonly FooterNavigationLink[];
+}>;
+
+function footerNavigationGroup(
+  label: string,
+  links: readonly FooterNavigationLink[],
+): FooterNavigationGroup {
+  return Object.freeze({
+    label,
+    links: Object.freeze(
+      links.map((link) => Object.freeze({ label: link.label, href: link.href })),
+    ),
+  });
+}
+
+export const footerNavigationGroups: readonly FooterNavigationGroup[] =
+  Object.freeze([
+    footerNavigationGroup("Shop", [
+      { label: "Catalog", href: "/catalog" },
+      { label: "Cart", href: "/cart" },
+    ]),
+    footerNavigationGroup("Resources", [
+      { label: "Quality Records", href: "/quality-records" },
+      { label: "Rewards", href: "/rewards" },
+      { label: "Partner Program", href: "/partners" },
+    ]),
+    footerNavigationGroup("Support", [
+      { label: "Order tracking", href: "/account/orders" },
+      { label: "FAQ", href: null },
+      { label: "Contact or Support", href: null },
+      { label: "Shipping information", href: null },
+    ]),
+    footerNavigationGroup("Legal", [
+      { label: "Research Use Only", href: "/research-use-policy" },
+      { label: "Privacy Policy", href: null },
+      { label: "Terms and Conditions", href: null },
+      { label: "Shipping and Returns", href: null },
+      { label: "Refund Policy", href: null },
+      { label: "FDA Disclaimer", href: null },
+    ]),
+  ]);
+
+export type FooterSocialPlatform = "instagram" | "tiktok" | "x" | "facebook";
+
+export type FooterSocialUrlConfiguration = Readonly<
+  Record<FooterSocialPlatform, string>
+>;
+
+export type FooterSocialLink = Readonly<{
+  platform: FooterSocialPlatform;
+  label: "Instagram" | "TikTok" | "X" | "Facebook";
+  href: string;
+}>;
+
+export const footerSocialUrls: FooterSocialUrlConfiguration = Object.freeze({
+  instagram: "/",
+  tiktok: "/",
+  x: "/",
+  facebook: "/",
+});
+
+const footerSocialDefinitions = Object.freeze([
+  Object.freeze({ platform: "instagram", label: "Instagram" }),
+  Object.freeze({ platform: "tiktok", label: "TikTok" }),
+  Object.freeze({ platform: "x", label: "X" }),
+  Object.freeze({ platform: "facebook", label: "Facebook" }),
+] as const);
+
+const unsafeSocialUrlCharacters = /[\s\u0000-\u001f\u007f-\u009f]/u;
+const encodedSocialControlCharacter = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
+
+function isSafeFooterSocialHref(value: unknown): value is string {
+  if (value === "/") return true;
+  if (
+    typeof value !== "string" ||
+    unsafeSocialUrlCharacters.test(value) ||
+    encodedSocialControlCharacter.test(value)
+  ) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" &&
+      parsed.hostname.length > 0 &&
+      parsed.username.length === 0 &&
+      parsed.password.length === 0;
+  } catch {
+    return false;
+  }
+}
+
+export function projectFooterSocialLinks(
+  values: Readonly<Partial<Record<FooterSocialPlatform, unknown>>> =
+    footerSocialUrls,
+): readonly FooterSocialLink[] {
+  if (values === null || typeof values !== "object" || Array.isArray(values)) {
+    return Object.freeze([]);
+  }
+
+  const projected: FooterSocialLink[] = [];
+  for (const definition of footerSocialDefinitions) {
+    try {
+      const descriptor = Reflect.getOwnPropertyDescriptor(
+        values,
+        definition.platform,
+      );
+      if (descriptor === undefined || !("value" in descriptor)) continue;
+      if (!isSafeFooterSocialHref(descriptor.value)) continue;
+      projected.push(Object.freeze({
+        platform: definition.platform,
+        label: definition.label,
+        href: descriptor.value,
+      }));
+    } catch {
+      continue;
+    }
+  }
+  return Object.freeze(projected);
+}
 
 export const researchRestrictions = [
   "For legitimate laboratory and research use only.",
