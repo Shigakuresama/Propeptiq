@@ -1,10 +1,12 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { ComponentProps } from "react";
 import type { ProductPurchasePanel } from "./product-purchase-panel";
 import type { CatalogItemDetail } from "./catalog-item-detail";
 import type { LaboratoryConcentrationCalculator } from "./laboratory-concentration-calculator";
+
+const promotionBarPath = "src/components/site/promotion-bar.tsx";
 
 const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
@@ -14,7 +16,7 @@ const clientEntries = [
   "src/components/commerce/laboratory-concentration-calculator.tsx",
   "src/components/commerce/quick-add-variant-sheet.tsx",
   "src/components/commerce/product-purchase-panel.tsx",
-  "src/components/site/promotion-bar.tsx",
+  promotionBarPath,
   "src/cart/cart-provider.tsx",
 ] as const;
 
@@ -46,12 +48,23 @@ function genericClientAuthorityViolation(specifier: string): boolean {
     /stripe|payment-provider|provider-repositor/iu.test(specifier);
 }
 
-function promotionBarAuthorityViolation(specifier: string): boolean {
-  return genericClientAuthorityViolation(specifier) ||
-    /^@\/cart(?:\/|$)/u.test(specifier) ||
-    /(?:^|[\/_-])variant(?:[\/_.-]|$)/iu.test(specifier) ||
-    /(?:^|[\/_-])promotions?(?:[\/_.-]|$)/iu.test(specifier) ||
-    specifier === "@/domain/storefront-pricing";
+function isLocalRuntimeSpecifier(specifier: string): boolean {
+  return specifier.startsWith("./") ||
+    specifier.startsWith("../") ||
+    specifier.startsWith("@/");
+}
+
+function promotionBarAuthorityViolation(from: string, specifier: string): boolean {
+  if (genericClientAuthorityViolation(specifier)) return true;
+  if (!isLocalRuntimeSpecifier(specifier)) return false;
+
+  const resolvedPath = resolveRuntimeLocalImportForTest(from, specifier);
+  return /^src\/(?:cart|env|config|db)(?:\/|$)/u.test(resolvedPath) ||
+    genericClientAuthorityViolation(resolvedPath) ||
+    /(?:^|[\/_-])variant(?:[\/_.-]|$)/iu.test(resolvedPath) ||
+    /(?:^|[\/_-])promotions?(?:[\/_.-]|$)/iu.test(resolvedPath) ||
+    /^src\/domain\/storefront-pricing(?:\.[^/]+)?$/u.test(resolvedPath) ||
+    runtimeImportSpecifiers(source(resolvedPath)).includes("server-only");
 }
 
 function runtimeImportSpecifiers(contents: string): readonly string[] {
@@ -61,15 +74,32 @@ function runtimeImportSpecifiers(contents: string): readonly string[] {
 
 function runtimeLocalImports(path: string): readonly string[] {
   return runtimeImportSpecifiers(source(path))
-    .filter((specifier) => specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("@/"));
+    .filter(isLocalRuntimeSpecifier);
 }
 
 function resolveRuntimeLocalImportForTest(from: string, specifier: string): string {
-  const candidate = specifier.startsWith("@/") ? `src/${specifier.slice(2)}` : `${from.slice(0, from.lastIndexOf("/"))}/${specifier}`;
-  const extensions = ["", ".ts", ".tsx", ".js", ".jsx"];
-  for (const suffix of extensions) {
-    try { source(`${candidate}${suffix}`); return `${candidate}${suffix}`; } catch { /* continue */ }
-    for (const ext of extensions.slice(1)) { try { source(`${candidate}/index${ext}`); return `${candidate}/index${ext}`; } catch { /* continue */ } }
+  if (!isLocalRuntimeSpecifier(specifier)) {
+    throw new Error(`Unresolved local runtime import: ${from} -> ${specifier}`);
+  }
+
+  const workspaceRoot = resolve(process.cwd());
+  const candidate = specifier.startsWith("@/")
+    ? resolve(workspaceRoot, "src", specifier.slice(2))
+    : resolve(workspaceRoot, dirname(from), specifier);
+  const extensions = [".ts", ".tsx", ".js", ".jsx"] as const;
+  const candidates = [
+    candidate,
+    ...extensions.map((extension) => `${candidate}${extension}`),
+    ...extensions.map((extension) => resolve(candidate, `index${extension}`)),
+  ];
+
+  for (const absolutePath of candidates) {
+    try {
+      readFileSync(absolutePath, "utf8");
+      const canonicalPath = relative(workspaceRoot, absolutePath).replaceAll("\\", "/");
+      if (!canonicalPath.startsWith("src/")) break;
+      return canonicalPath;
+    } catch { /* continue */ }
   }
   throw new Error(`Unresolved local runtime import: ${from} -> ${specifier}`);
 }
@@ -92,7 +122,10 @@ describe("storefront client boundary", () => {
 
   it.each([
     ["server banner adapter", "@/catalog/storefront-promotion-banner-server"],
+    ["aliased server module", "@/catalog/storefront-public-server"],
+    ["relative server module", "../../catalog/storefront-public-server"],
     ["cart state", "@/cart/cart-provider"],
+    ["relative cart state", "../../cart/cart-provider"],
     ["variant mutation", "@/components/commerce/variant-selector"],
     ["promotion mutation", "@/domain/promotions"],
     ["pricing mutation", "@/domain/storefront-pricing"],
@@ -106,14 +139,28 @@ describe("storefront client boundary", () => {
     const fixture = `import { syntheticAuthority } from "${specifier}";`;
 
     expect(
-      runtimeImportSpecifiers(fixture).filter(promotionBarAuthorityViolation),
+      runtimeImportSpecifiers(fixture)
+        .filter((candidate) => promotionBarAuthorityViolation(promotionBarPath, candidate)),
     ).toEqual([specifier]);
+  });
+
+  it.each([
+    ["third-party cart package", "shopping-cart-ui"],
+    ["third-party server package", "universal-server-renderer"],
+  ] as const)("allows an unrelated %s runtime import", (_label, specifier) => {
+    expect(promotionBarAuthorityViolation(promotionBarPath, specifier)).toBe(false);
+  });
+
+  it("allows type-only local imports without granting runtime authority", () => {
+    const fixture = 'import type { SyntheticAuthority } from "../../cart/cart-provider";';
+
+    expect(runtimeImportSpecifiers(fixture)).toEqual([]);
   });
 
   it("keeps PromotionBar runtime imports free of mutation and server authorities", () => {
     expect(
-      runtimeImportSpecifiers(source("src/components/site/promotion-bar.tsx"))
-        .filter(promotionBarAuthorityViolation),
+      runtimeImportSpecifiers(source(promotionBarPath))
+        .filter((specifier) => promotionBarAuthorityViolation(promotionBarPath, specifier)),
     ).toEqual([]);
   });
 
