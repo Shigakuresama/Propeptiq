@@ -13,6 +13,7 @@ import { testPricingContext } from "@/components/commerce/storefront-test-fixtur
 const { receivedPricing } = vi.hoisted(() => ({
   receivedPricing: [] as PublicStorefrontPricingContext[],
 }));
+const { panelPricing } = vi.hoisted(() => ({ panelPricing: [] as PublicStorefrontPricingContext[] }));
 
 vi.mock("@/components/commerce/catalog-listing-card", () => ({
   CatalogListingCard: ({
@@ -26,9 +27,12 @@ vi.mock("@/components/commerce/catalog-listing-card", () => ({
     return <article>{product.name}</article>;
   },
 }));
+vi.mock("@/components/commerce/product-purchase-panel", () => ({ ProductPurchasePanel: ({ pricing }: { pricing: PublicStorefrontPricingContext }) => { panelPricing.push(pricing); return <div data-testid="panel" />; } }));
 
 import { CatalogExplorer } from "./catalog-explorer";
 import { PublicHome } from "../site/public-home";
+import { CatalogItemDetail } from "./catalog-item-detail";
+import { testCanonicalProduct } from "./storefront-test-fixtures";
 
 const products = buildPublicStorefrontCatalog({
   configuredPublicationId: browseCatalogPublicationId,
@@ -41,6 +45,7 @@ const products = buildPublicStorefrontCatalog({
 describe("public pricing snapshot propagation", () => {
   beforeEach(() => {
     receivedPricing.length = 0;
+    panelPricing.length = 0;
   });
 
   it("forwards one exact pricing object reference through CatalogExplorer to every card", () => {
@@ -63,5 +68,11 @@ describe("public pricing snapshot propagation", () => {
 
     expect(receivedPricing).toHaveLength(3);
     for (const received of receivedPricing) expect(received).toBe(pricing);
+  });
+
+  it("forwards the exact snapshot through canonical detail into the panel", () => {
+    const pricing = testPricingContext("production");
+    render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} />);
+    expect(panelPricing).toHaveLength(1); expect(panelPricing[0]).toBe(pricing);
   });
 });

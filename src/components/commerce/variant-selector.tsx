@@ -1,5 +1,6 @@
 import type { CanonicalPublicStorefrontProduct } from "@/catalog/storefront-public";
 import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import { publicVariantPurchaseState } from "@/catalog/storefront-price-presentation";
 import { cn } from "@/lib/utils";
 
 export type VariantSelectorProps = Readonly<{
@@ -13,12 +14,8 @@ export type VariantSelectorProps = Readonly<{
 }>;
 
 function status(variant: VariantSelectorProps["variants"][number], productId: string, quantity: number, pricing: PublicStorefrontPricingContext): string {
-  if (variant.availability === "unavailable") return "Unavailable";
-  if (variant.priceStatus === "pending") {
-    return variant.availability === "preview_only" && variant.baseUnitMinor === 0 && variant.currency === "USD" && pricing.mode !== "production" ? "Preview only" : "Pricing coming soon";
-  }
-  if (variant.priceStatus !== "active" || variant.baseUnitMinor === null || variant.baseUnitMinor <= 0 || variant.currency !== "USD") return "Pricing coming soon";
-  return variant.checkoutReady ? "Available" : "Checkout unavailable";
+  const state = publicVariantPurchaseState(variant, pricing.mode);
+  return state === "unavailable" ? "Unavailable" : state === "pricing_pending" ? "Pricing coming soon" : state === "local_preview" ? "Preview only" : state === "checkout_unavailable" ? "Checkout unavailable" : "Available";
 }
 
 export function VariantSelector({ productId, productName, variants, selectedVariantId, quantity, pricing, onSelectedVariantIdChange }: VariantSelectorProps) {

@@ -65,6 +65,23 @@ export function canAddPublicVariant(
   return false;
 }
 
+export type PublicVariantPurchaseState = "ready" | "checkout_unavailable" | "pricing_pending" | "unavailable" | "local_preview";
+
+/** Pure status projection for selectors; intentionally performs no price arithmetic. */
+export function publicVariantPurchaseState(
+  variant: Pick<PublicStorefrontVariant, "availability" | "priceStatus" | "baseUnitMinor" | "currency" | "checkoutReady">,
+  mode: PricePresentationMode,
+): PublicVariantPurchaseState {
+  if (variant.availability === "unavailable" || variant.priceStatus === "unavailable") return "unavailable";
+  if (variant.priceStatus === "pending") {
+    return variant.availability === "preview_only" && variant.baseUnitMinor === 0 && variant.currency === "USD" && variant.checkoutReady === false && mode !== "production"
+      ? "local_preview"
+      : "pricing_pending";
+  }
+  if (variant.priceStatus !== "active" || variant.availability !== "available" || variant.baseUnitMinor === null || !Number.isSafeInteger(variant.baseUnitMinor) || variant.baseUnitMinor <= 0 || variant.currency !== "USD") return "pricing_pending";
+  return variant.checkoutReady === true ? "ready" : "checkout_unavailable";
+}
+
 export function formatStorefrontMoney(amountMinor: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(amountMinor / 100);
 }

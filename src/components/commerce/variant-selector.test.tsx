@@ -16,4 +16,17 @@ describe("VariantSelector", () => {
     expect(container.querySelector("label > span")?.className).toContain("[overflow-wrap:anywhere]");
     await user.click(screen.getByRole("radio", { name: /A/u })); expect(change).toHaveBeenCalledWith("a");
   });
+
+  it("moves visible selection with native arrow keys and keeps every unsafe option inspectable", async () => {
+    const user = userEvent.setup(); let selected = "b";
+    const { rerender, container } = render(<VariantSelector productId="keyboard" productName="P" variants={variants} selectedVariantId={selected} quantity={1} pricing={testPricingContext()} onSelectedVariantIdChange={(id) => { selected = id; rerender(<VariantSelector productId="keyboard" productName="P" variants={variants} selectedVariantId={selected} quantity={1} pricing={testPricingContext()} onSelectedVariantIdChange={(next) => { selected = next; }} />); }} />);
+    const radios = screen.getAllByRole("radio"); await user.click(radios[1]!); await user.keyboard("{ArrowDown}");
+    expect(screen.getByText("C").parentElement).toHaveTextContent("Selected"); expect(screen.getByText(/5 mg.*Unavailable/u)).toBeVisible();
+    expect(container.querySelectorAll("label")).toHaveLength(3); expect(container.querySelector("label")?.className).toContain("min-h-11");
+  });
+
+  it("fails closed with no selected radio when the supplied default is missing", () => {
+    render(<VariantSelector productId="missing" productName="P" variants={variants} selectedVariantId={null} quantity={1} pricing={testPricingContext()} onSelectedVariantIdChange={vi.fn()} />);
+    expect(screen.getAllByRole("radio").some((radio) => (radio as HTMLInputElement).checked)).toBe(false);
+  });
 });

@@ -28,6 +28,13 @@ function importSpecifiers(contents: string): readonly string[] {
   );
 }
 
+function runtimeLocalImports(path: string): readonly string[] {
+  const contents = source(path);
+  return [...contents.matchAll(/^(?!\s*import\s+type)(?:import\s+[^;]+?\s+from\s+|import\s*)["']([^"']+)["']/gmu)]
+    .map((match) => match[1]!)
+    .filter((specifier) => specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("@/"));
+}
+
 describe("storefront client boundary", () => {
   it("enumerates every direct client entry and keeps server/env/database/payment code out", () => {
     for (const path of clientEntries) {
@@ -60,6 +67,28 @@ describe("storefront client boundary", () => {
         );
       }
     }
+  });
+
+  it("recursively bounds panel runtime imports and excludes server authorities", () => {
+    const pending = ["src/components/commerce/product-purchase-panel.tsx"];
+    const visited = new Set<string>();
+    while (pending.length) {
+      const current = pending.pop()!; if (visited.has(current)) continue; visited.add(current);
+      const contents = source(current); expect(contents, current).not.toMatch(/process\.env/u);
+      for (const specifier of runtimeLocalImports(current)) {
+        expect(specifier, current).not.toMatch(/server-only|stripe|checkout|@\/db|@\/env|payment-provider|provider-repositor/iu);
+        const candidate = specifier.startsWith("@/") ? `src/${specifier.slice(2)}` : `${current.slice(0, current.lastIndexOf("/"))}/${specifier}`;
+        const resolved = [candidate, `${candidate}.ts`, `${candidate}.tsx`].find((entry) => { try { source(entry); return true; } catch { return false; } });
+        if (resolved) pending.push(resolved);
+      }
+    }
+    expect(visited.size).toBeGreaterThan(3);
+  });
+
+  it("keeps panel pricing required and exposes no mode prop", () => {
+    const panel = source("src/components/commerce/product-purchase-panel.tsx");
+    expect(panel).toMatch(/product:\s*CanonicalPublicStorefrontProduct;\s*pricing:\s*PublicStorefrontPricingContext/u);
+    expect(panel).not.toMatch(/ProductPurchasePanelProps[^\n]*mode|mode\?:/u);
   });
 
   it("has no contradictory client mode override or missing-pricing fallback", () => {

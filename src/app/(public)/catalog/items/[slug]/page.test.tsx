@@ -14,6 +14,7 @@ const {
   getPublicStorefrontViewMock,
   notFoundMock,
   requestCacheState,
+  detailProps,
 } = vi.hoisted(() => ({
   getPublicBrowseCatalogMock: vi.fn(),
   getPublicStorefrontViewMock: vi.fn(),
@@ -21,6 +22,7 @@ const {
     throw new Error("NEXT_NOT_FOUND");
   }),
   requestCacheState: { generation: 0 },
+  detailProps: [] as Array<{ product: unknown; pricing: unknown }>,
 }));
 
 vi.mock("react", async (importOriginal) => {
@@ -54,6 +56,9 @@ vi.mock("next/navigation", () => ({ notFound: notFoundMock }));
 vi.mock("@/components/site/page-transition", () => ({
   PageTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
+vi.mock("@/components/commerce/catalog-item-detail", () => ({
+  CatalogItemDetail: (props: { product: { name: string }; pricing: unknown }) => { detailProps.push(props); return <h1>{props.product.name}</h1>; },
+}));
 
 import CatalogItemPage, { generateMetadata } from "./page";
 
@@ -68,6 +73,7 @@ const projectedCatalog = buildPublicStorefrontCatalog({
 describe("retained catalog item route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    detailProps.length = 0;
     requestCacheState.generation += 1;
     getPublicBrowseCatalogMock.mockRejectedValue(
       new Error("legacy browse loader must not own the retained route"),
@@ -112,5 +118,13 @@ describe("retained catalog item route", () => {
     await expect(
       generateMetadata({ params: Promise.resolve({ slug: "not-a-real-item" }) }),
     ).resolves.toEqual({ title: "Catalog item unavailable" });
+  });
+
+  it("passes one exact pricing snapshot from the cached view to detail", async () => {
+    const pricing = { mode: "test" as const, evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] };
+    getPublicStorefrontViewMock.mockResolvedValue({ catalog: projectedCatalog, pricing });
+    await generateMetadata({ params: Promise.resolve({ slug: "tirzepatide" }) });
+    render(await CatalogItemPage({ params: Promise.resolve({ slug: "tirzepatide" }) }));
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce(); expect(detailProps[0]?.pricing).toBe(pricing);
   });
 });
