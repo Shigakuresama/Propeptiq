@@ -8,6 +8,7 @@ import { PromotionBar } from "./promotion-bar";
 
 const winter30 = Object.freeze({
   id: "winter30" as const,
+  displayName: "Winter Sale" as const,
   code: "WINTER30" as const,
   percentage: 30 as const,
 });
@@ -74,6 +75,36 @@ describe("PromotionBar", () => {
     );
     expect(screen.getByRole("button", { name: "Copy promotion code WINTER30" }))
       .toHaveClass("min-h-11", "px-4");
+  });
+
+  it("derives all campaign text and clipboard data from its safe promotion prop", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    setClipboard({ writeText });
+    const safeProp = {
+      id: "winter30" as const,
+      displayName: "Synthetic Preview Sale",
+      code: "TEST25",
+      percentage: 25,
+    };
+
+    render(<PromotionBar promotion={safeProp} />);
+    const copy = screen.getByRole("button", {
+      name: `Copy promotion code ${safeProp.code}`,
+    });
+    expect(
+      screen.getByText(
+        `${safeProp.displayName.toUpperCase()}: ${safeProp.percentage}% OFF SITEWIDE — USE CODE ${safeProp.code}`,
+      ),
+    ).toBeVisible();
+    expect(copy).toHaveTextContent(`Copy ${safeProp.code}`);
+
+    await user.click(copy);
+
+    expect(writeText).toHaveBeenCalledWith(safeProp.code);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      `${safeProp.code} copied`,
+    );
   });
 
   it("copies only WINTER30, preserves focus, and announces one polite atomic success", async () => {

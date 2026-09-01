@@ -300,6 +300,29 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("owner-configured WINTER30 promotion remains visible without purchasable canonical lines", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const banner = page.getByRole("complementary", { name: "Promotion" });
+  await expect(banner).toHaveCount(1);
+  await expect(banner).toBeVisible();
+  await expect(
+    banner.getByText(
+      "WINTER SALE: 30% OFF SITEWIDE — USE CODE WINTER30",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    banner.getByRole("button", { name: "Copy promotion code WINTER30" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /add .* to cart/iu }),
+  ).toHaveCount(0);
+  await expect(page.getByText(/\$\d+[.,]\d{2}/u)).toHaveCount(0);
+});
+
 test("site search ultra-narrow public header keeps every keyboard focus target inside the viewport without clipping overflow", async ({
   page,
 }) => {

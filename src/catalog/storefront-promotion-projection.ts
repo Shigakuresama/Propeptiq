@@ -1,4 +1,9 @@
 import { isStorefrontPromotionActive } from "@/domain/storefront-pricing";
+import {
+  isStrictStorefrontPromotionInstant,
+  isValidStorefrontPromotionTimezone,
+  storefrontPromotionMatchesOwnerConfiguration,
+} from "@/config/storefront-promotions";
 
 import type {
   DatabaseCatalogPromotionRecord,
@@ -12,7 +17,8 @@ export type PromotionProjectionDiagnostic = Readonly<{
     | "invalid_interval"
     | "invalid_scope"
     | "dangling_target"
-    | "duplicate_campaign_key";
+    | "duplicate_campaign_key"
+    | "configuration_mismatch";
   campaignKey: string | null;
 }>;
 
@@ -21,52 +27,7 @@ export type PromotionProjectionResult = Readonly<{
   diagnostics: readonly PromotionProjectionDiagnostic[];
 }>;
 
-const strictInstant = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-](\d{2}):(\d{2}))$/u;
-
-function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-export function isStrictStorefrontPromotionInstant(value: unknown): value is string {
-  if (typeof value !== "string") return false;
-  const match = strictInstant.exec(value);
-  if (!match) return false;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  const second = Number(match[6]);
-  const offsetHour = match[9] === undefined ? 0 : Number(match[9]);
-  const offsetMinute = match[10] === undefined ? 0 : Number(match[10]);
-  return (
-    month >= 1 &&
-    month <= 12 &&
-    day >= 1 &&
-    day <= daysInMonth(year, month) &&
-    hour >= 0 &&
-    hour <= 23 &&
-    minute >= 0 &&
-    minute <= 59 &&
-    second >= 0 &&
-    second <= 59 &&
-    offsetHour >= 0 &&
-    offsetHour <= 23 &&
-    offsetMinute >= 0 &&
-    offsetMinute <= 59 &&
-    Number.isFinite(Date.parse(value))
-  );
-}
-
-function validTimezone(value: unknown): value is string {
-  if (typeof value !== "string" || value.trim() === "") return false;
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
-    return true;
-  } catch {
-    return false;
-  }
-}
+export { isStrictStorefrontPromotionInstant };
 
 function validInstant(value: string | null): boolean {
   return value === null || isStrictStorefrontPromotionInstant(value);
@@ -224,7 +185,7 @@ export function projectAutomaticStorefrontPromotions(input: Readonly<{
     if (
       !nonblank(row.campaignKey) ||
       !nonblank(row.name) ||
-      !validTimezone(row.timezone) ||
+      !isValidStorefrontPromotionTimezone(row.timezone) ||
       row.kind !== "discount" ||
       row.applicationMode !== "automatic" ||
       row.amountMinor !== null ||
@@ -295,7 +256,16 @@ export function projectAutomaticStorefrontPromotions(input: Readonly<{
 
   const promotions = candidates
     .filter(({ promotion }) => (campaignCounts.get(promotion.id) ?? 0) === 1)
-    .map(({ promotion }) => promotion)
+    .flatMap(({ promotion }) => {
+      if (!storefrontPromotionMatchesOwnerConfiguration(promotion)) {
+        diagnostics.push({
+          code: "configuration_mismatch",
+          campaignKey: promotion.id,
+        });
+        return [];
+      }
+      return [promotion];
+    })
     .sort((left, right) => left.id.localeCompare(right.id, "en-US"));
   diagnostics.sort(
     (left, right) =>

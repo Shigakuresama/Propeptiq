@@ -38,6 +38,7 @@ import {
   type DestinationRule,
 } from "@/domain/eligibility";
 import type { PromotionRecord } from "@/domain/promotions";
+import { storefrontPromotionMatchesOwnerConfiguration } from "@/config/storefront-promotions";
 import type {
   StorefrontPromotion,
   StorefrontPromotionScope,
@@ -636,23 +637,24 @@ async function getAutomaticStorefrontPromotions(
     }
     if (scope === null) continue;
 
-    result.push(
-      Object.freeze({
-        recordId: row.recordId,
-        campaignKey: row.campaignKey,
-        version: safeInteger(row.version),
-        id: row.campaignKey,
-        displayName: row.displayName,
-        displayCode: row.displayCode,
-        discountBps,
-        enabled: row.enabled && row.status === "active",
-        startAt: row.startAt === null ? null : toIso(row.startAt),
-        endAt: row.endAt === null ? null : toIso(row.endAt),
-        timezone: row.timezone,
-        scope,
-        applicationMode: "automatic" as const,
-      }),
-    );
+    const promotion: PersistedStorefrontPromotion = Object.freeze({
+      recordId: row.recordId,
+      campaignKey: row.campaignKey,
+      version: safeInteger(row.version),
+      id: row.campaignKey,
+      displayName: row.displayName,
+      displayCode: row.displayCode,
+      discountBps,
+      enabled: row.enabled && row.status === "active",
+      startAt: row.startAt === null ? null : toIso(row.startAt),
+      endAt: row.endAt === null ? null : toIso(row.endAt),
+      timezone: row.timezone,
+      scope,
+      applicationMode: "automatic" as const,
+    });
+    if (storefrontPromotionMatchesOwnerConfiguration(promotion)) {
+      result.push(promotion);
+    }
   }
   return Object.freeze(result);
 }

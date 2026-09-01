@@ -65,7 +65,7 @@ There is no owner-editable tier configuration seam. Changing these thresholds or
 
 ## 4. WINTER30 and future campaigns
 
-`WINTER30` is an automatic campaign contract, not a customer-entered Stripe coupon. A persisted row whose campaign key is `winter30` must have this exact shape under the database constraint in [`src/db/schema/catalog.ts`](../../src/db/schema/catalog.ts):
+The owner display/application contract for `WINTER30` lives in [`src/config/storefront-promotions.ts`](../../src/config/storefront-promotions.ts). Edit campaign terms, dates, mode, or scope there only through a reviewed code-and-test change. `WINTER30` is automatic, not a customer-entered Stripe coupon. Its configured terms are:
 
 - campaign key `winter30`;
 - display code `WINTER30` and name `Winter Sale`;
@@ -76,11 +76,13 @@ There is no owner-editable tier configuration seam. Changing these thresholds or
 - application mode `automatic`; and
 - scope `sitewide`.
 
-If dates are added to a future campaign, the start is inclusive and the end is exclusive, as enforced by [`isStorefrontPromotionActive`](../../src/domain/storefront-pricing.ts). The server evaluates the current time; the browser clock is not authoritative.
+If dates are added to a future campaign, the start is inclusive and the end is exclusive. The server evaluates absolute instants; the configured IANA timezone is authoring/display metadata, and the browser clock is not authoritative.
 
-While an authoritative row is active, [`src/catalog/storefront-promotion-projection.ts`](../../src/catalog/storefront-promotion-projection.ts) drives prices and [`src/catalog/storefront-promotion-banner-server.ts`](../../src/catalog/storefront-promotion-banner-server.ts) drives the banner. The banner's copy control only copies the campaign code and announces the result; copying it does not apply another discount. [`src/commerce/provider-contracts.ts`](../../src/commerce/provider-contracts.ts) keeps Stripe's customer-entered promotion-code field off and sends no Stripe discount entry for this automatic campaign.
+[`src/catalog/storefront-promotion-banner-server.ts`](../../src/catalog/storefront-promotion-banner-server.ts) evaluates that immutable configuration directly, so the banner is active even when there are no canonical products and browse publication is closed. The banner's copy control only copies the campaign code and announces the result; copying it does not apply another discount.
 
-The schema constraint does not insert a production campaign. The WINTER30 object in [`src/catalog/demo-fixtures.ts`](../../src/catalog/demo-fixtures.ts) is explicitly synthetic and must never be copied to production. This source audit did not query a live database, and the repository contains no production seed that creates WINTER30. The banner can therefore remain absent until canonical catalog bindings exist and an authorized, reconciled production row is present.
+Banner visibility does not create a product, make any product purchasable, or authorize a Stripe Checkout Session. Positive production pricing and checkout still require canonical products and variants, positive active prices, inventory, payment mappings, and an active persisted promotion row whose public terms exactly match the owner configuration. [`src/catalog/storefront-promotion-projection.ts`](../../src/catalog/storefront-promotion-projection.ts) and the checkout repository omit a configured same-key row when any term or scope differs. The code-configured banner is never inserted into authoritative checkout facts. [`src/commerce/provider-contracts.ts`](../../src/commerce/provider-contracts.ts) keeps Stripe's customer-entered promotion-code field off and sends no Stripe discount entry for this automatic campaign.
+
+The `promotions_winter30_exact` schema constraint in [`src/db/schema/catalog.ts`](../../src/db/schema/catalog.ts) is a defense-in-depth mirror of the owner configuration; it does not insert a campaign. Any future WINTER30 term, date, mode, or scope change requires a reviewed matching schema/data change before positive checkout can use the new terms. The WINTER30 record in [`src/catalog/demo-fixtures.ts`](../../src/catalog/demo-fixtures.ts) remains a clearly synthetic database fixture whose business fields are derived from the owner configuration; its synthetic UUID/version must never be promoted to production. This source audit did not query a live database or verify deployment publication state.
 
 The current `/admin/promotions` form manages the older draft fields, product/policy-group targets, dates, and lifecycle. It does not author `campaignKey`, `enabled`, `timezone`, `applicationMode`, `scope`, or variant targets. Publishing WINTER30 or another automatic campaign requires a reviewed database/import change or an approved extension of that admin boundary, followed by projection, checkout, and browser verification.
 
@@ -203,7 +205,7 @@ npm run test:artifact-scanner
 Focused pricing/cart/checkout checks:
 
 ```powershell
-npm test -- src/domain/storefront-pricing.test.ts src/cart/cart.test.ts src/catalog/storefront-price-presentation.test.ts src/catalog/storefront-promotion-projection.test.ts src/catalog/storefront-promotion-banner.test.ts src/catalog/storefront-promotion-banner-server.test.ts src/commerce/checkout-service.test.ts src/commerce/provider-contracts.test.ts
+npm test -- src/config/storefront-promotions.test.ts src/domain/storefront-pricing.test.ts src/cart/cart.test.ts src/catalog/storefront-price-presentation.test.ts src/catalog/storefront-promotion-projection.test.ts src/catalog/storefront-promotion-banner.test.ts src/catalog/storefront-promotion-banner-server.test.ts src/commerce/checkout-service.test.ts src/commerce/provider-contracts.test.ts
 ```
 
 Focused catalog/search checks:
@@ -246,7 +248,7 @@ Browser tests use the configured local Playwright server; they do not prove live
 | Canonical product and variant identity | [`storefront-catalog-data.ts`](../../src/catalog/storefront-catalog-data.ts), [`storefront-bindings.ts`](../../src/catalog/storefront-bindings.ts), and database [`catalog.ts`](../../src/db/schema/catalog.ts) | Owner supplies facts; reviewed developer/import plus authorized database operator | Binding, schema, reconciliation, catalog, cart, checkout tests | Canonical products/bindings are empty; no variant admin command |
 | Prices and Stripe mappings | `product_prices`/`product_variants` in [`catalog.ts`](../../src/db/schema/catalog.ts) and matching storefront bindings | Owner/finance and Stripe account owner approve; authorized operator/developer implements | Positive integer/currency, provider binding, server quote/session, webhook tests | No approved real variant prices or mappings in canonical config |
 | Quantity tiers and non-stacking | [`storefront-pricing.ts`](../../src/domain/storefront-pricing.ts) and checkout/cart code | Developer only after an owner rule change | Pricing matrix, cart merge, checkout regression tests | Implemented and code-protected; no owner config seam |
-| Automatic campaigns | Database promotion tables/constraints in [`catalog.ts`](../../src/db/schema/catalog.ts), projection, and checkout | Owner approves terms; authorized reviewed database/admin implementation | Interval/scope/overlap, banner, cart, checkout, Stripe request tests | Contract exists; current admin cannot author automatic fields; no production seed |
+| Automatic campaigns | Owner terms in [`storefront-promotions.ts`](../../src/config/storefront-promotions.ts), database promotion tables/constraints in [`catalog.ts`](../../src/db/schema/catalog.ts), projection, and checkout | Owner approves terms; authorized reviewed database/admin implementation | Interval/scope/overlap, banner, persisted-row reconciliation, cart, checkout, Stripe request tests | Owner-configured banner active; current admin cannot author automatic fields; positive pricing still needs an exact persisted row |
 | Related products, rank, release date, aliases, default variant | [`storefront-catalog-data.ts`](../../src/catalog/storefront-catalog-data.ts) | Owner supplies decisions; developer changes reviewed config | Binding, discovery sort/search, related carousel tests | Empty with canonical catalog |
 | Why Choose, FAQ, product info, calculator copy, legal notices | [`storefront-content.ts`](../../src/content/storefront-content.ts) | Business/content/legal reviewer approves; developer enters reviewed records | Status/metadata, content policy, homepage/product/footer/search tests | Production registry is empty |
 | Searchable pages and anchors | [`public-information.ts`](../../src/content/public-information.ts) | Content owner approves destination; developer updates allowlist and record | Route/anchor existence, index, dialog, keyboard/browser tests | Information registry empty; no approved fragments |
@@ -268,7 +270,7 @@ Browser tests use the configured local Playwright server; they do not prove live
 - [ ] A newsletter provider, abuse/attempt gate, consent/retention/deletion decision, approved privacy route, duplicate behavior, and accountable incident owner—or an explicit decision to remain unavailable.
 - [ ] Real Instagram, TikTok, X, and Facebook profile URLs, or explicit acceptance of the current `/` placeholders for launch.
 - [ ] Calculator maximum inputs, neutral copy, sources, placement, review metadata, and explicit public-launch approval if it is to be enabled.
-- [ ] An authoritative WINTER30 production-record publication path and accountable campaign owner; schema and synthetic fixtures do not create the row.
+- [ ] An authoritative persisted WINTER30 publication path and accountable database campaign operator for positive production pricing; the owner code configuration and schema constraint do not create the row.
 - [ ] Stripe account/business acceptance, provider mapping reconciliation, webhook/signature operations, and production-safe payment/tax/shipping configuration.
 - [ ] Reviewed database migration/import plan, backup, reconciliation, rollback, fulfillment ownership, and production incident response.
 - [ ] Deployment-specific browse publication and capability settings, explicit deployment authority, and post-deployment verification.

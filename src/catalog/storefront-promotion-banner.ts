@@ -1,15 +1,20 @@
-import type { PublicStorefrontAutomaticPromotion } from "./storefront-price-presentation";
+import {
+  storefrontPromotionMatchesOwnerConfiguration,
+  WINTER30_STOREFRONT_PROMOTION,
+} from "@/config/storefront-promotions";
 
 export type Winter30PromotionView = Readonly<{
   id: "winter30";
-  code: "WINTER30";
-  percentage: 30;
+  displayName: string;
+  code: string;
+  percentage: number;
 }>;
 
 const winter30PromotionView: Winter30PromotionView = Object.freeze({
-  id: "winter30",
-  code: "WINTER30",
-  percentage: 30,
+  id: WINTER30_STOREFRONT_PROMOTION.id,
+  displayName: WINTER30_STOREFRONT_PROMOTION.displayName,
+  code: WINTER30_STOREFRONT_PROMOTION.displayCode,
+  percentage: WINTER30_STOREFRONT_PROMOTION.discountBps / 100,
 });
 
 function isRuntimeObject(value: unknown): value is Record<string, unknown> {
@@ -17,27 +22,22 @@ function isRuntimeObject(value: unknown): value is Record<string, unknown> {
 }
 
 export function selectWinter30PromotionView(
-  promotions: readonly PublicStorefrontAutomaticPromotion[],
+  promotions: unknown,
 ): Winter30PromotionView | null {
-  if (!Array.isArray(promotions)) return null;
-
-  const matches = promotions.filter(
-    (promotion) => isRuntimeObject(promotion) && promotion.id === "winter30",
-  );
-  if (matches.length !== 1) return null;
-
-  const campaign = matches[0]!;
-  if (
-    campaign.displayName !== "Winter Sale" ||
-    campaign.displayCode !== "WINTER30" ||
-    campaign.discountBps !== 3_000 ||
-    campaign.enabled !== true ||
-    campaign.applicationMode !== "automatic" ||
-    !isRuntimeObject(campaign.scope) ||
-    campaign.scope.kind !== "sitewide"
-  ) {
+  try {
+    if (!Array.isArray(promotions)) return null;
+    const matches: Record<string, unknown>[] = [];
+    for (let index = 0; index < promotions.length; index += 1) {
+      if (!Object.hasOwn(promotions, index)) return null;
+      const promotion = promotions[index];
+      if (isRuntimeObject(promotion) && promotion.id === "winter30") {
+        matches.push(promotion);
+      }
+    }
+    if (matches.length !== 1) return null;
+    if (!storefrontPromotionMatchesOwnerConfiguration(matches[0])) return null;
+    return winter30PromotionView;
+  } catch {
     return null;
   }
-
-  return winter30PromotionView;
 }

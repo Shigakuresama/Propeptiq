@@ -1285,17 +1285,20 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
 
   it("projects the exact automatic sitewide WINTER30 fixture from persisted records", async () => {
     const { repository } = setup();
+    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([]);
     await client.exec(`
       INSERT INTO promotions
-        (campaign_key, code, name, kind, status, basis_points, configuration,
+        (id, campaign_key, code, name, kind, status, basis_points, configuration,
          enabled, timezone, application_mode, scope, starts_at, ends_at)
-      VALUES ('winter30', 'WINTER30', 'Winter Sale', 'discount', 'active',
+      VALUES ('${ids.variantPromotion}', 'winter30', 'WINTER30', 'Winter Sale', 'discount', 'active',
         3000, '{}'::jsonb, true, 'America/Los_Angeles', 'automatic',
         'sitewide', null, null);
     `);
 
-    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([
-      expect.objectContaining({
+    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([{
+        recordId: ids.variantPromotion,
+        campaignKey: "winter30",
+        version: 1,
         id: "winter30",
         displayName: "Winter Sale",
         displayCode: "WINTER30",
@@ -1306,8 +1309,22 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         timezone: "America/Los_Angeles",
         applicationMode: "automatic",
         scope: { kind: "sitewide" },
-      }),
-    ]);
+      }]);
+  });
+
+  it("omits a persisted configured WINTER30 mismatch without synthesizing a replacement", async () => {
+    const { repository } = setup();
+    await client.exec(`
+      ALTER TABLE promotions DROP CONSTRAINT promotions_winter30_exact;
+      INSERT INTO promotions
+        (id, campaign_key, code, name, kind, status, basis_points, configuration,
+         enabled, timezone, application_mode, scope, starts_at, ends_at)
+      VALUES ('${ids.variantPromotion}', 'winter30', 'CHANGED30', 'Winter Sale',
+        'discount', 'active', 3000, '{}'::jsonb, true,
+        'America/Los_Angeles', 'automatic', 'sitewide', null, null);
+    `);
+
+    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([]);
   });
 
   it("projects an automatic promotion only to its explicitly persisted variant targets", async () => {

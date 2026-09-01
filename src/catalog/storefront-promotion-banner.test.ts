@@ -25,7 +25,12 @@ describe("WINTER30 promotion banner selector", () => {
   it("projects the exact frozen safe literal for one exact active automatic sitewide campaign", () => {
     const selected = selectWinter30PromotionView([promotion()]);
 
-    expect(selected).toEqual({ id: "winter30", code: "WINTER30", percentage: 30 });
+    expect(selected).toEqual({
+      id: "winter30",
+      displayName: "Winter Sale",
+      code: "WINTER30",
+      percentage: 30,
+    });
     expect(Object.isFrozen(selected)).toBe(true);
   });
 
@@ -67,6 +72,7 @@ describe("WINTER30 promotion banner selector", () => {
 
     expect(selectWinter30PromotionView(input)).toEqual({
       id: "winter30",
+      displayName: "Winter Sale",
       code: "WINTER30",
       percentage: 30,
     });

@@ -191,6 +191,94 @@ describe("automatic storefront promotion projection", () => {
     });
   });
 
+  it.each([
+    ["display name", promotion({ name: "Changed Winter Sale" }), {}],
+    ["display code", promotion({ code: "CHANGED30" }), {}],
+    ["missing display code", promotion({ code: " " }), {}],
+    ["basis points", promotion({ basisPoints: 2_999 }), {}],
+    ["timezone", promotion({ timezone: "UTC" }), {}],
+    ["active bounded start", promotion({ startsAt: "2026-08-01T00:00:00.000Z" }), {}],
+    ["active bounded end", promotion({ endsAt: "2026-09-30T00:00:00.000Z" }), {}],
+    [
+      "product scope",
+      promotion({ scope: "products" }),
+      {
+        promotionTargets: [{
+          promotionId: "database-record-private",
+          targetKind: "product" as const,
+          productId,
+          policyGroupId: null,
+        }],
+      },
+    ],
+    [
+      "variant scope",
+      promotion({ scope: "variants" }),
+      {
+        promotionVariantTargets: [{
+          promotionId: "database-record-private",
+          variantId,
+        }],
+      },
+    ],
+  ] as const)("omits configured WINTER30 %s drift with one safe mismatch diagnostic", (
+    _label,
+    row,
+    recordOverrides,
+  ) => {
+    const result = projectAutomaticStorefrontPromotions({
+      records: records([row], recordOverrides),
+      now,
+    });
+
+    expect(result.promotions).toEqual([]);
+    expect(result.diagnostics).toEqual([{
+      code: "configuration_mismatch",
+      campaignKey: "winter30",
+    }]);
+    expect(JSON.stringify(result.diagnostics)).not.toContain(row.id);
+  });
+
+  it("resolves duplicate configured keys before owner-configuration mismatches", () => {
+    const first = promotion({ code: "CHANGED30" });
+    const second = promotion({ id: "duplicate-record", code: "ALSOCHANGED30" });
+
+    expect(
+      projectAutomaticStorefrontPromotions({
+        records: records([first, second]),
+        now,
+      }),
+    ).toEqual({
+      promotions: [],
+      diagnostics: [{
+        code: "duplicate_campaign_key",
+        campaignKey: "winter30",
+      }],
+    });
+  });
+
+  it("preserves an otherwise-valid campaign with no owner configuration", () => {
+    const spring = promotion({
+      id: "spring-database-record",
+      campaignKey: "spring15",
+      code: "SPRING15",
+      name: "Spring Offer",
+      basisPoints: 1_500,
+    });
+
+    expect(
+      projectAutomaticStorefrontPromotions({ records: records([spring]), now }),
+    ).toMatchObject({
+      promotions: [{
+        id: "spring15",
+        displayName: "Spring Offer",
+        displayCode: "SPRING15",
+        discountBps: 1_500,
+      }],
+      diagnostics: [],
+    });
+  });
+
   it("returns deterministic promotion and diagnostic order", () => {
     const result = projectAutomaticStorefrontPromotions({
       records: records([

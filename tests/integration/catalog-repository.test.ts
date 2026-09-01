@@ -6,6 +6,7 @@ import {
   syntheticDemoCatalogRecords,
   syntheticWinter30PromotionFixture,
 } from "@/catalog/demo-fixtures";
+import { WINTER30_STOREFRONT_PROMOTION } from "@/config/storefront-promotions";
 import {
   buildPublicCatalog,
   findPublicProduct,
@@ -21,18 +22,18 @@ describe("database catalog projection", () => {
     client = undefined;
   });
 
-  it("defines WINTER30 only as the exact environment-gated catalog fixture", () => {
+  it("derives the synthetic WINTER30 database fixture from the owner configuration", () => {
     expect(syntheticWinter30PromotionFixture).toEqual({
-      campaignKey: "winter30",
-      displayName: "Winter Sale",
-      displayCode: "WINTER30",
-      basisPoints: 3000,
-      enabled: true,
-      startsAt: null,
-      endsAt: null,
-      timezone: "America/Los_Angeles",
-      applicationMode: "automatic",
-      scope: "sitewide",
+      campaignKey: WINTER30_STOREFRONT_PROMOTION.id,
+      displayName: WINTER30_STOREFRONT_PROMOTION.displayName,
+      displayCode: WINTER30_STOREFRONT_PROMOTION.displayCode,
+      basisPoints: WINTER30_STOREFRONT_PROMOTION.discountBps,
+      enabled: WINTER30_STOREFRONT_PROMOTION.enabled,
+      startsAt: WINTER30_STOREFRONT_PROMOTION.startAt,
+      endsAt: WINTER30_STOREFRONT_PROMOTION.endAt,
+      timezone: WINTER30_STOREFRONT_PROMOTION.timezone,
+      applicationMode: WINTER30_STOREFRONT_PROMOTION.applicationMode,
+      scope: WINTER30_STOREFRONT_PROMOTION.scope.kind,
     });
     expect(
       syntheticDemoCatalogRecords.promotions.filter(
