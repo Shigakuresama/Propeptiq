@@ -106,7 +106,14 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function synchronize(event: StorageEvent) {
-      if (event.key === CART_STORAGE_KEY || event.key === LEGACY_CART_STORAGE_KEY) {
+      const targetsLocalStorage =
+        event.storageArea === null || event.storageArea === window.localStorage;
+      if (
+        targetsLocalStorage &&
+        (event.key === null ||
+          event.key === CART_STORAGE_KEY ||
+          event.key === LEGACY_CART_STORAGE_KEY)
+      ) {
         pendingAddAnnouncement.current = null;
         const loaded = loadCart(window.localStorage);
         if (loaded.status === "ready") {

@@ -141,6 +141,33 @@ function AcceptedThenQuantityHarness() {
   return <output aria-label="Latest mutation cart lines">{JSON.stringify(items)}</output>;
 }
 
+function PendingAddThenStorageClearHarness() {
+  const { addVariant, hydrated, items } = useCart();
+  const attempted = useRef(false);
+  const [phase, setPhase] = useState("waiting");
+
+  useLayoutEffect(() => {
+    if (!hydrated || attempted.current) return;
+    attempted.current = true;
+    addVariant("variant-cleared", 1, { variantLabel: "Cleared" });
+    window.localStorage.clear();
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: null,
+        storageArea: window.localStorage,
+      }),
+    );
+    setPhase("clear dispatched");
+  }, [addVariant, hydrated]);
+
+  return (
+    <>
+      <p>{phase}</p>
+      <output aria-label="Storage-clear cart lines">{JSON.stringify(items)}</output>
+    </>
+  );
+}
+
 describe("CartProvider exact-variant announcements", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -292,6 +319,18 @@ describe("CartProvider exact-variant announcements", () => {
     expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
       "Quantity updated to 1.",
     );
+  });
+
+  it("reloads cleared storage and cancels a pending success for key-null events", async () => {
+    render(
+      <CartProvider>
+        <PendingAddThenStorageClearHarness />
+      </CartProvider>,
+    );
+
+    await screen.findByText("clear dispatched");
+    expect(screen.getByLabelText("Storage-clear cart lines")).toHaveTextContent("[]");
+    expect(screen.getByRole("status", { name: "Cart updates" })).toBeEmptyDOMElement();
   });
 
   it("keeps an exact-variant add made before deferred hydration alongside stored lines", async () => {
