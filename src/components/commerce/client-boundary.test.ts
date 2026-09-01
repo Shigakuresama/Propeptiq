@@ -14,6 +14,7 @@ const clientEntries = [
   "src/components/commerce/laboratory-concentration-calculator.tsx",
   "src/components/commerce/quick-add-variant-sheet.tsx",
   "src/components/commerce/product-purchase-panel.tsx",
+  "src/components/site/promotion-bar.tsx",
   "src/cart/cart-provider.tsx",
 ] as const;
 
