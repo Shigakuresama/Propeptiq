@@ -29,7 +29,9 @@ export async function loadPublicConcentrationCalculatorConfiguration(
     mode: environment.RECONSTITUTION_CALCULATOR_MODE,
     productionIdentity: hasProductionIdentity(environment),
     configuration:
-      dependencies.configuration ?? concentrationCalculatorConfiguration,
+      dependencies.configuration === undefined
+        ? concentrationCalculatorConfiguration
+        : dependencies.configuration,
     content: dependencies.content ?? storefrontContentRecords,
   });
 }

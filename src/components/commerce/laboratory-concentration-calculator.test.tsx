@@ -104,6 +104,21 @@ describe("LaboratoryConcentrationCalculator", () => {
     expect(screen.getByRole("status", { name: "Calculation results" })).toHaveTextContent("2 mg/mL");
   });
 
+  it("preserves a meaningful nonzero scientific result in values and arithmetic", async () => {
+    const user = userEvent.setup();
+    renderCalculator();
+    await fillRequired(user, ".0000000000001", "1");
+    await user.click(screen.getByRole("button", { name: "Calculate" }));
+
+    const results = screen.getByRole("status", { name: "Calculation results" });
+    expect(results).toHaveTextContent("Concentration (mg/mL)1e-13 mg/mL");
+    expect(results).toHaveTextContent("Concentration (mcg/mL)0.0000000001 mcg/mL");
+    expect(results).toHaveTextContent(
+      "1e-13 mg ÷ 1 mL = 1e-13 mg/mL. 1e-13 mg/mL × 1,000 = 0.0000000001 mcg/mL.",
+    );
+    expect(results).not.toHaveTextContent("Concentration (mg/mL)0 mg/mL");
+  });
+
   it("clears submitted results and errors when a draft changes", async () => {
     const user = userEvent.setup();
     renderCalculator();

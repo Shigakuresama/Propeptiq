@@ -44,10 +44,13 @@ function errorId(field: Field): string {
 }
 
 function formatNumber(value: number): string {
-  return new Intl.NumberFormat("en-US", {
+  const ordinary = new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 12,
     useGrouping: true,
   }).format(value);
+  return value !== 0 && Number(ordinary.replaceAll(",", "")) === 0
+    ? value.toExponential()
+    : ordinary;
 }
 
 function errorMessage(

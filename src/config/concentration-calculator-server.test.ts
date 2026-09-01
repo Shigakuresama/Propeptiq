@@ -1,4 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const concentrationCalculatorModuleState = vi.hoisted(() => ({
+  productionConfiguration: null as unknown,
+}));
+
+vi.mock("./concentration-calculator", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./concentration-calculator")>();
+  return {
+    ...actual,
+    get concentrationCalculatorConfiguration() {
+      return concentrationCalculatorModuleState.productionConfiguration;
+    },
+  };
+});
 
 import { parseServerEnv } from "@/config/env-schema";
 import type { ControlledContentRecord } from "@/content/storefront-content";
@@ -34,6 +48,10 @@ const approvedCopy: ControlledContentRecord = {
 };
 
 describe("concentration calculator server boundary", () => {
+  afterEach(() => {
+    concentrationCalculatorModuleState.productionConfiguration = null;
+  });
+
   it("shares one request-cached acquisition", async () => {
     const environment = parseServerEnv({ RECONSTITUTION_CALCULATOR_MODE: "approved" });
     const projection = Object.freeze({
@@ -99,5 +117,24 @@ describe("concentration calculator server boundary", () => {
     expect(JSON.stringify(projection)).not.toMatch(
       /contentId|approval|reviewed|source|policy|mode|status/iu,
     );
+  });
+
+  it("keeps an explicit null override fail-closed when the production default is non-null", async () => {
+    concentrationCalculatorModuleState.productionConfiguration = approvedConfiguration;
+    const environment = parseServerEnv({
+      RECONSTITUTION_CALCULATOR_MODE: "approved",
+    });
+
+    await expect(
+      loadPublicConcentrationCalculatorConfiguration(environment, {
+        content: [approvedCopy],
+      }),
+    ).resolves.toMatchObject({ title: "Laboratory concentration calculator" });
+    await expect(
+      loadPublicConcentrationCalculatorConfiguration(environment, {
+        configuration: null,
+        content: [approvedCopy],
+      }),
+    ).resolves.toBeNull();
   });
 });

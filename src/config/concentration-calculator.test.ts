@@ -61,6 +61,45 @@ describe("concentration calculator controlled projection", () => {
     expect(serialized).not.toMatch(/contentId|approval|reviewed|source|policy|mode|status/iu);
   });
 
+  it("allows exact-title neutral arithmetic-only copy", () => {
+    expect(
+      resolve({
+        content: [{
+          ...approvedCopy,
+          title: "Laboratory concentration calculator",
+          body: "Perform bounded arithmetic conversions only.",
+        }],
+      }),
+    ).toMatchObject({
+      title: "Laboratory concentration calculator",
+      body: "Perform bounded arithmetic conversions only.",
+    });
+  });
+
+  it("rejects any title other than the exact neutral calculator title", () => {
+    expect(
+      resolve({
+        content: [{ ...approvedCopy, title: "Peptide concentration helper" }],
+      }),
+    ).toBeNull();
+  });
+
+  it.each([
+    ["draw-volume recommendation", "Draw 0.1 mL from the vial."],
+    ["syringe units", "Use 10 syringe units."],
+    ["every-day schedule", "Repeat every day."],
+    ["daily frequency", "Calculate daily."],
+    ["explicit frequency", "Choose a frequency."],
+    ["schedule", "Follow this schedule."],
+    ["protocol", "Follow this protocol."],
+    ["injection technique", "Use this injection technique."],
+    ["administration guidance", "Administration instructions follow."],
+    ["treatment guidance", "Treatment guidance follows."],
+    ["human dosage advice", "Human dosage advice follows."],
+  ] as const)("rejects calculator copy containing %s", (_label, body) => {
+    expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
+  });
+
   it("permits preview only outside a production identity", () => {
     expect(resolve({ mode: "preview" })).not.toBeNull();
     expect(resolve({ mode: "preview", productionIdentity: true })).toBeNull();

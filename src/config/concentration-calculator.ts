@@ -26,6 +26,30 @@ export type ControlledConcentrationCalculatorConfiguration = Readonly<{
 
 export const concentrationCalculatorConfiguration: ControlledConcentrationCalculatorConfiguration | null = null;
 
+const exactPublicCalculatorTitle = "Laboratory concentration calculator";
+
+const calculatorSpecificProhibitedPatterns: readonly RegExp[] = Object.freeze([
+  /\b(?:draw(?:n|s|ing)?|withdraw(?:n|s|ing)?)\b/u,
+  /\bsyringes?\b|\b\d+(?:\.\d+)?\s+units?\b/u,
+  /\b(?:daily|weekly|monthly|hourly|frequency|schedules?|protocols?)\b/u,
+  /\bevery\s+(?:day|week|month|hour)\b/u,
+  /\b(?:inject(?:ion|ed|ing)?|administration|administer(?:ed|ing)?)\b/u,
+  /\b(?:treat(?:s|ed|ing|ment)?|dosage|dosing|dose|advice|recommend(?:ation|ations|ed|ing|s)?)\b/u,
+  /\b(?:human|patient)\s+(?:use|dosage|dosing|dose|advice|guidance)\b/u,
+]);
+
+function calculatorCopyIsNeutral(title: string, body: string): boolean {
+  if (title !== exactPublicCalculatorTitle) return false;
+  const normalizedCopy = `${title}\n${body}`
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/[\p{Cc}\p{Cf}\p{P}\p{S}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return !calculatorSpecificProhibitedPatterns.some((pattern) =>
+    pattern.test(normalizedCopy));
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -99,6 +123,9 @@ export function resolvePublicConcentrationCalculatorConfiguration({
     !isNonBlank(approvedRecord.title) ||
     !isNonBlank(approvedRecord.body)
   ) {
+    return null;
+  }
+  if (!calculatorCopyIsNeutral(approvedRecord.title, approvedRecord.body)) {
     return null;
   }
 
