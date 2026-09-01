@@ -48,6 +48,24 @@ function cssRuleBody(
   return source.slice(bodyStart, bodyEnd);
 }
 
+function cssAtRuleBody(source: string, atRule: string): string {
+  const atRuleStart = source.indexOf(atRule);
+  expect(atRuleStart, `missing CSS at-rule: ${atRule}`).toBeGreaterThanOrEqual(0);
+  const bodyStart = source.indexOf("{", atRuleStart);
+  expect(bodyStart, `missing CSS at-rule body: ${atRule}`).toBeGreaterThan(atRuleStart);
+
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    const token = source[index];
+    if (token === "{") depth += 1;
+    if (token !== "}") continue;
+    depth -= 1;
+    if (depth === 0) return source.slice(bodyStart + 1, index);
+  }
+
+  throw new Error(`Unterminated CSS at-rule: ${atRule}`);
+}
+
 function cssDeclarations(ruleBody: string): ReadonlyMap<string, string> {
   return new Map(
     ruleBody
@@ -413,13 +431,12 @@ describe("SiteSearchLauncher accessible Sheet behavior", () => {
   });
 
   it("constrains the semantic footer home brand at the ultra-narrow breakpoint", () => {
-    const ultraNarrowMedia = globalsCss.indexOf("@media (max-width: 17rem)");
-    expect(ultraNarrowMedia).toBeGreaterThanOrEqual(0);
+    const ultraNarrowCss = cssAtRuleBody(globalsCss, "@media (max-width: 17rem)");
 
     const brandSelector =
       '.public-layout > footer .site-container a[href="/"][aria-label$=" home"]';
     const brand = cssDeclarations(
-      cssRuleBody(globalsCss, brandSelector, ultraNarrowMedia),
+      cssRuleBody(ultraNarrowCss, brandSelector),
     );
     expect(brand.get("width")).toBe("100%");
     expect(brand.get("max-width")).toBe("12rem");
@@ -428,12 +445,24 @@ describe("SiteSearchLauncher accessible Sheet behavior", () => {
     expect(brand.has("text-overflow")).toBe(false);
 
     const logo = cssDeclarations(
-      cssRuleBody(globalsCss, `${brandSelector} > span`, ultraNarrowMedia),
+      cssRuleBody(ultraNarrowCss, `${brandSelector} > span`),
     );
     expect(logo.get("width")).toBe("100%");
     expect(logo.get("max-width")).toBe("100%");
     expect(logo.has("overflow")).toBe(false);
     expect(logo.has("overflow-x")).toBe(false);
+  });
+
+  it("keeps constrained public footer labels reflowable without clipping or ellipsis", () => {
+    const footerLinks = cssDeclarations(
+      cssRuleBody(globalsCss, ".public-layout > footer nav a"),
+    );
+    expect(footerLinks.get("max-width")).toBe("100%");
+    expect(footerLinks.get("overflow-wrap")).toBe("anywhere");
+    expect(footerLinks.get("white-space")).toBe("normal");
+    expect(["hidden", "clip"]).not.toContain(footerLinks.get("overflow"));
+    expect(["hidden", "clip"]).not.toContain(footerLinks.get("overflow-x"));
+    expect(footerLinks.get("text-overflow")).not.toBe("ellipsis");
   });
 
   it("keeps the launcher in a centered nonblocking safe-area lane", () => {

@@ -212,24 +212,59 @@ function rectanglesIntersect(
 
 async function horizontalLayout(page: Page) {
   return page.evaluate(() => {
-    const clientWidth = document.documentElement.clientWidth;
+    const root = document.documentElement;
+    const rootBounds = root.getBoundingClientRect();
+    const measuredScale = root.offsetWidth > 0
+      ? rootBounds.width / root.offsetWidth
+      : 1;
+    const rectScale = Number.isFinite(measuredScale) && measuredScale > 0
+      ? measuredScale
+      : 1;
+    const coordinateWidth = rootBounds.width / rectScale;
+    const rootLeft = rootBounds.left;
+    const clientWidth = root.clientWidth;
     return {
       clientWidth,
-      offenders: [...document.querySelectorAll("body *")]
+      coordinateWidth,
+      offenders: [...document.querySelectorAll("html, body, body *")]
         .map((element) => {
           const bounds = element.getBoundingClientRect();
+          const styles = getComputedStyle(element);
+          const elementClientWidth = element instanceof HTMLElement
+            ? element.clientWidth
+            : null;
+          const elementScrollWidth = element instanceof HTMLElement
+            ? element.scrollWidth
+            : null;
           return {
             className: element.getAttribute("class") ?? "",
-            left: bounds.left,
-            right: bounds.right,
+            clientWidth: elementClientWidth,
+            display: styles.display,
+            gridTemplateColumns: styles.gridTemplateColumns,
+            isRootOrBody: element === root || element === document.body,
+            left: (bounds.left - rootLeft) / rectScale,
+            minWidth: styles.minWidth,
+            overflowX: styles.overflowX,
+            right: (bounds.right - rootLeft) / rectScale,
+            scrollWidth: elementScrollWidth,
             tagName: element.tagName,
             text: element.textContent?.trim().slice(0, 80) ?? "",
-            width: bounds.width,
+            textOverflow: styles.textOverflow,
+            whiteSpace: styles.whiteSpace,
+            width: bounds.width / rectScale,
           };
         })
-        .filter(({ left, right }) => left < -1 || right > clientWidth + 1)
+        .filter(({ clientWidth: ownClientWidth, isRootOrBody, left, right, scrollWidth }) =>
+          left < -1 ||
+          right > coordinateWidth + 1 ||
+          (isRootOrBody &&
+            ownClientWidth !== null &&
+            scrollWidth !== null &&
+            scrollWidth > ownClientWidth + 1)
+        )
         .slice(0, 20),
-      scrollWidth: document.documentElement.scrollWidth,
+      rectScale,
+      scrollWidth: root.scrollWidth,
     };
   });
 }
@@ -426,39 +461,15 @@ test("site search ultra-narrow layout exposes a removable test-only long-content
     expect.soft(bounds.right, `${label} right edge`).toBeLessThanOrEqual(195.5);
   }
 
-  const realLayout = await page.evaluate(() => {
-    const clientWidth = document.documentElement.clientWidth;
-    return {
-      clientWidth,
-      offenders: [...document.querySelectorAll("body *")]
-        .map((element) => {
-          const bounds = element.getBoundingClientRect();
-          const styles = getComputedStyle(element);
-          return {
-            className: element.getAttribute("class") ?? "",
-            clientWidth: element instanceof HTMLElement ? element.clientWidth : null,
-            display: styles.display,
-            gridTemplateColumns: styles.gridTemplateColumns,
-            left: bounds.left,
-            minWidth: styles.minWidth,
-            overflowX: styles.overflowX,
-            right: bounds.right,
-            scrollWidth: element instanceof HTMLElement ? element.scrollWidth : null,
-            tagName: element.tagName,
-            text: element.textContent?.trim().slice(0, 80) ?? "",
-            whiteSpace: styles.whiteSpace,
-            width: bounds.width,
-          };
-        })
-        .filter(({ left, right }) => left < -1 || right > clientWidth + 1)
-        .slice(0, 40),
-      scrollWidth: document.documentElement.scrollWidth,
-    };
-  });
+  const realLayout = await horizontalLayout(page);
   expect(
     realLayout.scrollWidth,
     `real 195px overflow: ${JSON.stringify(realLayout.offenders)}`,
   ).toBe(realLayout.clientWidth);
+  expect(
+    realLayout.offenders,
+    `real 195px offenders: ${JSON.stringify(realLayout)}`,
+  ).toEqual([]);
   expect(requests).toHaveLength(0);
 });
 
@@ -1010,12 +1021,16 @@ test("mobile navigation traps focus, closes on Escape, and restores trigger focu
   const trigger = page.getByRole("button", {
     name: "Open navigation",
     exact: true,
-    includeHidden: true,
   });
-  await expect(trigger).toHaveAccessibleName("Open navigation");
+  await expect(trigger).toBeVisible();
   await trigger.focus();
   await page.keyboard.press("Enter");
-  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+  const hiddenTrigger = page.getByRole("button", {
+    name: "Open navigation",
+    exact: true,
+    includeHidden: true,
+  });
+  await expect(hiddenTrigger).toHaveAttribute("aria-expanded", "true");
   const sheet = page.locator('[data-slot="sheet-content"]');
   await expect(sheet).toBeVisible();
 
@@ -1030,6 +1045,7 @@ test("mobile navigation traps focus, closes on Escape, and restores trigger focu
 
   await page.keyboard.press("Escape");
   await expect(sheet).toBeHidden();
+  await expect(trigger).toBeVisible();
   await expect(trigger).toBeFocused();
 });
 
@@ -1143,9 +1159,15 @@ test("explicit 200% CSS rendering pass remains operable without horizontal overf
   });
   const layout = await horizontalLayout(page);
   expect(
+    layout.rectScale,
+    `catalog 200% rectangle scale: ${JSON.stringify(layout)}`,
+  ).toBe(2);
+  expect(
     layout.scrollWidth - layout.clientWidth,
     `catalog 200% zoom overflow: ${JSON.stringify(layout)}`,
   ).toBeLessThanOrEqual(1);
+  expect(layout.offenders, `catalog 200% zoom offenders: ${JSON.stringify(layout)}`)
+    .toEqual([]);
   await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible();
   await page.screenshot({
     path: path.join(screenshotDirectory, "catalog-css-zoom-200.png"),
@@ -1177,6 +1199,8 @@ test("homepage current catalog remains reachable at 200% CSS zoom without horizo
     layout.scrollWidth - layout.clientWidth,
     `homepage 200% zoom overflow: ${JSON.stringify(layout)}`,
   ).toBeLessThanOrEqual(1);
+  expect(layout.offenders, `homepage 200% zoom offenders: ${JSON.stringify(layout)}`)
+    .toEqual([]);
 });
 
 test("reduced motion disables transition and animation durations", async ({ page }) => {
@@ -1349,6 +1373,7 @@ test("scroll reveal keeps server content visible, hides only below-fold sections
   await expect(firstSection).toHaveAttribute("data-scroll-reveal-state", "visible");
   await expect(firstSection).toHaveCSS("opacity", "1");
   await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "pending");
+  await expect(belowFoldSection).toHaveCSS("transition-duration", "0s");
   const before = await belowFoldSection.evaluate((element) => ({
     height: (element as HTMLElement).offsetHeight,
     offsetTop: (element as HTMLElement).offsetTop,
@@ -1357,6 +1382,10 @@ test("scroll reveal keeps server content visible, hides only below-fold sections
 
   await belowFoldSection.scrollIntoViewIfNeeded();
   await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  await expect(belowFoldSection).toHaveCSS(
+    "transition-duration",
+    /^0\.28s(?:,\s*0\.28s)?$/u,
+  );
   const after = await belowFoldSection.evaluate((element) => ({
     height: (element as HTMLElement).offsetHeight,
     offsetTop: (element as HTMLElement).offsetTop,

@@ -379,6 +379,10 @@ describe("ScrollRevealController progressive behavior", () => {
 describe("scroll reveal CSS", () => {
   it("uses only a short composited transition in the public main and forces a visible reduced-motion fallback", () => {
     const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+    const visibleSelector =
+      ".public-layout main section[data-scroll-reveal-state]";
+    const pendingSelector =
+      '.public-layout main section[data-scroll-reveal-state="pending"]';
 
     expect(css).toMatch(
       /\.public-layout main section\[data-scroll-reveal-state\]\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*translateY\(0\);[^}]*transition:\s*opacity 280ms ease-out,\s*transform 280ms ease-out;[^}]*\}/su,
@@ -386,6 +390,10 @@ describe("scroll reveal CSS", () => {
     expect(css).toMatch(
       /\.public-layout main section\[data-scroll-reveal-state="pending"\]\s*\{[^}]*opacity:\s*0;[^}]*transform:\s*translateY\(0\.625rem\);[^}]*transition:\s*none;[^}]*\}/su,
     );
+    const visibleRuleStart = css.indexOf(`${visibleSelector} {`);
+    const pendingRuleStart = css.indexOf(`${pendingSelector} {`);
+    expect(visibleRuleStart).toBeGreaterThanOrEqual(0);
+    expect(pendingRuleStart).toBeGreaterThan(visibleRuleStart);
     expect(css).not.toMatch(
       /section\[data-scroll-reveal-state[^}]*\b(?:height|margin|padding|position|will-change|transition-delay)\s*:/su,
     );
