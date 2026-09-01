@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 
-import { findPublicStorefrontProduct } from "@/catalog/storefront-public";
+import { findPublicStorefrontProduct, resolvePublicStorefrontRelatedProducts } from "@/catalog/storefront-public";
 import { getPublicStorefrontView } from "@/catalog/storefront-public-server";
 import { CatalogItemDetail } from "@/components/commerce/catalog-item-detail";
 import { PageTransition } from "@/components/site/page-transition";
@@ -32,10 +32,13 @@ export default async function CatalogItemPage({ params }: CatalogItemPageProps) 
   const view = await getPublicStorefrontViewForRequest();
   const product = findPublicStorefrontProduct(view.catalog, slug);
   if (!product) notFound();
+  const relatedProducts = product.kind === "canonical"
+    ? resolvePublicStorefrontRelatedProducts(view.catalog, product)
+    : Object.freeze([]);
 
   return (
     <PageTransition>
-      <CatalogItemDetail product={product} pricing={view.pricing} />
+      <CatalogItemDetail product={product} pricing={view.pricing} relatedProducts={relatedProducts} />
     </PageTransition>
   );
 }

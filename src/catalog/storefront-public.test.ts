@@ -15,8 +15,10 @@ import {
   buildPublicStorefrontCatalog,
   findPublicStorefrontProduct,
   parseRuntimeVariantPresentationFacts,
+  resolvePublicStorefrontRelatedProducts,
   storefrontImageMetadata,
   type RuntimeVariantPresentationFact,
+  type CanonicalPublicStorefrontProduct,
 } from "./storefront-public";
 
 const productId = "10000000-0000-4000-8000-000000000001";
@@ -187,6 +189,16 @@ function recursivelyCollectKeys(value: unknown, keys = new Set<string>()): Set<s
 }
 
 describe("public storefront projection", () => {
+  it("resolves configured related products in order and filters unsafe targets", () => {
+    const current = buildFixtureCatalog().products.find((entry) => entry.kind === "canonical") as CanonicalPublicStorefrontProduct;
+    const target = { ...current, id: "10000000-0000-4000-8000-000000000002", slug: "target", relatedProductIds: [] };
+    const unavailable = { ...target, id: "10000000-0000-4000-8000-000000000003", slug: "unavailable", variants: target.variants.map((variant) => ({ ...variant, availability: "unavailable" as const })) };
+    const catalog = { ...buildFixtureCatalog(), products: [current, target, unavailable] };
+    const withRelations = { ...current, relatedProductIds: [target.id, target.id, "missing", current.id, unavailable.id] };
+    const result = resolvePublicStorefrontRelatedProducts(catalog, withRelations);
+    expect(result.map((product) => product.id)).toEqual([target.id]);
+    expect(Object.isFrozen(result)).toBe(true);
+  });
   it("retains all 56 products and 103 display configurations with empty canonical data", () => {
     const catalog = buildFixtureCatalog({
       catalogData: {

@@ -22,7 +22,7 @@ const {
     throw new Error("NEXT_NOT_FOUND");
   }),
   requestCacheState: { generation: 0 },
-  detailProps: [] as Array<{ product: unknown; pricing: unknown }>,
+  detailProps: [] as Array<{ product: unknown; pricing: unknown; relatedProducts: unknown }>,
 }));
 
 vi.mock("react", async (importOriginal) => {
@@ -57,7 +57,7 @@ vi.mock("@/components/site/page-transition", () => ({
   PageTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 vi.mock("@/components/commerce/catalog-item-detail", () => ({
-  CatalogItemDetail: (props: { product: { name: string }; pricing: unknown }) => { detailProps.push(props); return <h1>{props.product.name}</h1>; },
+  CatalogItemDetail: (props: { product: { name: string }; pricing: unknown; relatedProducts: unknown }) => { detailProps.push(props); return <h1>{props.product.name}</h1>; },
 }));
 
 import CatalogItemPage, { generateMetadata } from "./page";

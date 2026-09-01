@@ -72,11 +72,11 @@ describe("public pricing snapshot propagation", () => {
 
   it("forwards the exact snapshot through canonical detail into the panel", () => {
     const pricing = testPricingContext("production");
-    render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} />);
+    render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={[]} />);
     expect(panelPricing).toHaveLength(1); expect(panelPricing[0]).toBe(pricing);
   });
 
   it("does not replace the snapshot with a client mode", () => {
-    const pricing = testPricingContext("production"); render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} />); expect(panelPricing[0]).toBe(pricing);
+    const pricing = testPricingContext("production"); render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={[]} />); expect(panelPricing[0]).toBe(pricing);
   });
 });

@@ -175,6 +175,7 @@ export function CatalogListingCard({
             <AddToCartButton
               variantId={selectedVariant.id}
               productName={product.name}
+              variantLabel={selectedVariant.label}
               canAdd={canAddPublicVariant(selectedVariant, pricing.mode)}
               disabledReason="This product is not currently available for cart testing."
               className="mt-5 min-h-11"

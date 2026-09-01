@@ -158,6 +158,13 @@ const bindingSchema = z
           });
         }
       }
+      if (new Set(product.relatedProductIds).size !== product.relatedProductIds.length) {
+        context.addIssue({
+          code: "custom",
+          path: ["products", index, "relatedProductIds"],
+          message: "Storefront product relationships must not contain duplicate IDs",
+        });
+      }
     }
   });
 

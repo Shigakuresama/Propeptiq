@@ -27,7 +27,7 @@ describe("CatalogItemDetail", () => {
 
   it("shows every supplied variant and exposes a normalized source label", () => {
     const product = findPublicStorefrontProduct(catalog, "pinealon")!;
-    render(<CatalogItemDetail product={product} pricing={testPricingContext()} />);
+    render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} />);
 
     expect(screen.getByRole("heading", { level: 1, name: "Pinealon" })).toBeVisible();
     expect(screen.getByRole("img", { name: product.image.alt })).toBeVisible();
@@ -47,7 +47,7 @@ describe("CatalogItemDetail", () => {
     ["cjc-1295-no-dac-ipa-cp20", "CP20", "CJC-1295 NO DAC 10mg + IPA 10mg"],
   ])("keeps the exact supplied blend composition attached to %s", (slug, code, sourceName) => {
     const product = findPublicStorefrontProduct(catalog, slug)!;
-    render(<CatalogItemDetail product={product} pricing={testPricingContext()} />);
+    render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} />);
 
     const variantRow = screen.getByText(code).closest("li");
     expect(variantRow).not.toBeNull();
@@ -63,7 +63,7 @@ describe("CatalogItemDetail", () => {
       { id: "legal", kind: "legal_notice" as const, status: "approved" as const, title: "Legal", body: "Approved legal", sourceReferences: [], approvalNote: null, reviewedAt: null, effectiveAt: null },
     ];
     const product = testCanonicalProduct([], { content: content as never, description: "raw description" });
-    render(<CatalogItemDetail product={product} pricing={pricing} />);
+    render(<CatalogItemDetail product={product} pricing={pricing} relatedProducts={[]} />);
     expect(screen.getByTestId("purchase-panel")).toBeVisible(); expect(capturedPricing[0]).toBe(pricing); expect(screen.getByText("literal <em>text</em>")).toBeVisible(); expect(screen.getByText("Approved legal")).toBeVisible();
     expect(screen.queryByText("raw description")).toBeNull(); expect(screen.queryByText("DRAFT")).toBeNull(); expect(screen.queryByText("FAQ")).toBeNull(); expect(screen.queryByText("private")).toBeNull(); expect(screen.queryByText("secret")).toBeNull(); expect(screen.queryByText("2026")).toBeNull(); expect(screen.queryByText("Browse-only catalog item")).toBeNull(); expect(screen.queryByText(/not represented/u)).toBeNull(); expect(screen.getByText("Approved info").compareDocumentPosition(screen.getByText("Legal")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -71,7 +71,7 @@ describe("CatalogItemDetail", () => {
   it("keeps a synthetic browse-only item entirely purchase-free with all configurations", () => {
     const base = findPublicStorefrontProduct(catalog, "pinealon")!;
     const browse = { ...base, displayConfigurations: [{ displayCode: "A", packageForm: "one" }, { displayCode: "B", packageForm: "two" }, { displayCode: "C", packageForm: "three" }] };
-    render(<CatalogItemDetail product={browse} pricing={testPricingContext()} />);
+    render(<CatalogItemDetail product={browse} pricing={testPricingContext()} relatedProducts={[]} />);
     expect(screen.getByText("A")).toBeVisible(); expect(screen.getByText("B")).toBeVisible(); expect(screen.getByText("C")).toBeVisible(); expect(screen.queryByRole("radio")).toBeNull(); expect(screen.queryByRole("spinbutton")).toBeNull(); expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull(); expect(screen.queryByRole("status", { name: "Purchase summary" })).toBeNull(); expect(screen.queryByText(/approved information/i)).toBeNull(); expect(document.body).not.toHaveTextContent(/\$|usd/i);
   });
 });

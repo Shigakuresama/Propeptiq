@@ -130,6 +130,31 @@ export type PublicStorefrontCatalog = Readonly<{
   displayConfigurationCount: number;
 }>;
 
+export function resolvePublicStorefrontRelatedProducts(
+  catalog: PublicStorefrontCatalog,
+  currentProduct: CanonicalPublicStorefrontProduct,
+): readonly CanonicalPublicStorefrontProduct[] {
+  const productsById = new Map(
+    catalog.products.flatMap((product) =>
+      product.kind === "canonical" ? [[product.id, product] as const] : [],
+    ),
+  );
+  const seen = new Set<string>();
+  const related = currentProduct.relatedProductIds.flatMap((id) => {
+    if (seen.has(id)) return [];
+    seen.add(id);
+    const product = productsById.get(id);
+    if (
+      !product ||
+      product.id === currentProduct.id ||
+      product.variants.length === 0 ||
+      product.variants.every((variant) => variant.availability === "unavailable")
+    ) return [];
+    return [product];
+  });
+  return Object.freeze(related);
+}
+
 export type PublicStorefrontSources = Readonly<{
   configuredPublicationId: string | undefined;
   catalogData: StorefrontCatalogData;

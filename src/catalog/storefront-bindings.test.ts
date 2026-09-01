@@ -48,6 +48,17 @@ describe("parseStorefrontBindings", () => {
     })).toThrow();
   });
 
+  it("rejects duplicate related product IDs", () => {
+    const otherId = "10000000-0000-4000-8000-000000000002";
+    expect(() => parseStorefrontBindings({
+      ...approved,
+      products: [
+        { ...approved.products[0], relatedProductIds: [otherId, otherId] },
+        { ...approved.products[0], id: otherId, browseSlug: "fixture-other" },
+      ],
+    })).toThrow(/duplicate IDs/iu);
+  });
+
   it("does not infer an amount or package quantity from a label", () => {
     const withoutCanonicalFacts: Record<string, unknown> = {
       ...approved.variants[0],
