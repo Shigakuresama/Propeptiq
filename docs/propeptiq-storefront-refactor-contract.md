@@ -53,7 +53,7 @@ Four existing controls prevent zero-dollar checkout: the positive database price
 - Clipboard announcement pattern: `src/components/growth/shared-set-card.tsx`
 - Storefront browser coverage: `tests/e2e/public-storefront.spec.ts`
 
-The Tint & Go search was inspected in its real workspace. The reusable parts are its lazy normalized index, deterministic ranking, fixed bottom-center safe-area lane, short-viewport handling, collision priority, body padding, and reduced-motion coverage. Its current panel is a non-modal popover without a focus trap, so PropeptIQ must use its own Radix Sheet for the required modal focus behavior and grouped results.
+The Tint & Go search implementation was not available in this workspace, so no inspection claim is made. PropeptIQ uses only the requested high-level interaction direction and its own verified local patterns for a lazy normalized index, deterministic ranking, a fixed bottom-center safe-area lane, short-viewport handling, collision priority, reserved bottom spacing, and reduced-motion coverage. Its existing Radix Sheet provides the required modal focus behavior and grouped-results foundation.
 
 ## Reference and compliance context
 

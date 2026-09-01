@@ -153,7 +153,7 @@ git commit -m "feat(search): add deterministic storefront ranking"
 **Interfaces:**
 
 - Consumes: public storefront products, approved controlled content, and the explicit approved public-information registry
-- Produces: `buildStorefrontSearchIndex(input)` and cached `GET`/`HEAD` JSON endpoint
+- Produces: `buildStorefrontSearchIndex(input)` and a cached `GET` JSON endpoint
 
 - [ ] **Step 1: Write failing index and route tests**
 
@@ -172,7 +172,7 @@ it("excludes draft and retired controlled content", () => {
 });
 ```
 
-Route tests assert exact response shape `{ version: 1, entries }`, `HEAD` has no body, protected routes and server-only fields are absent, and cache headers are public only because every document is already approved/public.
+Route tests assert exact response shape `{ version: 1, entries }`, prove that no `HEAD` handler is exported or claimed, verify that protected routes and server-only fields are absent, and confirm cache headers are public only because every document is already approved/public.
 
 - [ ] **Step 2: Run tests and verify missing-module failures**
 
