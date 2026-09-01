@@ -1,5 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SearchEntry } from "@/search/storefront-search";
@@ -24,6 +26,44 @@ import { SiteSearchLauncher } from "./site-search-launcher";
 const PROMPT = "Type to search products and information.";
 const TEMPORARY_UNAVAILABLE =
   "Search is temporarily unavailable. Please try again.";
+const globalsCss = readFileSync(
+  path.resolve(process.cwd(), "src/app/globals.css"),
+  "utf8",
+).replace(/\r\n?/gu, "\n");
+const siteHeaderSource = readFileSync(
+  path.resolve(process.cwd(), "src/components/site/site-header.tsx"),
+  "utf8",
+);
+
+function cssRuleBody(
+  source: string,
+  selector: string,
+  startAt = 0,
+): string {
+  const ruleStart = source.indexOf(`${selector} {`, startAt);
+  expect(ruleStart, `missing CSS rule: ${selector}`).toBeGreaterThanOrEqual(0);
+  const bodyStart = source.indexOf("{", ruleStart) + 1;
+  const bodyEnd = source.indexOf("}", bodyStart);
+  expect(bodyEnd, `unterminated CSS rule: ${selector}`).toBeGreaterThan(bodyStart);
+  return source.slice(bodyStart, bodyEnd);
+}
+
+function cssDeclarations(ruleBody: string): ReadonlyMap<string, string> {
+  return new Map(
+    ruleBody
+      .split(";")
+      .map((declaration) => declaration.trim())
+      .filter(Boolean)
+      .map((declaration) => {
+        const separator = declaration.indexOf(":");
+        expect(separator, `invalid CSS declaration: ${declaration}`).toBeGreaterThan(0);
+        return [
+          declaration.slice(0, separator).trim(),
+          declaration.slice(separator + 1).trim(),
+        ];
+      }),
+  );
+}
 
 function syntheticProduct(overrides: Partial<SearchEntry> = {}): SearchEntry {
   return {
@@ -341,6 +381,116 @@ describe("SiteSearchLauncher loading and validation", () => {
 });
 
 describe("SiteSearchLauncher accessible Sheet behavior", () => {
+  it("keeps footer reservation public-only and preserves the exact safe-area token", () => {
+    const root = cssDeclarations(cssRuleBody(globalsCss, ":root"));
+    expect(root.get("--site-search-reserved-height")).toBe("4.5rem");
+
+    const footer = cssDeclarations(
+      cssRuleBody(globalsCss, ".public-layout > footer"),
+    );
+    expect(footer.get("padding-bottom")).toBe(
+      "calc(var(--site-search-reserved-height) + env(safe-area-inset-bottom, 0px))",
+    );
+
+    for (const selector of ["body", "main", "footer"]) {
+      const bareRule = new RegExp(
+        `(?:^|\\})\\s*${selector}\\s*\\{([^}]*)\\}`,
+        "gu",
+      );
+      for (const match of globalsCss.matchAll(bareRule)) {
+        expect(match[1], `${selector} must not own launcher reservation`)
+          .not.toMatch(/padding(?:-bottom)?\s*:/u);
+      }
+    }
+  });
+
+  it("keeps the launcher in a centered nonblocking safe-area lane", () => {
+    const lane = cssDeclarations(
+      cssRuleBody(globalsCss, ".site-search-launcher-lane"),
+    );
+    expect(lane.get("position")).toBe("fixed");
+    expect(lane.get("left")).toBe("50%");
+    expect(lane.get("transform")).toBe("translateX(-50%)");
+    expect(lane.get("bottom")).toBe(
+      "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+    );
+    expect(lane.get("width")).toBe("min(24rem, calc(100vw - 1rem))");
+    expect(lane.get("max-width")).toBe("calc(100vw - 1rem)");
+    expect(lane.get("z-index")).toBe("30");
+    expect(lane.get("pointer-events")).toBe("none");
+    expect(lane.get("justify-content")).toBe("center");
+
+    const trigger = cssDeclarations(cssRuleBody(
+      globalsCss,
+      '.site-search-launcher-lane > [data-slot="sheet-trigger"]',
+    ));
+    expect(trigger.get("min-width")).toBe("44px");
+    expect(trigger.get("min-height")).toBe("44px");
+    expect(trigger.get("max-width")).toBe("100%");
+    expect(trigger.get("pointer-events")).toBe("auto");
+  });
+
+  it("gives the bottom search Sheet capped desktop geometry and one results scroller", () => {
+    const sheetSelector = '.site-search-sheet[data-side="bottom"]';
+    const sheet = cssDeclarations(cssRuleBody(globalsCss, sheetSelector));
+    expect(sheet.get("width")).toBe("min(36rem, calc(100vw - 2rem))");
+    expect(sheet.get("height")).toBe("min(42rem, calc(100dvh - 2rem))");
+    expect(sheet.get("max-height")).toBe("min(42rem, calc(100dvh - 2rem))");
+    expect(sheet.get("overflow")).toBe("hidden");
+
+    const results = cssDeclarations(cssRuleBody(
+      globalsCss,
+      `${sheetSelector} > .site-search-results`,
+    ));
+    expect(results.get("flex")).toBe("1 1 0%");
+    expect(results.get("min-height")).toBe("0");
+    expect(results.get("overflow-y")).toBe("auto");
+    expect(results.get("overscroll-behavior")).toBe("contain");
+
+    const phoneMedia = globalsCss.indexOf("@media (max-width: 47.999rem)");
+    expect(phoneMedia).toBeGreaterThanOrEqual(0);
+    const phoneSheet = cssDeclarations(
+      cssRuleBody(globalsCss, sheetSelector, phoneMedia),
+    );
+    expect(phoneSheet.get("inset-inline")).toBe("0");
+    expect(phoneSheet.get("bottom")).toBe("0");
+    expect(phoneSheet.get("width")).toBe("100%");
+    expect(phoneSheet.get("max-width")).toBe("100%");
+    expect(phoneSheet.get("height")).toBe("100dvh");
+    expect(phoneSheet.get("max-height")).toBe("100dvh");
+    expect(phoneSheet.get("border-radius")).toBe("0");
+    expect(phoneSheet.get("overscroll-behavior")).toBe("contain");
+    expect(phoneSheet.get("padding-bottom")).toBe(
+      "env(safe-area-inset-bottom, 0px)",
+    );
+    expect(phoneSheet.get("height")).not.toBe("100vh");
+  });
+
+  it("leaves the generic mobile Sheet untouched and retains authoritative reduced motion", () => {
+    expect(siteHeaderSource).toContain('side="right"');
+    expect(siteHeaderSource).toContain(
+      'className="w-[min(24rem,calc(100vw-1rem))] border-border bg-canvas p-0"',
+    );
+    expect(globalsCss).not.toMatch(
+      /\[data-slot=["']?sheet-content["']?\]\s*\{/u,
+    );
+
+    const reducedMedia = globalsCss.indexOf(
+      "@media (prefers-reduced-motion: reduce)",
+    );
+    expect(reducedMedia).toBeGreaterThanOrEqual(0);
+    const reducedSource = globalsCss.slice(reducedMedia);
+    expect(cssDeclarations(cssRuleBody(reducedSource, "html")).get("scroll-behavior"))
+      .toBe("auto");
+    const universalMotion = cssDeclarations(cssRuleBody(
+      reducedSource,
+      "*,\n  *::before,\n  *::after",
+    ));
+    expect(universalMotion.get("scroll-behavior")).toBe("auto !important");
+    expect(universalMotion.get("transition-duration")).toBe("0s !important");
+    expect(universalMotion.get("animation-duration")).toBe("0s !important");
+  });
+
   it("uses one bottom Sheet, stable owners, one live status, and no empty-query dump", async () => {
     const { dialog, trigger } = await openInjected();
 
