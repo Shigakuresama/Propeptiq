@@ -6,6 +6,7 @@ import { findPublicStorefrontProduct, resolvePublicStorefrontRelatedProducts } f
 import { getPublicStorefrontView } from "@/catalog/storefront-public-server";
 import { CatalogItemDetail } from "@/components/commerce/catalog-item-detail";
 import { PageTransition } from "@/components/site/page-transition";
+import { getPublicConcentrationCalculatorConfiguration } from "@/config/concentration-calculator-server";
 
 type CatalogItemPageProps = {
   params: Promise<{ slug: string }>;
@@ -29,7 +30,10 @@ export async function generateMetadata({
 
 export default async function CatalogItemPage({ params }: CatalogItemPageProps) {
   const { slug } = await params;
-  const view = await getPublicStorefrontViewForRequest();
+  const [view, calculator] = await Promise.all([
+    getPublicStorefrontViewForRequest(),
+    getPublicConcentrationCalculatorConfiguration(),
+  ]);
   const product = findPublicStorefrontProduct(view.catalog, slug);
   if (!product) notFound();
   const relatedProducts = product.kind === "canonical"
@@ -38,7 +42,12 @@ export default async function CatalogItemPage({ params }: CatalogItemPageProps) 
 
   return (
     <PageTransition>
-      <CatalogItemDetail product={product} pricing={view.pricing} relatedProducts={relatedProducts} />
+      <CatalogItemDetail
+        calculator={calculator}
+        product={product}
+        pricing={view.pricing}
+        relatedProducts={relatedProducts}
+      />
     </PageTransition>
   );
 }

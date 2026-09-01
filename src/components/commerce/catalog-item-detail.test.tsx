@@ -12,6 +12,12 @@ import {
 import { CatalogItemDetail } from "./catalog-item-detail";
 import { testPricingContext, testCanonicalProduct, testPublicVariant } from "./storefront-test-fixtures";
 
+const calculator = Object.freeze({
+  title: "Synthetic approved calculator",
+  body: "Synthetic approved body.",
+  limits: Object.freeze({ maxVialMg: 100, maxDiluentMl: 50, maxSampleMl: 10 }),
+});
+
 const { capturedPricing } = vi.hoisted(() => ({ capturedPricing: [] as unknown[] }));
 vi.mock("./product-purchase-panel", () => ({ ProductPurchasePanel: ({ pricing }: { pricing: unknown }) => { capturedPricing.push(pricing); return <div data-testid="purchase-panel" />; } }));
 const { capturedRelated } = vi.hoisted(() => ({ capturedRelated: [] as Array<{ products: unknown; pricing: unknown }> }));
@@ -28,7 +34,7 @@ describe("CatalogItemDetail", () => {
 
   it("shows every supplied variant and exposes a normalized source label", () => {
     const product = findPublicStorefrontProduct(catalog, "pinealon")!;
-    render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} />);
+    render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
     expect(screen.getByRole("heading", { level: 1, name: "Pinealon" })).toBeVisible();
     expect(screen.getByRole("img", { name: product.image.alt })).toBeVisible();
@@ -48,7 +54,7 @@ describe("CatalogItemDetail", () => {
     ["cjc-1295-no-dac-ipa-cp20", "CP20", "CJC-1295 NO DAC 10mg + IPA 10mg"],
   ])("keeps the exact supplied blend composition attached to %s", (slug, code, sourceName) => {
     const product = findPublicStorefrontProduct(catalog, slug)!;
-    render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} />);
+    render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
     const variantRow = screen.getByText(code).closest("li");
     expect(variantRow).not.toBeNull();
@@ -64,7 +70,7 @@ describe("CatalogItemDetail", () => {
       { id: "legal", kind: "legal_notice" as const, status: "approved" as const, title: "Legal", body: "Approved legal", sourceReferences: [], approvalNote: null, reviewedAt: null, effectiveAt: null },
     ];
     const product = testCanonicalProduct([], { content: content as never, description: "raw description" });
-    render(<CatalogItemDetail product={product} pricing={pricing} relatedProducts={[]} />);
+    render(<CatalogItemDetail product={product} pricing={pricing} relatedProducts={[]} calculator={null} />);
     expect(screen.getByTestId("purchase-panel")).toBeVisible(); expect(capturedPricing[0]).toBe(pricing); expect(screen.getByText("literal <em>text</em>")).toBeVisible(); expect(screen.getByText("Approved legal")).toBeVisible();
     expect(screen.queryByText("raw description")).toBeNull(); expect(screen.queryByText("DRAFT")).toBeNull(); expect(screen.queryByText("FAQ")).toBeNull(); expect(screen.queryByText("private")).toBeNull(); expect(screen.queryByText("secret")).toBeNull(); expect(screen.queryByText("2026")).toBeNull(); expect(screen.queryByText("Browse-only catalog item")).toBeNull(); expect(screen.queryByText(/not represented/u)).toBeNull(); expect(screen.getByText("Approved info").compareDocumentPosition(screen.getByText("Legal")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -72,8 +78,9 @@ describe("CatalogItemDetail", () => {
   it("keeps a synthetic browse-only item entirely purchase-free with all configurations", () => {
     const base = findPublicStorefrontProduct(catalog, "pinealon")!;
     const browse = { ...base, displayConfigurations: [{ displayCode: "A", packageForm: "one" }, { displayCode: "B", packageForm: "two" }, { displayCode: "C", packageForm: "three" }] };
-    render(<CatalogItemDetail product={browse} pricing={testPricingContext()} relatedProducts={[]} />);
+    render(<CatalogItemDetail product={browse} pricing={testPricingContext()} relatedProducts={[]} calculator={calculator} />);
     expect(screen.getByText("A")).toBeVisible(); expect(screen.getByText("B")).toBeVisible(); expect(screen.getByText("C")).toBeVisible(); expect(screen.queryByRole("radio")).toBeNull(); expect(screen.queryByRole("spinbutton")).toBeNull(); expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull(); expect(screen.queryByRole("status", { name: "Purchase summary" })).toBeNull(); expect(screen.queryByText(/approved information/i)).toBeNull(); expect(document.body).not.toHaveTextContent(/\$|usd/i);
+    expect(screen.queryByRole("heading", { name: calculator.title })).toBeNull();
   });
 
   it("renders configured related products after the main detail grid with the exact pricing reference", () => {
@@ -81,11 +88,62 @@ describe("CatalogItemDetail", () => {
     const first = testCanonicalProduct([testPublicVariant({ id: "related-a-v" })], { id: "related-a", name: "Related A" });
     const second = testCanonicalProduct([testPublicVariant({ id: "related-b-v" })], { id: "related-b", name: "Related B" });
     capturedRelated.length = 0;
-    render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={[first, second]} />);
+    render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={[first, second]} calculator={null} />);
     expect(screen.getByRole("heading", { name: "Frequently Researched Together" })).toBeVisible();
     expect(within(screen.getByRole("region", { name: "Frequently Researched Together" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Related A", "Related B"]);
     expect(screen.getByRole("heading", { name: "Frequently Researched Together" }).compareDocumentPosition(screen.getByRole("heading", { level: 1, name: "Synthetic Product Alpha" })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     expect(capturedRelated[0]?.products).toEqual([first, second]);
     expect(capturedRelated[0]?.pricing).toBe(pricing);
+  });
+
+  it("renders the approved calculator after approved information and before related products", () => {
+    const content = [{
+      id: "approved-info",
+      kind: "product_information" as const,
+      status: "approved" as const,
+      title: "Approved product information",
+      body: "Approved product body.",
+      sourceReferences: [],
+      approvalNote: null,
+      reviewedAt: null,
+      effectiveAt: null,
+    }];
+    const related = testCanonicalProduct(
+      [testPublicVariant({ id: "related-calculator-v" })],
+      { id: "related-calculator", name: "Related calculator fixture" },
+    );
+    render(
+      <CatalogItemDetail
+        calculator={calculator}
+        pricing={testPricingContext()}
+        product={testCanonicalProduct([], { content: content as never })}
+        relatedProducts={[related]}
+      />,
+    );
+
+    const informationHeading = screen.getByRole("heading", { name: "Approved product information" });
+    const calculatorHeading = screen.getByRole("heading", { name: calculator.title });
+    const relatedHeading = screen.getByRole("heading", { name: "Frequently Researched Together" });
+    expect(
+      informationHeading.compareDocumentPosition(calculatorHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      calculatorHeading.compareDocumentPosition(relatedHeading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("omits every calculator surface for canonical products when the projection is null", () => {
+    render(
+      <CatalogItemDetail
+        calculator={null}
+        pricing={testPricingContext()}
+        product={testCanonicalProduct()}
+        relatedProducts={[]}
+      />,
+    );
+    expect(screen.queryByRole("heading", { name: /concentration calculator/iu })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Calculate" })).toBeNull();
   });
 });

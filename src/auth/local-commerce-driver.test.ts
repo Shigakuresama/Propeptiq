@@ -7,7 +7,7 @@ import { createCheckoutServerRuntime } from "@/commerce/server-runtime";
 import type { ServerEnv } from "@/config/env-schema";
 
 const environment = {
-  APP_ENV: "local", APP_ORIGIN: "http://127.0.0.1:4631", CATALOG_DEMO_MODE: "enabled", LOCAL_TEST_DRIVER: "enabled",
+  APP_ENV: "local", APP_ORIGIN: "http://127.0.0.1:4631", CATALOG_DEMO_MODE: "enabled", RECONSTITUTION_CALCULATOR_MODE: "disabled", LOCAL_TEST_DRIVER: "enabled",
   LOCAL_TEST_SECRET: "local-commerce-event-secret-at-least-32-characters", RATE_LIMIT_SECRET: "local-commerce-rate-secret-at-least-32-characters",
   VERCEL_ENV: "development", VERCEL_TARGET_ENV: "development", AUTH_MODE: "disabled", DATABASE_MODE: "disabled", PAYMENTS_MODE: "disabled",
   STORAGE_MODE: "disabled", EMAIL_MODE: "disabled", COMMERCE_LIVE_CAPABILITY: "disabled", PAYMENTS_LIVE_CAPABILITY: "disabled",

@@ -76,18 +76,18 @@ describe("public pricing snapshot propagation", () => {
 
   it("forwards the exact snapshot through canonical detail into the panel", () => {
     const pricing = testPricingContext("production");
-    render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={[]} />);
+    render(<CatalogItemDetail calculator={null} product={testCanonicalProduct()} pricing={pricing} relatedProducts={[]} />);
     expect(panelPricing).toHaveLength(1); expect(panelPricing[0]).toBe(pricing);
   });
 
   it("does not replace the snapshot with a client mode", () => {
-    const pricing = testPricingContext("production"); render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={[]} />); expect(panelPricing[0]).toBe(pricing);
+    const pricing = testPricingContext("production"); render(<CatalogItemDetail calculator={null} product={testCanonicalProduct()} pricing={pricing} relatedProducts={[]} />); expect(panelPricing[0]).toBe(pricing);
   });
 
   it("keeps the exact snapshot through detail, carousel, and every related card", () => {
     const pricing = testPricingContext("production");
     const related = [testCanonicalProduct([testPublicVariant({ id: "related-v1" })], { id: "related-1", name: "Related 1" }), testCanonicalProduct([testPublicVariant({ id: "related-v2" })], { id: "related-2", name: "Related 2" })];
-    render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={related} />);
+    render(<CatalogItemDetail calculator={null} product={testCanonicalProduct()} pricing={pricing} relatedProducts={related} />);
     expect(panelPricing[0]).toBe(pricing);
     expect(relatedPricing[0]).toBe(pricing);
     expect(relatedCardPricing).toHaveLength(2);

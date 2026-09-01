@@ -3,6 +3,7 @@ import { z } from "zod";
 const capabilityMode = z.enum(["disabled", "test", "live"]);
 const appEnvironment = z.enum(["local", "preview", "production"]);
 const catalogDemoMode = z.enum(["disabled", "enabled"]);
+const concentrationCalculatorMode = z.enum(["disabled", "preview", "approved"]);
 const localTestDriver = z.enum(["disabled", "enabled"]);
 const vercelEnvironment = z.enum(["development", "preview", "production"]);
 const nonBlank = z.string().trim().min(1);
@@ -39,6 +40,7 @@ const rawServerEnvSchema = z.object({
   APP_ENV: appEnvironment.default("local"),
   APP_ORIGIN: urlValue.optional(),
   CATALOG_DEMO_MODE: catalogDemoMode.default("disabled"),
+  RECONSTITUTION_CALCULATOR_MODE: concentrationCalculatorMode.default("disabled"),
   BROWSE_CATALOG_PUBLICATION: nonBlank.optional(),
   LOCAL_TEST_DRIVER: localTestDriver.default("disabled"),
   LOCAL_TEST_SECRET: z.string().min(32).optional(),
@@ -198,6 +200,18 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
       code: "custom",
       path: ["CATALOG_DEMO_MODE"],
       message: "CATALOG_DEMO_MODE cannot be enabled for a production identity",
+    });
+  }
+
+  if (
+    env.RECONSTITUTION_CALCULATOR_MODE === "preview" &&
+    productionDeployment
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["RECONSTITUTION_CALCULATOR_MODE"],
+      message:
+        "RECONSTITUTION_CALCULATOR_MODE=preview is not permitted for a production identity",
     });
   }
 

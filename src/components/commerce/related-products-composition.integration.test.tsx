@@ -12,7 +12,7 @@ describe("real detail related composition", () => {
   it("renders the real detail → carousel → card path and adds a related item", async () => {
     const user = userEvent.setup();
     const related = testCanonicalProduct([testPublicVariant({ id: "composition-v", label: "5 mg" })], { id: "composition-related", name: "Composition Related" });
-    render(<CartProvider><CatalogItemDetail product={testCanonicalProduct()} pricing={testPricingContext("test", [testWinter30])} relatedProducts={[related]} /></CartProvider>);
+    render(<CartProvider><CatalogItemDetail calculator={null} product={testCanonicalProduct()} pricing={testPricingContext("test", [testWinter30])} relatedProducts={[related]} /></CartProvider>);
     const section = screen.getByRole("region", { name: "Frequently Researched Together" });
     expect(section).toBeVisible();
     expect(within(section).getByRole("heading", { name: "Frequently Researched Together" })).toBeVisible();

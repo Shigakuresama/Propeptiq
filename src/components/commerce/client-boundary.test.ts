@@ -4,12 +4,14 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { ComponentProps } from "react";
 import type { ProductPurchasePanel } from "./product-purchase-panel";
 import type { CatalogItemDetail } from "./catalog-item-detail";
+import type { LaboratoryConcentrationCalculator } from "./laboratory-concentration-calculator";
 
 const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
   "src/components/commerce/catalog-explorer.tsx",
   "src/components/commerce/catalog-listing-card.tsx",
   "src/components/commerce/related-products-carousel.tsx",
+  "src/components/commerce/laboratory-concentration-calculator.tsx",
   "src/components/commerce/quick-add-variant-sheet.tsx",
   "src/components/commerce/product-purchase-panel.tsx",
   "src/cart/cart-provider.tsx",
@@ -20,6 +22,7 @@ const clientSafeDependencies = [
   "src/components/commerce/product-price.tsx",
   "src/components/commerce/variant-selector.tsx",
   "src/components/commerce/quantity-tier-selector.tsx",
+  "src/domain/concentration.ts",
 ] as const;
 
 function source(path: string): string {
@@ -59,6 +62,7 @@ describe("storefront client boundary", () => {
       for (const specifier of importSpecifiers(contents)) {
         expect(specifier, `${path} server-only`).not.toBe("server-only");
         expect(specifier, `${path} environment`).not.toMatch(/^@\/env(?:\/|$)/u);
+        expect(specifier, `${path} configuration`).not.toMatch(/^@\/config(?:\/|$)/u);
         expect(specifier, `${path} database`).not.toMatch(/^@\/db(?:\/|$)/u);
         expect(specifier, `${path} checkout`).not.toMatch(/checkout|cart-repository/iu);
         expect(specifier, `${path} provider`).not.toMatch(
@@ -84,13 +88,13 @@ describe("storefront client boundary", () => {
   });
 
   it("recursively bounds panel runtime imports and excludes server authorities", () => {
-    const pending = ["src/components/commerce/product-purchase-panel.tsx", "src/components/commerce/related-products-carousel.tsx"];
+    const pending = ["src/components/commerce/product-purchase-panel.tsx", "src/components/commerce/related-products-carousel.tsx", "src/components/commerce/laboratory-concentration-calculator.tsx"];
     const visited = new Set<string>();
     while (pending.length) {
       const current = pending.pop()!; if (visited.has(current)) continue; visited.add(current);
       const contents = source(current); expect(contents, current).not.toMatch(/process\.env/u);
       for (const specifier of runtimeLocalImports(current)) {
-        expect(specifier, current).not.toMatch(/server-only|stripe|checkout|@\/db|@\/env|payment-provider|provider-repositor/iu);
+        expect(specifier, current).not.toMatch(/server-only|stripe|checkout|@\/config|@\/db|@\/env|payment-provider|provider-repositor/iu);
         pending.push(resolveRuntimeLocalImportForTest(current, specifier));
       }
     }
@@ -107,7 +111,20 @@ describe("storefront client boundary", () => {
     expect(panel).not.toMatch(/ProductPurchasePanelProps[^\n]*mode|mode\?:/u);
     type PanelProps = ComponentProps<typeof ProductPurchasePanel>;
     type DetailProps = ComponentProps<typeof CatalogItemDetail>;
-    expectTypeOf<PanelProps>().toHaveProperty("pricing"); expectTypeOf<PanelProps>().not.toHaveProperty("mode"); expectTypeOf<DetailProps>().toHaveProperty("pricing"); expectTypeOf<DetailProps>().not.toHaveProperty("mode");
+    type CalculatorProps = ComponentProps<typeof LaboratoryConcentrationCalculator>;
+    type CalculatorProjection = CalculatorProps["calculator"];
+    expectTypeOf<PanelProps>().toHaveProperty("pricing"); expectTypeOf<PanelProps>().not.toHaveProperty("mode"); expectTypeOf<DetailProps>().toHaveProperty("pricing"); expectTypeOf<DetailProps>().toHaveProperty("calculator"); expectTypeOf<DetailProps>().not.toHaveProperty("mode");
+    expectTypeOf<CalculatorProps>().toHaveProperty("calculator");
+    expectTypeOf<CalculatorProjection>().toHaveProperty("title");
+    expectTypeOf<CalculatorProjection>().toHaveProperty("body");
+    expectTypeOf<CalculatorProjection>().toHaveProperty("limits");
+    expectTypeOf<CalculatorProjection>().not.toHaveProperty("mode");
+    expectTypeOf<CalculatorProjection>().not.toHaveProperty("product");
+    expectTypeOf<CalculatorProjection>().not.toHaveProperty("variant");
+    expectTypeOf<CalculatorProjection>().not.toHaveProperty("contentId");
+    expectTypeOf<CalculatorProjection>().not.toHaveProperty("approvalNote");
+    expectTypeOf<CalculatorProjection>().not.toHaveProperty("sourceReferences");
+    expectTypeOf<CalculatorProjection>().not.toHaveProperty("reviewedAt");
   });
 
   it("has no contradictory client mode override or missing-pricing fallback", () => {

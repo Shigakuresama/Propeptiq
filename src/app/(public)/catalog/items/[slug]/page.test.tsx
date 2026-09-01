@@ -12,17 +12,19 @@ import {
 const {
   getPublicBrowseCatalogMock,
   getPublicStorefrontViewMock,
+  getCalculatorMock,
   notFoundMock,
   requestCacheState,
   detailProps,
 } = vi.hoisted(() => ({
   getPublicBrowseCatalogMock: vi.fn(),
   getPublicStorefrontViewMock: vi.fn(),
+  getCalculatorMock: vi.fn(),
   notFoundMock: vi.fn(() => {
     throw new Error("NEXT_NOT_FOUND");
   }),
   requestCacheState: { generation: 0 },
-  detailProps: [] as Array<{ product: unknown; pricing: unknown; relatedProducts: unknown }>,
+  detailProps: [] as Array<{ product: unknown; pricing: unknown; relatedProducts: unknown; calculator: unknown }>,
 }));
 
 vi.mock("react", async (importOriginal) => {
@@ -52,12 +54,15 @@ vi.mock("@/catalog/browse-catalog-server", () => ({
 vi.mock("@/catalog/storefront-public-server", () => ({
   getPublicStorefrontView: getPublicStorefrontViewMock,
 }));
+vi.mock("@/config/concentration-calculator-server", () => ({
+  getPublicConcentrationCalculatorConfiguration: getCalculatorMock,
+}));
 vi.mock("next/navigation", () => ({ notFound: notFoundMock }));
 vi.mock("@/components/site/page-transition", () => ({
   PageTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 vi.mock("@/components/commerce/catalog-item-detail", () => ({
-  CatalogItemDetail: (props: { product: { name: string }; pricing: unknown; relatedProducts: unknown }) => { detailProps.push(props); return <h1>{props.product.name}</h1>; },
+  CatalogItemDetail: (props: { product: { name: string }; pricing: unknown; relatedProducts: unknown; calculator: unknown }) => { detailProps.push(props); return <h1>{props.product.name}</h1>; },
 }));
 
 import CatalogItemPage, { generateMetadata } from "./page";
@@ -80,6 +85,7 @@ describe("retained catalog item route", () => {
       new Error("legacy browse loader must not own the retained route"),
     );
     getPublicStorefrontViewMock.mockResolvedValue({ catalog: projectedCatalog, pricing: { mode: "test", evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] } });
+    getCalculatorMock.mockResolvedValue(null);
   });
 
   it("renders an owner-published product through the safe storefront projection", async () => {
@@ -89,7 +95,9 @@ describe("retained catalog item route", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
     expect(getPublicStorefrontViewMock).toHaveBeenCalledTimes(1);
+    expect(getCalculatorMock).toHaveBeenCalledTimes(1);
     expect(getPublicBrowseCatalogMock).not.toHaveBeenCalled();
+    expect(detailProps[0]?.calculator).toBeNull();
   });
 
   it("shares one catalog acquisition between metadata and page rendering per request", async () => {
@@ -158,5 +166,25 @@ describe("retained catalog item route", () => {
     expect(detailProps[0]?.relatedProducts).toEqual([second, first]);
     expect(detailProps[0]?.relatedProducts).not.toContain(hidden);
     expect(detailProps[0]?.pricing).toBe(pricing);
+  });
+
+  it("forwards the exact safe calculator projection reference without reloading the catalog", async () => {
+    const calculator = Object.freeze({
+      title: "Synthetic approved calculator",
+      body: "Synthetic approved body.",
+      limits: Object.freeze({ maxVialMg: 100, maxDiluentMl: 50, maxSampleMl: 10 }),
+    });
+    const canonical = testCanonicalProduct([], { slug: "synthetic-calculator" });
+    getPublicStorefrontViewMock.mockResolvedValue({
+      catalog: { ...projectedCatalog, products: [canonical] },
+      pricing: { mode: "test", evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] },
+    });
+    getCalculatorMock.mockResolvedValue(calculator);
+
+    render(await CatalogItemPage({ params: Promise.resolve({ slug: canonical.slug }) }));
+
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
+    expect(getCalculatorMock).toHaveBeenCalledOnce();
+    expect(detailProps[0]?.calculator).toBe(calculator);
   });
 });

@@ -28,7 +28,12 @@ async function seedLocalTestCart(page: import("@playwright/test").Page, quantity
         items: [{ variantId, quantity: requestedQuantity }],
       }),
     );
-    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2" }));
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: "propeptiq.cart.v2",
+        storageArea: window.localStorage,
+      }),
+    );
   }, { variantId: localTestVariantId, requestedQuantity: quantity });
 }
 
@@ -414,9 +419,15 @@ test("owner-supplied catalog is complete, price-free, and serves every illustrat
   expect(unknown?.status()).toBe(404);
 });
 
-test("retained browse-only item has no related carousel or eager related media", async ({ page }) => {
+test("retained browse-only item has no gated calculator, related carousel, overflow, or eager related media", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/catalog/items/tirzepatide");
+  await expect(page.getByRole("heading", { name: "Laboratory concentration calculator", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Vial amount (mg)", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Diluent volume (mL)", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Sample volume (mL, optional)", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Calculate", exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Frequently Researched Together", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Previous related products" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Next related products" })).toHaveCount(0);

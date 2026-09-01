@@ -4,10 +4,12 @@ import Link from "next/link";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import type { PublicConcentrationCalculatorConfiguration } from "@/domain/concentration";
+import { LaboratoryConcentrationCalculator } from "./laboratory-concentration-calculator";
 import { ProductPurchasePanel } from "./product-purchase-panel";
 import { RelatedProductsCarousel } from "./related-products-carousel";
 
-export function CatalogItemDetail({ product, pricing, relatedProducts }: { product: PublicStorefrontProduct; pricing: PublicStorefrontPricingContext; relatedProducts: readonly Extract<PublicStorefrontProduct, { kind: "canonical" }>[] }) {
+export function CatalogItemDetail({ calculator, product, pricing, relatedProducts }: { calculator: PublicConcentrationCalculatorConfiguration | null; product: PublicStorefrontProduct; pricing: PublicStorefrontPricingContext; relatedProducts: readonly Extract<PublicStorefrontProduct, { kind: "canonical" }>[] }) {
   const canonical = product.kind === "canonical";
   const sourceLabelIsDistinct =
     product.sourceName.replace(/\s+/gu, "").toLocaleLowerCase("en-US") !==
@@ -79,6 +81,9 @@ export function CatalogItemDetail({ product, pricing, relatedProducts }: { produ
           {canonical && product.content.some((record) => record.status === "approved" && (record.kind === "product_information" || record.kind === "legal_notice")) ? <section className="mt-10 space-y-5" aria-label="Approved information">{product.content.filter((record) => record.status === "approved" && (record.kind === "product_information" || record.kind === "legal_notice")).map((record) => <article key={record.id}><h2 className="font-heading text-2xl text-ink">{record.title}</h2><p className="mt-2 whitespace-pre-wrap text-muted-ink">{record.body}</p></article>)}</section> : null}
         </div>
       </div>
+      {canonical && calculator ? (
+        <LaboratoryConcentrationCalculator calculator={calculator} />
+      ) : null}
       {canonical ? <RelatedProductsCarousel currentProductId={product.id} products={relatedProducts} pricing={pricing} /> : null}
     </article>
   );
