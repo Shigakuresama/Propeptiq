@@ -160,6 +160,203 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("site search ultra-narrow public header keeps every keyboard focus target inside the viewport without clipping overflow", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 195, height: 520 });
+  const requests = await interceptFictionalSearch(page);
+  await page.goto("/catalog");
+
+  const publicLayout = page.locator(".public-layout");
+  const publicOverflow = await publicLayout.evaluate((element) => ({
+    overflow: getComputedStyle(element).overflow,
+    overflowX: getComputedStyle(element).overflowX,
+  }));
+  expect.soft(["hidden", "clip"]).not.toContain(publicOverflow.overflow);
+  expect.soft(["hidden", "clip"]).not.toContain(publicOverflow.overflowX);
+
+  const headerRow = page.getByRole("banner").locator(".site-container");
+  const rowWidth = await headerRow.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect.soft(
+    rowWidth.scrollWidth,
+    `persistent header row overflowed: ${JSON.stringify(rowWidth)}`,
+  ).toBeLessThanOrEqual(rowWidth.clientWidth);
+
+  const headerTargets = headerRow.locator(
+    "a[href]:visible, button:not([disabled]):visible",
+  );
+  await expect(headerTargets).toHaveCount(4);
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    window.scrollTo(0, 0);
+  });
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("link", { name: "Skip to main content" }))
+    .toBeFocused();
+
+  for (let index = 0; index < 4; index += 1) {
+    await page.keyboard.press("Tab");
+    const target = headerTargets.nth(index);
+    await expect(target).toBeFocused();
+    const focusTarget = await target.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const styles = getComputedStyle(element);
+      const focusExtent = Number.parseFloat(styles.outlineWidth) +
+        Number.parseFloat(styles.outlineOffset);
+      return {
+        bottom: bounds.bottom,
+        focusExtent,
+        label: element.getAttribute("aria-label") ?? element.textContent?.trim() ?? "",
+        left: bounds.left,
+        right: bounds.right,
+        top: bounds.top,
+      };
+    });
+    expect.soft(
+      focusTarget.left - focusTarget.focusExtent,
+      `${focusTarget.label} left focus ring`,
+    ).toBeGreaterThanOrEqual(-0.5);
+    expect.soft(
+      focusTarget.right + focusTarget.focusExtent,
+      `${focusTarget.label} right focus ring`,
+    ).toBeLessThanOrEqual(195.5);
+    expect.soft(
+      focusTarget.top - focusTarget.focusExtent,
+      `${focusTarget.label} top focus ring`,
+    ).toBeGreaterThanOrEqual(-0.5);
+    expect.soft(
+      focusTarget.bottom + focusTarget.focusExtent,
+      `${focusTarget.label} bottom focus ring`,
+    ).toBeLessThanOrEqual(520.5);
+  }
+
+  expect(requests).toHaveLength(0);
+});
+
+test("site search ultra-narrow layout exposes a removable test-only long-content sentinel before returning to exact viewport width", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 195, height: 520 });
+  const requests = await interceptFictionalSearch(page);
+  await page.goto("/catalog");
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => {
+    document.documentElement.style.scrollBehavior = "auto";
+    const sentinel = document.createElement("div");
+    sentinel.setAttribute("aria-hidden", "true");
+    sentinel.dataset.task4bOverflowSentinel = "true";
+    sentinel.style.width = "max-content";
+    sentinel.style.whiteSpace = "nowrap";
+    sentinel.textContent = "TASK-4B-TEST-ONLY-LONG-CONTENT-SENTINEL-".repeat(20);
+    document.querySelector("main#main-content")?.append(sentinel);
+  });
+
+  const sentinel = page.locator('[data-task4b-overflow-sentinel="true"]');
+  await expect(sentinel).toHaveCount(1);
+  const overflowWidth = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(overflowWidth.scrollWidth).toBeGreaterThan(overflowWidth.clientWidth);
+
+  await page.evaluate(() => {
+    window.scrollTo(document.documentElement.scrollWidth, 0);
+  });
+  await expect.poll(() => page.evaluate(() => window.scrollX)).toBeGreaterThan(0);
+  expect((await clientRect(sentinel)).right).toBeLessThanOrEqual(195.5);
+
+  await sentinel.evaluate((element) => element.remove());
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.evaluate(() => document.fonts.ready);
+
+  const firstCatalogCard = page.locator(".catalog-grid > li").first();
+  const firstCatalogArticle = firstCatalogCard.locator("article");
+  const firstCatalogHeading = firstCatalogArticle.getByRole("heading", { level: 2 });
+  const firstCatalogLink = firstCatalogArticle.getByRole("link", {
+    name: /View catalog item/u,
+  });
+  for (const [label, locator] of [
+    ["first catalog card", firstCatalogArticle],
+    ["first catalog heading", firstCatalogHeading],
+    ["first catalog action", firstCatalogLink],
+  ] as const) {
+    const bounds = await clientRect(locator);
+    expect.soft(bounds.left, `${label} left edge`).toBeGreaterThanOrEqual(-0.5);
+    expect.soft(bounds.right, `${label} right edge`).toBeLessThanOrEqual(195.5);
+  }
+  await firstCatalogLink.evaluate((element) => {
+    if (element instanceof HTMLElement) element.focus({ preventScroll: true });
+  });
+  await expect(firstCatalogLink).toBeFocused();
+  const catalogFocus = await firstCatalogLink.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const styles = getComputedStyle(element);
+    const focusExtent = Number.parseFloat(styles.outlineWidth) +
+      Number.parseFloat(styles.outlineOffset);
+    return {
+      left: bounds.left - focusExtent,
+      right: bounds.right + focusExtent,
+    };
+  });
+  expect.soft(catalogFocus.left, "first catalog action left focus ring")
+    .toBeGreaterThanOrEqual(-0.5);
+  expect.soft(catalogFocus.right, "first catalog action right focus ring")
+    .toBeLessThanOrEqual(195.5);
+
+  const publicFooter = page.locator(".public-layout > footer");
+  const footerBrand = publicFooter.getByRole("link", { name: /home$/u });
+  const footerLastLink = publicFooter
+    .getByRole("navigation", { name: "Footer" })
+    .getByRole("link")
+    .last();
+  for (const [label, locator] of [
+    ["footer brand", footerBrand],
+    ["footer final action", footerLastLink],
+  ] as const) {
+    const bounds = await clientRect(locator);
+    expect.soft(bounds.left, `${label} left edge`).toBeGreaterThanOrEqual(-0.5);
+    expect.soft(bounds.right, `${label} right edge`).toBeLessThanOrEqual(195.5);
+  }
+
+  const realLayout = await page.evaluate(() => {
+    const clientWidth = document.documentElement.clientWidth;
+    return {
+      clientWidth,
+      offenders: [...document.querySelectorAll("body *")]
+        .map((element) => {
+          const bounds = element.getBoundingClientRect();
+          const styles = getComputedStyle(element);
+          return {
+            className: element.getAttribute("class") ?? "",
+            clientWidth: element instanceof HTMLElement ? element.clientWidth : null,
+            display: styles.display,
+            gridTemplateColumns: styles.gridTemplateColumns,
+            left: bounds.left,
+            minWidth: styles.minWidth,
+            overflowX: styles.overflowX,
+            right: bounds.right,
+            scrollWidth: element instanceof HTMLElement ? element.scrollWidth : null,
+            tagName: element.tagName,
+            text: element.textContent?.trim().slice(0, 80) ?? "",
+            whiteSpace: styles.whiteSpace,
+            width: bounds.width,
+          };
+        })
+        .filter(({ left, right }) => left < -1 || right > clientWidth + 1)
+        .slice(0, 40),
+      scrollWidth: document.documentElement.scrollWidth,
+    };
+  });
+  expect(
+    realLayout.scrollWidth,
+    `real 195px overflow: ${JSON.stringify(realLayout.offenders)}`,
+  ).toBe(realLayout.clientWidth);
+  expect(requests).toHaveLength(0);
+});
+
 test("site search launcher stays centered, operable, and clear of the footer across the Chromium viewport matrix", async ({
   page,
 }) => {

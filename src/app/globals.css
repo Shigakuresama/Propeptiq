@@ -598,7 +598,6 @@ footer a {
 
 .public-layout {
   min-width: 0;
-  overflow-x: clip;
 }
 
 .public-layout > footer {
@@ -684,6 +683,62 @@ footer a {
   footer p.text-sm {
     font-size: 1rem;
     line-height: 1.5;
+  }
+}
+
+@media (max-width: 17rem) {
+  .public-layout .persistent-chrome .site-container {
+    gap: 0.125rem;
+    padding-inline: 0.375rem;
+  }
+
+  .public-layout .persistent-chrome .site-container > a:first-child > span:last-child,
+  .public-layout .persistent-chrome .site-container > a[href="/cart"] > .cart-count {
+    display: none;
+  }
+
+  .public-layout .persistent-chrome .site-container > a[href="/cart"],
+  .public-layout .persistent-chrome .site-container > a[href^="/sign-in"] {
+    min-width: 44px;
+    justify-content: center;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .public-layout .persistent-chrome .site-container > a[href^="/sign-in"] > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .public-layout .catalog-listing-card {
+    padding: 0;
+  }
+
+  .public-layout .catalog-grid > li {
+    min-width: 0;
+  }
+
+  .public-layout .catalog-listing-card h2 {
+    overflow-wrap: anywhere;
+  }
+
+  .public-layout > footer .site-container > * {
+    min-width: 0;
+  }
+
+  .public-layout > footer .site-container > div:first-child > a[href="/"] {
+    width: 100%;
+    max-width: 12rem;
+  }
+
+  .public-layout > footer .site-container > div:first-child > a[href="/"] > span {
+    width: 100%;
+    max-width: 100%;
   }
 }
 

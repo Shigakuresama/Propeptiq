@@ -381,6 +381,14 @@ describe("SiteSearchLauncher loading and validation", () => {
 });
 
 describe("SiteSearchLauncher accessible Sheet behavior", () => {
+  it("does not mask public descendant overflow with hidden or clipped overflow", () => {
+    const publicLayout = cssDeclarations(
+      cssRuleBody(globalsCss, ".public-layout"),
+    );
+    expect(["hidden", "clip"]).not.toContain(publicLayout.get("overflow"));
+    expect(["hidden", "clip"]).not.toContain(publicLayout.get("overflow-x"));
+  });
+
   it("keeps footer reservation public-only and preserves the exact safe-area token", () => {
     const root = cssDeclarations(cssRuleBody(globalsCss, ":root"));
     expect(root.get("--site-search-reserved-height")).toBe("4.5rem");
