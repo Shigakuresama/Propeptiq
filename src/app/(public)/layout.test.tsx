@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,12 +39,17 @@ describe("public layout promotion composition", () => {
     );
 
     expect(getStorefrontPromotionBannerViewMock).toHaveBeenCalledOnce();
-    expect([...container.children].map((element) => element.tagName)).toEqual([
+    expect(container.children).toHaveLength(1);
+    const root = container.firstElementChild;
+    expect(root).not.toBeNull();
+    expect(root).toHaveClass("public-layout");
+    expect([...root!.children].map((element) => element.tagName)).toEqual([
       "A",
       "HEADER",
       "ASIDE",
       "MAIN",
       "FOOTER",
+      "DIV",
     ]);
     expect(screen.getByRole("link", { name: "Skip to main content" })).toHaveAttribute(
       "href",
@@ -55,7 +62,13 @@ describe("public layout promotion composition", () => {
     expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
     expect(screen.getByRole("main")).toHaveAttribute("tabindex", "-1");
     expect(screen.getByRole("main")).toHaveTextContent("Public content");
-    expect(screen.getByRole("contentinfo")).toHaveTextContent("Site footer");
+    const footer = screen.getByRole("contentinfo");
+    expect(footer).toHaveTextContent("Site footer");
+    expect(footer.parentElement).toBe(root);
+    const lanes = root!.querySelectorAll(":scope > .site-search-launcher-lane");
+    expect(lanes).toHaveLength(1);
+    expect(lanes[0]).toBe(root!.lastElementChild);
+    expect(screen.getByRole("button", { name: "Search PropeptIQ" })).toBeVisible();
   });
 
   it("omits the banner and empty spacing when the safe server view is null", async () => {
@@ -66,15 +79,20 @@ describe("public layout promotion composition", () => {
     );
 
     expect(getStorefrontPromotionBannerViewMock).toHaveBeenCalledOnce();
-    expect([...container.children].map((element) => element.tagName)).toEqual([
+    expect(container.children).toHaveLength(1);
+    const root = container.firstElementChild;
+    expect(root).toHaveClass("public-layout");
+    expect([...root!.children].map((element) => element.tagName)).toEqual([
       "A",
       "HEADER",
       "MAIN",
       "FOOTER",
+      "DIV",
     ]);
     expect(screen.queryByRole("complementary", { name: "Promotion" })).toBeNull();
     expect(screen.queryByText(/WINTER30/u)).toBeNull();
     expect(screen.getByRole("main")).toHaveTextContent("Information remains available");
+    expect(root!.lastElementChild).toHaveClass("site-search-launcher-lane");
   });
 
   it("renders the unchanged public shell with no fabricated fallback after acquisition failure", async () => {
@@ -87,6 +105,33 @@ describe("public layout promotion composition", () => {
     expect(screen.getByRole("banner")).toBeVisible();
     expect(screen.getByRole("main")).toHaveTextContent("Research policy");
     expect(screen.getByRole("contentinfo")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Search PropeptIQ" })).toBeVisible();
     expect(screen.queryByText(/WINTER SALE|WINTER30/iu)).toBeNull();
+  });
+
+  it("does not load the search index while rendering the async public layout", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    getStorefrontPromotionBannerViewMock.mockResolvedValue(null);
+    try {
+      render(await PublicLayout({ children: <p>Lazy search content</p> }));
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("keeps the launcher scoped to the public route-group layout", () => {
+    const nonPublicLayouts = [
+      "src/app/layout.tsx",
+      "src/app/account/layout.tsx",
+      "src/app/admin/layout.tsx",
+      "src/app/research-sets/layout.tsx",
+    ];
+    for (const path of nonPublicLayouts) {
+      expect(
+        readFileSync(resolve(process.cwd(), path), "utf8"),
+        path,
+      ).not.toMatch(/SiteSearchLauncher|site-search-launcher/iu);
+    }
   });
 });

@@ -8,6 +8,10 @@ import type { CatalogItemDetail } from "./catalog-item-detail";
 import type { LaboratoryConcentrationCalculator } from "./laboratory-concentration-calculator";
 
 const promotionBarPath = "src/components/site/promotion-bar.tsx";
+const searchClientPaths = [
+  "src/components/search/site-search-launcher.tsx",
+  "src/components/search/site-search-sheet.tsx",
+] as const;
 
 const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
@@ -18,6 +22,7 @@ const clientEntries = [
   "src/components/commerce/quick-add-variant-sheet.tsx",
   "src/components/commerce/product-purchase-panel.tsx",
   promotionBarPath,
+  ...searchClientPaths,
   "src/cart/cart-provider.tsx",
 ] as const;
 
@@ -129,6 +134,22 @@ function resolveRuntimeLocalImportForTest(from: string, specifier: string): stri
     } catch { /* continue */ }
   }
   throw new Error(`Unresolved local runtime import: ${from} -> ${specifier}`);
+}
+
+function searchClientAuthorityViolation(from: string, specifier: string): boolean {
+  if (genericClientAuthorityViolation(specifier) || /(?:^|[/_-])cart(?:$|[/_.-])/iu.test(specifier)) {
+    return true;
+  }
+  if (!isLocalRuntimeSpecifier(specifier)) return false;
+
+  const resolvedPath = resolveRuntimeLocalImportForTest(from, specifier);
+  return !(
+    /^src\/components\/search\/site-search-(?:launcher|sheet)\.tsx$/u.test(resolvedPath) ||
+    /^src\/components\/ui\//u.test(resolvedPath) ||
+    resolvedPath === "src/lib/utils.ts" ||
+    resolvedPath === "src/search/storefront-search.ts" ||
+    resolvedPath === "src/content/public-information.ts"
+  );
 }
 
 describe("storefront client boundary", () => {
@@ -245,6 +266,43 @@ describe("storefront client boundary", () => {
 
   it("keeps the pure storefront search core free of local runtime dependencies", () => {
     expect(runtimeLocalImports("src/search/storefront-search.ts")).toEqual([]);
+  });
+
+  it("recursively bounds the launcher and Sheet to browser-safe search, href-policy, and UI code", () => {
+    const pending: string[] = [...searchClientPaths];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const contents = source(current);
+      expect(contents, `${current} environment`).not.toMatch(/\bprocess\.env\b/u);
+      if (searchClientPaths.includes(current as typeof searchClientPaths[number])) {
+        expect(contents, `${current} raw controlled content`).not.toMatch(
+          /publicInformationRecords|getApprovedPublicInformation/iu,
+        );
+      }
+      expect(contents, `${current} commerce authority`).not.toMatch(
+        /checkout|stripe|payment-provider|provider-repositor|cart-provider/iu,
+      );
+      for (const specifier of runtimeImportSpecifiers(contents)) {
+        expect(
+          searchClientAuthorityViolation(current, specifier),
+          `${current} forbidden search client authority ${specifier}`,
+        ).toBe(false);
+        if (isLocalRuntimeSpecifier(specifier)) {
+          pending.push(resolveRuntimeLocalImportForTest(current, specifier));
+        }
+      }
+    }
+
+    const directRuntimeImports = searchClientPaths.flatMap((path) =>
+      runtimeImportSpecifiers(source(path))
+    );
+    expect(directRuntimeImports).toContain("@/search/storefront-search");
+    expect(directRuntimeImports).toContain("@/content/public-information");
+    expect(directRuntimeImports).not.toContain("@/search/storefront-index");
+    expect(visited.size).toBeGreaterThan(searchClientPaths.length);
   });
 
   it("keeps catalog discovery data serializable and imports only the browser-safe core at runtime", () => {
