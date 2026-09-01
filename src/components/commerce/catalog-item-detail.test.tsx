@@ -10,11 +10,12 @@ import {
 } from "@/catalog/storefront-public";
 
 import { CatalogItemDetail } from "./catalog-item-detail";
-import { testPricingContext } from "./storefront-test-fixtures";
-import { testCanonicalProduct } from "./storefront-test-fixtures";
+import { testPricingContext, testCanonicalProduct, testPublicVariant } from "./storefront-test-fixtures";
 
 const { capturedPricing } = vi.hoisted(() => ({ capturedPricing: [] as unknown[] }));
 vi.mock("./product-purchase-panel", () => ({ ProductPurchasePanel: ({ pricing }: { pricing: unknown }) => { capturedPricing.push(pricing); return <div data-testid="purchase-panel" />; } }));
+const { capturedRelated } = vi.hoisted(() => ({ capturedRelated: [] as Array<{ products: unknown; pricing: unknown }> }));
+vi.mock("./related-products-carousel", () => ({ RelatedProductsCarousel: (props: { products: unknown; pricing: unknown }) => { capturedRelated.push(props); return <section aria-label="Frequently Researched Together"><h2>Frequently Researched Together</h2><ul>{(props.products as Array<{ name: string }>).map((product) => <li key={product.name}>{product.name}</li>)}</ul></section>; } }));
 
 describe("CatalogItemDetail", () => {
   const catalog = buildPublicStorefrontCatalog({
@@ -73,5 +74,18 @@ describe("CatalogItemDetail", () => {
     const browse = { ...base, displayConfigurations: [{ displayCode: "A", packageForm: "one" }, { displayCode: "B", packageForm: "two" }, { displayCode: "C", packageForm: "three" }] };
     render(<CatalogItemDetail product={browse} pricing={testPricingContext()} relatedProducts={[]} />);
     expect(screen.getByText("A")).toBeVisible(); expect(screen.getByText("B")).toBeVisible(); expect(screen.getByText("C")).toBeVisible(); expect(screen.queryByRole("radio")).toBeNull(); expect(screen.queryByRole("spinbutton")).toBeNull(); expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull(); expect(screen.queryByRole("status", { name: "Purchase summary" })).toBeNull(); expect(screen.queryByText(/approved information/i)).toBeNull(); expect(document.body).not.toHaveTextContent(/\$|usd/i);
+  });
+
+  it("renders configured related products after the main detail grid with the exact pricing reference", () => {
+    const pricing = testPricingContext();
+    const first = testCanonicalProduct([testPublicVariant({ id: "related-a-v" })], { id: "related-a", name: "Related A" });
+    const second = testCanonicalProduct([testPublicVariant({ id: "related-b-v" })], { id: "related-b", name: "Related B" });
+    capturedRelated.length = 0;
+    render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={[first, second]} />);
+    expect(screen.getByRole("heading", { name: "Frequently Researched Together" })).toBeVisible();
+    expect(within(screen.getByRole("region", { name: "Frequently Researched Together" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Related A", "Related B"]);
+    expect(screen.getByRole("heading", { name: "Frequently Researched Together" }).compareDocumentPosition(screen.getByRole("heading", { level: 1, name: "Synthetic Product Alpha" })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(capturedRelated[0]?.products).toEqual([first, second]);
+    expect(capturedRelated[0]?.pricing).toBe(pricing);
   });
 });

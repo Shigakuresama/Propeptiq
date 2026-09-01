@@ -8,12 +8,13 @@ import {
   storefrontImageMetadata,
 } from "@/catalog/storefront-public";
 import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
-import { testPricingContext } from "@/components/commerce/storefront-test-fixtures";
+import { testPricingContext, testPublicVariant } from "@/components/commerce/storefront-test-fixtures";
 
 const { receivedPricing } = vi.hoisted(() => ({
   receivedPricing: [] as PublicStorefrontPricingContext[],
 }));
 const { panelPricing } = vi.hoisted(() => ({ panelPricing: [] as PublicStorefrontPricingContext[] }));
+const { relatedPricing, relatedCardPricing } = vi.hoisted(() => ({ relatedPricing: [] as PublicStorefrontPricingContext[], relatedCardPricing: [] as PublicStorefrontPricingContext[] }));
 
 vi.mock("@/components/commerce/catalog-listing-card", () => ({
   CatalogListingCard: ({
@@ -27,6 +28,7 @@ vi.mock("@/components/commerce/catalog-listing-card", () => ({
     return <article>{product.name}</article>;
   },
 }));
+vi.mock("./related-products-carousel", () => ({ RelatedProductsCarousel: ({ products, pricing }: { products: Array<{ name: string }>; pricing: PublicStorefrontPricingContext }) => { relatedPricing.push(pricing); for (const product of products) { void product; relatedCardPricing.push(pricing); } return <section>{products.map((product) => <article key={product.name}>{product.name}</article>)}</section>; } }));
 vi.mock("@/components/commerce/product-purchase-panel", () => ({ ProductPurchasePanel: ({ pricing }: { pricing: PublicStorefrontPricingContext }) => { panelPricing.push(pricing); return <div data-testid="panel" />; } }));
 
 import { CatalogExplorer } from "./catalog-explorer";
@@ -46,6 +48,8 @@ describe("public pricing snapshot propagation", () => {
   beforeEach(() => {
     receivedPricing.length = 0;
     panelPricing.length = 0;
+    relatedPricing.length = 0;
+    relatedCardPricing.length = 0;
   });
 
   it("forwards one exact pricing object reference through CatalogExplorer to every card", () => {
@@ -78,5 +82,15 @@ describe("public pricing snapshot propagation", () => {
 
   it("does not replace the snapshot with a client mode", () => {
     const pricing = testPricingContext("production"); render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={[]} />); expect(panelPricing[0]).toBe(pricing);
+  });
+
+  it("keeps the exact snapshot through detail, carousel, and every related card", () => {
+    const pricing = testPricingContext("production");
+    const related = [testCanonicalProduct([testPublicVariant({ id: "related-v1" })], { id: "related-1", name: "Related 1" }), testCanonicalProduct([testPublicVariant({ id: "related-v2" })], { id: "related-2", name: "Related 2" })];
+    render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={related} />);
+    expect(panelPricing[0]).toBe(pricing);
+    expect(relatedPricing[0]).toBe(pricing);
+    expect(relatedCardPricing).toHaveLength(2);
+    expect(relatedCardPricing.every((received) => received === pricing)).toBe(true);
   });
 });

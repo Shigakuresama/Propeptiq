@@ -61,7 +61,7 @@ vi.mock("@/components/commerce/catalog-item-detail", () => ({
 }));
 
 import CatalogItemPage, { generateMetadata } from "./page";
-import { testCanonicalProduct } from "@/components/commerce/storefront-test-fixtures";
+import { testCanonicalProduct, testPublicVariant } from "@/components/commerce/storefront-test-fixtures";
 
 const projectedCatalog = buildPublicStorefrontCatalog({
   configuredPublicationId: browseCatalogPublicationId,
@@ -143,5 +143,20 @@ describe("retained catalog item route", () => {
     await expect(generateMetadata({ params: Promise.resolve({ slug: "synthetic-canonical" }) })).resolves.toMatchObject({ title: canonical.name });
     render(await CatalogItemPage({ params: Promise.resolve({ slug: "synthetic-canonical" }) }));
     expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce(); expect(detailProps[0]?.pricing).toBe(pricing);
+  });
+
+  it("passes the configured filtered related slice and exact pricing reference", async () => {
+    const pricing = { mode: "test" as const, evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] };
+    const first = testCanonicalProduct([testPublicVariant({ id: "related-first-v" })], { id: "related-first", slug: "related-first", name: "Related First" });
+    const second = testCanonicalProduct([testPublicVariant({ id: "related-second-v" })], { id: "related-second", slug: "related-second", name: "Related Second" });
+    const hidden = testCanonicalProduct([], { id: "related-hidden", slug: "related-hidden", name: "Related Hidden" });
+    const current = testCanonicalProduct([], { slug: "synthetic-related-current", relatedProductIds: [second.id, first.id, first.id, hidden.id] });
+    const catalog = { ...projectedCatalog, products: [first, current, hidden, second] };
+    getPublicStorefrontViewMock.mockResolvedValue({ catalog, pricing });
+    render(await CatalogItemPage({ params: Promise.resolve({ slug: current.slug }) }));
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
+    expect(detailProps[0]?.relatedProducts).toEqual([second, first]);
+    expect(detailProps[0]?.relatedProducts).not.toContain(hidden);
+    expect(detailProps[0]?.pricing).toBe(pricing);
   });
 });
