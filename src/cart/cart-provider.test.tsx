@@ -168,6 +168,27 @@ function PendingAddThenStorageClearHarness() {
   );
 }
 
+function PendingAddThenUnknownStorageClearHarness() {
+  const { addVariant, hydrated, items } = useCart();
+  const attempted = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!hydrated || attempted.current) return;
+    attempted.current = true;
+    addVariant("variant-unknown-storage", 1, { variantLabel: "Unknown storage" });
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: null,
+        storageArea: null,
+      }),
+    );
+  }, [addVariant, hydrated]);
+
+  return (
+    <output aria-label="Unknown-storage cart lines">{JSON.stringify(items)}</output>
+  );
+}
+
 describe("CartProvider exact-variant announcements", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -331,6 +352,23 @@ describe("CartProvider exact-variant announcements", () => {
     await screen.findByText("clear dispatched");
     expect(screen.getByLabelText("Storage-clear cart lines")).toHaveTextContent("[]");
     expect(screen.getByRole("status", { name: "Cart updates" })).toBeEmptyDOMElement();
+  });
+
+  it("ignores key-null events whose storage area is unknown", async () => {
+    render(
+      <CartProvider>
+        <PendingAddThenUnknownStorageClearHarness />
+      </CartProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Unknown-storage cart lines")).toHaveTextContent(
+        JSON.stringify([{ variantId: "variant-unknown-storage", quantity: 1 }]),
+      );
+    });
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
+      "Cart updated. Unknown storage: 1 unit in cart.",
+    );
   });
 
   it("keeps an exact-variant add made before deferred hydration alongside stored lines", async () => {
