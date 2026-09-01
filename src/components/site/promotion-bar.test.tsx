@@ -37,6 +37,16 @@ function contrastRatio(first: string, second: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+function deferred<T>() {
+  let resolvePromise!: (value: T | PromiseLike<T>) => void;
+  let rejectPromise!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return { promise, resolve: resolvePromise, reject: rejectPromise };
+}
+
 describe("PromotionBar", () => {
   it("renders nothing and no spacing when there is no safe promotion", () => {
     const { container } = render(<PromotionBar promotion={null} />);
@@ -123,6 +133,68 @@ describe("PromotionBar", () => {
     await user.keyboard("{Enter}");
 
     expect(writeText).toHaveBeenCalledWith("WINTER30");
+    expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
+    expect(button).toHaveFocus();
+  });
+
+  it("keeps the latest clipboard failure when an older attempt resolves afterward", async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const writeText = vi.fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    setClipboard({ writeText });
+    render(<PromotionBar promotion={winter30} />);
+    const button = screen.getByRole("button", { name: "Copy promotion code WINTER30" });
+    button.focus();
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(writeText).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      second.reject(new Error("latest clipboard failure"));
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("WINTER30 could not be copied.");
+
+    await act(async () => {
+      first.resolve();
+      await Promise.resolve();
+    });
+    const statuses = screen.getAllByRole("status");
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]).toHaveTextContent("WINTER30 could not be copied.");
+    expect(statuses[0]).toHaveAttribute("aria-live", "polite");
+    expect(statuses[0]).toHaveAttribute("aria-atomic", "true");
+    expect(button).toHaveFocus();
+  });
+
+  it("keeps the latest clipboard success when an older attempt rejects afterward", async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const writeText = vi.fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    setClipboard({ writeText });
+    render(<PromotionBar promotion={winter30} />);
+    const button = screen.getByRole("button", { name: "Copy promotion code WINTER30" });
+    button.focus();
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(writeText).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      second.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
+
+    await act(async () => {
+      first.reject(new Error("stale clipboard failure"));
+      await Promise.resolve();
+    });
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
     expect(button).toHaveFocus();
   });

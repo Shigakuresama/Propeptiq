@@ -94,45 +94,63 @@ function isNonBlankTrimmedString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.trim() === value;
 }
 
-function validKeywords(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every(
+function cloneValidKeywords(value: unknown): readonly string[] | null {
+  if (!Array.isArray(value)) return null;
+  const keywords: unknown[] = [...value];
+  if (!keywords.every(
     (keyword) => typeof keyword === "string" && keyword.trim().length > 0,
-  );
+  )) {
+    return null;
+  }
+  return Object.freeze(keywords as string[]);
 }
+
+const emptyApprovedPublicInformation: readonly ApprovedPublicInformation[] =
+  Object.freeze([] as ApprovedPublicInformation[]);
 
 export function getApprovedPublicInformation(
   records: readonly PublicInformationRecord[] = publicInformationRecords,
   destinations: readonly PublicInformationDestination[] = publicInformationDestinations,
 ): readonly ApprovedPublicInformation[] {
-  const runtimeRecords: readonly unknown[] = Array.isArray(records) ? records : [];
   const approved: ApprovedPublicInformation[] = [];
 
-  for (const candidate of runtimeRecords) {
-    try {
-      if (
-        !isRecord(candidate) ||
-        candidate.status !== "approved" ||
-        !isNonBlankTrimmedString(candidate.id) ||
-        !isNonBlankTrimmedString(candidate.title) ||
-        !isNonBlankTrimmedString(candidate.description) ||
-        !validKeywords(candidate.keywords) ||
-        !isApprovedPublicInformationHref(candidate.href, destinations)
-      ) {
-        continue;
-      }
+  try {
+    if (!Array.isArray(records)) return emptyApprovedPublicInformation;
 
-      const keywords = Object.freeze([...candidate.keywords]);
-      approved.push(Object.freeze({
-        id: candidate.id,
-        title: candidate.title,
-        href: candidate.href,
-        description: candidate.description,
-        keywords,
-        status: "approved" as const,
-      }));
-    } catch {
-      // Runtime-loose records fail closed without freezing caller-owned input.
+    for (const candidate of records as readonly unknown[]) {
+      try {
+        if (!isRecord(candidate)) continue;
+        const id = candidate.id;
+        const title = candidate.title;
+        const href = candidate.href;
+        const description = candidate.description;
+        const keywords = cloneValidKeywords(candidate.keywords);
+        const status = candidate.status;
+        if (
+          status !== "approved" ||
+          !isNonBlankTrimmedString(id) ||
+          !isNonBlankTrimmedString(title) ||
+          !isNonBlankTrimmedString(description) ||
+          keywords === null ||
+          !isApprovedPublicInformationHref(href, destinations)
+        ) {
+          continue;
+        }
+
+        approved.push(Object.freeze({
+          id,
+          title,
+          href,
+          description,
+          keywords,
+          status,
+        }));
+      } catch {
+        // Runtime-loose records fail closed without freezing caller-owned input.
+      }
     }
+  } catch {
+    return emptyApprovedPublicInformation;
   }
 
   return Object.freeze(approved);

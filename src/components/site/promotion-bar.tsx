@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { Winter30PromotionView } from "@/catalog/storefront-promotion-banner";
 
@@ -12,18 +12,21 @@ export function PromotionBar({
   promotion: Winter30PromotionView | null;
 }) {
   const [copyState, setCopyState] = useState<CopyState>("idle");
+  const latestCopyAttempt = useRef(0);
 
   if (promotion === null) return null;
 
   const copyPromotionCode = async (): Promise<void> => {
+    const attempt = latestCopyAttempt.current + 1;
+    latestCopyAttempt.current = attempt;
     try {
       if (typeof navigator.clipboard?.writeText !== "function") {
         throw new Error("Clipboard unavailable");
       }
       await navigator.clipboard.writeText("WINTER30");
-      setCopyState("copied");
+      if (attempt === latestCopyAttempt.current) setCopyState("copied");
     } catch {
-      setCopyState("unavailable");
+      if (attempt === latestCopyAttempt.current) setCopyState("unavailable");
     }
   };
 

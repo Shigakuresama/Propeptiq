@@ -37,10 +37,30 @@ function importSpecifiers(contents: string): readonly string[] {
   );
 }
 
-function runtimeLocalImports(path: string): readonly string[] {
-  const contents = source(path);
+function genericClientAuthorityViolation(specifier: string): boolean {
+  return specifier === "server-only" ||
+    /^@\/env(?:\/|$)/u.test(specifier) ||
+    /^@\/config(?:\/|$)/u.test(specifier) ||
+    /^@\/db(?:\/|$)/u.test(specifier) ||
+    /checkout|cart-repository/iu.test(specifier) ||
+    /stripe|payment-provider|provider-repositor/iu.test(specifier);
+}
+
+function promotionBarAuthorityViolation(specifier: string): boolean {
+  return genericClientAuthorityViolation(specifier) ||
+    /^@\/cart(?:\/|$)/u.test(specifier) ||
+    /(?:^|[\/_-])variant(?:[\/_.-]|$)/iu.test(specifier) ||
+    /(?:^|[\/_-])promotions?(?:[\/_.-]|$)/iu.test(specifier) ||
+    specifier === "@/domain/storefront-pricing";
+}
+
+function runtimeImportSpecifiers(contents: string): readonly string[] {
   return [...contents.matchAll(/^(?!\s*import\s+type)(?:import\s+[^;]+?\s+from\s+|import\s*)["']([^"']+)["']/gmu)]
-    .map((match) => match[1]!)
+    .map((match) => match[1]!);
+}
+
+function runtimeLocalImports(path: string): readonly string[] {
+  return runtimeImportSpecifiers(source(path))
     .filter((specifier) => specifier.startsWith("./") || specifier.startsWith("../") || specifier.startsWith("@/"));
 }
 
@@ -62,16 +82,39 @@ describe("storefront client boundary", () => {
       expect(contents, `${path} process environment`).not.toMatch(/\bprocess\.env\b/u);
 
       for (const specifier of importSpecifiers(contents)) {
-        expect(specifier, `${path} server-only`).not.toBe("server-only");
-        expect(specifier, `${path} environment`).not.toMatch(/^@\/env(?:\/|$)/u);
-        expect(specifier, `${path} configuration`).not.toMatch(/^@\/config(?:\/|$)/u);
-        expect(specifier, `${path} database`).not.toMatch(/^@\/db(?:\/|$)/u);
-        expect(specifier, `${path} checkout`).not.toMatch(/checkout|cart-repository/iu);
-        expect(specifier, `${path} provider`).not.toMatch(
-          /stripe|payment-provider|provider-repositor/iu,
-        );
+        expect(
+          genericClientAuthorityViolation(specifier),
+          `${path} forbidden client authority ${specifier}`,
+        ).toBe(false);
       }
     }
+  });
+
+  it.each([
+    ["server banner adapter", "@/catalog/storefront-promotion-banner-server"],
+    ["cart state", "@/cart/cart-provider"],
+    ["variant mutation", "@/components/commerce/variant-selector"],
+    ["promotion mutation", "@/domain/promotions"],
+    ["pricing mutation", "@/domain/storefront-pricing"],
+    ["checkout", "@/commerce/checkout-service"],
+    ["payment provider", "@/commerce/payment-provider"],
+    ["Stripe provider", "@/commerce/stripe-payment-provider"],
+    ["environment", "@/env"],
+    ["configuration", "@/config/env-schema"],
+    ["database", "@/db/runtime"],
+  ] as const)("rejects a PromotionBar runtime import of %s authority", (_label, specifier) => {
+    const fixture = `import { syntheticAuthority } from "${specifier}";`;
+
+    expect(
+      runtimeImportSpecifiers(fixture).filter(promotionBarAuthorityViolation),
+    ).toEqual([specifier]);
+  });
+
+  it("keeps PromotionBar runtime imports free of mutation and server authorities", () => {
+    expect(
+      runtimeImportSpecifiers(source("src/components/site/promotion-bar.tsx"))
+        .filter(promotionBarAuthorityViolation),
+    ).toEqual([]);
   });
 
   it("keeps the shared client-safe pricing dependency graph free of server authorities", () => {

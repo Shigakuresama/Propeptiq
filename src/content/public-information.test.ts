@@ -146,6 +146,124 @@ describe("approved public-information registry", () => {
     ).toEqual([]);
   });
 
+  it("snapshots every approved field once before validation and projection", () => {
+    const reads = {
+      id: 0,
+      title: 0,
+      href: 0,
+      description: 0,
+      keywords: 0,
+      status: 0,
+    };
+    const once = <T,>(
+      field: keyof typeof reads,
+      first: T,
+      later: T,
+    ) => ({
+      enumerable: true,
+      get() {
+        reads[field] += 1;
+        return reads[field] === 1 ? first : later;
+      },
+    });
+    const hostileRecord = Object.defineProperties({}, {
+      id: once("id", "stable-approved-id", "mutated-id"),
+      title: once("title", "Stable approved title", "Mutated title"),
+      href: once("href", "/catalog", "https://external.invalid/catalog"),
+      description: once(
+        "description",
+        "Stable approved description.",
+        "Mutated description.",
+      ),
+      keywords: once("keywords", ["stable-keyword"], ["mutated-keyword"]),
+      status: once("status", "approved", "retired"),
+    });
+
+    expect(
+      getApprovedPublicInformation([
+        hostileRecord as unknown as PublicInformationRecord,
+      ]),
+    ).toEqual([{
+      id: "stable-approved-id",
+      title: "Stable approved title",
+      href: "/catalog",
+      description: "Stable approved description.",
+      keywords: ["stable-keyword"],
+      status: "approved",
+    }]);
+    expect(reads).toEqual({
+      id: 1,
+      title: 1,
+      href: 1,
+      description: 1,
+      keywords: 1,
+      status: 1,
+    });
+  });
+
+  it("returns a deeply frozen empty result when array iterator access throws", () => {
+    const backing = [approvedRecord()];
+    const records = new Proxy(backing, {
+      get(target, property, receiver) {
+        if (property === Symbol.iterator) {
+          throw new Error("hostile iterator access");
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    let projected: ReturnType<typeof getApprovedPublicInformation> | undefined;
+
+    expect(() => {
+      projected = getApprovedPublicInformation(records);
+    }).not.toThrow();
+    expect(projected).toEqual([]);
+    expect(Object.isFrozen(projected)).toBe(true);
+    expect(backing).toEqual([approvedRecord()]);
+    expect(Object.isFrozen(backing)).toBe(false);
+    expect(Object.isFrozen(backing[0])).toBe(false);
+  });
+
+  it("discards partial output when an array iterator throws mid-stream", () => {
+    const first = approvedRecord({ id: "must-not-partially-project" });
+    const backing = [first];
+    const records = new Proxy(backing, {
+      get(target, property, receiver) {
+        if (property === Symbol.iterator) {
+          return function* hostileIterator() {
+            yield target[0]!;
+            throw new Error("hostile mid-stream iterator");
+          };
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    let projected: ReturnType<typeof getApprovedPublicInformation> | undefined;
+
+    expect(() => {
+      projected = getApprovedPublicInformation(records);
+    }).not.toThrow();
+    expect(projected).toEqual([]);
+    expect(Object.isFrozen(projected)).toBe(true);
+    expect(backing).toEqual([first]);
+    expect(Object.isFrozen(backing)).toBe(false);
+    expect(Object.isFrozen(first)).toBe(false);
+  });
+
+  it("returns a deeply frozen empty result for a revoked array proxy", () => {
+    const revocable = Proxy.revocable<PublicInformationRecord[]>(
+      [approvedRecord()],
+      {},
+    );
+    revocable.revoke();
+    let projected: ReturnType<typeof getApprovedPublicInformation> | undefined;
+
+    expect(() => {
+      projected = getApprovedPublicInformation(revocable.proxy);
+    }).not.toThrow();
+    expect(projected).toEqual([]);
+    expect(Object.isFrozen(projected)).toBe(true);
+  });
+
   it("accepts only explicitly approved anchors for their exact configured path", () => {
     const destinations = Object.freeze([
       Object.freeze({
