@@ -64,7 +64,7 @@ async function seedCart(page: Page, quantity = 2) {
       JSON.stringify({ version: 2, items: [{ variantId: id, quantity: requestedQuantity }] }),
     );
     window.sessionStorage.removeItem("propeptiq.cart-preview.presentation.v1");
-    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2" }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2", storageArea: window.localStorage }));
   }, { id: variantId, requestedQuantity: quantity });
   await expect(page.getByRole("link", { name: `Cart, ${quantity} requested units` })).toBeVisible();
 }

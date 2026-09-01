@@ -63,7 +63,7 @@ async function seedCart(page: Page, quantity = 2) {
       version: 2,
       items: [{ variantId: id, quantity: count }],
     }));
-    dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2" }));
+    dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2", storageArea: window.localStorage }));
   }, { id: variantId, count: quantity });
 }
 

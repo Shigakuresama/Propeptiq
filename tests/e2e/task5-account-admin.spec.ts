@@ -25,7 +25,7 @@ test("preserves exact cart IDs and quantities through fixed sign-in and checkout
       "propeptiq.cart.v2",
       JSON.stringify({ version: 2, items: [{ variantId: "55000000-0000-4000-8000-000000000001", quantity: 2 }] }),
     );
-    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2" }));
+    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2", storageArea: window.localStorage }));
   });
   await expect(page.getByRole("button", { name: "Continue to sign in" })).toBeVisible();
   await page.reload();
