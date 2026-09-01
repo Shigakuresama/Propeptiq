@@ -155,14 +155,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const pending = pendingAddAnnouncement.current;
     if (pending === null) return;
-    pendingAddAnnouncement.current = null;
     const normalizedQuantity = items.find(
       (item) => item.variantId === pending.variantId,
     )?.quantity;
+    if (normalizedQuantity === undefined) return;
+    pendingAddAnnouncement.current = null;
     setAnnouncement(
-      normalizedQuantity === undefined
-        ? "The cart was not changed."
-        : `Cart updated. ${announcementSubject(pending.labels)}: ${normalizedQuantity} unit${normalizedQuantity === 1 ? "" : "s"} in cart.`,
+      `Cart updated. ${announcementSubject(pending.labels)}: ${normalizedQuantity} unit${normalizedQuantity === 1 ? "" : "s"} in cart.`,
     );
   }, [items]);
 
