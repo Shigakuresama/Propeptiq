@@ -290,6 +290,73 @@ describe("approved homepage content", () => {
     });
   });
 
+  it.each([
+    [
+      "unsafe ID with sparse source metadata",
+      () => {
+        const sparseSources = new Array<string>(2);
+        sparseSources[0] = "fictional-source";
+        return homepageRecord({
+          id: "Unsafe-ID",
+          sourceReferences: sparseSources,
+        });
+      },
+    ],
+    [
+      "untrimmed title with throwing source metadata",
+      () => Object.defineProperty(
+        homepageRecord({ id: "unsafe-title", title: " Unsafe title" }),
+        "sourceReferences",
+        {
+          enumerable: true,
+          get() {
+            throw new Error("private-source-metadata-fixture");
+          },
+        },
+      ),
+    ],
+    [
+      "blank body with throwing approval metadata",
+      () => Object.defineProperty(
+        homepageRecord({ id: "unsafe-body", body: "" }),
+        "approvalNote",
+        {
+          enumerable: true,
+          get() {
+            throw new Error("private-approval-metadata-fixture");
+          },
+        },
+      ),
+    ],
+  ] as const)("rejects the whole projection for %s before malformed unrelated metadata can erase the strict failure", (_label, unsafeRecord) => {
+    expect(() => getApprovedHomepageContent([
+      homepageRecord({ id: "safe-fixture" }),
+      unsafeRecord(),
+    ])).toThrowError(new TypeError("Invalid approved homepage content."));
+  });
+
+  it("continues to omit a valid homepage record with malformed unrelated metadata", () => {
+    const sparseSources = new Array<string>(2);
+    sparseSources[0] = "fictional-source";
+
+    expect(getApprovedHomepageContent([
+      homepageRecord({ id: "safe-fixture" }),
+      homepageRecord({
+        id: "metadata-invalid-but-copy-safe",
+        title: "Safe fictional title",
+        body: "Safe fictional body.",
+        sourceReferences: sparseSources,
+      }),
+    ])).toEqual({
+      whyChoose: [{
+        id: "safe-fixture",
+        title: "Fictional fixture title",
+        body: "Fictional fixture body.",
+      }],
+      faqs: [],
+    });
+  });
+
   it("allowlist-projects and deeply freezes safe output without mutating or freezing caller input", () => {
     const input = {
       ...homepageRecord({ id: "safe-fixture" }),

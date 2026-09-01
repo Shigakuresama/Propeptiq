@@ -164,6 +164,16 @@ function snapshotApprovedStorefrontContentRecord(
       invalidApprovedHomepageRecord: approvedHomepageKind,
     };
   }
+  if (
+    approvedHomepageKind &&
+    (
+      !approvedHomepageId.test(id) ||
+      !isNonBlankTrimmed(title) ||
+      !isNonBlankTrimmed(body)
+    )
+  ) {
+    return { record: null, invalidApprovedHomepageRecord: true };
+  }
 
   try {
     const sourceReferenceCandidates = denseArraySnapshot(record.sourceReferences);
