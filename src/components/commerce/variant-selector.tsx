@@ -1,5 +1,6 @@
 import type { CanonicalPublicStorefrontProduct } from "@/catalog/storefront-public";
 import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import { resolvePublicVariantPrice } from "@/catalog/storefront-price-presentation";
 import { cn } from "@/lib/utils";
 
 export type VariantSelectorProps = Readonly<{
@@ -12,13 +13,16 @@ export type VariantSelectorProps = Readonly<{
   onSelectedVariantIdChange: (variantId: string) => void;
 }>;
 
-function status(variant: VariantSelectorProps["variants"][number]): string {
+function status(variant: VariantSelectorProps["variants"][number], productId: string, quantity: number, pricing: PublicStorefrontPricingContext): string {
   if (variant.availability === "unavailable") return "Unavailable";
-  if (variant.priceStatus === "pending") return "Pricing coming soon";
-  return variant.checkoutReady ? "Available" : "Checkout unavailable";
+  const presentation = resolvePublicVariantPrice({ variant, productId, quantity, pricing });
+  if (presentation.state === "pending") return "Pricing coming soon";
+  if (presentation.state === "unavailable") return "Unavailable";
+  if (presentation.purchaseState === "local_preview") return "Preview only";
+  return presentation.purchaseState === "ready" ? "Available" : "Checkout unavailable";
 }
 
-export function VariantSelector({ productId, productName, variants, selectedVariantId, onSelectedVariantIdChange }: VariantSelectorProps) {
+export function VariantSelector({ productId, productName, variants, selectedVariantId, quantity, pricing, onSelectedVariantIdChange }: VariantSelectorProps) {
   const name = `variant-${productId}`;
   return (
     <fieldset className="space-y-3" aria-label={`${productName} variants`}>
@@ -31,7 +35,7 @@ export function VariantSelector({ productId, productName, variants, selectedVari
             <input className="size-4 shrink-0 accent-moss" type="radio" name={name} value={variant.id} checked={selected} onChange={() => onSelectedVariantIdChange(variant.id)} />
             <span className="min-w-0 [overflow-wrap:anywhere]">
               <span className="block font-semibold text-ink">{variant.label}</span>
-              <span className="block text-sm text-muted-ink">{amount} · {status(variant)}{selected ? " · Selected" : ""}</span>
+              <span className="block text-sm text-muted-ink">{amount} · {status(variant, productId, quantity, pricing)}{selected ? " · Selected" : ""}</span>
             </span>
           </label>
         );

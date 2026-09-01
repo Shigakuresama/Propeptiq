@@ -21,7 +21,7 @@ export function ProductPurchasePanel({ product, pricing }: ProductPurchasePanelP
   const selected = product.variants.find((variant) => variant.id === selectedVariantId) ?? null;
   const presentation = useMemo(() => quantityIsValid && selected ? resolvePublicVariantPrice({ variant: selected, productId: product.id, quantity, pricing }) : null, [pricing, product.id, quantity, quantityIsValid, selected]);
   const chooseQuantity = (next: number) => { setLastValidQuantity(next); setQuantityDraft(String(next)); };
-  const status = presentation?.state === "unavailable" ? "Unavailable" : presentation?.state === "pending" ? "Pricing coming soon" : presentation?.purchaseState === "checkout_unavailable" ? "Checkout unavailable" : presentation?.purchaseState === "local_preview" ? "Preview only" : "Ready to purchase";
+  const status = selected === null ? "Choose a variant" : !quantityIsValid ? "Invalid quantity" : presentation?.state === "unavailable" ? "Unavailable" : presentation?.state === "pending" ? "Pricing coming soon" : presentation?.purchaseState === "checkout_unavailable" ? "Checkout unavailable" : presentation?.purchaseState === "local_preview" ? "Preview only" : "Ready to purchase";
   const price = presentation?.state === "priced" ? presentation.price : null;
   return <section className="mt-10 space-y-8" aria-labelledby="purchase-heading">
     <h2 id="purchase-heading" className="font-heading text-3xl text-ink">Purchase</h2>
@@ -31,6 +31,7 @@ export function ProductPurchasePanel({ product, pricing }: ProductPurchasePanelP
       <p className="font-semibold text-ink">{selected?.label ?? "No variant selected"} · {quantityIsValid ? `${quantity} bottle${quantity === 1 ? "" : "s"}` : QUANTITY_ERROR}</p>
       <p className="text-sm text-muted-ink">{status}</p>
       {price ? <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm"><dt>Standard unit price</dt><dd>{formatStorefrontMoney(price.baseUnitMinor)}</dd><dt>Effective unit price</dt><dd className="font-semibold">{price.effectiveUnitMinor === price.baseUnitMinor ? formatStorefrontMoney(price.effectiveUnitMinor) : <><del>{formatStorefrontMoney(price.baseUnitMinor)}</del> {formatStorefrontMoney(price.effectiveUnitMinor)}</>}</dd><dt>Discount</dt><dd>{price.effectiveDiscountBps / 100}%</dd><dt>Savings</dt><dd>{formatStorefrontMoney(price.lineSavingsMinor)}</dd><dt>Quantity</dt><dd>{price.quantity}</dd><dt>Subtotal</dt><dd className="font-semibold">{formatStorefrontMoney(price.lineSubtotalMinor)}</dd></dl> : null}
+      {price?.appliedPromotionIds.length ? <p className="text-sm font-semibold text-moss">{price.appliedPromotionIds.map((id) => pricing.automaticPromotions.find((promotion) => promotion.id === id)?.displayCode ?? id).join(", ")}</p> : null}
       <AddToCartButton variantId={selected?.id ?? null} quantity={lastValidQuantity} productName={product.name} {...(selected ? { variantLabel: selected.label } : {})} canAdd={quantityIsValid && selected !== null && canAddPublicVariant(selected, pricing.mode)} />
     </div>
   </section>;

@@ -73,9 +73,7 @@ export function CatalogItemDetail({ product, pricing }: { product: PublicStorefr
             </ul>
           </section>
 
-          <p className="info-record mt-8 text-sm">
-            {!canonical ? "This browse-only entry reproduces the supplied product name, code, and package configuration. Availability, quality records, and purchasing are not represented." : null}
-          </p>
+          {!canonical ? <p className="info-record mt-8 text-sm">This browse-only entry reproduces the supplied product name, code, and package configuration. Availability, quality records, and purchasing are not represented.</p> : null}
           {canonical ? <ProductPurchasePanel product={product} pricing={pricing} /> : null}
           {canonical && product.content.some((record) => record.kind === "product_information" || record.kind === "legal_notice") ? <section className="mt-10 space-y-5" aria-label="Approved information">{product.content.filter((record) => record.kind === "product_information" || record.kind === "legal_notice").map((record) => <article key={record.id}><h2 className="font-heading text-2xl text-ink">{record.title}</h2><p className="mt-2 whitespace-pre-wrap text-muted-ink">{record.body}</p></article>)}</section> : null}
         </div>
