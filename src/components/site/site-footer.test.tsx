@@ -157,6 +157,26 @@ describe("footer configuration", () => {
       facebook: {},
     })).toEqual([]);
   });
+
+  it("returns a frozen empty projection without mutating a revoked top-level proxy", () => {
+    const project = footerContent.projectFooterSocialLinks;
+    expect(project).toEqual(expect.any(Function));
+    if (project === undefined) return;
+
+    const target = { instagram: "/" };
+    const before = { ...target };
+    const revocable = Proxy.revocable(target, {});
+    revocable.revoke();
+
+    let projected: readonly ExpectedSocialLink[] | undefined;
+    expect(() => {
+      projected = project(revocable.proxy);
+    }).not.toThrow();
+    expect(projected).toEqual([]);
+    expect(Object.isFrozen(projected)).toBe(true);
+    expect(target).toEqual(before);
+    expect(Object.isFrozen(target)).toBe(false);
+  });
 });
 
 describe("SiteFooter", () => {

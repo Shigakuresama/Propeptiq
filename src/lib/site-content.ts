@@ -241,6 +241,7 @@ const footerSocialDefinitions = Object.freeze([
   Object.freeze({ platform: "x", label: "X" }),
   Object.freeze({ platform: "facebook", label: "Facebook" }),
 ] as const);
+const emptyFooterSocialLinks: readonly FooterSocialLink[] = Object.freeze([]);
 
 const unsafeSocialUrlCharacters = /[\s\u0000-\u001f\u007f-\u009f]/u;
 const encodedSocialControlCharacter = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
@@ -270,8 +271,12 @@ export function projectFooterSocialLinks(
   values: Readonly<Partial<Record<FooterSocialPlatform, unknown>>> =
     footerSocialUrls,
 ): readonly FooterSocialLink[] {
-  if (values === null || typeof values !== "object" || Array.isArray(values)) {
-    return Object.freeze([]);
+  try {
+    if (values === null || typeof values !== "object" || Array.isArray(values)) {
+      return emptyFooterSocialLinks;
+    }
+  } catch {
+    return emptyFooterSocialLinks;
   }
 
   const projected: FooterSocialLink[] = [];
