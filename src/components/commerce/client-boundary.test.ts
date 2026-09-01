@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { ComponentProps } from "react";
+import type { ProductPurchasePanel } from "./product-purchase-panel";
+import type { CatalogItemDetail } from "./catalog-item-detail";
 
 const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
@@ -101,6 +104,9 @@ describe("storefront client boundary", () => {
     const panel = source("src/components/commerce/product-purchase-panel.tsx");
     expect(panel).toMatch(/product:\s*CanonicalPublicStorefrontProduct;\s*pricing:\s*PublicStorefrontPricingContext/u);
     expect(panel).not.toMatch(/ProductPurchasePanelProps[^\n]*mode|mode\?:/u);
+    type PanelProps = ComponentProps<typeof ProductPurchasePanel>;
+    type DetailProps = ComponentProps<typeof CatalogItemDetail>;
+    expectTypeOf<PanelProps>().toHaveProperty("pricing"); expectTypeOf<PanelProps>().not.toHaveProperty("mode"); expectTypeOf<DetailProps>().toHaveProperty("pricing"); expectTypeOf<DetailProps>().not.toHaveProperty("mode");
   });
 
   it("has no contradictory client mode override or missing-pricing fallback", () => {

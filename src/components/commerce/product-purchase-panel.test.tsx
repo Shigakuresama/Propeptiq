@@ -40,6 +40,24 @@ describe("ProductPurchasePanel", () => {
     fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: "10" } }); expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("35%");
   });
 
+  it.each([2, 3, 10])("applies WINTER30 exactly once at quantity %s", (quantity) => {
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext("test", [testWinter30])} /></CartProvider>); fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: String(quantity) } }); const summary = screen.getByRole("status", { name: "Purchase summary" }); const discount = within(summary.querySelector("dl")!).getByText("Discount").nextElementSibling!; expect(discount).toHaveTextContent("30%");
+  });
+
+  it("renders the permitted preview-zero sale structure exactly", () => {
+    const zero = testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, currency: "USD", checkoutReady: false });
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([zero])} pricing={testPricingContext("preview", [testWinter30])} /></CartProvider>);
+    const summary = screen.getByRole("status", { name: "Purchase summary" }); const dl = summary.querySelector("dl")!;
+    expect(within(dl).getByText("Standard unit price").nextElementSibling).toContainHTML("<del>$0.00</del>"); expect(within(dl).getByText("Effective unit price").nextElementSibling).toHaveTextContent("$0.00"); expect(within(dl).getByText("Savings").nextElementSibling).toHaveTextContent("$0.00"); expect(within(dl).getByText("Subtotal").nextElementSibling).toHaveTextContent("$0.00"); expect(summary).toHaveTextContent("WINTER30"); expect(summary.querySelector("del")).not.toBeNull();
+  });
+
+  it("preserves quantity while a real variant change updates price and status", () => {
+    const first = testPublicVariant({ id: "first", label: "First", baseUnitMinor: 1000 }); const second = testPublicVariant({ id: "second", label: "Second", baseUnitMinor: 2000, checkoutReady: false });
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([first, second], { defaultVariantId: "second" })} pricing={testPricingContext()} /></CartProvider>);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: "11" } }); fireEvent.click(screen.getByRole("radio", { name: /First/u }));
+    const summary = screen.getByRole("status", { name: "Purchase summary" }); expect(summary).toHaveTextContent("First"); expect(within(summary.querySelector("dl")!).getByText("Quantity").nextElementSibling).toHaveTextContent("11"); expect(summary).toHaveTextContent("$7.00"); expect(summary).not.toHaveTextContent("Checkout unavailable");
+  });
+
   it.each([
     ["mapping missing", testPublicVariant({ checkoutReady: false }), "Checkout unavailable", true],
     ["unavailable", testPublicVariant({ availability: "unavailable", checkoutReady: false }), "Unavailable", false],
@@ -49,7 +67,7 @@ describe("ProductPurchasePanel", () => {
     ["preview zero", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, currency: "USD", checkoutReady: false }), "Preview only", true],
   ] as const)("handles %s honestly", (_name, variant, status, hasMoney) => {
     render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([variant])} pricing={testPricingContext("preview", [{ ...testWinter30, displayCode: "ZERO" }])} /></CartProvider>);
-    const summary = screen.getByRole("status", { name: "Purchase summary" }); expect(summary).toHaveTextContent(status); if (!hasMoney || String(status) === "Pricing coming soon") expect(summary).not.toHaveTextContent("Standard unit price");
+    const summary = screen.getByRole("status", { name: "Purchase summary" }); expect(summary).toHaveTextContent(status); if (!hasMoney || String(status) === "Pricing coming soon") { expect(summary).not.toHaveTextContent("Standard unit price"); expect(summary).not.toHaveTextContent("Savings"); expect(summary).not.toHaveTextContent("Subtotal"); expect(summary.querySelector("del")).toBeNull(); expect(summary).not.toHaveTextContent("ZERO"); }
   });
 
   it("keeps production pending-zero closed and invalid drafts out of arithmetic", () => {
@@ -59,6 +77,13 @@ describe("ProductPurchasePanel", () => {
     resolver.mockClear();
     for (const value of ["", "1.0", "1e1", "x", "0", "-1", "26"]) { fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value } }); expect(screen.getByRole("spinbutton")).toHaveAttribute("aria-invalid", "true"); expect(screen.getByRole("button", { name: /unavailable/i })).toBeDisabled(); }
     expect(resolver).not.toHaveBeenCalled(); resolver.mockRestore();
+  });
+
+  it("links the panel error and recovers from invalid drafts to canonical 11", () => {
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct()} pricing={testPricingContext()} /></CartProvider>);
+    const input = screen.getByRole("spinbutton", { name: "Exact quantity" }); fireEvent.change(input, { target: { value: "1.0" } });
+    expect(input).toHaveAttribute("aria-invalid", "true"); expect(input).toHaveAttribute("aria-describedby", "quantity-error"); expect(screen.getByText("Enter a whole number from 1 to 25.")).toBeVisible(); expect(screen.getByRole("button", { name: /unavailable/i })).toBeDisabled();
+    fireEvent.change(input, { target: { value: "11" } }); expect(input).not.toHaveAttribute("aria-invalid", "true"); expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Quantity11");
   });
 
   it("exposes exactly one panel summary and one global cart announcement", () => {
@@ -73,5 +98,10 @@ describe("ProductPurchasePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /add synthetic product alpha to cart/i }));
     await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "null").items).toEqual([{ variantId: "variant-5mg", quantity: 11 }]));
     expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("Synthetic Product Alpha, 5 mg");
+  });
+
+  it("does not announce success when cart normalization rejects an already-full line", async () => {
+    window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({ version: 2, items: [{ variantId: "variant-5mg", quantity: 25 }] }));
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext()} /></CartProvider>); fireEvent.click(screen.getByRole("button", { name: /add synthetic product alpha to cart/i })); await waitFor(() => expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("cart was not changed")); expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Ready to purchase");
   });
 });

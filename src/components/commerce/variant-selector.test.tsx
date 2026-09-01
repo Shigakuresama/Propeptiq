@@ -30,4 +30,11 @@ describe("VariantSelector", () => {
     render(<VariantSelector productId="missing" productName="P" variants={variants} selectedVariantId={null} quantity={1} pricing={testPricingContext()} onSelectedVariantIdChange={vi.fn()} />);
     expect(screen.getAllByRole("radio").some((radio) => (radio as HTMLInputElement).checked)).toBe(false);
   });
+
+  it("contains a long unbroken label in the constrained copy wrapper", () => {
+    const label = "variant-" + "x".repeat(140);
+    const longVariant = testPublicVariant({ id: "long", label });
+    const { container } = render(<VariantSelector productId="long" productName="P" variants={[longVariant]} selectedVariantId="long" quantity={1} pricing={testPricingContext()} onSelectedVariantIdChange={vi.fn()} />);
+    expect(screen.getByText(label)).toBeVisible(); const copy = container.querySelector("label > span")!; expect(copy.className).toContain("min-w-0"); expect(copy.className).toContain("[overflow-wrap:anywhere]"); expect(copy.textContent).toContain(label);
+  });
 });
