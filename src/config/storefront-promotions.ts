@@ -315,16 +315,22 @@ function scopesMatch(
   return false;
 }
 
-export function storefrontPromotionMatchesOwnerConfiguration(
+function instantsMatch(candidate: unknown, configured: string | null): boolean {
+  if (candidate === null || configured === null) return candidate === configured;
+  return isStrictStorefrontPromotionInstant(candidate) &&
+    isStrictStorefrontPromotionInstant(configured) &&
+    Date.parse(candidate) === Date.parse(configured);
+}
+
+export function storefrontPromotionMatchesConfiguration(
   promotion: unknown,
+  configuration: StorefrontPromotionConfiguration,
 ): boolean {
   try {
-    if (!isRuntimeObject(promotion)) return false;
+    const configured = normalizeConfiguration(configuration);
+    if (configured === null || !isRuntimeObject(promotion)) return false;
     const id = ownData(promotion, "id");
-    if (!id.ok || typeof id.value !== "string") return false;
-    const configured = STOREFRONT_PROMOTIONS.find((entry) => entry.id === id.value);
-    if (configured === undefined) return true;
-
+    if (!id.ok || id.value !== configured.id) return false;
     const displayName = ownData(promotion, "displayName");
     const displayCode = ownData(promotion, "displayCode");
     const discountBps = ownData(promotion, "discountBps");
@@ -352,12 +358,28 @@ export function storefrontPromotionMatchesOwnerConfiguration(
       displayCode.value === configured.displayCode &&
       discountBps.value === configured.discountBps &&
       enabled.value === configured.enabled &&
-      startAt.value === configured.startAt &&
-      endAt.value === configured.endAt &&
+      instantsMatch(startAt.value, configured.startAt) &&
+      instantsMatch(endAt.value, configured.endAt) &&
       timezone.value === configured.timezone &&
       applicationMode.value === configured.applicationMode &&
       scopesMatch(scope.value, configured.scope)
     );
+  } catch {
+    return false;
+  }
+}
+
+export function storefrontPromotionMatchesOwnerConfiguration(
+  promotion: unknown,
+): boolean {
+  try {
+    if (!isRuntimeObject(promotion)) return false;
+    const id = ownData(promotion, "id");
+    if (!id.ok || typeof id.value !== "string") return false;
+    const configured = STOREFRONT_PROMOTIONS.find((entry) => entry.id === id.value);
+    return configured === undefined
+      ? true
+      : storefrontPromotionMatchesConfiguration(promotion, configured);
   } catch {
     return false;
   }

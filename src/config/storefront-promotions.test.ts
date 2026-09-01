@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveActiveConfiguredAutomaticPromotions,
   STOREFRONT_PROMOTIONS,
+  storefrontPromotionMatchesConfiguration,
   storefrontPromotionMatchesOwnerConfiguration,
   WINTER30_STOREFRONT_PROMOTION,
   type StorefrontPromotionConfiguration,
@@ -151,6 +152,107 @@ describe("storefront promotion owner configuration", () => {
         }),
       ),
     ).toBe(true);
+  });
+
+  it("matches equivalent offset and UTC start/end instants without mutating either input", () => {
+    const configured = configuredPromotion({
+      startAt: "2026-09-01T05:00:00-07:00",
+      endAt: "2026-09-30T17:00:00-07:00",
+    });
+    const candidate = configuredPromotion({
+      startAt: "2026-09-01T12:00:00Z",
+      endAt: "2026-10-01T00:00:00.000Z",
+    });
+    const configuredBefore = JSON.stringify(configured);
+    const candidateBefore = JSON.stringify(candidate);
+
+    expect(
+      storefrontPromotionMatchesConfiguration(candidate, configured),
+    ).toBe(true);
+    expect(JSON.stringify(configured)).toBe(configuredBefore);
+    expect(JSON.stringify(candidate)).toBe(candidateBefore);
+  });
+
+  it("matches omitted fractional seconds with the corresponding .000Z instant", () => {
+    const configured = configuredPromotion({
+      startAt: "2026-09-01T12:00:00Z",
+      endAt: "2026-10-01T00:00:00Z",
+    });
+    const candidate = configuredPromotion({
+      startAt: "2026-09-01T12:00:00.000Z",
+      endAt: "2026-10-01T00:00:00.000Z",
+    });
+
+    expect(
+      storefrontPromotionMatchesConfiguration(candidate, configured),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["different start", { startAt: "2026-09-01T12:00:00.001Z" }],
+    ["different end", { endAt: "2026-10-01T00:00:00.001Z" }],
+  ] as const)("rejects a genuinely %s instant", (_label, override) => {
+    const configured = configuredPromotion({
+      startAt: "2026-09-01T12:00:00.000Z",
+      endAt: "2026-10-01T00:00:00.000Z",
+    });
+    const candidate = configuredPromotion({
+      startAt: configured.startAt,
+      endAt: configured.endAt,
+      ...override,
+    });
+
+    expect(
+      storefrontPromotionMatchesConfiguration(candidate, configured),
+    ).toBe(false);
+  });
+
+  it("matches two null bounds and rejects either null/non-null pairing", () => {
+    const unbounded = configuredPromotion();
+    expect(
+      storefrontPromotionMatchesConfiguration(configuredPromotion(), unbounded),
+    ).toBe(true);
+    expect(
+      storefrontPromotionMatchesConfiguration(
+        configuredPromotion({ startAt: "2026-09-01T12:00:00.000Z" }),
+        unbounded,
+      ),
+    ).toBe(false);
+    expect(
+      storefrontPromotionMatchesConfiguration(
+        configuredPromotion(),
+        configuredPromotion({ endAt: "2026-10-01T00:00:00.000Z" }),
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    [
+      "malformed start",
+      { startAt: "09/01/2026 12:00:00" },
+      { startAt: "2026-09-01T12:00:00.000Z" },
+    ],
+    [
+      "impossible start",
+      { startAt: "2026-02-31T12:00:00.000Z" },
+      { startAt: "2026-03-03T12:00:00.000Z" },
+    ],
+    [
+      "malformed end",
+      { endAt: "not-an-instant" },
+      { endAt: "2026-10-01T00:00:00.000Z" },
+    ],
+  ] as const)("fails closed for a %s candidate bound", (
+    _label,
+    candidateOverride,
+    configuredOverride,
+  ) => {
+    expect(
+      storefrontPromotionMatchesConfiguration(
+        configuredPromotion(candidateOverride),
+        configuredPromotion(configuredOverride),
+      ),
+    ).toBe(false);
   });
 
   it("does not mutate caller data and returns frozen cloned entries and nested scopes", () => {
