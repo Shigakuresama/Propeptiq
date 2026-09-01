@@ -9,6 +9,7 @@ const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
   "src/components/commerce/catalog-explorer.tsx",
   "src/components/commerce/catalog-listing-card.tsx",
+  "src/components/commerce/related-products-carousel.tsx",
   "src/components/commerce/quick-add-variant-sheet.tsx",
   "src/components/commerce/product-purchase-panel.tsx",
   "src/cart/cart-provider.tsx",
@@ -83,7 +84,7 @@ describe("storefront client boundary", () => {
   });
 
   it("recursively bounds panel runtime imports and excludes server authorities", () => {
-    const pending = ["src/components/commerce/product-purchase-panel.tsx"];
+    const pending = ["src/components/commerce/product-purchase-panel.tsx", "src/components/commerce/related-products-carousel.tsx"];
     const visited = new Set<string>();
     while (pending.length) {
       const current = pending.pop()!; if (visited.has(current)) continue; visited.add(current);

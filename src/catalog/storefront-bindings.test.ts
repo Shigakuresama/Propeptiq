@@ -50,12 +50,14 @@ describe("parseStorefrontBindings", () => {
 
   it("rejects duplicate related product IDs", () => {
     const otherId = "10000000-0000-4000-8000-000000000002";
+    const otherVariantId = "20000000-0000-4000-8000-000000000002";
     expect(() => parseStorefrontBindings({
       ...approved,
       products: [
         { ...approved.products[0], relatedProductIds: [otherId, otherId] },
-        { ...approved.products[0], id: otherId, browseSlug: "fixture-other" },
+        { ...approved.products[0], id: otherId, browseSlug: "fixture-other", defaultVariantId: otherVariantId },
       ],
+      variants: [approved.variants[0], { ...approved.variants[0], id: otherVariantId, productId: otherId, sku: "TEST-OTHER-5" }],
     })).toThrow(/duplicate IDs/iu);
   });
 

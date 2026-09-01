@@ -16,9 +16,15 @@ export type RelatedProductsCarouselProps = Readonly<{
 
 const relatedListId = "related-products-list";
 
-export function RelatedProductsCarousel({ products, pricing }: RelatedProductsCarouselProps) {
+export function RelatedProductsCarousel({ currentProductId, products, pricing }: RelatedProductsCarouselProps) {
   const listRef = useRef<HTMLUListElement>(null);
-  if (products.length === 0) return null;
+  const seen = new Set<string>();
+  const safeProducts = products.filter((product) => {
+    if (product.id === currentProductId || seen.has(product.id)) return false;
+    seen.add(product.id);
+    return true;
+  });
+  if (safeProducts.length === 0) return null;
 
   function scroll(direction: -1 | 1) {
     const list = listRef.current;
@@ -41,7 +47,7 @@ export function RelatedProductsCarousel({ products, pricing }: RelatedProductsCa
         </div>
       </div>
       <ul ref={listRef} id={relatedListId} role="list" className="flex list-none gap-6 overflow-x-auto overscroll-x-contain p-2 scroll-px-2 snap-x snap-proximity">
-        {products.map((product) => (
+        {safeProducts.map((product) => (
           <li className="flex w-[min(85vw,24rem)] shrink-0 snap-start md:w-[min(45vw,24rem)] xl:w-[min(28vw,24rem)]" key={product.id}>
             <CatalogListingCard product={product} pricing={pricing} priority={false} />
           </li>

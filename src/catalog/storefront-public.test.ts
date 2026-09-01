@@ -191,12 +191,17 @@ function recursivelyCollectKeys(value: unknown, keys = new Set<string>()): Set<s
 describe("public storefront projection", () => {
   it("resolves configured related products in order and filters unsafe targets", () => {
     const current = buildFixtureCatalog().products.find((entry) => entry.kind === "canonical") as CanonicalPublicStorefrontProduct;
-    const target = { ...current, id: "10000000-0000-4000-8000-000000000002", slug: "target", relatedProductIds: [] };
-    const unavailable = { ...target, id: "10000000-0000-4000-8000-000000000003", slug: "unavailable", variants: target.variants.map((variant) => ({ ...variant, availability: "unavailable" as const })) };
-    const catalog = { ...buildFixtureCatalog(), products: [current, target, unavailable] };
-    const withRelations = { ...current, relatedProductIds: [target.id, target.id, "missing", current.id, unavailable.id] };
+    const target = { ...current, id: "10000000-0000-4000-8000-000000000002", slug: "zulu", popularityRank: 99, relatedProductIds: [] };
+    const pending = { ...target, id: "10000000-0000-4000-8000-000000000003", slug: "alpha", popularityRank: 1, variants: target.variants.map((variant) => ({ ...variant, priceStatus: "pending" as const, availability: "preview_only" as const, baseUnitMinor: 0 })) };
+    const mappingMissing = { ...target, id: "10000000-0000-4000-8000-000000000004", slug: "mapping-missing", variants: target.variants.map((variant) => ({ ...variant, checkoutReady: false })) };
+    const mixed = { ...target, id: "10000000-0000-4000-8000-000000000005", slug: "mixed", variants: target.variants.map((variant, index) => ({ ...variant, availability: index === 0 ? "unavailable" as const : "available" as const })) };
+    const unavailable = { ...target, id: "10000000-0000-4000-8000-000000000006", slug: "unavailable", variants: target.variants.map((variant) => ({ ...variant, availability: "unavailable" as const })) };
+    const empty = { ...target, id: "10000000-0000-4000-8000-000000000007", slug: "empty", variants: [] as const };
+    const browseOnly = buildFixtureCatalog().products.find((entry) => entry.kind === "browse_only")!;
+    const catalog = { ...buildFixtureCatalog(), products: [target, current, pending, mappingMissing, mixed, unavailable, empty, browseOnly] };
+    const withRelations = { ...current, relatedProductIds: [mixed.id, pending.id, mappingMissing.id, target.id, target.id, "missing", current.id, browseOnly.slug, empty.id, unavailable.id] };
     const result = resolvePublicStorefrontRelatedProducts(catalog, withRelations);
-    expect(result.map((product) => product.id)).toEqual([target.id]);
+    expect(result.map((product) => product.id)).toEqual([mixed.id, pending.id, mappingMissing.id, target.id]);
     expect(Object.isFrozen(result)).toBe(true);
   });
   it("retains all 56 products and 103 display configurations with empty canonical data", () => {

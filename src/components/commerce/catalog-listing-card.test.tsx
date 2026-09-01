@@ -1,5 +1,6 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { render, screen, within, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
 import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
@@ -8,6 +9,7 @@ import {
   storefrontImageMetadata,
 } from "@/catalog/storefront-public";
 import { CartProvider } from "@/cart/cart-provider";
+import { CART_STORAGE_KEY } from "@/cart/cart-storage";
 import {
   testCanonicalProduct,
   testPricingContext,
@@ -29,6 +31,38 @@ function renderCanonical(
 }
 
 describe("CatalogListingCard", () => {
+  beforeEach(() => window.localStorage.clear());
+
+  it("requires and announces an explicit variant for a real multi-variant quick add", async () => {
+    const user = userEvent.setup();
+    const variants = [
+      testPublicVariant({ id: "variant-5", label: "5 mg" }),
+      testPublicVariant({ id: "variant-10", label: "10 mg" }),
+    ];
+    renderCanonical(testCanonicalProduct(variants, { defaultVariantId: "variant-5" }));
+    const trigger = screen.getByRole("button", { name: /add synthetic product alpha to cart/i });
+    await user.click(trigger);
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(screen.getByRole("radio", { name: /10 mg/i })).toBeEnabled();
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("");
+    await user.click(screen.getByRole("radio", { name: /10 mg/i }));
+    await user.click(screen.getByRole("button", { name: /add synthetic product alpha to cart/i }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("Synthetic Product Alpha, 10 mg: 1 unit"));
+    expect(trigger).toHaveFocus();
+    expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "{}")).toEqual({ version: 2, items: [{ variantId: "variant-10", quantity: 1 }] });
+  });
+
+  it("directly adds a single variant with its exact announcement context", async () => {
+    const user = userEvent.setup();
+    const product = testCanonicalProduct([testPublicVariant({ id: "variant-single", label: "5 mg" })]);
+    renderCanonical(product);
+    const button = screen.getByRole("button", { name: /add synthetic product alpha to cart/i });
+    await user.click(button);
+    await waitFor(() => expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("Synthetic Product Alpha, 5 mg: 1 unit"));
+    expect(button).toHaveFocus();
+  });
+
   it("retains an illustrated browse-only entry with honest pending pricing and no cart action", () => {
     const product = buildPublicStorefrontCatalog({
       configuredPublicationId: browseCatalogPublicationId,
