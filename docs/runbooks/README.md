@@ -2,6 +2,7 @@
 
 These runbooks operate the lightweight commerce model:
 
+- `storefront-configuration.md`: owner-facing catalog, pricing, promotion, content, search, newsletter, footer, calculator, and launch-gate configuration map.
 - `compliance-holds.md`: explicit buyer/destination review and changed-fact paid-order holds.
 - `failed-orders.md`: checkout/payment/order failures and inventory release.
 - `refunds-reconciliation.md`: idempotent refunds and provider reconciliation.
