@@ -12,7 +12,16 @@ vi.mock("./catalog-listing-card", () => ({
 }));
 
 describe("RelatedProductsCarousel", () => {
-  afterEach(() => vi.restoreAllMocks());
+  let originalScrollBy: PropertyDescriptor | undefined;
+  let originalMatchMedia: PropertyDescriptor | undefined;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalScrollBy) Object.defineProperty(HTMLElement.prototype, "scrollBy", originalScrollBy);
+    else delete (HTMLElement.prototype as HTMLElement & { scrollBy?: unknown }).scrollBy;
+    if (originalMatchMedia) Object.defineProperty(window, "matchMedia", originalMatchMedia);
+    else delete (window as Window & { matchMedia?: unknown }).matchMedia;
+  });
 
   it("omits the section for an empty relationship slice", () => {
     render(<RelatedProductsCarousel currentProductId="current" products={[]} pricing={testPricingContext()} />);
@@ -24,8 +33,9 @@ describe("RelatedProductsCarousel", () => {
     const second = testCanonicalProduct([testPublicVariant({ id: "related-b-variant" })], { id: "related-b", name: "Related B" });
     const user = userEvent.setup();
     const scrollBy = vi.fn();
+    originalScrollBy = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollBy");
     Object.defineProperty(HTMLElement.prototype, "scrollBy", { configurable: true, value: scrollBy });
-    const originalMatchMedia = window.matchMedia;
+    originalMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
     Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false })) });
     render(<RelatedProductsCarousel currentProductId="current" products={[first, second]} pricing={testPricingContext()} />);
     const list = screen.getByRole("list");
@@ -36,6 +46,5 @@ describe("RelatedProductsCarousel", () => {
     expect(screen.getAllByRole("article")).toHaveLength(2);
     expect(screen.getAllByRole("article")[0]).toHaveAttribute("data-priority", "false");
     expect(next).toHaveAttribute("aria-controls", list.id);
-    Object.defineProperty(window, "matchMedia", { configurable: true, value: originalMatchMedia });
   });
 });
