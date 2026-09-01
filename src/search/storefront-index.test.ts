@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ApprovedStorefrontContent } from "@/content/storefront-content";
 import {
@@ -396,6 +396,54 @@ describe("buildStorefrontSearchIndex", () => {
   });
 
   it.each([
+    [
+      "products",
+      () => ({
+        products: new Array<PublicStorefrontProduct>(1),
+        information: [],
+      }),
+    ],
+    [
+      "information",
+      () => ({
+        products: [],
+        information: new Array<ApprovedPublicInformation>(1),
+      }),
+    ],
+  ] as const)("rejects a sparse top-level %s array", (_label, input) => {
+    expect(() => buildStorefrontSearchIndex(input())).toThrow(TypeError);
+  });
+
+  it.each([
+    [
+      "displayConfigurations",
+      () => canonicalProduct({
+        displayConfigurations: new Array(1) as never,
+      }),
+    ],
+    [
+      "aliases",
+      () => canonicalProduct({ aliases: new Array(1) as never }),
+    ],
+    [
+      "variants",
+      () => canonicalProduct({ variants: new Array(1) as never }),
+    ],
+    [
+      "content",
+      () => canonicalProduct({ content: new Array(1) as never }),
+    ],
+  ] as const)("rejects sparse product %s", (_label, candidate) => {
+    expect(() => build([candidate()])).toThrow(TypeError);
+  });
+
+  it("rejects sparse approved-information keywords instead of serializing a null hole", () => {
+    const keywords = new Array<string>(1);
+
+    expect(() => build([], [information({ keywords })])).toThrow(TypeError);
+  });
+
+  it.each([
     ["non-object product", null],
     ["unknown kind", { ...canonicalProduct(), kind: "unknown" }],
     ["missing title", { ...canonicalProduct(), name: undefined }],
@@ -434,6 +482,180 @@ describe("buildStorefrontSearchIndex", () => {
     expect(() =>
       build([], [candidate as unknown as ApprovedPublicInformation]),
     ).toThrow(TypeError);
+  });
+
+  it("ignores own top-level map overrides instead of suppressing approved rows", () => {
+    const products = [canonicalProduct()];
+    const approvedInformation = [information()];
+    const productMap = vi.fn(() => []);
+    const informationMap = vi.fn(() => []);
+    Object.defineProperty(products, "map", { value: productMap });
+    Object.defineProperty(approvedInformation, "map", {
+      value: informationMap,
+    });
+
+    const index = buildStorefrontSearchIndex({
+      products,
+      information: approvedInformation,
+    });
+
+    expect(index.entries.map(({ id }) => id)).toEqual([
+      "product:synthetic-alpha",
+      "information:synthetic-quality-records",
+    ]);
+    expect(productMap).not.toHaveBeenCalled();
+    expect(informationMap).not.toHaveBeenCalled();
+  });
+
+  it("ignores own map and flatMap overrides on display configurations", () => {
+    const displays = [
+      {
+        displayCode: "SYN-DENSE-5",
+        packageForm: "Dense 5 mg package",
+        sourceName: "Synthetic Dense Source",
+      },
+    ];
+    const flatMapOverride = vi.fn(() => ["override-injected-term"]);
+    const mapOverride = vi.fn(
+      (callback: (value: (typeof displays)[number], index: number) => unknown) => {
+        const projected = [callback(displays[0]!, 0)];
+        Object.defineProperty(projected, "flatMap", {
+          value: flatMapOverride,
+        });
+        return projected;
+      },
+    );
+    Object.defineProperty(displays, "map", { value: mapOverride });
+
+    const entry = build([
+      canonicalProduct({ displayConfigurations: displays }),
+    ]).entries[0]!;
+
+    expect(entry.keywords).toEqual([
+      "Synthetic Peptides",
+      "Synthetic Owner Source",
+      "Synthetic Dense Source",
+    ]);
+    expect(entry.keywords).not.toContain("override-injected-term");
+    expect(mapOverride).not.toHaveBeenCalled();
+    expect(flatMapOverride).not.toHaveBeenCalled();
+  });
+
+  it("ignores own some overrides and still rejects blank information keywords", () => {
+    const keywords = ["records", " "];
+    const someOverride = vi.fn(() => false);
+    const mapOverride = vi.fn(() => keywords);
+    Object.defineProperty(keywords, "map", { value: mapOverride });
+    Object.defineProperty(keywords, "some", { value: someOverride });
+
+    expect(() => build([], [information({ keywords })])).toThrow(TypeError);
+    expect(mapOverride).not.toHaveBeenCalled();
+    expect(someOverride).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke a caller-owned iterator while snapshotting content", () => {
+    const content = [approvedContent()];
+    const iterator = vi.fn(() => {
+      throw new Error("caller iterator must not run");
+    });
+    Object.defineProperty(content, Symbol.iterator, { value: iterator });
+
+    const entry = build([canonicalProduct({ content })]).entries[0]!;
+
+    expect(entry.description).toBe(
+      "Synthetic approved overview Synthetic approved body.",
+    );
+    expect(iterator).not.toHaveBeenCalled();
+  });
+
+  it("reads each own array index once and projects only the snapshotted value", () => {
+    const aliases: string[] = [];
+    let lengthDescriptorReads = 0;
+    let indexReads = 0;
+    Object.defineProperty(aliases, "0", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        indexReads += 1;
+        return indexReads === 1 ? "Stable Synthetic Alias" : "TOCTOU Alias";
+      },
+    });
+    aliases.length = 1;
+    const mapOverride = vi.fn(
+      (callback: (value: string, index: number, array: string[]) => string) => [
+        callback(aliases[0]!, 0, aliases),
+        callback(aliases[0]!, 0, aliases),
+      ],
+    );
+    Object.defineProperty(aliases, "map", { value: mapOverride });
+    const proxiedAliases = new Proxy(aliases, {
+      getOwnPropertyDescriptor(target, property) {
+        if (property === "length") lengthDescriptorReads += 1;
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      },
+    });
+
+    const entry = build([
+      canonicalProduct({ aliases: proxiedAliases }),
+    ]).entries[0]!;
+
+    expect(entry.exactTerms).toContain("Stable Synthetic Alias");
+    expect(entry.exactTerms).not.toContain("TOCTOU Alias");
+    expect(lengthDescriptorReads).toBe(1);
+    expect(indexReads).toBe(1);
+    expect(mapOverride).not.toHaveBeenCalled();
+  });
+
+  it("rejects a sparse large array before probing numeric membership", () => {
+    const sparse = new Array<PublicStorefrontProduct>(1_000_000);
+    sparse[999_999] = canonicalProduct();
+    let numericHasCalls = 0;
+    const products = new Proxy(sparse, {
+      has(target, property) {
+        if (typeof property === "string" && /^\d+$/u.test(property)) {
+          numericHasCalls += 1;
+          throw new Error("numeric membership probe must not run");
+        }
+        return Reflect.has(target, property);
+      },
+    });
+
+    expect(() => build(products)).toThrow(TypeError);
+    expect(numericHasCalls).toBe(0);
+  });
+
+  it("does not let a proxy-spoofed length suppress later own rows", () => {
+    const products = [
+      canonicalProduct(),
+      canonicalProduct({
+        slug: "synthetic-beta",
+        name: "Synthetic Beta Research Item",
+      }),
+    ];
+    const lengthOverride = vi.fn(() => 1);
+    const proxiedProducts = new Proxy(products, {
+      get(target, property, receiver) {
+        if (property === "length") return lengthOverride();
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const index = build(proxiedProducts);
+
+    expect(index.entries.map(({ id }) => id)).toEqual([
+      "product:synthetic-alpha",
+      "product:synthetic-beta",
+    ]);
+    expect(lengthOverride).not.toHaveBeenCalled();
+  });
+
+  it("normalizes a revoked array proxy to the deterministic TypeError", () => {
+    const revocable = Proxy.revocable([canonicalProduct()], {});
+    revocable.revoke();
+
+    expect(() => build(revocable.proxy)).toThrow(
+      new TypeError("Invalid storefront search index input."),
+    );
   });
 
   it("rejects duplicate generated IDs and exact hrefs across the complete output", () => {

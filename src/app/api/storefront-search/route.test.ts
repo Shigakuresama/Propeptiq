@@ -288,6 +288,52 @@ describe("GET /api/storefront-search", () => {
     expect(reportUnavailable).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    [
+      "sparse display configurations",
+      () => ({
+        products: [{
+          ...syntheticBrowseProduct(),
+          displayConfigurations: new Array(1),
+        }] as unknown as readonly PublicStorefrontProduct[],
+        information: [] as readonly ApprovedPublicInformation[],
+      }),
+    ],
+    [
+      "sparse information keywords",
+      () => ({
+        products: [] as readonly PublicStorefrontProduct[],
+        information: [{
+          id: "synthetic-sparse-information",
+          title: "Synthetic sparse information",
+          href: "/quality-records",
+          description: "Synthetic sparse information fixture.",
+          keywords: new Array(1),
+          status: "approved",
+        }] as unknown as readonly ApprovedPublicInformation[],
+      }),
+    ],
+  ] as const)("contains %s as the fixed 503 response", async (_label, makeInput) => {
+    const input = makeInput();
+    const actualIndex = await vi.importActual<
+      typeof import("@/search/storefront-index")
+    >("@/search/storefront-index");
+    const reportUnavailable = vi.fn();
+    const handler = createStorefrontSearchHandler({
+      loadView: async () => ({ catalog: { products: input.products } }),
+      loadInformation: () => input.information,
+      buildIndex: actualIndex.buildStorefrontSearchIndex,
+      reportUnavailable,
+    });
+
+    const text = await expectUnavailableResponse(handler);
+
+    expect(reportUnavailable).toHaveBeenCalledWith(
+      "STOREFRONT_SEARCH_INDEX_UNAVAILABLE",
+    );
+    expect(text).not.toMatch(/sparse|display|keyword/iu);
+  });
+
   it("contains injected builder failures and never leaks the thrown value", async () => {
     const loadView = vi.fn(async () => ({ catalog: { products: [] } }));
     const loadInformation = vi.fn(() => []);
