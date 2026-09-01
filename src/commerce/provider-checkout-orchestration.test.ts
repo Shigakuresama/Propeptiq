@@ -679,6 +679,10 @@ function canonicalSetup(
   const checkoutRepository = {
     findAttempt: vi.fn(async () => stored),
     loadVariantFacts: vi.fn(async () => ({ ok: true as const, value: canonicalFacts })),
+    loadProviderCreateVariantFacts: vi.fn(async () => ({
+      ok: true as const,
+      value: canonicalFacts,
+    })),
     findExactReview: vi.fn(async () => null),
     prepare: vi.fn(async (plan, preparation) => {
       trace.push("prepare");
@@ -1151,6 +1155,49 @@ describe("canonical variant provider state machine", () => {
   });
 
   it.each([
+    [
+      "null guard result",
+      async () => null,
+      { status: "conflict" as const },
+    ],
+    [
+      "undefined guard result",
+      async () => undefined,
+      { status: "conflict" as const },
+    ],
+    [
+      "primitive guard result",
+      async () => 7,
+      { status: "conflict" as const },
+    ],
+    [
+      "array guard result",
+      async () => ["quoted"],
+      { status: "conflict" as const },
+    ],
+    [
+      "unknown guard status",
+      async () => ({ status: "synthetic_unknown" }),
+      { status: "conflict" as const },
+    ],
+    [
+      "throwing guard status getter",
+      async () => Object.defineProperty({}, "status", {
+        get() {
+          throw new Error("synthetic hostile getter");
+        },
+      }),
+      { status: "conflict" as const },
+    ],
+    [
+      "revoked guard proxy",
+      async () => {
+        const proxy = Proxy.revocable({ status: "quoted" }, {});
+        proxy.revoke();
+        return proxy.proxy;
+      },
+      { status: "conflict" as const },
+    ],
     [
       "thrown guard",
       async () => { throw new Error("synthetic guard failure"); },

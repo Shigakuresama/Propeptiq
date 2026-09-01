@@ -91,6 +91,53 @@ type ExactProviderCheckoutRequest = Readonly<{
   providerBindingSnapshot: StripeProviderBindingSnapshotV2 | null;
 }>;
 
+const checkoutGuardStatuses = new Set<CheckoutSessionQuoteResult["status"]>([
+  "PRICE_CHANGED",
+  "CHECKOUT_UNAVAILABLE",
+  "invalid_request",
+  "internal_conflict",
+  "idempotency_conflict",
+  "loaded",
+  "review_rejected",
+  "denied",
+  "quote_invalid",
+  "quote_unavailable",
+  "quoted",
+]);
+
+function projectCheckoutGuardResult(value: unknown): CheckoutSessionQuoteResult | null {
+  try {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return null;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const keys = Reflect.ownKeys(value);
+    if (keys.some((key) => typeof key !== "string")) return null;
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const snapshot: Record<string, unknown> = {};
+    for (const key of keys as string[]) {
+      const descriptor = descriptors[key];
+      if (descriptor === undefined || !("value" in descriptor)) return null;
+      Object.defineProperty(snapshot, key, {
+        configurable: false,
+        enumerable: descriptor.enumerable ?? false,
+        writable: false,
+        value: descriptor.value,
+      });
+    }
+    const statusDescriptor = Object.getOwnPropertyDescriptor(snapshot, "status");
+    if (statusDescriptor === undefined || !("value" in statusDescriptor) ||
+      typeof statusDescriptor.value !== "string" ||
+      !checkoutGuardStatuses.has(
+        statusDescriptor.value as CheckoutSessionQuoteResult["status"],
+      )) return null;
+    return Object.freeze(snapshot) as CheckoutSessionQuoteResult;
+  } catch {
+    return null;
+  }
+}
+
 function requestFromPlan(
   plan: AuthoritativeCheckoutPlanData,
   replay: Readonly<{
@@ -672,9 +719,9 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
       return Object.freeze({ status: "conflict" });
     }
 
-    let guarded: CheckoutSessionQuoteResult;
+    let guardValue: unknown;
     try {
-      guarded = await input.checkoutService.revalidateCanonicalForProviderCreate({
+      guardValue = await input.checkoutService.revalidateCanonicalForProviderCreate({
         buyerUserId: context.buyerUserId,
         idempotencyKey: startInput.idempotencyKey,
         paymentProviderAvailable: context.checkoutCreationAvailable,
@@ -688,6 +735,9 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
       return Object.freeze({ status: "conflict" });
     }
 
+    const guarded = projectCheckoutGuardResult(guardValue);
+    if (guarded === null) return Object.freeze({ status: "conflict" });
+    try {
     if (guarded.status === "PRICE_CHANGED") {
       return isSha256(guarded.pricingRevision) &&
         safePriceChangedCart(guarded.cart)
@@ -810,6 +860,9 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
     return terminal || knownSession || stillProviderless
       ? processDurable(reloaded, contextValue)
       : Object.freeze({ status: "conflict" });
+    } catch {
+      return Object.freeze({ status: "conflict" });
+    }
   }
 
   return Object.freeze({

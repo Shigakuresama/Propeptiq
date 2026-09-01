@@ -995,6 +995,10 @@ function setupVariant(
   const repository = {
     findAttempt: vi.fn<CheckoutRepository["findAttempt"]>(async () => null),
     loadVariantFacts: vi.fn(async () => ({ ok: true as const, value: loadedFacts })),
+    loadProviderCreateVariantFacts: vi.fn(async () => ({
+      ok: true as const,
+      value: loadedFacts,
+    })),
     findExactReview: vi.fn(async () => null),
     prepare: vi.fn(async (plan: { decision: { reviewRequired: boolean }; identity: { orderId: string; attemptId: string }; browserQuote: unknown }) => ({
       status: plan.decision.reviewRequired ? "review_required" as const : "prepared" as const,
@@ -1354,6 +1358,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
       pricingRevision: quoted.pricingRevision,
     });
     vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+    vi.mocked(fixture.repository.loadProviderCreateVariantFacts).mockClear();
 
     await expect((fixture.service as unknown as {
       quoteForSession: (input: unknown) => Promise<unknown>;
@@ -1382,7 +1387,17 @@ describe("authoritative canonical variant quote lifecycle", () => {
       pricingRevision: quoted.pricingRevision,
       quote: quoted.quote,
     });
-    expect(fixture.repository.loadVariantFacts).toHaveBeenCalledTimes(1);
+    expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+    expect(fixture.repository.loadProviderCreateVariantFacts).toHaveBeenCalledTimes(1);
+    expect(fixture.repository.loadProviderCreateVariantFacts).toHaveBeenCalledWith({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: variantRequest,
+      now,
+    });
     expect(fixture.repository.prepare).not.toHaveBeenCalled();
     },
   );
@@ -1411,6 +1426,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
       pricingRevision: "e".repeat(64),
     }));
     vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+    vi.mocked(fixture.repository.loadProviderCreateVariantFacts).mockClear();
     fixture.shippingQuote.mockClear();
     fixture.taxQuote.mockClear();
     const operation = (fixture.service as unknown as {
@@ -1425,6 +1441,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
       request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
     })).resolves.toEqual({ status: "internal_conflict" });
     expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+    expect(fixture.repository.loadProviderCreateVariantFacts).not.toHaveBeenCalled();
     expect(fixture.shippingQuote).not.toHaveBeenCalled();
     expect(fixture.taxQuote).not.toHaveBeenCalled();
     expect(fixture.repository.prepare).not.toHaveBeenCalled();
@@ -1458,6 +1475,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
         pricingRevision: quoted.pricingRevision,
       }));
       vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+      vi.mocked(fixture.repository.loadProviderCreateVariantFacts).mockClear();
       const operation = (fixture.service as unknown as {
         revalidateCanonicalForProviderCreate: (input: unknown) => Promise<unknown>;
       }).revalidateCanonicalForProviderCreate;
@@ -1470,6 +1488,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
         request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
       })).resolves.toEqual({ status: "internal_conflict" });
       expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+      expect(fixture.repository.loadProviderCreateVariantFacts).not.toHaveBeenCalled();
       expect(fixture.repository.prepare).not.toHaveBeenCalled();
     },
   );
@@ -1498,6 +1517,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
       pricingRevision: quoted.pricingRevision,
     }));
     vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+    vi.mocked(fixture.repository.loadProviderCreateVariantFacts).mockClear();
     const operation = (fixture.service as unknown as {
       revalidateCanonicalForProviderCreate: (input: unknown) => Promise<unknown>;
     }).revalidateCanonicalForProviderCreate;
@@ -1512,8 +1532,187 @@ describe("authoritative canonical variant quote lifecycle", () => {
       status: "PRICE_CHANGED",
       pricingRevision: quoted.pricingRevision,
     });
-    expect(fixture.repository.loadVariantFacts).toHaveBeenCalledTimes(1);
+    expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+    expect(fixture.repository.loadProviderCreateVariantFacts).toHaveBeenCalledTimes(1);
     expect(fixture.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("keeps merchandise pricing revision stable across raw inventory-only movement", async () => {
+    const initial = setupVariant();
+    const initialQuote = await initial.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (initialQuote.status !== "quoted" || initialQuote.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const movedInventory = setupVariant({
+      items: [Object.freeze({
+        ...variantFacts.items[0]!,
+        inventoryRevision: "inventory-revision-after-unrelated-movement",
+        eligibleLots: Object.freeze([Object.freeze({
+          ...variantFacts.items[0]!.eligibleLots[0]!,
+          availableQuantity: 9,
+        })]),
+      })],
+    });
+
+    const movedQuote = await movedInventory.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+
+    expect(movedQuote).toMatchObject({
+      status: "quoted",
+      pricingRevision: initialQuote.pricingRevision,
+    });
+  });
+
+  it.each([
+    ["missing port", undefined],
+    ["authority conflict", Object.freeze({
+      ok: false as const,
+      reasons: Object.freeze(["provider_create_authority_conflict"]),
+    })],
+    ["unexpected failure", Object.freeze({
+      ok: false as const,
+      reasons: Object.freeze(["unexpected_repository_reason"]),
+    })],
+    ["malformed result", null],
+  ] as const)("fails forced provider-create revalidation closed for %s", async (
+    _label,
+    providerCreateResult,
+  ) => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: quoted.pricingRevision,
+    }));
+    if (providerCreateResult === undefined) {
+      Object.defineProperty(fixture.repository, "loadProviderCreateVariantFacts", {
+        configurable: true,
+        value: undefined,
+      });
+    } else {
+      vi.mocked(fixture.repository.loadProviderCreateVariantFacts)
+        .mockResolvedValue(providerCreateResult as never);
+    }
+    vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+    fixture.shippingQuote.mockClear();
+    fixture.taxQuote.mockClear();
+
+    await expect(fixture.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toEqual({ status: "internal_conflict" });
+    expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+    expect(fixture.shippingQuote).not.toHaveBeenCalled();
+    expect(fixture.taxQuote).not.toHaveBeenCalled();
+    expect(fixture.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("fails a rejected provider-create fact transaction closed", async () => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: quoted.pricingRevision,
+    }));
+    vi.mocked(fixture.repository.loadProviderCreateVariantFacts)
+      .mockRejectedValue(new Error("synthetic exhausted transaction retry"));
+    fixture.shippingQuote.mockClear();
+    fixture.taxQuote.mockClear();
+
+    await expect(fixture.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toEqual({ status: "internal_conflict" });
+    expect(fixture.shippingQuote).not.toHaveBeenCalled();
+    expect(fixture.taxQuote).not.toHaveBeenCalled();
+    expect(fixture.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("returns PRICE_CHANGED for a stored schema-1 revision after validating the pair", async () => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted") throw new Error("expected canonical quote");
+    const schemaOneRevision = "1".repeat(64);
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: schemaOneRevision,
+    }));
+    fixture.shippingQuote.mockClear();
+    fixture.taxQuote.mockClear();
+
+    await expect(fixture.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: schemaOneRevision,
+      request: { ...variantRequest, pricingRevision: schemaOneRevision },
+    })).resolves.toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: quoted.pricingRevision,
+    });
+    expect(fixture.repository.loadProviderCreateVariantFacts).toHaveBeenCalledTimes(1);
+    expect(fixture.shippingQuote).not.toHaveBeenCalled();
+    expect(fixture.taxQuote).not.toHaveBeenCalled();
   });
 
   it("returns the current safe cart when fresh canonical pricing changed after a valid stored revision", async () => {

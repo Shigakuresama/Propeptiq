@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hashReviewSnapshot } from "@/commerce/checkout-identity";
 import { createCheckoutHttpHandlers } from "@/commerce/checkout-http";
-import { createCheckoutService } from "@/commerce/checkout-service";
+import {
+  createCheckoutService,
+  type AuthoritativeCheckoutPlan,
+} from "@/commerce/checkout-service";
+import { createStripeProviderBindingSnapshotV2 } from "@/commerce/provider-contracts";
 import {
   createPostgresCheckoutRepository,
   resolveExactReviewRequest,
@@ -71,7 +75,7 @@ const request = {
     city: "Testville",
     stateCode: "CA",
     postalCode: "90001",
-    countryCode: "US",
+    countryCode: "US" as const,
   },
   promotionIds: [] as string[],
 };
@@ -286,6 +290,107 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     `);
   }
 
+  function providerPreparationV2(
+    plan: AuthoritativeCheckoutPlan,
+  ) {
+    if (plan.kind !== "canonical_variant" || plan.totals === null) {
+      throw new Error("expected ready canonical variant plan");
+    }
+    const totalByVariant = new Map(
+      plan.totals.lines.map((line) => [line.productId, line] as const),
+    );
+    const factByVariant = new Map(
+      plan.facts.items.map((line) => [line.variantId, line] as const),
+    );
+    const binding = createStripeProviderBindingSnapshotV2(
+      plan.effectiveLines.map((line) => {
+        const total = totalByVariant.get(line.variantId);
+        const fact = factByVariant.get(line.variantId);
+        if (total === undefined || fact === undefined) return null;
+        return {
+          variantId: line.variantId,
+          productId: line.productId,
+          sku: line.sku,
+          productName: fact.productName,
+          variantLabel: line.variantLabel,
+          requestedQuantity: line.quantity,
+          netLineMinor: total.totalMinor,
+          baseUnitMinor: line.baseUnitMinor,
+          currency: "USD" as const,
+          priceBookId: line.priceId,
+          priceVersion: line.priceVersion,
+          stripeProductId: line.stripeProductId,
+          stripePriceId: line.stripePriceId,
+        };
+      }),
+    );
+    if (!binding.ok) throw new Error("expected valid V2 binding snapshot");
+    return {
+      authority: "server_prepared_provider_request" as const,
+      provider: "local_test" as const,
+      providerIdempotencyKey: `checkout_attempt:${plan.identity.attemptId}`,
+      providerRequestHash: "f".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "synthetic.variant.buyer@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 2 as const,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+      providerBindingSnapshot: binding.value,
+    };
+  }
+
+  async function prepareCanonicalVariantV2(
+    key: string,
+    options: Readonly<{
+      buyerUserId?: string;
+      availableQuantity?: number;
+      seed?: boolean;
+    }> = {},
+  ) {
+    if (options.seed !== false) await seedCheckoutReadyVariant();
+    if (options.availableQuantity !== undefined) {
+      await client.query(
+        `UPDATE lots SET received_quantity = $2, available_quantity = $2
+         WHERE id = $1::uuid`,
+        [ids.variantLotA, options.availableQuantity],
+      );
+    }
+    const buyerUserId = options.buyerUserId ?? ids.buyer;
+    const setupResult = setup();
+    const quoted = await setupResult.service.quote({
+      buyerUserId,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical variant quote");
+    }
+    const sessionQuote = await setupResult.service.quoteForSession({
+      buyerUserId,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (sessionQuote.status !== "quoted") {
+      throw new Error("expected acknowledged canonical quote");
+    }
+    const prepared = await setupResult.service.prepare(
+      sessionQuote.plan,
+      providerPreparationV2(sessionQuote.plan),
+    );
+    expect(prepared).toMatchObject({ status: "prepared" });
+    return {
+      ...setupResult,
+      buyerUserId,
+      key,
+      quoted,
+      pricingRevision: quoted.pricingRevision,
+      sessionQuote,
+    };
+  }
+
   it("returns PRICE_CHANGED before writes when locked canonical variant price facts change", async () => {
     await seedCheckoutReadyVariant();
     const { service } = setup();
@@ -400,6 +505,199 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     expect(transactionSql.some((sql) =>
       sql.includes("FROM lots") && sql.includes("variant_id = ANY") && sql.includes("FOR UPDATE"),
     )).toBe(true);
+  });
+
+  it("revalidates exact-stock V2 checkout from its own active reservation after prepare", async () => {
+    const key = "30000000-0000-4000-8000-000000000129";
+    const { repository, service, pricingRevision, sessionQuote } =
+      await prepareCanonicalVariantV2(key, { availableQuantity: 2 });
+    expect((await client.query<{ available: number; reservations: number }>(`
+      SELECT
+        (SELECT available_quantity FROM lots
+          WHERE id = '${ids.variantLotA}') AS available,
+        (SELECT count(*)::int FROM inventory_reservations
+          WHERE checkout_attempt_id = '${sessionQuote.plan.identity.attemptId}'
+            AND state = 'active') AS reservations
+    `)).rows).toEqual([{ available: 0, reservations: 1 }]);
+    expect(repository.loadProviderCreateVariantFacts).toBeTypeOf("function");
+    await client.exec(`
+      UPDATE lots SET updated_at = '2026-08-25T12:30:00.000Z'
+      WHERE id = '${ids.variantLotA}';
+    `);
+    await expect(repository.loadProviderCreateVariantFacts!({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      orderId: sessionQuote.plan.identity.orderId,
+      attemptId: sessionQuote.plan.identity.attemptId,
+      expectedStoredPricingRevision: pricingRevision,
+      request: variantRequest,
+      now,
+    })).resolves.toMatchObject({
+      ok: true,
+      value: {
+        items: [{
+          variantId: ids.variantA,
+          eligibleLots: [{
+            id: ids.variantLotA,
+            availableQuantity: 2,
+          }],
+        }],
+      },
+    });
+
+    await expect(service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: pricingRevision,
+      request: { ...variantRequest, pricingRevision },
+    })).resolves.toMatchObject({
+      status: "quoted",
+      pricingRevision,
+      quote: { status: "ready" },
+    });
+  });
+
+  it.each([
+    [
+      "released own reservation",
+      `UPDATE inventory_reservations
+       SET state = 'released', quantity_remaining = 0
+       WHERE checkout_attempt_id = $1::uuid`,
+    ],
+    [
+      "insufficient own reservation",
+      `UPDATE inventory_reservations
+       SET quantity_reserved = 1, quantity_remaining = 1
+       WHERE checkout_attempt_id = $1::uuid`,
+    ],
+    [
+      "nonreleased reserved lot",
+      `UPDATE lots SET status = 'quarantined'
+       WHERE id = '${ids.variantLotA}'
+         AND EXISTS (SELECT 1 FROM inventory_reservations r
+           WHERE r.checkout_attempt_id = $1::uuid AND r.lot_id = lots.id)`,
+    ],
+    [
+      "expired reserved lot",
+      `UPDATE lots SET expires_at = '2026-08-25T12:00:00.000Z'
+       WHERE id = '${ids.variantLotA}'
+         AND EXISTS (SELECT 1 FROM inventory_reservations r
+           WHERE r.checkout_attempt_id = $1::uuid AND r.lot_id = lots.id)`,
+    ],
+  ])("returns unavailable for %s", async (_label, mutation) => {
+    const key = keyedUuid(`provider-create-unavailable:${_label}`);
+    const prepared = await prepareCanonicalVariantV2(key);
+    await client.query(mutation, [prepared.sessionQuote.plan.identity.attemptId]);
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: {
+        ...variantRequest,
+        pricingRevision: prepared.pricingRevision,
+      },
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variantA, code: "unavailable" }],
+    });
+  });
+
+  it.each([
+    [
+      "mismatched reservation expiry",
+      `UPDATE inventory_reservations
+       SET expires_at = expires_at + interval '1 minute'
+       WHERE checkout_attempt_id = $1::uuid`,
+    ],
+    [
+      "overcovered reservation",
+      `UPDATE inventory_reservations
+       SET quantity_reserved = 3, quantity_remaining = 3
+       WHERE checkout_attempt_id = $1::uuid`,
+    ],
+  ])("fails provider-create authority closed for %s", async (_label, mutation) => {
+    const key = keyedUuid(`provider-create-conflict:${_label}`);
+    const prepared = await prepareCanonicalVariantV2(key);
+    await client.query(mutation, [prepared.sessionQuote.plan.identity.attemptId]);
+
+    await expect(prepared.repository.loadProviderCreateVariantFacts!({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      orderId: prepared.sessionQuote.plan.identity.orderId,
+      attemptId: prepared.sessionQuote.plan.identity.attemptId,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: variantRequest,
+      now,
+    })).resolves.toEqual({
+      ok: false,
+      reasons: ["provider_create_authority_conflict"],
+    });
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: {
+        ...variantRequest,
+        pricingRevision: prepared.pricingRevision,
+      },
+    })).resolves.toEqual({ status: "internal_conflict" });
+  });
+
+  it("keeps the first attempt current when another buyer reserves the same variant", async () => {
+    const first = await prepareCanonicalVariantV2(
+      "30000000-0000-4000-8000-000000000130",
+    );
+    await prepareCanonicalVariantV2(
+      "30000000-0000-4000-8000-000000000131",
+      { buyerUserId: ids.buyer2, seed: false },
+    );
+    expect((await client.query<{ available: number }>(
+      `SELECT available_quantity AS available FROM lots WHERE id = $1::uuid`,
+      [ids.variantLotA],
+    )).rows).toEqual([{ available: 1 }]);
+
+    await expect(first.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: first.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: first.pricingRevision,
+      request: {
+        ...variantRequest,
+        pricingRevision: first.pricingRevision,
+      },
+    })).resolves.toMatchObject({
+      status: "quoted",
+      pricingRevision: first.pricingRevision,
+    });
+  });
+
+  it("detects a commercial price change after reservation without using global inventory", async () => {
+    const prepared = await prepareCanonicalVariantV2(
+      "30000000-0000-4000-8000-000000000132",
+    );
+    await client.exec(`
+      UPDATE product_prices SET amount_minor = 5200
+      WHERE id = '${ids.variantPriceA}';
+    `);
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: prepared.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: {
+        ...variantRequest,
+        pricingRevision: prepared.pricingRevision,
+      },
+    })).resolves.toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: expect.not.stringMatching(prepared.pricingRevision),
+    });
   });
 
   it("locks globally ordered parents before crossed variant, price, and lot identities", async () => {

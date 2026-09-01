@@ -4,6 +4,7 @@ import {
   hashCanonicalEnvelope,
   hashReviewSnapshot,
   isCanonicalUuid,
+  isSha256,
   type KeyedUuidGenerator,
   type ReviewSnapshotHashInput,
   type Sha256Hasher,
@@ -30,6 +31,7 @@ import type {
   LegacyRewardsCheckoutRequest,
   ProviderPreparation,
 } from "@/commerce/checkout-ports";
+import { createStripeProviderBindingSnapshotV2 } from "@/commerce/provider-contracts";
 import type { CheckoutQuoteRequest } from "@/domain/checkout";
 import {
   evaluateCheckout,
@@ -1079,6 +1081,21 @@ type VariantCore = Readonly<{
   priceSetRevision: string;
 }>;
 
+type VariantInventoryRow = Readonly<{
+  id: string;
+  variantId: string;
+  productId: string;
+  receivedQuantity: number | string;
+  availableQuantity: number | string;
+  expiresAt: Date | string | null;
+  updatedAt: Date | string;
+}>;
+
+type VariantInventoryOverride = Readonly<{
+  lots: readonly VariantInventoryRow[];
+  revisionByVariant: ReadonlyMap<string, string>;
+}>;
+
 async function loadVariantFactsFromClient(
   client: CheckoutSqlClient,
   input: Readonly<{
@@ -1088,6 +1105,7 @@ async function loadVariantFactsFromClient(
     lock: boolean;
     buyer?: BuyerFacts;
     beforeLots?: () => Promise<void>;
+    inventoryOverride?: VariantInventoryOverride;
   }>,
 ): Promise<VariantFactLoadResult> {
   const buyer = input.buyer ??
@@ -1316,28 +1334,21 @@ async function loadVariantFactsFromClient(
   );
   await input.beforeLots?.();
 
-  type LotRow = {
-    id: string;
-    variantId: string;
-    productId: string;
-    receivedQuantity: number | string;
-    availableQuantity: number | string;
-    expiresAt: Date | string | null;
-    updatedAt: Date | string;
-  };
   const variantIds = input.request.items.map((item) => item.variantId);
-  const lots = await client.query<LotRow>(
-    `SELECT id::text AS id, variant_id::text AS "variantId",
-            product_id::text AS "productId", received_quantity AS "receivedQuantity",
-            available_quantity AS "availableQuantity", expires_at AS "expiresAt",
-            updated_at AS "updatedAt"
-     FROM lots
-     WHERE variant_id = ANY($1::uuid[]) AND status = 'released'
-       AND available_quantity > 0
-       AND (expires_at IS NULL OR expires_at > $2::timestamptz)
-     ORDER BY id${lockSuffix(input.lock)}`,
-    [[...variantIds], input.now.toISOString()],
-  );
+  const lotRows = input.inventoryOverride === undefined
+    ? (await client.query<VariantInventoryRow>(
+        `SELECT id::text AS id, variant_id::text AS "variantId",
+                product_id::text AS "productId", received_quantity AS "receivedQuantity",
+                available_quantity AS "availableQuantity", expires_at AS "expiresAt",
+                updated_at AS "updatedAt"
+         FROM lots
+         WHERE variant_id = ANY($1::uuid[]) AND status = 'released'
+           AND available_quantity > 0
+           AND (expires_at IS NULL OR expires_at > $2::timestamptz)
+         ORDER BY id${lockSuffix(input.lock)}`,
+        [[...variantIds], input.now.toISOString()],
+      )).rows
+    : [...input.inventoryOverride.lots];
   const promotions = await getAutomaticStorefrontPromotions(
     client,
     input.lock,
@@ -1352,11 +1363,13 @@ async function loadVariantFactsFromClient(
   );
   const items = input.request.items.map((requested) => {
     const core = cores.get(requested.variantId)!;
-    const lotRows = lots.rows.filter((lot) => lot.variantId === requested.variantId);
-    if (lotRows.some((lot) => lot.productId !== core.productId)) {
+    const itemLotRows = lotRows.filter((lot) =>
+      lot.variantId === requested.variantId,
+    );
+    if (itemLotRows.some((lot) => lot.productId !== core.productId)) {
       throw new Error("Variant inventory product relationship is inconsistent");
     }
-    const eligibleLots = Object.freeze(lotRows.map((lot) => Object.freeze({
+    const eligibleLots = Object.freeze(itemLotRows.map((lot) => Object.freeze({
       id: lot.id,
       status: "released" as const,
       receivedQuantity: safeInteger(lot.receivedQuantity),
@@ -1384,14 +1397,16 @@ async function loadVariantFactsFromClient(
         destination,
         priceSetRevision: core.priceSetRevision,
       }),
-      inventoryRevision: canonicalJson(lotRows.map((lot) => ({
-        id: lot.id,
-        productId: lot.productId,
-        receivedQuantity: safeInteger(lot.receivedQuantity),
-        availableQuantity: safeInteger(lot.availableQuantity),
-        expiresAt: lot.expiresAt === null ? null : toIso(lot.expiresAt),
-        updatedAt: toIso(lot.updatedAt),
-      }))),
+      inventoryRevision: input.inventoryOverride?.revisionByVariant.get(
+        requested.variantId,
+      ) ?? canonicalJson(itemLotRows.map((lot) => ({
+          id: lot.id,
+          productId: lot.productId,
+          receivedQuantity: safeInteger(lot.receivedQuantity),
+          availableQuantity: safeInteger(lot.availableQuantity),
+          expiresAt: lot.expiresAt === null ? null : toIso(lot.expiresAt),
+          updatedAt: toIso(lot.updatedAt),
+        }))),
       price: core.price,
       stripeProductId: core.stripeProductId,
       stripePriceId: core.stripePriceId,
@@ -1407,6 +1422,308 @@ async function loadVariantFactsFromClient(
       automaticPromotions: promotions,
     }),
   };
+}
+
+type ProviderCreateVariantFactsInput = Parameters<
+  NonNullable<CheckoutRepository["loadProviderCreateVariantFacts"]>
+>[0];
+
+const providerCreateAuthorityConflict = Object.freeze({
+  ok: false as const,
+  reasons: Object.freeze(["provider_create_authority_conflict"]),
+});
+
+async function loadProviderCreateVariantFactsFromClient(
+  client: CheckoutSqlClient,
+  input: ProviderCreateVariantFactsInput,
+): Promise<VariantFactLoadResult> {
+  type AttemptRow = {
+    attemptId: string;
+    orderId: string;
+    buyerUserId: string;
+    idempotencyKey: string;
+    status: CheckoutAttemptStatus;
+    orderState: OrderState;
+    canonicalPricingRevision: string | null;
+    permitted: boolean;
+    reviewRequired: boolean;
+    reviewAuthorizationMode: string | null;
+    taxReady: boolean;
+    shippingReady: boolean;
+    provider: string | null;
+    providerRequestId: string | null;
+    providerSessionId: string | null;
+    providerRequestHash: string | null;
+    providerRequestSchemaVersion: number | string | null;
+    providerBindingSnapshot: unknown;
+    providerExpiresAt: Date | string | null;
+    providerLivemode: boolean | null;
+    providerScope: string | null;
+  };
+  const attempts = await client.query<AttemptRow>(
+    `SELECT a.id::text AS "attemptId", a.order_id::text AS "orderId",
+            a.buyer_user_id::text AS "buyerUserId", a.idempotency_key AS "idempotencyKey",
+            a.status, o.state AS "orderState",
+            a.canonical_pricing_revision AS "canonicalPricingRevision",
+            a.permitted, a.review_required AS "reviewRequired",
+            a.review_authorization_mode AS "reviewAuthorizationMode",
+            a.tax_ready AS "taxReady", a.shipping_ready AS "shippingReady",
+            a.provider, a.provider_request_id AS "providerRequestId",
+            a.provider_session_id AS "providerSessionId",
+            a.provider_request_hash AS "providerRequestHash",
+            a.provider_request_schema_version AS "providerRequestSchemaVersion",
+            a.provider_binding_snapshot AS "providerBindingSnapshot",
+            a.expires_at AS "providerExpiresAt",
+            a.provider_livemode AS "providerLivemode",
+            a.provider_scope AS "providerScope"
+     FROM checkout_attempts a
+     JOIN orders o ON o.id = a.order_id AND o.buyer_user_id = a.buyer_user_id
+     WHERE a.buyer_user_id = $1::uuid AND a.idempotency_key = $2
+       AND a.order_id = $3::uuid AND a.id = $4::uuid
+     FOR UPDATE OF a, o`,
+    [input.buyerUserId, input.idempotencyKey, input.orderId, input.attemptId],
+  );
+  if (attempts.rows.length !== 1) return providerCreateAuthorityConflict;
+  const attempt = attempts.rows[0]!;
+  const expiresAt = attempt.providerExpiresAt === null
+    ? null
+    : toIso(attempt.providerExpiresAt);
+  const rawBinding = attempt.providerBindingSnapshot;
+  const bindingRecord = typeof rawBinding === "object" && rawBinding !== null &&
+    !Array.isArray(rawBinding)
+      ? rawBinding as Record<string, unknown>
+      : null;
+  const parsedBinding = bindingRecord?.schemaVersion === 2
+    ? createStripeProviderBindingSnapshotV2(bindingRecord.lines)
+    : null;
+  if (
+    attempt.attemptId !== input.attemptId ||
+    attempt.orderId !== input.orderId ||
+    attempt.buyerUserId !== input.buyerUserId ||
+    attempt.idempotencyKey !== input.idempotencyKey ||
+    attempt.canonicalPricingRevision !== input.expectedStoredPricingRevision ||
+    !isSha256(input.expectedStoredPricingRevision) ||
+    (attempt.status !== "created" && attempt.status !== "provider_unknown") ||
+    attempt.orderState !== "checkout_pending" ||
+    !attempt.permitted || attempt.reviewRequired ||
+    attempt.reviewAuthorizationMode !== "none" ||
+    !attempt.taxReady || !attempt.shippingReady ||
+    (attempt.provider !== "stripe" && attempt.provider !== "local_test") ||
+    attempt.providerRequestId !== `checkout_attempt:${input.attemptId}` ||
+    attempt.providerSessionId !== null ||
+    attempt.providerRequestHash === null ||
+    !isSha256(attempt.providerRequestHash) ||
+    safeInteger(attempt.providerRequestSchemaVersion ?? 0) !== 2 ||
+    bindingRecord === null ||
+    Reflect.ownKeys(bindingRecord).length !== 2 ||
+    !Object.hasOwn(bindingRecord, "schemaVersion") ||
+    !Object.hasOwn(bindingRecord, "lines") ||
+    parsedBinding === null || !parsedBinding.ok ||
+    canonicalJson(parsedBinding.value) !== canonicalJson(rawBinding) ||
+    expiresAt === null || new Date(expiresAt).getTime() <= input.now.getTime() ||
+    typeof attempt.providerLivemode !== "boolean" ||
+    !nonblank(attempt.providerScope ?? "")
+  ) return providerCreateAuthorityConflict;
+
+  type ItemRow = {
+    orderItemId: string;
+    orderId: string;
+    productId: string;
+    variantId: string | null;
+    productPriceId: string;
+    quantity: number | string;
+    unitAmountMinor: number | string;
+    totalMinor: number | string;
+    currency: string;
+  };
+  const itemResult = await client.query<ItemRow>(
+    `SELECT id::text AS "orderItemId", order_id::text AS "orderId",
+            product_id::text AS "productId", variant_id::text AS "variantId",
+            product_price_id::text AS "productPriceId", quantity,
+            unit_amount_minor AS "unitAmountMinor", total_minor AS "totalMinor",
+            currency
+     FROM order_items WHERE order_id = $1::uuid ORDER BY id FOR UPDATE`,
+    [input.orderId],
+  );
+  const requestedByVariant = new Map(
+    input.request.items.map((item) => [item.variantId, item] as const),
+  );
+  const bindingByVariant = new Map(
+    parsedBinding.value.lines.map((line) => [line.variantId, line] as const),
+  );
+  const itemById = new Map(itemResult.rows.map((item) =>
+    [item.orderItemId, item] as const));
+  const itemByVariant = new Map(itemResult.rows.map((item) =>
+    [item.variantId, item] as const));
+  if (
+    requestedByVariant.size !== input.request.items.length ||
+    bindingByVariant.size !== parsedBinding.value.lines.length ||
+    itemById.size !== itemResult.rows.length ||
+    itemByVariant.has(null) ||
+    itemByVariant.size !== itemResult.rows.length ||
+    itemResult.rows.length !== input.request.items.length ||
+    bindingByVariant.size !== input.request.items.length
+  ) return providerCreateAuthorityConflict;
+  for (const requested of input.request.items) {
+    const item = itemByVariant.get(requested.variantId);
+    const binding = bindingByVariant.get(requested.variantId);
+    if (
+      item === undefined || binding === undefined ||
+      item.orderId !== input.orderId ||
+      item.productId !== binding.productId ||
+      item.variantId !== binding.variantId ||
+      item.productPriceId !== binding.priceBookId ||
+      safeInteger(item.quantity) !== requested.quantity ||
+      binding.requestedQuantity !== requested.quantity ||
+      safeInteger(item.unitAmountMinor) !== binding.baseUnitMinor ||
+      safeInteger(item.totalMinor) !== binding.netLineMinor ||
+      item.currency !== binding.currency
+    ) return providerCreateAuthorityConflict;
+  }
+
+  type ReservationRow = {
+    reservationId: string;
+    checkoutAttemptId: string;
+    reservationOrderId: string;
+    reservationOrderItemId: string;
+    reservationProductId: string;
+    reservationVariantId: string | null;
+    reservationLotId: string;
+    quantityReserved: number | string;
+    quantityRemaining: number | string;
+    reservationState: string;
+    reservationExpiresAt: Date | string;
+    reservationUpdatedAt: Date | string;
+    itemOrderId: string | null;
+    itemProductId: string | null;
+    itemVariantId: string | null;
+    itemQuantity: number | string | null;
+    lotProductId: string | null;
+    lotVariantId: string | null;
+    lotStatus: string | null;
+    lotReceivedQuantity: number | string | null;
+    lotExpiresAt: Date | string | null;
+    lotUpdatedAt: Date | string | null;
+  };
+  const reservationResult = await client.query<ReservationRow>(
+    `SELECT r.id::text AS "reservationId",
+            r.checkout_attempt_id::text AS "checkoutAttemptId",
+            r.order_id::text AS "reservationOrderId",
+            r.order_item_id::text AS "reservationOrderItemId",
+            r.product_id::text AS "reservationProductId",
+            r.variant_id::text AS "reservationVariantId",
+            r.lot_id::text AS "reservationLotId",
+            r.quantity_reserved AS "quantityReserved",
+            r.quantity_remaining AS "quantityRemaining",
+            r.state AS "reservationState", r.expires_at AS "reservationExpiresAt",
+            r.updated_at AS "reservationUpdatedAt",
+            oi.order_id::text AS "itemOrderId", oi.product_id::text AS "itemProductId",
+            oi.variant_id::text AS "itemVariantId", oi.quantity AS "itemQuantity",
+            l.product_id::text AS "lotProductId", l.variant_id::text AS "lotVariantId",
+            l.status AS "lotStatus", l.received_quantity AS "lotReceivedQuantity",
+            l.expires_at AS "lotExpiresAt", l.updated_at AS "lotUpdatedAt"
+     FROM inventory_reservations r
+     LEFT JOIN order_items oi ON oi.id = r.order_item_id
+     LEFT JOIN lots l ON l.id = r.lot_id
+     WHERE r.checkout_attempt_id = $1::uuid
+     ORDER BY r.id`,
+    [input.attemptId],
+  );
+  const seenReservations = new Set<string>();
+  const seenOwnership = new Set<string>();
+  const coverage = new Map<string, number>();
+  const eligibleLots: VariantInventoryRow[] = [];
+  const revisionRows = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of reservationResult.rows) {
+    const item = itemById.get(row.reservationOrderItemId);
+    const variantId = row.reservationVariantId;
+    const requested = variantId === null
+      ? undefined
+      : requestedByVariant.get(variantId);
+    const reservationExpiry = toIso(row.reservationExpiresAt);
+    const ownership = `${row.reservationOrderItemId}:${row.reservationLotId}`;
+    if (
+      seenReservations.has(row.reservationId) || seenOwnership.has(ownership) ||
+      row.checkoutAttemptId !== input.attemptId ||
+      row.reservationOrderId !== input.orderId ||
+      item === undefined || requested === undefined || variantId === null ||
+      item.orderId !== row.itemOrderId || item.orderId !== row.reservationOrderId ||
+      item.productId !== row.itemProductId ||
+      item.productId !== row.reservationProductId ||
+      item.variantId !== row.itemVariantId || item.variantId !== variantId ||
+      safeInteger(item.quantity) !== requested.quantity ||
+      row.lotProductId !== row.reservationProductId ||
+      row.lotVariantId !== variantId ||
+      reservationExpiry !== expiresAt
+    ) return providerCreateAuthorityConflict;
+    seenReservations.add(row.reservationId);
+    seenOwnership.add(ownership);
+    const quantityReserved = safeInteger(row.quantityReserved);
+    const quantityRemaining = safeInteger(row.quantityRemaining);
+    const revision = {
+      reservationId: row.reservationId,
+      orderItemId: row.reservationOrderItemId,
+      lotId: row.reservationLotId,
+      quantityReserved,
+      quantityRemaining,
+      reservationState: row.reservationState,
+      reservationExpiresAt: reservationExpiry,
+      reservationUpdatedAt: toIso(row.reservationUpdatedAt),
+      lotStatus: row.lotStatus,
+      lotExpiresAt: row.lotExpiresAt === null ? null : toIso(row.lotExpiresAt),
+      lotUpdatedAt: row.lotUpdatedAt === null ? null : toIso(row.lotUpdatedAt),
+    };
+    const revisions = revisionRows.get(variantId) ?? [];
+    revisions.push(revision);
+    revisionRows.set(variantId, revisions);
+    if (row.reservationState !== "active") continue;
+    if (quantityReserved <= 0 || quantityRemaining !== quantityReserved) {
+      return providerCreateAuthorityConflict;
+    }
+    const nextCoverage = (coverage.get(variantId) ?? 0) + quantityRemaining;
+    if (!Number.isSafeInteger(nextCoverage) || nextCoverage > requested.quantity) {
+      return providerCreateAuthorityConflict;
+    }
+    coverage.set(variantId, nextCoverage);
+    const lotExpiry = row.lotExpiresAt === null ? null : toIso(row.lotExpiresAt);
+    if (
+      row.lotStatus !== "released" ||
+      row.lotReceivedQuantity === null || row.lotUpdatedAt === null ||
+      (lotExpiry !== null && new Date(lotExpiry).getTime() <= input.now.getTime())
+    ) continue;
+    const receivedQuantity = safeInteger(row.lotReceivedQuantity);
+    if (receivedQuantity < quantityRemaining) return providerCreateAuthorityConflict;
+    eligibleLots.push(Object.freeze({
+      id: row.reservationLotId,
+      variantId,
+      productId: row.reservationProductId,
+      receivedQuantity,
+      availableQuantity: quantityRemaining,
+      expiresAt: lotExpiry,
+      updatedAt: toIso(row.lotUpdatedAt),
+    }));
+  }
+  const revisionByVariant = new Map<string, string>();
+  for (const requested of input.request.items) {
+    revisionByVariant.set(
+      requested.variantId,
+      canonicalJson({
+        attemptId: input.attemptId,
+        providerExpiresAt: expiresAt,
+        reservations: revisionRows.get(requested.variantId) ?? [],
+      }),
+    );
+  }
+  return loadVariantFactsFromClient(client, {
+    buyerUserId: input.buyerUserId,
+    request: input.request,
+    now: input.now,
+    lock: true,
+    inventoryOverride: Object.freeze({
+      lots: Object.freeze(eligibleLots),
+      revisionByVariant,
+    }),
+  });
 }
 
 type ReviewRow = {
@@ -3080,6 +3397,15 @@ export function createPostgresCheckoutRepository(dependencies: Readonly<{
         ...input,
         lock: false,
       });
+    },
+    loadProviderCreateVariantFacts(input) {
+      return runSerializableWithRetry(
+        () => dependencies.runTransaction(
+          (client) => loadProviderCreateVariantFactsFromClient(client, input),
+          { isolationLevel: "serializable" },
+        ),
+        retryOptions,
+      );
     },
     findExactReview(input) {
       return findExactReviewByHash(dependencies.client, input, false);

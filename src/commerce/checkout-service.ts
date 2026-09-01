@@ -292,6 +292,15 @@ export type CheckoutRepository = Readonly<{
     request: CheckoutQuoteRequest;
     now: Date;
   }>) => Promise<VariantFactLoadResult>;
+  loadProviderCreateVariantFacts?: (input: Readonly<{
+    buyerUserId: string;
+    idempotencyKey: string;
+    orderId: string;
+    attemptId: string;
+    expectedStoredPricingRevision: string;
+    request: CheckoutQuoteRequest;
+    now: Date;
+  }>) => Promise<VariantFactLoadResult>;
   findExactReview: (input: Readonly<{
     orderId: string;
     buyerUserId: string;
@@ -518,6 +527,44 @@ function exactReplayRecord(
   const keys = Reflect.ownKeys(value);
   return requiredKeys.every((key) => Object.hasOwn(value, key)) &&
     keys.every((key) => typeof key === "string" && allowed.has(key));
+}
+
+function projectVariantFactLoadResult(value: unknown): VariantFactLoadResult | null {
+  try {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return null;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const okDescriptor = Object.getOwnPropertyDescriptor(value, "ok");
+    if (okDescriptor === undefined || !("value" in okDescriptor)) return null;
+    if (okDescriptor.value === true) {
+      if (!exactReplayRecord(value, ["ok", "value"])) return null;
+      const factDescriptor = Object.getOwnPropertyDescriptor(value, "value");
+      if (factDescriptor === undefined || !("value" in factDescriptor)) return null;
+      return Object.freeze({
+        ok: true as const,
+        value: factDescriptor.value as AuthoritativeVariantCheckoutFacts,
+      });
+    }
+    if (okDescriptor.value !== false ||
+      !exactReplayRecord(value, ["ok", "reasons"])) return null;
+    const reasonsDescriptor = Object.getOwnPropertyDescriptor(value, "reasons");
+    if (reasonsDescriptor === undefined || !("value" in reasonsDescriptor) ||
+      !Array.isArray(reasonsDescriptor.value) || reasonsDescriptor.value.length === 0 ||
+      reasonsDescriptor.value.length > 12) return null;
+    const reasons: string[] = [];
+    for (let index = 0; index < reasonsDescriptor.value.length; index += 1) {
+      if (!Object.hasOwn(reasonsDescriptor.value, index)) return null;
+      const reason = reasonsDescriptor.value[index];
+      if (typeof reason !== "string" || reason.trim() !== reason ||
+        reason.length === 0 || reason.length > 128) return null;
+      reasons.push(reason);
+    }
+    return Object.freeze({ ok: false as const, reasons: Object.freeze(reasons) });
+  } catch {
+    return null;
+  }
 }
 
 function boundedReplayText(value: unknown, maximum: number): value is string {
@@ -1149,16 +1196,47 @@ export function createCheckoutService(dependencies: Readonly<{
       return { status: "internal_conflict" };
     }
 
-    if (dependencies.repository.loadVariantFacts === undefined) {
-      return { status: "internal_conflict" };
+    let loaded: VariantFactLoadResult;
+    if (forcedFresh !== undefined) {
+      const loadProviderCreateVariantFacts =
+        dependencies.repository.loadProviderCreateVariantFacts;
+      if (loadProviderCreateVariantFacts === undefined) {
+        return { status: "internal_conflict" };
+      }
+      let projected: VariantFactLoadResult | null = null;
+      try {
+        projected = projectVariantFactLoadResult(
+          await loadProviderCreateVariantFacts({
+            buyerUserId: input.buyerUserId,
+            idempotencyKey: input.idempotencyKey,
+            orderId: identity.orderId,
+            attemptId: identity.attemptId,
+            expectedStoredPricingRevision:
+              forcedFresh.expectedStoredPricingRevision,
+            request,
+            now: authoritativeAt,
+          }),
+        );
+      } catch {
+        return { status: "internal_conflict" };
+      }
+      if (projected === null) return { status: "internal_conflict" };
+      loaded = projected;
+    } else {
+      if (dependencies.repository.loadVariantFacts === undefined) {
+        return { status: "internal_conflict" };
+      }
+      loaded = await dependencies.repository.loadVariantFacts({
+        buyerUserId: input.buyerUserId,
+        request,
+        now: authoritativeAt,
+      });
     }
-    const loaded = await dependencies.repository.loadVariantFacts({
-      buyerUserId: input.buyerUserId,
-      request,
-      now: authoritativeAt,
-    });
     if (!loaded.ok) {
-      if (loaded.reasons.includes("variant_catalog_incomplete")) {
+      if (
+        loaded.reasons.length === 1 &&
+        loaded.reasons[0] === "variant_catalog_incomplete"
+      ) {
         return Object.freeze({
           status: "CHECKOUT_UNAVAILABLE" as const,
           reasons: Object.freeze(request.items.map((item) => Object.freeze({
@@ -1167,11 +1245,20 @@ export function createCheckoutService(dependencies: Readonly<{
           }))),
         });
       }
+      if (forcedFresh !== undefined) return { status: "internal_conflict" };
       return { status: "denied", reasons: Object.freeze([...loaded.reasons]) };
     }
     const facts = loaded.value;
-    if (!isVariantFactsValid(facts, request, input.buyerUserId, authoritativeAt)) {
-      return { status: "denied", reasons: ["authoritative_facts_invalid"] };
+    try {
+      if (!isVariantFactsValid(facts, request, input.buyerUserId, authoritativeAt)) {
+        return forcedFresh === undefined
+          ? { status: "denied", reasons: ["authoritative_facts_invalid"] }
+          : { status: "internal_conflict" };
+      }
+    } catch {
+      return forcedFresh === undefined
+        ? { status: "denied", reasons: ["authoritative_facts_invalid"] }
+        : { status: "internal_conflict" };
     }
 
     const unreconciled =
@@ -1265,7 +1352,7 @@ export function createCheckoutService(dependencies: Readonly<{
     }
 
     const pricingRevision = await hashCanonicalEnvelope({
-      schemaVersion: 1,
+      schemaVersion: 2,
       kind: "canonical_variant_pricing_revision",
       lines: request.items.map((requested) => {
         const fact = factByVariant.get(requested.variantId)!;
@@ -1279,7 +1366,6 @@ export function createCheckoutService(dependencies: Readonly<{
           baseUnitMinor: fact.price.amountMinor,
           currency: fact.price.currency,
           availabilityRevision: fact.availabilityRevision,
-          inventoryRevision: fact.inventoryRevision,
           quantity: requested.quantity,
           activeAutomaticPromotions: line.activePromotions.map((promotion) => ({
             id: promotion.id,
@@ -2327,12 +2413,17 @@ export function createCheckoutService(dependencies: Readonly<{
           ? { rewardRedemptionPoints: parsed.value.rewardRedemptionPoints }
           : {}),
       });
-      const result = await quoteCanonicalVariant(
-        input,
-        request,
-        parsed.value.pricingRevision,
-        { expectedStoredPricingRevision: input.expectedStoredPricingRevision },
-      );
+      let result: CheckoutSessionQuoteResult;
+      try {
+        result = await quoteCanonicalVariant(
+          input,
+          request,
+          parsed.value.pricingRevision,
+          { expectedStoredPricingRevision: input.expectedStoredPricingRevision },
+        );
+      } catch {
+        return { status: "internal_conflict" };
+      }
       if (result.status === "loaded") return { status: "internal_conflict" };
       if (result.status !== "quoted") return result;
       const plan = projectAuthoritativeCheckoutPlan(result.plan);

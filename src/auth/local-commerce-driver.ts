@@ -544,6 +544,91 @@ export function createLocalCommerceDriverV1(
         }),
       });
     },
+    async loadProviderCreateVariantFacts(input) {
+      const conflict = () => Object.freeze({
+        ok: false as const,
+        reasons: Object.freeze(["provider_create_authority_conflict"]),
+      });
+      const record = state.attempts.get(
+        attemptKey(input.buyerUserId, input.idempotencyKey),
+      );
+      const order = state.orders.get(input.orderId);
+      if (
+        record === undefined ||
+        order === undefined ||
+        order.ownerUserId !== input.buyerUserId ||
+        record.stored.orderId !== input.orderId ||
+        record.stored.attemptId !== input.attemptId ||
+        record.stored.pricingRevision !== input.expectedStoredPricingRevision ||
+        (record.stored.status !== "created" &&
+          record.stored.status !== "provider_unknown") ||
+        record.stored.orderState !== "checkout_pending" ||
+        !record.stored.permitted ||
+        record.stored.reviewRequired ||
+        !record.stored.hasReservations ||
+        record.providerSessionId !== null ||
+        record.durable === null ||
+        record.providerPreparation === null ||
+        record.providerPreparation.providerRequestSchemaVersion !== 2 ||
+        record.durable.providerRequestSchemaVersion !== 2 ||
+        record.durable.buyerUserId !== input.buyerUserId ||
+        record.durable.idempotencyKey !== input.idempotencyKey ||
+        record.durable.orderId !== input.orderId ||
+        record.durable.attemptId !== input.attemptId ||
+        record.durable.attemptStatus !== record.stored.status ||
+        record.durable.orderState !== "checkout_pending" ||
+        record.durable.providerSessionId !== null ||
+        record.durable.providerExpiresAt !==
+          record.providerPreparation.providerExpiresAt ||
+        new Date(record.durable.providerExpiresAt).getTime() <= input.now.getTime()
+      ) return conflict();
+
+      const lines = record.durable.providerBindingSnapshot.lines;
+      const byVariant = new Map(lines.map((line) => [line.variantId, line]));
+      if (byVariant.size !== lines.length ||
+        lines.length !== input.request.items.length) return conflict();
+      for (const requested of input.request.items) {
+        const line = byVariant.get(requested.variantId);
+        if (line === undefined ||
+          line.requestedQuantity !== requested.quantity) return conflict();
+      }
+
+      // This local-only test double reuses the same canonical catalog builder,
+      // then projects aggregate reservation coverage from its durable V2 lines.
+      // Production uses per-lot database reservation rows instead.
+      const loaded = await checkoutRepository.loadVariantFacts!({
+        buyerUserId: input.buyerUserId,
+        request: input.request,
+        now: input.now,
+      });
+      if (!loaded.ok) return loaded;
+      return Object.freeze({
+        ok: true as const,
+        value: Object.freeze({
+          ...loaded.value,
+          items: Object.freeze(loaded.value.items.map((item) => {
+            const line = byVariant.get(item.variantId)!;
+            const lot = item.eligibleLots[0];
+            return Object.freeze({
+              ...item,
+              inventoryRevision:
+                `local-test:reservation:${input.attemptId}:${item.variantId}:` +
+                `${line.requestedQuantity}:${record.durable!.providerExpiresAt}`,
+              eligibleLots: lot === undefined
+                ? Object.freeze([])
+                : Object.freeze([Object.freeze({
+                    ...lot,
+                    receivedQuantity: Math.max(
+                      lot.receivedQuantity,
+                      line.requestedQuantity,
+                    ),
+                    availableQuantity: line.requestedQuantity,
+                  })]),
+            });
+          })),
+        }),
+      });
+    },
     async findExactReview(input) {
       const review = state.reviews.get(input.snapshotHash);
       if (!review || review.orderId !== input.orderId || review.ownerUserId !== input.buyerUserId) return null;

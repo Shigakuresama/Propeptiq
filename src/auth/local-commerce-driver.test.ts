@@ -39,6 +39,57 @@ async function openHostedSession(idempotencyKey: string) {
   };
 }
 
+async function openCanonicalHostedSession(idempotencyKey: string) {
+  const driver = getLocalTestDriver();
+  const identity = driver.loadIdentityByClerkId(
+    "LOCAL_TEST_ONLY_PROPEPTIQ_91C4E7_NON_ADMIN",
+  );
+  const principal = identity ? driver.loadPrincipal(identity.clerkUserId) : null;
+  const runtime = await createCheckoutServerRuntime({
+    environment,
+    identity,
+    principal,
+    localDriver: driver,
+  });
+  const request = {
+    items: [{
+      variantId: "55000000-0000-4000-8000-000000000001",
+      quantity: 2,
+    }],
+    destination: {
+      recipientName: "Synthetic Buyer",
+      line1: "100 Test Way",
+      line2: null,
+      city: "Los Angeles",
+      stateCode: "CA",
+      postalCode: "90001",
+      countryCode: "US" as const,
+    },
+  };
+  const quoted = await runtime!.quoteCheckout({
+    buyerUserId: ownerUserId,
+    idempotencyKey,
+    request,
+  });
+  if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+    throw new Error("expected local canonical quote");
+  }
+  const opened = await runtime!.startSession({
+    buyerUserId: ownerUserId,
+    idempotencyKey,
+    request: { ...request, pricingRevision: quoted.pricingRevision },
+  });
+  if (opened.status !== "open") throw new Error("expected local canonical session");
+  return {
+    driver,
+    idempotencyKey,
+    orderId: opened.orderId,
+    sessionId: opened.url.split("/").at(-1)!,
+    pricingRevision: quoted.pricingRevision,
+    request,
+  };
+}
+
 function attemptIdFromSession(sessionId: string): string {
   const value = sessionId.replace("cs_local_synthetic_", "");
   return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
@@ -76,6 +127,7 @@ describe("guarded local commerce driver", () => {
     const commerce = getLocalTestDriver().commerce;
     const repository = commerce.checkoutRepository;
     expect(repository.loadVariantFacts).toBeTypeOf("function");
+    expect(repository.loadProviderCreateVariantFacts).toBeTypeOf("function");
 
     const loaded = await repository.loadVariantFacts!({
       buyerUserId: ownerUserId,
@@ -206,5 +258,39 @@ describe("guarded local commerce driver", () => {
       secret: eventSecret,
     })).toBeNull();
     expect(driver.commerce.inspect()).toEqual(before);
+  });
+
+  it("fails local provider-create facts closed after canonical reservations become terminal", async () => {
+    const driver = getLocalTestDriver();
+    driver.commerce.reset();
+    const created = await openCanonicalHostedSession(
+      "6c000000-0000-4000-8000-000000000005",
+    );
+    const attemptId = attemptIdFromSession(created.sessionId);
+    await driver.commerce.checkoutRepository.releaseDefiniteFailure({
+      authority: "authoritative_provider_terminal",
+      providerEvidenceId: "synthetic-terminal-provider-create-evidence",
+      attemptId,
+      orderId: created.orderId,
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${attemptId}`,
+      cause: "definite_rejection",
+      targetAttemptStatus: "failed",
+    });
+
+    await expect(
+      driver.commerce.checkoutRepository.loadProviderCreateVariantFacts!({
+        buyerUserId: ownerUserId,
+        idempotencyKey: created.idempotencyKey,
+        orderId: created.orderId,
+        attemptId,
+        expectedStoredPricingRevision: created.pricingRevision,
+        request: created.request,
+        now: new Date(),
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reasons: ["provider_create_authority_conflict"],
+    });
   });
 });
