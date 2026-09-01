@@ -32,6 +32,7 @@ describe("RelatedProductsCarousel", () => {
   });
 
   it("renders configured cards and scroll controls with reduced-motion behavior", async () => {
+    const current = testCanonicalProduct([testPublicVariant({ id: "current-v" })], { id: "current", name: "Current Product" });
     const first = testCanonicalProduct([testPublicVariant()], { id: "related-a", name: "Related A" });
     const second = testCanonicalProduct([testPublicVariant({ id: "related-b-variant" })], { id: "related-b", name: "Related B" });
     const user = userEvent.setup();
@@ -41,7 +42,7 @@ describe("RelatedProductsCarousel", () => {
     Object.defineProperty(HTMLElement.prototype, "scrollBy", { configurable: true, value: scrollBy });
     originalMatchMedia = Object.getOwnPropertyDescriptor(window, "matchMedia");
     Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false })) });
-    render(<RelatedProductsCarousel currentProductId="current" products={[first, second, first]} pricing={pricing} />);
+    render(<RelatedProductsCarousel currentProductId="current" products={[second, current, first, second]} pricing={pricing} />);
     const list = screen.getByRole("list");
     Object.defineProperty(list, "clientWidth", { configurable: true, value: 640 });
     const next = screen.getByRole("button", { name: "Next related products" });
@@ -53,6 +54,7 @@ describe("RelatedProductsCarousel", () => {
     expect(document.activeElement).toBe(next);
     expect(scrollBy).toHaveBeenCalledWith({ left: 640, behavior: "smooth" });
     expect(screen.getAllByRole("article")).toHaveLength(2);
+    expect(screen.getAllByRole("article").map((article) => article.textContent)).toEqual(["Related B", "Related A"]);
     expect(screen.getAllByRole("article")[0]).toHaveAttribute("data-priority", "false");
     expect(next).toHaveAttribute("aria-controls", list.id);
     expect(previous).toHaveAttribute("aria-controls", list.id);

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { CartProvider } from "@/cart/cart-provider";
 import { CatalogItemDetail } from "./catalog-item-detail";
-import { testCanonicalProduct, testPricingContext, testPublicVariant } from "./storefront-test-fixtures";
+import { testCanonicalProduct, testPricingContext, testPublicVariant, testWinter30 } from "./storefront-test-fixtures";
 
 describe("real detail related composition", () => {
   beforeEach(() => window.localStorage.clear());
@@ -12,7 +12,7 @@ describe("real detail related composition", () => {
   it("renders the real detail → carousel → card path and adds a related item", async () => {
     const user = userEvent.setup();
     const related = testCanonicalProduct([testPublicVariant({ id: "composition-v", label: "5 mg" })], { id: "composition-related", name: "Composition Related" });
-    render(<CartProvider><CatalogItemDetail product={testCanonicalProduct()} pricing={testPricingContext()} relatedProducts={[related]} /></CartProvider>);
+    render(<CartProvider><CatalogItemDetail product={testCanonicalProduct()} pricing={testPricingContext("test", [testWinter30])} relatedProducts={[related]} /></CartProvider>);
     const section = screen.getByRole("region", { name: "Frequently Researched Together" });
     expect(section).toBeVisible();
     expect(within(section).getByRole("heading", { name: "Frequently Researched Together" })).toBeVisible();
@@ -24,6 +24,7 @@ describe("real detail related composition", () => {
     expect(related.image.height).toBe(1254);
     expect(image).toHaveAttribute("sizes");
     expect(image).toHaveAttribute("loading", "lazy");
+    expect(within(section).getByText("$7.00")).toBeVisible();
     await user.click(within(section).getByRole("button", { name: "Add Composition Related to cart" }));
     await waitFor(() => expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("Composition Related, 5 mg: 1 unit"));
   });
