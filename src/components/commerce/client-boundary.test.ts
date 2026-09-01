@@ -19,6 +19,7 @@ const clientEntries = [
 
 const clientSafeDependencies = [
   "src/catalog/storefront-price-presentation.ts",
+  "src/search/storefront-search.ts",
   "src/components/commerce/product-price.tsx",
   "src/components/commerce/variant-selector.tsx",
   "src/components/commerce/quantity-tier-selector.tsx",
@@ -85,6 +86,10 @@ describe("storefront client boundary", () => {
         );
       }
     }
+  });
+
+  it("keeps the pure storefront search core free of local runtime dependencies", () => {
+    expect(runtimeLocalImports("src/search/storefront-search.ts")).toEqual([]);
   });
 
   it("recursively bounds panel runtime imports and excludes server authorities", () => {
