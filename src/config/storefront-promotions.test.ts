@@ -100,6 +100,41 @@ describe("storefront promotion owner configuration", () => {
     ).toEqual(["ends-later", "starts-now"]);
   });
 
+  it("accepts an otherwise-valid promotion interval shorter than one millisecond", () => {
+    expect(
+      storefrontPromotionMatchesConfiguration(
+        configuredPromotion({
+          startAt: "2026-09-01T12:00:00.000000001Z",
+          endAt: "2026-09-01T12:00:00.000000002Z",
+        }),
+        configuredPromotion({
+          startAt: "2026-09-01T12:00:00.000000001Z",
+          endAt: "2026-09-01T12:00:00.000000002Z",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      "empty",
+      "2026-09-01T12:00:00.000000002Z",
+      "2026-09-01T12:00:00.000000002Z",
+    ],
+    [
+      "reversed",
+      "2026-09-01T12:00:00.000000002Z",
+      "2026-09-01T12:00:00.000000001Z",
+    ],
+  ] as const)("rejects a sub-millisecond %s interval", (_label, startAt, endAt) => {
+    expect(
+      resolveActiveConfiguredAutomaticPromotions(
+        [configuredPromotion({ startAt, endAt })],
+        now,
+      ),
+    ).toBeNull();
+  });
+
   it("fails closed for an invalid evaluation instant and malformed or duplicate lists", () => {
     expect(
       resolveActiveConfiguredAutomaticPromotions(
@@ -185,6 +220,66 @@ describe("storefront promotion owner configuration", () => {
 
     expect(
       storefrontPromotionMatchesConfiguration(candidate, configured),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      "different nanoseconds within the first microsecond",
+      "2026-09-01T12:00:00.000000001Z",
+      "2026-09-01T12:00:00.000000999Z",
+    ],
+    [
+      "different fourth-through-ninth fractional digits",
+      "2026-09-01T12:00:00.123000001Z",
+      "2026-09-01T12:00:00.123999999Z",
+    ],
+  ] as const)("rejects %s", (_label, configuredStart, candidateStart) => {
+    expect(
+      storefrontPromotionMatchesConfiguration(
+        configuredPromotion({ startAt: candidateStart }),
+        configuredPromotion({ startAt: configuredStart }),
+      ),
+    ).toBe(false);
+  });
+
+  it("matches the same nanosecond instant expressed with an offset and with Z", () => {
+    expect(
+      storefrontPromotionMatchesConfiguration(
+        configuredPromotion({
+          startAt: "2026-09-01T12:00:00.123456789Z",
+          endAt: "2026-10-01T00:00:00.987654321Z",
+        }),
+        configuredPromotion({
+          startAt: "2026-09-01T05:00:00.123456789-07:00",
+          endAt: "2026-09-30T17:00:00.987654321-07:00",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("matches equivalent offset and Z representations before the Unix epoch", () => {
+    expect(
+      storefrontPromotionMatchesConfiguration(
+        configuredPromotion({
+          startAt: "1969-12-31T23:59:59.123456789Z",
+        }),
+        configuredPromotion({
+          startAt: "1969-12-31T15:59:59.123456789-08:00",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["omitted and zero-padded fractions", "2026-09-01T12:00:00Z", "2026-09-01T12:00:00.000000000Z"],
+    ["short and padded fractions", "2026-09-01T12:00:00.1Z", "2026-09-01T12:00:00.100000000Z"],
+  ] as const)("matches equivalent %s", (_label, configuredStart, candidateStart) => {
+    expect(
+      storefrontPromotionMatchesConfiguration(
+        configuredPromotion({ startAt: candidateStart }),
+        configuredPromotion({ startAt: configuredStart }),
+      ),
     ).toBe(true);
   });
 

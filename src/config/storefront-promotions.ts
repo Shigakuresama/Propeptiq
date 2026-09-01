@@ -245,12 +245,16 @@ function normalizeConfiguration(
   ) {
     return null;
   }
-  if (
-    entry.startAt !== null &&
-    entry.endAt !== null &&
-    Date.parse(entry.endAt) <= Date.parse(entry.startAt)
-  ) {
-    return null;
+  if (entry.startAt !== null && entry.endAt !== null) {
+    const startInstant = strictInstantEpochNanoseconds(entry.startAt);
+    const endInstant = strictInstantEpochNanoseconds(entry.endAt);
+    if (
+      startInstant === null ||
+      endInstant === null ||
+      endInstant <= startInstant
+    ) {
+      return null;
+    }
   }
   return Object.freeze({
     id: entry.id,
@@ -315,11 +319,28 @@ function scopesMatch(
   return false;
 }
 
+function strictInstantEpochNanoseconds(value: unknown): bigint | null {
+  if (!isStrictStorefrontPromotionInstant(value)) return null;
+  const match = strictInstant.exec(value);
+  if (match === null) return null;
+  const fraction = (match[7] ?? "").padEnd(9, "0");
+  const millisecondsWithinSecond = BigInt(fraction.slice(0, 3));
+  const epochMilliseconds = BigInt(Date.parse(value));
+  return (
+    (epochMilliseconds - millisecondsWithinSecond) * 1_000_000n +
+    BigInt(fraction)
+  );
+}
+
 function instantsMatch(candidate: unknown, configured: string | null): boolean {
   if (candidate === null || configured === null) return candidate === configured;
-  return isStrictStorefrontPromotionInstant(candidate) &&
-    isStrictStorefrontPromotionInstant(configured) &&
-    Date.parse(candidate) === Date.parse(configured);
+  const candidateInstant = strictInstantEpochNanoseconds(candidate);
+  const configuredInstant = strictInstantEpochNanoseconds(configured);
+  return (
+    candidateInstant !== null &&
+    configuredInstant !== null &&
+    candidateInstant === configuredInstant
+  );
 }
 
 export function storefrontPromotionMatchesConfiguration(
