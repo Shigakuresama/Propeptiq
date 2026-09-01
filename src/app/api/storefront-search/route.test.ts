@@ -12,11 +12,11 @@ import type {
 
 const {
   defaultLoadView,
-  defaultLoadInformation,
+  defaultLoadContentView,
   defaultBuildIndex,
 } = vi.hoisted(() => ({
   defaultLoadView: vi.fn(),
-  defaultLoadInformation: vi.fn(),
+  defaultLoadContentView: vi.fn(),
   defaultBuildIndex: vi.fn(),
 }));
 
@@ -24,8 +24,8 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/catalog/storefront-public-server", () => ({
   getPublicStorefrontView: defaultLoadView,
 }));
-vi.mock("@/content/public-information", () => ({
-  getApprovedPublicInformation: defaultLoadInformation,
+vi.mock("@/content/storefront-public-content-server", () => ({
+  getPublicStorefrontContentView: defaultLoadContentView,
 }));
 vi.mock("@/search/storefront-index", () => ({
   buildStorefrontSearchIndex: defaultBuildIndex,
@@ -52,6 +52,9 @@ const safeIndex: StorefrontSearchIndex = Object.freeze({
     }),
   ]),
 });
+const defaultInformationRows = Object.freeze([
+  Object.freeze({ synthetic: "default-information-row" }),
+]);
 
 function request(suffix = ""): Request {
   return new Request(`https://example.test/api/storefront-search${suffix}`);
@@ -118,14 +121,22 @@ beforeEach(() => {
   defaultLoadView.mockResolvedValue({
     catalog: { products: [{ synthetic: "default-product-row" }] },
   });
-  defaultLoadInformation.mockReturnValue([
-    { synthetic: "default-information-row" },
-  ]);
+  defaultLoadContentView.mockResolvedValue({
+    homepage: {
+      whyChoose: [{
+        id: "server-view-homepage-must-not-cross",
+        title: "Server view homepage must not cross",
+        body: "Server view body must not cross.",
+      }],
+      faqs: [],
+    },
+    information: defaultInformationRows,
+  });
   defaultBuildIndex.mockReturnValue(safeIndex);
 });
 
 describe("GET /api/storefront-search", () => {
-  it("uses the pre-import default accessor, registry, and builder exactly once", async () => {
+  it("uses the pre-import storefront and content-view accessors and builder exactly once", async () => {
     const response = await GET(request());
 
     expect(response.status).toBe(200);
@@ -135,12 +146,53 @@ describe("GET /api/storefront-search", () => {
     );
     await expect(response.json()).resolves.toEqual(safeIndex);
     expect(defaultLoadView).toHaveBeenCalledTimes(1);
-    expect(defaultLoadInformation).toHaveBeenCalledTimes(1);
+    expect(defaultLoadContentView).toHaveBeenCalledTimes(1);
     expect(defaultBuildIndex).toHaveBeenCalledTimes(1);
     expect(defaultBuildIndex).toHaveBeenCalledWith({
       products: [{ synthetic: "default-product-row" }],
       information: [{ synthetic: "default-information-row" }],
     });
+    const defaultInput = defaultBuildIndex.mock.calls[0]![0] as
+      StorefrontSearchIndexInput;
+    expect(Object.keys(defaultInput)).toEqual(["products", "information"]);
+    expect(defaultInput.information).toBe(defaultInformationRows);
+    expect(JSON.stringify(defaultBuildIndex.mock.calls[0])).not.toContain(
+      "server-view-homepage-must-not-cross",
+    );
+  });
+
+  it.each([
+    [
+      "synchronous content-view failure",
+      () => { throw new Error("content-view-sync-sensitive-detail"); },
+    ],
+    [
+      "rejected content-view failure",
+      () => Promise.reject(new Error("content-view-reject-sensitive-detail")),
+    ],
+    ["null server view", () => Promise.resolve(null)],
+    ["missing information", () => Promise.resolve({ homepage: {} })],
+    [
+      "non-array information",
+      () => Promise.resolve({ homepage: {}, information: {} }),
+    ],
+  ])("contains a %s behind the fixed default-route failure", async (_label, loadContentView) => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    defaultLoadContentView.mockImplementationOnce(loadContentView);
+
+    try {
+      const text = await expectUnavailableResponse(GET);
+
+      expect(defaultLoadView).toHaveBeenCalledTimes(1);
+      expect(defaultLoadContentView).toHaveBeenCalledTimes(1);
+      expect(defaultBuildIndex).not.toHaveBeenCalled();
+      expect(errorLog.mock.calls).toEqual([
+        ["STOREFRONT_SEARCH_INDEX_UNAVAILABLE"],
+      ]);
+      expect(text).not.toMatch(/content-view|sensitive|homepage/iu);
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("supports product-only and fully empty success through the injected factory", async () => {
@@ -290,6 +342,38 @@ describe("GET /api/storefront-search", () => {
 
   it.each([
     [
+      "synchronous approved-information loader failure",
+      () => { throw new Error("information-sync-sensitive-detail"); },
+    ],
+    [
+      "rejected approved-information loader failure",
+      () => Promise.reject(new Error("information-reject-sensitive-detail")),
+    ],
+  ])("contains an injected %s behind the fixed 503", async (_label, failingLoader) => {
+    const loadView = vi.fn(async () => ({ catalog: { products: [] } }));
+    const loadInformation = vi.fn(failingLoader);
+    const buildIndex = vi.fn(() => emptyIndex);
+    const reportUnavailable = vi.fn();
+    const handler = createStorefrontSearchHandler({
+      loadView,
+      loadInformation,
+      buildIndex,
+      reportUnavailable,
+    });
+
+    const text = await expectUnavailableResponse(handler);
+
+    expect(loadView).toHaveBeenCalledTimes(1);
+    expect(loadInformation).toHaveBeenCalledTimes(1);
+    expect(buildIndex).not.toHaveBeenCalled();
+    expect(reportUnavailable.mock.calls).toEqual([
+      ["STOREFRONT_SEARCH_INDEX_UNAVAILABLE"],
+    ]);
+    expect(text).not.toMatch(/information-(?:sync|reject)|sensitive/iu);
+  });
+
+  it.each([
+    [
       "sparse display configurations",
       () => ({
         products: [{
@@ -416,7 +500,33 @@ describe("GET /api/storefront-search", () => {
     }
   });
 
-  it("serializes only the wrapper and eight SearchEntry fields without server-only leakage", async () => {
+  it("keeps the exact production content view information-empty without fabricated FAQ or Why copy", async () => {
+    const actualContent = await vi.importActual<
+      typeof import("@/content/storefront-public-content-server")
+    >("@/content/storefront-public-content-server");
+    const actualIndex = await vi.importActual<
+      typeof import("@/search/storefront-index")
+    >("@/search/storefront-index");
+    const handler = createStorefrontSearchHandler({
+      loadView: async () => ({ catalog: { products: [] } }),
+      loadInformation: async () =>
+        (await actualContent.getPublicStorefrontContentView()).information,
+      buildIndex: actualIndex.buildStorefrontSearchIndex,
+    });
+
+    const response = await handler(request());
+    const body = await response.json() as StorefrontSearchIndex;
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ version: 1, entries: [] });
+    expect(body.entries.filter(({ group }) => group === "information")).toEqual([]);
+    expect(JSON.stringify(body)).not.toMatch(/why choose|frequently asked|faq/iu);
+  });
+
+  it("serializes only the wrapper and eight SearchEntry fields without raw records or server-view leakage", async () => {
+    const actualIndex = await vi.importActual<
+      typeof import("@/search/storefront-index")
+    >("@/search/storefront-index");
     const handler = createStorefrontSearchHandler({
       loadView: async () => ({
         catalog: {
@@ -428,8 +538,21 @@ describe("GET /api/storefront-search", () => {
           inventory: "inventory-sensitive-detail",
         },
       }),
-      loadInformation: () => [],
-      buildIndex: () => safeIndex,
+      loadInformation: async () => [{
+        id: "synthetic-approved-route-information",
+        title: "Synthetic approved route information",
+        href: "/quality-records",
+        description: "Synthetic approved route information body.",
+        keywords: ["synthetic approved route"],
+        status: "approved",
+        kind: "faq",
+        sourceReferences: ["source-reference-sensitive-detail"],
+        approvalNote: "approval-note-sensitive-detail",
+        reviewedAt: "2026-08-31T00:00:00.000Z",
+        effectiveAt: "2026-08-31T00:00:00.000Z",
+        homepage: { whyChoose: "server-view-sensitive-detail" },
+      }] as unknown as readonly ApprovedPublicInformation[],
+      buildIndex: actualIndex.buildStorefrontSearchIndex,
     });
     const response = await handler(request());
     const body = await response.json() as unknown;
@@ -454,6 +577,16 @@ describe("GET /api/storefront-search", () => {
       "status",
       "kind",
       "content",
+      "homepage",
+      "whyChoose",
+      "faqs",
+      "question",
+      "answer",
+      "anchor",
+      "sourceReferences",
+      "approvalNote",
+      "reviewedAt",
+      "effectiveAt",
       "productId",
       "variantId",
       "baseUnitMinor",
@@ -469,7 +602,7 @@ describe("GET /api/storefront-search", () => {
     ];
     expect(collected.keys.filter((key) => forbiddenKeys.includes(key))).toEqual([]);
     expect(JSON.stringify(collected.values)).not.toMatch(
-      /catalog-sensitive|provider-sensitive|inventory-sensitive/iu,
+      /catalog-sensitive|provider-sensitive|inventory-sensitive|source-reference-sensitive|approval-note-sensitive|server-view-sensitive|2026-08-31/iu,
     );
   });
 
@@ -485,7 +618,7 @@ describe("GET /api/storefront-search", () => {
 
     expect(importSpecifiers.sort()).toEqual([
       "@/catalog/storefront-public-server",
-      "@/content/public-information",
+      "@/content/storefront-public-content-server",
       "@/search/storefront-index",
       "server-only",
     ]);

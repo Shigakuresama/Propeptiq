@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getPublicStorefrontView } from "@/catalog/storefront-public-server";
-import { getApprovedPublicInformation } from "@/content/public-information";
+import { getPublicStorefrontContentView } from "@/content/storefront-public-content-server";
 import {
   buildStorefrontSearchIndex,
   type StorefrontSearchIndex,
@@ -12,7 +12,7 @@ const UNAVAILABLE_DIAGNOSTIC = "STOREFRONT_SEARCH_INDEX_UNAVAILABLE" as const;
 
 export type StorefrontSearchRouteDependencies = Readonly<{
   loadView?: () => Promise<unknown>;
-  loadInformation?: () => unknown;
+  loadInformation?: () => unknown | Promise<unknown>;
   buildIndex?: (
     input: StorefrontSearchIndexInput,
   ) => StorefrontSearchIndex;
@@ -50,7 +50,8 @@ export function createStorefrontSearchHandler(
 ): (request: Request) => Promise<Response> {
   const loadView = dependencies.loadView ?? getPublicStorefrontView;
   const loadInformation =
-    dependencies.loadInformation ?? getApprovedPublicInformation;
+    dependencies.loadInformation ??
+      (async () => (await getPublicStorefrontContentView()).information);
   const buildIndex = dependencies.buildIndex ?? buildStorefrontSearchIndex;
   const reportUnavailable =
     dependencies.reportUnavailable ?? defaultUnavailableReporter;
@@ -82,7 +83,7 @@ export function createStorefrontSearchHandler(
         throw new TypeError("Malformed storefront products");
       }
 
-      const information = loadInformation();
+      const information = await loadInformation();
       if (!Array.isArray(information)) {
         throw new TypeError("Malformed approved information");
       }

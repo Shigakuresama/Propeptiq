@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { buildStorefrontSearchIndex } from "@/search/storefront-index";
+import { searchEntries } from "@/search/storefront-search";
+
 import {
   createPublicStorefrontContentViewAccessor,
   getPublicStorefrontContentView,
@@ -84,6 +87,109 @@ describe("server-only public storefront content view", () => {
     expect(JSON.stringify(view)).not.toMatch(/approvalNote|sourceReferences|reviewedAt|effectiveAt|kind/iu);
   });
 
+  it("feeds approved Why Choose and FAQ destinations into the unchanged index and shared scorer", async () => {
+    const getView = createPublicStorefrontContentViewAccessor({
+      loadControlledContent: () => [approvedWhy(), approvedFaq()],
+      loadInformationRecords: () => [],
+      loadDestinations: () => exactDestinations,
+      reportUnavailable: vi.fn(),
+    });
+
+    const view = await getView();
+    const index = buildStorefrontSearchIndex({
+      products: [],
+      information: view.information,
+    });
+
+    expect(index.entries.map(({ id, group, href }) => ({ id, group, href }))).toEqual([
+      {
+        id: "information:homepage:why-choose-propeptiq",
+        group: "information",
+        href: "/#why-choose-propeptiq",
+      },
+      {
+        id: "information:homepage:faq:fictional-question",
+        group: "information",
+        href: "/#faq-fictional-question",
+      },
+    ]);
+    for (const entry of index.entries) {
+      expect(Object.keys(entry)).toEqual([
+        "id",
+        "group",
+        "title",
+        "href",
+        "description",
+        "exactTerms",
+        "keywords",
+        "popularityRank",
+      ]);
+    }
+    expect(searchEntries(index.entries, "Fictional value")[0]?.entry.id).toBe(
+      "information:homepage:why-choose-propeptiq",
+    );
+    expect(
+      searchEntries(index.entries, "Fictional value body")[0]?.entry.id,
+    ).toBe("information:homepage:why-choose-propeptiq");
+    expect(
+      searchEntries(index.entries, "Fictional question")[0]?.entry.id,
+    ).toBe("information:homepage:faq:fictional-question");
+    expect(searchEntries(index.entries, "Fictional answer")[0]?.entry.id).toBe(
+      "information:homepage:faq:fictional-question",
+    );
+    expect(JSON.stringify(index)).not.toMatch(
+      /sourceReferences|approvalNote|reviewedAt|effectiveAt|whyChoose|faqs/iu,
+    );
+  });
+
+  it("omits draft and retired homepage records while retaining approved records", async () => {
+    const getView = createPublicStorefrontContentViewAccessor({
+      loadControlledContent: () => [
+        { ...approvedWhy("fictional-draft-value"), status: "draft" },
+        { ...approvedFaq("fictional-retired-question"), status: "retired" },
+        approvedWhy(),
+        approvedFaq(),
+      ],
+      loadInformationRecords: () => [],
+      loadDestinations: () => exactDestinations,
+      reportUnavailable: vi.fn(),
+    });
+
+    const view = await getView();
+
+    expect(view.homepage.whyChoose.map(({ id }) => id)).toEqual([
+      "fictional-value",
+    ]);
+    expect(view.homepage.faqs.map(({ id }) => id)).toEqual([
+      "fictional-question",
+    ]);
+    expect(JSON.stringify(view)).not.toMatch(/fictional-draft|fictional-retired/iu);
+  });
+
+  it.each([
+    ["unsafe approved ID", [approvedWhy("Unsafe ID")]],
+    [
+      "duplicate approved homepage ID",
+      [approvedWhy("fictional-duplicate"), approvedFaq("fictional-duplicate")],
+    ],
+  ])("fails the whole controlled projection closed for an %s", async (_label, records) => {
+    const reportUnavailable = vi.fn();
+    const getView = createPublicStorefrontContentViewAccessor({
+      loadControlledContent: () => records,
+      loadInformationRecords: () => [],
+      loadDestinations: () => exactDestinations,
+      reportUnavailable,
+    });
+
+    expect(await getView()).toEqual({
+      homepage: { whyChoose: [], faqs: [] },
+      information: [],
+    });
+    expect(reportUnavailable.mock.calls).toEqual([
+      ["PUBLIC_STOREFRONT_CONTENT_UNAVAILABLE"],
+    ]);
+  });
+
   it.each([
     ["duplicate ID", approvedInformation({ id: "homepage:why-choose-propeptiq" })],
     ["duplicate href", approvedInformation({ href: "/#why-choose-propeptiq" })],
@@ -163,6 +269,25 @@ describe("server-only public storefront content view", () => {
     expect(reportUnavailable).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["FAQ section anchor", ["faq-fictional-question"]],
+    ["FAQ item anchor", ["faq"]],
+  ])("omits FAQ content when the approved %s is missing", async (_label, allowedAnchors) => {
+    const reportUnavailable = vi.fn();
+    const getView = createPublicStorefrontContentViewAccessor({
+      loadControlledContent: () => [approvedFaq()],
+      loadInformationRecords: () => [],
+      loadDestinations: () => [{ path: "/", allowedAnchors }],
+      reportUnavailable,
+    });
+
+    const view = await getView();
+
+    expect(view.homepage.faqs).toEqual([]);
+    expect(view.information).toEqual([]);
+    expect(reportUnavailable).not.toHaveBeenCalled();
+  });
+
   it("uses only the fixed diagnostic when the default reporter handles a failure", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const getView = createPublicStorefrontContentViewAccessor({
@@ -224,8 +349,14 @@ describe("server-only public storefront content view", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const view = await getPublicStorefrontContentView();
+    const index = buildStorefrontSearchIndex({
+      products: [],
+      information: view.information,
+    });
 
     expect(view).toEqual({ homepage: { whyChoose: [], faqs: [] }, information: [] });
+    expect(index).toEqual({ version: 1, entries: [] });
+    expect(JSON.stringify(index)).not.toMatch(/why choose|frequently asked|faq/iu);
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });

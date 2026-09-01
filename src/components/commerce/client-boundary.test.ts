@@ -137,7 +137,13 @@ function resolveRuntimeLocalImportForTest(from: string, specifier: string): stri
 }
 
 function searchClientAuthorityViolation(from: string, specifier: string): boolean {
-  if (genericClientAuthorityViolation(specifier) || /(?:^|[/_-])cart(?:$|[/_.-])/iu.test(specifier)) {
+  if (
+    genericClientAuthorityViolation(specifier) ||
+    /(?:^|[/_-])cart(?:$|[/_.-])/iu.test(specifier) ||
+    /storefront-public-content-server|(?:^|\/)storefront-content(?:\.|$)/iu.test(
+      specifier,
+    )
+  ) {
     return true;
   }
   if (!isLocalRuntimeSpecifier(specifier)) return false;
@@ -302,7 +308,26 @@ describe("storefront client boundary", () => {
     expect(directRuntimeImports).toContain("@/search/storefront-search");
     expect(directRuntimeImports).toContain("@/content/public-information");
     expect(directRuntimeImports).not.toContain("@/search/storefront-index");
+    expect(directRuntimeImports).not.toContain(
+      "@/content/storefront-public-content-server",
+    );
+    expect(directRuntimeImports).not.toContain("@/content/storefront-content");
     expect(visited.size).toBeGreaterThan(searchClientPaths.length);
+  });
+
+  it.each([
+    ["server-only content view", "@/content/storefront-public-content-server"],
+    ["raw controlled content", "@/content/storefront-content"],
+    ["server-only marker", "server-only"],
+    ["environment", "@/env/runtime"],
+    ["database", "@/db/runtime"],
+    ["provider", "@/commerce/payment-provider"],
+    ["cart", "@/cart/cart-provider"],
+    ["checkout", "@/commerce/checkout-service"],
+  ] as const)("rejects search-client runtime access to %s", (_label, specifier) => {
+    expect(
+      searchClientAuthorityViolation(searchClientPaths[0], specifier),
+    ).toBe(true);
   });
 
   it("keeps catalog discovery data serializable and imports only the browser-safe core at runtime", () => {

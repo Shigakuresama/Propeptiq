@@ -324,6 +324,50 @@ describe("buildStorefrontSearchIndex", () => {
     ]);
   });
 
+  it("indexes approved homepage destinations as ordinary information and finds approved title and body text", () => {
+    const index = build([], [
+      information({
+        id: "homepage:why-choose-propeptiq",
+        title: "Why choose Fictional PropeptIQ",
+        href: "/#why-choose-propeptiq",
+        description:
+          "Fictional laboratory value: Fictional approved value body.",
+        keywords: ["Fictional laboratory value"],
+      }),
+      information({
+        id: "homepage:faq:fictional-question",
+        title: "What is the fictional research question?",
+        href: "/#faq-fictional-question",
+        description: "Fictional approved answer without use guidance.",
+        keywords: [],
+      }),
+    ]);
+
+    expect(index.entries.map(({ id, group, href }) => ({ id, group, href }))).toEqual([
+      {
+        id: "information:homepage:why-choose-propeptiq",
+        group: "information",
+        href: "/#why-choose-propeptiq",
+      },
+      {
+        id: "information:homepage:faq:fictional-question",
+        group: "information",
+        href: "/#faq-fictional-question",
+      },
+    ]);
+    expect(
+      searchEntries(index.entries, "Fictional laboratory value body")[0]
+        ?.entry.id,
+    ).toBe("information:homepage:why-choose-propeptiq");
+    expect(
+      searchEntries(index.entries, "fictional research question")[0]?.entry.id,
+    ).toBe("information:homepage:faq:fictional-question");
+    expect(
+      searchEntries(index.entries, "approved answer without use guidance")[0]
+        ?.entry.id,
+    ).toBe("information:homepage:faq:fictional-question");
+  });
+
   it("keeps the empty production information registry empty and synthesizes no destinations", () => {
     expect(getApprovedPublicInformation()).toEqual([]);
     const index = build([], getApprovedPublicInformation());
