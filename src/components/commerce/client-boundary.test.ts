@@ -12,6 +12,7 @@ const searchClientPaths = [
   "src/components/search/site-search-launcher.tsx",
   "src/components/search/site-search-sheet.tsx",
 ] as const;
+const newsletterClientPath = "src/components/site/newsletter-form.tsx";
 
 const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
@@ -22,6 +23,7 @@ const clientEntries = [
   "src/components/commerce/quick-add-variant-sheet.tsx",
   "src/components/commerce/product-purchase-panel.tsx",
   promotionBarPath,
+  newsletterClientPath,
   ...searchClientPaths,
   "src/cart/cart-provider.tsx",
 ] as const;
@@ -33,6 +35,7 @@ const clientSafeDependencies = [
   "src/components/commerce/variant-selector.tsx",
   "src/components/commerce/quantity-tier-selector.tsx",
   "src/domain/concentration.ts",
+  "src/newsletter/contracts.ts",
 ] as const;
 
 function source(path: string): string {
@@ -268,6 +271,34 @@ describe("storefront client boundary", () => {
         );
       }
     }
+  });
+
+  it("recursively keeps the newsletter browser graph free of server, provider, PII-storage, cart, and checkout authority", () => {
+    const pending = [newsletterClientPath];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const contents = source(current);
+      expect(contents, `${current} server or secret authority`).not.toMatch(
+        /server-only|process\.env|@\/env|@\/config|@\/db|resend|stripe|payment-provider|provider-repositor|cart-provider|checkout-service/iu,
+      );
+      expect(contents, `${current} browser persistence or logging`).not.toMatch(
+        /localStorage|sessionStorage|document\.cookie|console\.(?:log|warn|error)/u,
+      );
+      for (const specifier of runtimeLocalImports(current)) {
+        expect(
+          genericClientAuthorityViolation(specifier),
+          `${current} forbidden newsletter client authority ${specifier}`,
+        ).toBe(false);
+        pending.push(resolveRuntimeLocalImportForTest(current, specifier));
+      }
+    }
+
+    expect(visited).toContain(newsletterClientPath);
+    expect(visited).toContain("src/newsletter/contracts.ts");
+    expect(visited).not.toContain("src/newsletter/server.ts");
   });
 
   it("keeps the pure storefront search core free of local runtime dependencies", () => {

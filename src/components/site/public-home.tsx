@@ -7,13 +7,18 @@ import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
 import { ProgramStrip } from "@/components/growth/program-strip";
 import { FaqSection } from "@/components/site/faq-section";
+import { NewsletterForm } from "@/components/site/newsletter-form";
 import { ProofRail } from "@/components/site/proof-rail";
 import { WhyChoosePropeptIQ } from "@/components/site/why-choose-propeptiq";
 import { Button } from "@/components/ui/button";
 import type { ApprovedHomepageContent } from "@/content/storefront-content";
 import type { LoyaltyPolicy } from "@/domain/rewards";
 import type { ReferralPolicy } from "@/domain/referrals";
-import { researchRestrictions } from "@/lib/site-content";
+import {
+  newsletterConfiguration,
+  researchRestrictions,
+  type ApprovedNewsletterPrivacyHref,
+} from "@/lib/site-content";
 
 const emptyHomepageContent: ApprovedHomepageContent = Object.freeze({
   whyChoose: Object.freeze([]),
@@ -22,6 +27,7 @@ const emptyHomepageContent: ApprovedHomepageContent = Object.freeze({
 
 export function PublicHome({
   homepageContent = emptyHomepageContent,
+  newsletterPrivacyHref = newsletterConfiguration.privacyHref,
   loyaltyPolicy = null,
   referralPolicy = null,
   syntheticLocal = false,
@@ -30,6 +36,7 @@ export function PublicHome({
   pricing,
 }: {
   homepageContent?: ApprovedHomepageContent | undefined;
+  newsletterPrivacyHref?: ApprovedNewsletterPrivacyHref | null | undefined;
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
   syntheticLocal?: boolean;
@@ -164,6 +171,7 @@ export function PublicHome({
 
       <WhyChoosePropeptIQ items={homepageContent.whyChoose} />
       <FaqSection entries={homepageContent.faqs} />
+      <NewsletterForm privacyHref={newsletterPrivacyHref} />
 
       <section className="border-t border-border py-14 lg:py-16" aria-labelledby="quality-callout-heading">
         <div className="site-container grid gap-6 md:grid-cols-[auto_1fr_auto] md:items-center">
