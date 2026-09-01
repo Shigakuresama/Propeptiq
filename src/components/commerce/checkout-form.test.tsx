@@ -52,6 +52,28 @@ function authoritativeQuote(revision = pricingRevision) {
   };
 }
 
+function safePriceChangedCart() {
+  return {
+    items: [{
+      variantId,
+      quantity: 2,
+      available: true,
+      name: "Synthetic local test only — Alpha",
+      packageForm: "Research vial",
+      variantLabel: "5 mg test fixture",
+      sku: "SYNTHETIC-ALPHA-5MG",
+      unitAmountMinor: 2400,
+      lineSubtotalMinor: 4800,
+      currency: "USD",
+    }],
+    subtotalMinor: 4800,
+    currency: "USD",
+    taxMinor: null,
+    shippingMinor: null,
+    finalDiscountMinor: null,
+  };
+}
+
 async function fillDestination(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText("Recipient name"), "Synthetic Research Buyer");
   await user.type(screen.getByLabelText("Address line 1"), "100 Test Way");
@@ -120,7 +142,7 @@ describe("CheckoutForm", () => {
       .mockResolvedValueOnce(response(authoritativeQuote()))
       .mockResolvedValueOnce(response({
         status: "PRICE_CHANGED", pricingRevision: "e".repeat(64),
-        cart: preview(),
+        cart: safePriceChangedCart(),
       }))
       .mockResolvedValueOnce(response(authoritativeQuote("e".repeat(64))));
     render(<CheckoutForm promotions={[]} />);
@@ -142,9 +164,81 @@ describe("CheckoutForm", () => {
     await user.click(screen.getByRole("button", { name: "Try authoritative quote again" }));
     expect(await screen.findByRole("button", { name: "Continue to hosted payment" })).toBeVisible();
     const quoteCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/checkout/quote");
-    expect((quoteCalls[0]![1] as RequestInit).headers).toEqual(
-      (quoteCalls[1]![1] as RequestInit).headers,
-    );
+    const firstHeaders = (quoteCalls[0]![1] as RequestInit).headers as Record<string, string>;
+    const refreshedHeaders = (quoteCalls[1]![1] as RequestInit).headers as Record<string, string>;
+    expect(refreshedHeaders["Content-Type"]).toBe(firstHeaders["Content-Type"]);
+    expect(refreshedHeaders["Idempotency-Key"]).not.toBe(firstHeaders["Idempotency-Key"]);
+  });
+
+  it.each([
+    ["network error", "reject"],
+    ["provider-unknown result", "provider_unknown"],
+    ["generic unavailable result", "unavailable"],
+  ])("retains the idempotency key across a %s session retry", async (_label, outcome) => {
+    const user = userEvent.setup();
+    fetchMock.mockReset()
+      .mockResolvedValueOnce(response(preview()))
+      .mockResolvedValueOnce(response(authoritativeQuote()));
+    if (outcome === "reject") {
+      fetchMock.mockRejectedValueOnce(new Error("synthetic network failure"));
+    } else {
+      fetchMock.mockResolvedValueOnce(response({ status: outcome }));
+    }
+    fetchMock.mockResolvedValueOnce(response({ status: "provider_unknown" }));
+
+    render(<CheckoutForm promotions={[]} />);
+    await screen.findByRole("status");
+    await fillDestination(user);
+    await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
+    await user.click(await screen.findByRole("button", { name: "Continue to hosted payment" }));
+    await user.click(await screen.findByRole("button", { name: "Try hosted payment again" }));
+
+    await waitFor(() => {
+      const sessionCalls = fetchMock.mock.calls.filter(([url]) =>
+        url === "/api/checkout/sessions");
+      expect(sessionCalls).toHaveLength(2);
+    });
+    const sessionCalls = fetchMock.mock.calls.filter(([url]) =>
+      url === "/api/checkout/sessions");
+    const firstHeaders = (sessionCalls[0]![1] as RequestInit)
+      .headers as Record<string, string>;
+    const retriedHeaders = (sessionCalls[1]![1] as RequestInit)
+      .headers as Record<string, string>;
+    expect(retriedHeaders["Idempotency-Key"])
+      .toBe(firstHeaders["Idempotency-Key"]);
+  });
+
+  it("does not rotate the idempotency key for a malformed PRICE_CHANGED response", async () => {
+    const user = userEvent.setup();
+    fetchMock.mockReset()
+      .mockResolvedValueOnce(response(preview()))
+      .mockResolvedValueOnce(response(authoritativeQuote()))
+      .mockResolvedValueOnce(response({
+        status: "PRICE_CHANGED",
+        pricingRevision: "e".repeat(64),
+        cart: { items: [] },
+      }))
+      .mockResolvedValueOnce(response({ status: "provider_unknown" }));
+
+    render(<CheckoutForm promotions={[]} />);
+    await screen.findByRole("status");
+    await fillDestination(user);
+    await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
+    await user.click(await screen.findByRole("button", { name: "Continue to hosted payment" }));
+    await user.click(await screen.findByRole("button", { name: "Try hosted payment again" }));
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([url]) =>
+        url === "/api/checkout/sessions")).toHaveLength(2);
+    });
+    const sessionCalls = fetchMock.mock.calls.filter(([url]) =>
+      url === "/api/checkout/sessions");
+    const firstHeaders = (sessionCalls[0]![1] as RequestInit)
+      .headers as Record<string, string>;
+    const retriedHeaders = (sessionCalls[1]![1] as RequestInit)
+      .headers as Record<string, string>;
+    expect(retriedHeaders["Idempotency-Key"])
+      .toBe(firstHeaders["Idempotency-Key"]);
   });
 
   it("retains accessible required destination controls", async () => {

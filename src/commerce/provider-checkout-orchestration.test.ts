@@ -602,6 +602,7 @@ function stripeProviderWith(
 function canonicalSetup(
   provider: PaymentProvider,
   verifyStatus: "verified" | "unavailable" = "verified",
+  shippingAmountMinor = 700,
 ) {
   const trace: string[] = [];
   let durable: Record<string, unknown> | null = null;
@@ -735,7 +736,7 @@ function canonicalSetup(
     configuredPromotions: Object.freeze([]),
     shippingQuotePort: { quoteShipping: async (input) => ({
       status: "ready", bindingHash: input.bindingHash, reference: "ship_canonical",
-      service: "Synthetic Ground", amountMinor: 700, currency: "USD",
+      service: "Synthetic Ground", amountMinor: shippingAmountMinor, currency: "USD",
     }) },
     taxQuotePort: { quoteTax: async (input) => ({
       status: "ready", bindingHash: input.bindingHash, reference: "tax_canonical",
@@ -756,7 +757,9 @@ function canonicalSetup(
     }),
   };
   const sessions = {
-    load: vi.fn(async () => durable as never),
+    load: vi.fn<ProviderCheckoutSessionRepository["load"]>(
+      async () => durable as never,
+    ),
     recordOpen: vi.fn(async (_loaded, providerSessionId) => {
       trace.push("cas:open");
       durable = { ...durable!, attemptStatus: "open", providerSessionId };
@@ -929,7 +932,7 @@ describe("canonical variant provider state machine", () => {
       request: exactRequest,
     })).resolves.toMatchObject({ status: "open", orderId: expect.any(String) });
 
-    expect(fixture.bindingVerifier.verifyBindings).toHaveBeenCalledTimes(1);
+    expect(fixture.bindingVerifier.verifyBindings).toHaveBeenCalledTimes(2);
     expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
     expect(provider.retrieveCheckoutSession).toHaveBeenCalledTimes(1);
   });
@@ -968,7 +971,7 @@ describe("canonical variant provider state machine", () => {
       request: exactRequest,
     })).resolves.toEqual({ status: "provider_unknown" });
 
-    expect(fixture.bindingVerifier.verifyBindings).toHaveBeenCalledTimes(2);
+    expect(fixture.bindingVerifier.verifyBindings).toHaveBeenCalledTimes(3);
     expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
     expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
     expect(fixture.sessions.recordUnknown).toHaveBeenCalledTimes(2);
@@ -977,5 +980,488 @@ describe("canonical variant provider state machine", () => {
       attemptStatus: "provider_unknown",
       providerSessionId: null,
     });
+  });
+
+  it("fences a providerless V2 replay through the fresh guard before another create", async () => {
+    const provider = stripeProviderWith(() => ({
+      status: "provider_unknown",
+      knownProviderSessionId: null,
+      evidenceCode: "provider_transport_unknown",
+    }));
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted" || quote.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const sessionRequest = {
+      ...fixture.quoteRequest,
+      pricingRevision: quote.pricingRevision,
+    };
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    })).resolves.toEqual({ status: "provider_unknown" });
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+
+    const guard = vi.fn(async () => ({
+      status: "CHECKOUT_UNAVAILABLE" as const,
+      reasons: Object.freeze([Object.freeze({
+        variantId: ids.variantA,
+        code: "pricing_coming_soon" as const,
+      })]),
+    }));
+    const guarded = createProviderCheckoutOrchestrator({
+      checkoutService: Object.freeze({
+        ...fixture.checkoutService,
+        revalidateCanonicalForProviderCreate: guard,
+      }),
+      providerSessionRepository: fixture.sessions,
+      releaseDefiniteFailure: fixture.checkoutRepository.releaseDefiniteFailure,
+      bindingVerifier: fixture.bindingVerifier,
+      sha256,
+    });
+
+    await expect(guarded.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variantA, code: "pricing_coming_soon" }],
+    });
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(guard).toHaveBeenCalledWith({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: sessionRequest,
+      expectedStoredPricingRevision: quote.pricingRevision,
+    });
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("calls a successful fresh guard exactly once and reloads once before the first V2 create", async () => {
+    const provider = stripeProviderWith((exactRequest) => ({
+      status: "open",
+      session: {
+        ...normalizedSession(exactRequest),
+        provider: "stripe",
+        hostedUrl: "https://checkout.stripe.com/c/pay/cs_test_synthetic_guarded",
+      },
+    }));
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted" || quote.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const realGuard = fixture.checkoutService.revalidateCanonicalForProviderCreate;
+    const guard = vi.fn((input: Parameters<typeof realGuard>[0]) => realGuard(input));
+    const orchestrator = createProviderCheckoutOrchestrator({
+      checkoutService: Object.freeze({
+        ...fixture.checkoutService,
+        revalidateCanonicalForProviderCreate: guard,
+      }),
+      providerSessionRepository: fixture.sessions,
+      releaseDefiniteFailure: fixture.checkoutRepository.releaseDefiniteFailure,
+      bindingVerifier: fixture.bindingVerifier,
+      sha256,
+    });
+    const sessionRequest = {
+      ...fixture.quoteRequest,
+      pricingRevision: quote.pricingRevision,
+    };
+
+    await expect(orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    })).resolves.toMatchObject({ status: "open" });
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(guard).toHaveBeenCalledWith({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: sessionRequest,
+      expectedStoredPricingRevision: quote.pricingRevision,
+    });
+    expect(fixture.sessions.load).toHaveBeenCalledTimes(2);
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("fails a providerless V2 replay closed when the fresh guard port is absent", async () => {
+    const provider = stripeProviderWith(() => ({
+      status: "provider_unknown",
+      knownProviderSessionId: null,
+      evidenceCode: "provider_transport_unknown",
+    }));
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted" || quote.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const sessionRequest = {
+      ...fixture.quoteRequest,
+      pricingRevision: quote.pricingRevision,
+    };
+    await fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    });
+    const withoutGuard = createProviderCheckoutOrchestrator({
+      checkoutService: {
+        quote: fixture.checkoutService.quote,
+        quoteForSession: fixture.checkoutService.quoteForSession,
+        prepare: fixture.checkoutService.prepare,
+      },
+      providerSessionRepository: fixture.sessions,
+      releaseDefiniteFailure: fixture.checkoutRepository.releaseDefiniteFailure,
+      bindingVerifier: fixture.bindingVerifier,
+      sha256,
+    });
+
+    await expect(withoutGuard.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    })).resolves.toEqual({ status: "conflict" });
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "thrown guard",
+      async () => { throw new Error("synthetic guard failure"); },
+      { status: "conflict" as const },
+    ],
+    [
+      "malformed price change",
+      async () => ({
+        status: "PRICE_CHANGED",
+        pricingRevision: "e".repeat(64),
+        cart: { items: [] },
+      }),
+      { status: "conflict" as const },
+    ],
+    [
+      "malformed unavailable reasons",
+      async () => ({ status: "CHECKOUT_UNAVAILABLE", reasons: [] }),
+      { status: "conflict" as const },
+    ],
+    [
+      "invalid request",
+      async () => ({
+        status: "invalid_request",
+        reason: "checkout_input_invalid",
+      }),
+      { status: "invalid" as const },
+    ],
+    [
+      "provider unavailable denial",
+      async () => ({
+        status: "denied",
+        reasons: ["payment_provider_unavailable"],
+      }),
+      { status: "unavailable" as const },
+    ],
+    [
+      "other denial",
+      async () => ({ status: "denied", reasons: ["buyer_blocked"] }),
+      { status: "invalid" as const },
+    ],
+    [
+      "invalid shipping quote",
+      async () => ({ status: "quote_invalid", component: "shipping" }),
+      { status: "unavailable" as const },
+    ],
+    [
+      "unavailable tax quote",
+      async () => ({
+        status: "quote_unavailable",
+        component: "tax",
+        reason: "synthetic_unavailable",
+      }),
+      { status: "unavailable" as const },
+    ],
+    [
+      "loaded replay success",
+      async () => ({ status: "loaded" }),
+      { status: "conflict" as const },
+    ],
+  ])("maps a %s without making another provider call", async (
+    _label,
+    guardOperation,
+    expected,
+  ) => {
+    const provider = stripeProviderWith(() => ({
+      status: "provider_unknown",
+      knownProviderSessionId: null,
+      evidenceCode: "provider_transport_unknown",
+    }));
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted" || quote.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const sessionRequest = {
+      ...fixture.quoteRequest,
+      pricingRevision: quote.pricingRevision,
+    };
+    await fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    });
+    const guard = vi.fn(guardOperation);
+    const orchestrator = createProviderCheckoutOrchestrator({
+      checkoutService: Object.freeze({
+        ...fixture.checkoutService,
+        revalidateCanonicalForProviderCreate: guard as never,
+      }),
+      providerSessionRepository: fixture.sessions,
+      releaseDefiniteFailure: fixture.checkoutRepository.releaseDefiniteFailure,
+      bindingVerifier: fixture.bindingVerifier,
+      sha256,
+    });
+
+    await expect(orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    })).resolves.toEqual(expected);
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("returns PRICE_CHANGED when a fresh full provider request differs from the durable request", async () => {
+    const provider = stripeProviderWith(() => ({
+      status: "provider_unknown",
+      knownProviderSessionId: null,
+      evidenceCode: "provider_transport_unknown",
+    }));
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted" || quote.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const sessionRequest = {
+      ...fixture.quoteRequest,
+      pricingRevision: quote.pricingRevision,
+    };
+    await fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    });
+
+    const changed = canonicalSetup(provider, "verified", 701);
+    const changedQuote = await changed.checkoutService.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: sessionRequest,
+    });
+    if (changedQuote.status !== "quoted") {
+      throw new Error("expected changed fresh quote");
+    }
+    const malformedGuardResult = {
+      status: changedQuote.status,
+      quote: changedQuote.quote,
+      pricingRevision: changedQuote.pricingRevision,
+      cart: { items: [] },
+    };
+    Object.defineProperty(malformedGuardResult, "plan", {
+      enumerable: false,
+      value: changedQuote.plan,
+    });
+    const malformedGuard = vi.fn(async () => malformedGuardResult);
+    const malformedOrchestrator = createProviderCheckoutOrchestrator({
+      checkoutService: Object.freeze({
+        ...fixture.checkoutService,
+        revalidateCanonicalForProviderCreate: malformedGuard as never,
+      }),
+      providerSessionRepository: fixture.sessions,
+      releaseDefiniteFailure: fixture.checkoutRepository.releaseDefiniteFailure,
+      bindingVerifier: fixture.bindingVerifier,
+      sha256,
+    });
+    await expect(malformedOrchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    })).resolves.toEqual({ status: "conflict" });
+    expect(malformedGuard).toHaveBeenCalledTimes(1);
+
+    const guard = vi.fn(async () => changedQuote);
+    const orchestrator = createProviderCheckoutOrchestrator({
+      checkoutService: Object.freeze({
+        ...fixture.checkoutService,
+        revalidateCanonicalForProviderCreate: guard,
+      }),
+      providerSessionRepository: fixture.sessions,
+      releaseDefiniteFailure: fixture.checkoutRepository.releaseDefiniteFailure,
+      bindingVerifier: fixture.bindingVerifier,
+      sha256,
+    });
+
+    await expect(orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    })).resolves.toEqual({
+      status: "PRICE_CHANGED",
+      pricingRevision: quote.pricingRevision,
+      cart: changedQuote.cart,
+    });
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
+  });
+
+  it("uses a post-guard known-session transition for retrieval instead of another create", async () => {
+    const provider = stripeProviderWith(
+      () => ({
+        status: "provider_unknown",
+        knownProviderSessionId: null,
+        evidenceCode: "provider_transport_unknown",
+      }),
+      (input) => ({
+        status: "open",
+        session: {
+          ...normalizedSession(input.expectedRequest, input.knownProviderSessionId),
+          provider: "stripe",
+          hostedUrl: "https://checkout.stripe.com/c/pay/cs_test_synthetic_reloaded",
+        },
+      }),
+    );
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted" || quote.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const sessionRequest = {
+      ...fixture.quoteRequest,
+      pricingRevision: quote.pricingRevision,
+    };
+    await fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    });
+    const providerless = fixture.getDurable();
+    if (providerless === null) throw new Error("expected durable V2 replay");
+    let loads = 0;
+    vi.mocked(fixture.sessions.load).mockReset().mockImplementation(async () => {
+      loads += 1;
+      return loads === 1
+        ? providerless as never
+        : {
+            ...providerless,
+            attemptStatus: "open",
+            providerSessionId: "cs_test_synthetic_reloaded",
+          } as never;
+    });
+
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    })).resolves.toMatchObject({ status: "open" });
+    expect(fixture.sessions.load).toHaveBeenCalledTimes(2);
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["completed terminal", "completed" as const, { status: "provider_pending" as const }],
+    ["expired terminal", "expired" as const, { status: "expired" as const }],
+    ["failed terminal", "failed" as const, { status: "failed" as const }],
+    ["missing", null, { status: "conflict" as const }],
+  ])("fails safe or preserves a %s post-guard reload", async (_label, reloadedStatus, expected) => {
+    const provider = stripeProviderWith(() => ({
+      status: "provider_unknown",
+      knownProviderSessionId: null,
+      evidenceCode: "provider_transport_unknown",
+    }));
+    const fixture = canonicalSetup(provider);
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: fixture.quoteRequest,
+    });
+    if (quote.status !== "quoted" || quote.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const sessionRequest = {
+      ...fixture.quoteRequest,
+      pricingRevision: quote.pricingRevision,
+    };
+    await fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    });
+    const providerless = fixture.getDurable();
+    if (providerless === null) throw new Error("expected durable V2 replay");
+    vi.mocked(fixture.sessions.load).mockReset()
+      .mockResolvedValueOnce(providerless as never)
+      .mockResolvedValueOnce(reloadedStatus === null
+        ? null
+        : {
+            ...providerless,
+            attemptStatus: reloadedStatus,
+            orderState: "paid_pending_fulfillment",
+          } as never);
+
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: ids.key,
+      request: sessionRequest,
+    })).resolves.toMatchObject(expected);
+    expect(provider.createCheckoutSession).toHaveBeenCalledTimes(1);
+    expect(provider.retrieveCheckoutSession).not.toHaveBeenCalled();
   });
 });

@@ -40,6 +40,8 @@ An active variant must have all of the following:
 
 The validation rules live in [`src/catalog/storefront-bindings.ts`](../../src/catalog/storefront-bindings.ts), [`src/commerce/checkout-service.ts`](../../src/commerce/checkout-service.ts), and [`src/commerce/provider-contracts.ts`](../../src/commerce/provider-contracts.ts). Checkout reloads the canonical variant facts, recalculates every line, and returns `PRICE_CHANGED` for a stale cart or `CHECKOUT_UNAVAILABLE` for an ineligible line before creating a provider session. Stripe Checkout receives server-calculated inline line pricing; customer-entered Stripe promotion codes remain disabled.
 
+An already-prepared canonical attempt is not permission to create a new provider session from stale facts. When a V2 attempt is still providerless in `created` or `provider_unknown`, the server freshly revalidates its stored revision, complete quote, current catalog and promotion authority, full provider request, and binding snapshot immediately before any new provider-session creation. If those facts changed, Checkout returns `PRICE_CHANGED`; the customer must review a new quote and the browser uses a new idempotency key for that reviewed attempt. Network failures, provider-unknown results, and ordinary retries keep the existing key. An attempt with a known provider-session identifier remains on the existing retrieval/recovery path, and completed, expired, or failed attempts retain their terminal projection instead of creating another session.
+
 Pending or zero-dollar records may exercise selection and cart behavior in local, test, or explicitly marked preview environments. In production, a pending record remains browse-only, displays `Pricing coming soon`, keeps checkout unavailable, and cannot create a Checkout Session. A zero-dollar record likewise cannot create production Checkout. The current canonical production configuration contains no purchasable variants or approved real prices.
 
 The existing `/admin/prices` operation is a legacy product-level price-history command. It does not author the required canonical variant, variant price status, or Stripe mappings by itself. Variant pricing needs an approved database/import path plus the matching server binding and review.
@@ -183,7 +185,7 @@ Production readiness requires evidence for all of the following:
 - backup, migration rollback, incident response, and credential-rotation readiness; and
 - explicit deployment authority and post-deployment read-back.
 
-A working local build or Stripe API integration is not provider-account approval. A schema, test fixture, or admin draft is not a production record. This documentation task did not query a live database or provider, apply migrations, push, merge, deploy, or publish.
+A working local build or Stripe API integration is not provider-account approval. A schema, test fixture, or admin draft is not a production record. Production database contents, provider state, and deployment behavior remain unverified. This documentation task did not query a live database or provider, apply migrations, push, merge, deploy, or publish.
 
 ## 11. Focused verification commands
 

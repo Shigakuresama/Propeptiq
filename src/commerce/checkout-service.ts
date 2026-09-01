@@ -5,6 +5,7 @@ import {
   hashCheckoutRequest,
   hashReviewSnapshot,
   isCanonicalUuid,
+  isSha256,
   type CheckoutIdentity,
   type KeyedUuidGenerator,
   type Sha256Hasher,
@@ -470,6 +471,212 @@ export function projectLoadedCheckoutAttempt(
   });
 }
 
+const canonicalReplayQuoteKeys = Object.freeze([
+  "status",
+  "reviewRequired",
+  "reasons",
+  "currency",
+  "subtotalMinor",
+  "discountMinor",
+  "shippingMinor",
+  "taxMinor",
+  "totalMinor",
+  "promotionDiscountMinor",
+  "referralDiscountMinor",
+  "rewardRedemptionPoints",
+  "rewardRedemptionMinor",
+  "pendingBaseEarnPoints",
+  "rewardsBenefitAvailable",
+  "rewardsUnavailableReason",
+  "lines",
+] as const);
+
+const canonicalReplayLineKeys = Object.freeze([
+  "variantId",
+  "sku",
+  "variantLabel",
+  "productName",
+  "packageForm",
+  "quantity",
+  "unitAmountMinor",
+  "subtotalMinor",
+  "discountMinor",
+  "totalMinor",
+] as const);
+
+function exactReplayRecord(
+  value: unknown,
+  requiredKeys: readonly string[],
+  optionalKeys: readonly string[] = [],
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const allowed = new Set([...requiredKeys, ...optionalKeys]);
+  const keys = Reflect.ownKeys(value);
+  return requiredKeys.every((key) => Object.hasOwn(value, key)) &&
+    keys.every((key) => typeof key === "string" && allowed.has(key));
+}
+
+function boundedReplayText(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value.length > 0 &&
+    value.length <= maximum && value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+function replayMoney(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function comparableCanonicalReplayQuote(value: unknown): unknown | null {
+  try {
+    if (!exactReplayRecord(value, canonicalReplayQuoteKeys)) return null;
+    if (
+      (value.status !== "ready" && value.status !== "review_required") ||
+      value.reviewRequired !== (value.status === "review_required") ||
+      value.currency !== "USD" ||
+      !Array.isArray(value.reasons) ||
+      value.reasons.length > 12 ||
+      !Array.isArray(value.lines) ||
+      value.lines.length < 1 ||
+      value.lines.length > 50
+    ) return null;
+
+    const reasons: string[] = [];
+    for (let index = 0; index < value.reasons.length; index += 1) {
+      if (!Object.hasOwn(value.reasons, index)) return null;
+      const reason = value.reasons[index];
+      if (!boundedReplayText(reason, 80)) return null;
+      reasons.push(reason);
+    }
+    if (
+      (value.status === "ready" && reasons.length !== 0) ||
+      (value.status === "review_required" && reasons.length === 0)
+    ) return null;
+
+    const moneyKeys = [
+      "subtotalMinor",
+      "discountMinor",
+      "shippingMinor",
+      "taxMinor",
+      "totalMinor",
+      "promotionDiscountMinor",
+      "referralDiscountMinor",
+      "rewardRedemptionPoints",
+      "rewardRedemptionMinor",
+      "pendingBaseEarnPoints",
+    ] as const;
+    if (
+      moneyKeys.some((key) => !replayMoney(value[key])) ||
+      (value.discountMinor as number) > (value.subtotalMinor as number) ||
+      typeof value.rewardsBenefitAvailable !== "boolean" ||
+      (value.rewardsUnavailableReason !== null &&
+        !boundedReplayText(value.rewardsUnavailableReason, 80))
+    ) return null;
+
+    const lines: Record<string, unknown>[] = [];
+    const variantIds = new Set<string>();
+    let lineSubtotal = 0;
+    let lineDiscount = 0;
+    for (let index = 0; index < value.lines.length; index += 1) {
+      if (!Object.hasOwn(value.lines, index)) return null;
+      const line = value.lines[index];
+      if (!exactReplayRecord(line, canonicalReplayLineKeys, ["productId"])) {
+        return null;
+      }
+      const expectedLineSubtotal = (line.unitAmountMinor as number) *
+        (line.quantity as number);
+      if (
+        !isCanonicalUuid(line.variantId) ||
+        variantIds.has(line.variantId) ||
+        (Object.hasOwn(line, "productId") && !isCanonicalUuid(line.productId)) ||
+        !boundedReplayText(line.sku, 120) ||
+        !boundedReplayText(line.variantLabel, 240) ||
+        !boundedReplayText(line.productName, 240) ||
+        !boundedReplayText(line.packageForm, 240) ||
+        !Number.isSafeInteger(line.quantity) ||
+        (line.quantity as number) < 1 ||
+        (line.quantity as number) > 25 ||
+        !replayMoney(line.unitAmountMinor) ||
+        !replayMoney(line.subtotalMinor) ||
+        !replayMoney(line.discountMinor) ||
+        !replayMoney(line.totalMinor) ||
+        !Number.isSafeInteger(expectedLineSubtotal) ||
+        line.subtotalMinor !== expectedLineSubtotal ||
+        (line.discountMinor as number) > (line.subtotalMinor as number) ||
+        line.totalMinor !==
+          (line.subtotalMinor as number) - (line.discountMinor as number)
+      ) return null;
+      variantIds.add(line.variantId);
+      const nextLineSubtotal = lineSubtotal + (line.subtotalMinor as number);
+      const nextLineDiscount = lineDiscount + (line.discountMinor as number);
+      if (
+        !Number.isSafeInteger(nextLineSubtotal) ||
+        !Number.isSafeInteger(nextLineDiscount)
+      ) return null;
+      lineSubtotal = nextLineSubtotal;
+      lineDiscount = nextLineDiscount;
+      lines.push({
+        variantId: line.variantId,
+        sku: line.sku,
+        variantLabel: line.variantLabel,
+        productName: line.productName,
+        packageForm: line.packageForm,
+        quantity: line.quantity,
+        unitAmountMinor: line.unitAmountMinor,
+        subtotalMinor: line.subtotalMinor,
+        discountMinor: line.discountMinor,
+        totalMinor: line.totalMinor,
+      });
+    }
+    const expectedDiscount = (value.promotionDiscountMinor as number) +
+      (value.referralDiscountMinor as number) +
+      (value.rewardRedemptionMinor as number);
+    const expectedTotal = (value.subtotalMinor as number) -
+      (value.discountMinor as number) + (value.shippingMinor as number) +
+      (value.taxMinor as number);
+    if (
+      lineSubtotal !== value.subtotalMinor ||
+      lineDiscount !== value.discountMinor ||
+      !Number.isSafeInteger(expectedDiscount) ||
+      value.discountMinor !== expectedDiscount ||
+      !Number.isSafeInteger(expectedTotal) ||
+      value.totalMinor !== expectedTotal
+    ) return null;
+
+    return {
+      status: value.status,
+      reviewRequired: value.reviewRequired,
+      reasons,
+      currency: "USD",
+      subtotalMinor: value.subtotalMinor,
+      discountMinor: value.discountMinor,
+      shippingMinor: value.shippingMinor,
+      taxMinor: value.taxMinor,
+      totalMinor: value.totalMinor,
+      promotionDiscountMinor: value.promotionDiscountMinor,
+      referralDiscountMinor: value.referralDiscountMinor,
+      rewardRedemptionPoints: value.rewardRedemptionPoints,
+      rewardRedemptionMinor: value.rewardRedemptionMinor,
+      pendingBaseEarnPoints: value.pendingBaseEarnPoints,
+      rewardsBenefitAvailable: value.rewardsBenefitAvailable,
+      rewardsUnavailableReason: value.rewardsUnavailableReason,
+      lines,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function canonicalReplayQuotesMatch(stored: unknown, fresh: unknown): boolean {
+  const storedComparable = comparableCanonicalReplayQuote(stored);
+  const freshComparable = comparableCanonicalReplayQuote(fresh);
+  return storedComparable !== null && freshComparable !== null &&
+    JSON.stringify(storedComparable) === JSON.stringify(freshComparable);
+}
+
 function toIso(value: string): string | null {
   const date = new Date(value);
   return Number.isFinite(date.getTime()) && date.toISOString() === value
@@ -735,8 +942,14 @@ function isVariantFactsValid(
       lots.add(lot.id);
     }
   }
+  return true;
+}
+
+function areAutomaticPromotionFactsValid(
+  promotions: readonly AuthoritativeAutomaticPromotion[],
+): boolean {
   const promotionKeys = new Set<string>();
-  for (const promotion of facts.automaticPromotions) {
+  for (const promotion of promotions) {
     const key = `${promotion.id}:${promotion.version}`;
     if (
       promotionKeys.has(key) ||
@@ -885,6 +1098,7 @@ export function createCheckoutService(dependencies: Readonly<{
     }>,
     request: RewardsCheckoutQuoteRequest,
     acknowledgedPricingRevision: string | null,
+    forcedFresh?: Readonly<{ expectedStoredPricingRevision: string }>,
   ): Promise<CheckoutSessionQuoteResult> {
     const authoritativeAt = dependencies.clock();
     if (!Number.isFinite(authoritativeAt.getTime())) {
@@ -900,15 +1114,39 @@ export function createCheckoutService(dependencies: Readonly<{
       buyerUserId: input.buyerUserId,
       idempotencyKey: input.idempotencyKey,
     });
+    let storedReplayQuote: BrowserCheckoutQuote | null = null;
     if (existing !== null) {
-      if (existing.requestHash !== requestHash) return { status: "idempotency_conflict" };
+      if (existing.requestHash !== requestHash) {
+        return forcedFresh === undefined
+          ? { status: "idempotency_conflict" }
+          : { status: "internal_conflict" };
+      }
       if (existing.orderId !== identity.orderId || existing.attemptId !== identity.attemptId) {
         return { status: "internal_conflict" };
       }
-      const mutableReview = existing.status === "created" &&
-        existing.orderState === "eligibility_review" && !existing.permitted &&
-        existing.reviewRequired && !existing.hasReservations;
-      if (!mutableReview) return projectLoadedCheckoutAttempt(existing);
+      if (forcedFresh !== undefined) {
+        if (
+          (existing.status !== "created" && existing.status !== "provider_unknown") ||
+          existing.orderState !== "checkout_pending" ||
+          !existing.permitted ||
+          existing.reviewRequired ||
+          !existing.hasReservations ||
+          !isSha256(existing.pricingRevision) ||
+          existing.pricingRevision !== forcedFresh.expectedStoredPricingRevision ||
+          existing.quoteSnapshot === null ||
+          comparableCanonicalReplayQuote(existing.quoteSnapshot) === null ||
+          existing.quoteSnapshot.status !== "ready" ||
+          existing.quoteSnapshot.reviewRequired
+        ) return { status: "internal_conflict" };
+        storedReplayQuote = existing.quoteSnapshot;
+      } else {
+        const mutableReview = existing.status === "created" &&
+          existing.orderState === "eligibility_review" && !existing.permitted &&
+          existing.reviewRequired && !existing.hasReservations;
+        if (!mutableReview) return projectLoadedCheckoutAttempt(existing);
+      }
+    } else if (forcedFresh !== undefined) {
+      return { status: "internal_conflict" };
     }
 
     if (dependencies.repository.loadVariantFacts === undefined) {
@@ -973,6 +1211,9 @@ export function createCheckoutService(dependencies: Readonly<{
         status: "CHECKOUT_UNAVAILABLE" as const,
         reasons: Object.freeze(unreconciledReasons),
       });
+    }
+    if (!areAutomaticPromotionFactsValid(facts.automaticPromotions)) {
+      return { status: "denied", reasons: ["authoritative_facts_invalid"] };
     }
 
     const activeByVariant = new Map<string, AuthoritativeAutomaticPromotion[]>();
@@ -1054,10 +1295,14 @@ export function createCheckoutService(dependencies: Readonly<{
       }),
     }, dependencies.sha256);
     const cart = safeVariantCart(facts, request, priced);
-    if (
-      acknowledgedPricingRevision !== null &&
-      acknowledgedPricingRevision !== pricingRevision
-    ) {
+    if (forcedFresh !== undefined && (
+      acknowledgedPricingRevision !== forcedFresh.expectedStoredPricingRevision ||
+      pricingRevision !== forcedFresh.expectedStoredPricingRevision
+    )) {
+      return Object.freeze({ status: "PRICE_CHANGED", pricingRevision, cart });
+    }
+    if (forcedFresh === undefined && acknowledgedPricingRevision !== null &&
+      acknowledgedPricingRevision !== pricingRevision) {
       return Object.freeze({ status: "PRICE_CHANGED", pricingRevision, cart });
     }
 
@@ -1404,6 +1649,12 @@ export function createCheckoutService(dependencies: Readonly<{
         });
       })),
     });
+    if (
+      forcedFresh !== undefined &&
+      !canonicalReplayQuotesMatch(storedReplayQuote, quote)
+    ) {
+      return Object.freeze({ status: "PRICE_CHANGED", pricingRevision, cart });
+    }
     const plan = makePlan({
       kind: "canonical_variant",
       identity,
@@ -2040,6 +2291,61 @@ export function createCheckoutService(dependencies: Readonly<{
         request,
         acknowledgedPricingRevision,
       );
+    },
+
+    async revalidateCanonicalForProviderCreate(input: Readonly<{
+      buyerUserId: string;
+      idempotencyKey: string;
+      paymentProviderAvailable: boolean;
+      request: unknown;
+      expectedStoredPricingRevision: string;
+      attributionCookie?: string | null;
+    }>): Promise<CheckoutSessionQuoteResult> {
+      if (!isSha256(input.expectedStoredPricingRevision)) {
+        return { status: "internal_conflict" };
+      }
+      if (
+        !isCanonicalUuid(input.buyerUserId) ||
+        !isCanonicalUuid(input.idempotencyKey) ||
+        typeof input.paymentProviderAvailable !== "boolean" ||
+        (input.attributionCookie !== undefined &&
+          input.attributionCookie !== null &&
+          (typeof input.attributionCookie !== "string" ||
+            input.attributionCookie.length === 0 ||
+            input.attributionCookie.length > 2_048))
+      ) {
+        return { status: "invalid_request", reason: "checkout_input_invalid" };
+      }
+      const parsed = parseRewardsCheckoutRequest(input.request);
+      if (!parsed.ok) {
+        return { status: "invalid_request", reason: "checkout_input_invalid" };
+      }
+      const request: RewardsCheckoutQuoteRequest = Object.freeze({
+        items: parsed.value.items,
+        destination: parsed.value.destination,
+        ...(Object.hasOwn(parsed.value, "rewardRedemptionPoints")
+          ? { rewardRedemptionPoints: parsed.value.rewardRedemptionPoints }
+          : {}),
+      });
+      const result = await quoteCanonicalVariant(
+        input,
+        request,
+        parsed.value.pricingRevision,
+        { expectedStoredPricingRevision: input.expectedStoredPricingRevision },
+      );
+      if (result.status === "loaded") return { status: "internal_conflict" };
+      if (result.status !== "quoted") return result;
+      const plan = projectAuthoritativeCheckoutPlan(result.plan);
+      if (
+        plan === null ||
+        plan.kind !== "canonical_variant" ||
+        !plan.decision.permitted ||
+        plan.decision.reviewRequired ||
+        result.quote.status !== "ready" ||
+        !isSha256(result.pricingRevision) ||
+        result.cart === undefined
+      ) return { status: "internal_conflict" };
+      return result;
     },
 
     async prepare(

@@ -27,7 +27,11 @@ import type {
   ProviderSessionCasResult,
   ProviderSessionRepository,
 } from "@/db/repositories/provider-session-repository";
-import type { Sha256Hasher } from "@/commerce/checkout-identity";
+import {
+  isCanonicalUuid,
+  isSha256,
+  type Sha256Hasher,
+} from "@/commerce/checkout-identity";
 import { parseCheckoutRequest } from "@/domain/checkout";
 
 type CheckoutServicePort = Readonly<{
@@ -43,6 +47,14 @@ type CheckoutServicePort = Readonly<{
     idempotencyKey: string;
     paymentProviderAvailable: boolean;
     request: unknown;
+    attributionCookie?: string | null;
+  }>) => Promise<CheckoutSessionQuoteResult>;
+  revalidateCanonicalForProviderCreate?: (input: Readonly<{
+    buyerUserId: string;
+    idempotencyKey: string;
+    paymentProviderAvailable: boolean;
+    request: unknown;
+    expectedStoredPricingRevision: string;
     attributionCookie?: string | null;
   }>) => Promise<CheckoutSessionQuoteResult>;
   prepare: (
@@ -280,10 +292,32 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
     }
   }
 
+  async function verifiedDurableRequest(
+    durable: DurableCheckoutRequest,
+  ): Promise<ExactProviderCheckoutRequest | null> {
+    try {
+      const exact = requestFromDurable(durable);
+      if (exact === null) return null;
+      const rebuiltHash = await hashProviderCheckoutRequest(
+        {
+          provider: durable.provider,
+          providerRequestSchemaVersion: durable.providerRequestSchemaVersion,
+          request: exact.request,
+          ...(durable.providerRequestSchemaVersion === 2
+            ? { providerBindingSnapshot: durable.providerBindingSnapshot }
+            : {}),
+        },
+        input.sha256,
+      );
+      return rebuiltHash === durable.providerRequestHash ? exact : null;
+    } catch {
+      return null;
+    }
+  }
+
   async function processDurable(
     durable: DurableCheckoutRequest,
     contextValue: ProviderExecutionContextV1,
-    bindingsAlreadyVerified = false,
   ): Promise<ProviderCheckoutRouteResult> {
     if (durable.attemptStatus === "completed") {
       return Object.freeze({ status: "provider_pending", orderId: durable.orderId });
@@ -296,24 +330,10 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
     }
     const context = projectProviderExecutionContextV1(contextValue);
     if (context === null) return Object.freeze({ status: "invalid" });
-    const exact = requestFromDurable(durable);
-    const rebuiltHash = exact === null
-      ? null
-      : await hashProviderCheckoutRequest(
-          {
-            provider: durable.provider,
-            providerRequestSchemaVersion: durable.providerRequestSchemaVersion,
-            request: exact.request,
-            ...(durable.providerRequestSchemaVersion === 2
-              ? { providerBindingSnapshot: durable.providerBindingSnapshot }
-              : {}),
-          },
-          input.sha256,
-        );
+    const exact = await verifiedDurableRequest(durable);
     const adapter = context.adapter;
     if (
       exact === null ||
-      rebuiltHash !== durable.providerRequestHash ||
       !context.sessionRecoveryAvailable ||
       adapter === null ||
       adapter.context.provider !== durable.provider ||
@@ -343,7 +363,6 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
     if (
       operation === "create" &&
       durable.providerRequestSchemaVersion === 2 &&
-      !bindingsAlreadyVerified &&
       !(await verifyBindings(durable.provider, durable.providerBindingSnapshot))
     ) {
       await markUnknown(durable, durable.providerSessionId, false);
@@ -466,6 +485,333 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
     return Object.freeze({ status: "provider_unknown" });
   }
 
+  function sameJson(left: unknown, right: unknown): boolean {
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+      return false;
+    }
+  }
+
+  function exactReplayRecord(
+    value: unknown,
+    keys: readonly string[],
+  ): value is Record<string, unknown> {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    const own = Reflect.ownKeys(value);
+    return own.length === keys.length &&
+      keys.every((key) => Object.hasOwn(value, key)) &&
+      own.every((key) => typeof key === "string" && keys.includes(key));
+  }
+
+  function replayMoney(value: unknown): value is number {
+    return Number.isSafeInteger(value) && (value as number) >= 0;
+  }
+
+  function replayText(value: unknown, maximum: number): value is string {
+    return typeof value === "string" && value.length > 0 &&
+      value.length <= maximum && value.trim() === value &&
+      !/[\u0000-\u001f\u007f]/u.test(value);
+  }
+
+  function safePriceChangedCart(value: unknown): boolean {
+    try {
+      if (!exactReplayRecord(value, [
+        "items", "subtotalMinor", "currency", "taxMinor", "shippingMinor",
+        "finalDiscountMinor",
+      ]) || !Array.isArray(value.items) || value.items.length < 1 ||
+        value.items.length > 50 || !replayMoney(value.subtotalMinor) ||
+        (value.currency !== null &&
+          (typeof value.currency !== "string" ||
+            !/^[A-Z]{3}$/u.test(value.currency))) ||
+        value.taxMinor !== null || value.shippingMinor !== null ||
+        value.finalDiscountMinor !== null) return false;
+      const seen = new Set<string>();
+      const currencies = new Set<string>();
+      let subtotalMinor = 0;
+      for (let index = 0; index < value.items.length; index += 1) {
+        if (!Object.hasOwn(value.items, index)) return false;
+        const line = value.items[index];
+        if (!exactReplayRecord(line, [
+          "variantId", "quantity", "available", "name", "packageForm",
+          "variantLabel", "sku", "unitAmountMinor", "lineSubtotalMinor",
+          "currency",
+        ]) || !isCanonicalUuid(line.variantId) || seen.has(line.variantId) ||
+          !Number.isSafeInteger(line.quantity) || (line.quantity as number) < 1 ||
+          (line.quantity as number) > 25 || typeof line.available !== "boolean" ||
+          (line.name !== null && !replayText(line.name, 240)) ||
+          (line.packageForm !== null && !replayText(line.packageForm, 240)) ||
+          (line.variantLabel !== null && !replayText(line.variantLabel, 240)) ||
+          (line.sku !== null && !replayText(line.sku, 120)) ||
+          (line.unitAmountMinor !== null && !replayMoney(line.unitAmountMinor)) ||
+          (line.lineSubtotalMinor !== null && !replayMoney(line.lineSubtotalMinor)) ||
+          (line.currency !== null &&
+            (typeof line.currency !== "string" ||
+              !/^[A-Z]{3}$/u.test(line.currency))) ||
+          (line.unitAmountMinor !== null && line.lineSubtotalMinor !== null &&
+            line.lineSubtotalMinor !==
+              line.unitAmountMinor * (line.quantity as number))) return false;
+        const nextSubtotal = subtotalMinor + (line.lineSubtotalMinor ?? 0);
+        if (!Number.isSafeInteger(nextSubtotal)) return false;
+        subtotalMinor = nextSubtotal;
+        if (line.currency !== null) currencies.add(line.currency);
+        seen.add(line.variantId);
+      }
+      const coherentCurrency = currencies.size === 1
+        ? [...currencies][0]!
+        : null;
+      return subtotalMinor === value.subtotalMinor &&
+        value.currency === coherentCurrency;
+    } catch {
+      return false;
+    }
+  }
+
+  function safeCheckoutUnavailableReasons(value: unknown): boolean {
+    try {
+      if (!Array.isArray(value) || value.length < 1 || value.length > 50) {
+        return false;
+      }
+      const seen = new Set<string>();
+      const allowed = new Set([
+        "pricing_coming_soon",
+        "payment_mapping_missing",
+        "unavailable",
+        "invalid_currency",
+      ]);
+      for (let index = 0; index < value.length; index += 1) {
+        if (!Object.hasOwn(value, index)) return false;
+        const reason = value[index];
+        if (!exactReplayRecord(reason, ["variantId", "code"]) ||
+          !isCanonicalUuid(reason.variantId) || seen.has(reason.variantId) ||
+          typeof reason.code !== "string" || !allowed.has(reason.code)) {
+          return false;
+        }
+        seen.add(reason.variantId);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function immutableReplayMatches(
+    initial: DurableCheckoutRequest,
+    reloaded: DurableCheckoutRequest,
+    initialExact: ExactProviderCheckoutRequest,
+    reloadedExact: ExactProviderCheckoutRequest,
+  ): boolean {
+    return initial.buyerUserId === reloaded.buyerUserId &&
+      initial.idempotencyKey === reloaded.idempotencyKey &&
+      initial.orderId === reloaded.orderId &&
+      initial.attemptId === reloaded.attemptId &&
+      initial.requestHash === reloaded.requestHash &&
+      initial.provider === reloaded.provider &&
+      initial.providerIdempotencyKey === reloaded.providerIdempotencyKey &&
+      initial.providerRequestHash === reloaded.providerRequestHash &&
+      initial.providerExpiresAt === reloaded.providerExpiresAt &&
+      initial.providerCustomerEmail === reloaded.providerCustomerEmail &&
+      initial.providerOrigin === reloaded.providerOrigin &&
+      initial.providerRequestSchemaVersion === reloaded.providerRequestSchemaVersion &&
+      initial.providerLivemode === reloaded.providerLivemode &&
+      initial.providerScope === reloaded.providerScope &&
+      initial.currency === reloaded.currency &&
+      sameJson(initialExact, reloadedExact);
+  }
+
+  async function guardProviderlessCanonicalCreate(
+    durable: DurableCheckoutRequest,
+    contextValue: ProviderExecutionContextV1,
+    startInput: Readonly<{
+      idempotencyKey: string;
+      request: unknown;
+      attributionCookie?: string | null;
+    }>,
+    expectedStoredPricingRevision: unknown,
+  ): Promise<ProviderCheckoutRouteResult> {
+    const providerlessV2 = durable.providerRequestSchemaVersion === 2 &&
+      durable.providerSessionId === null &&
+      (durable.attemptStatus === "created" ||
+        durable.attemptStatus === "provider_unknown");
+    if (!providerlessV2) return processDurable(durable, contextValue);
+    if (durable.orderState !== "checkout_pending") {
+      return Object.freeze({ status: "conflict" });
+    }
+
+    const context = projectProviderExecutionContextV1(contextValue);
+    const exactDurable = await verifiedDurableRequest(durable);
+    if (
+      context === null ||
+      !context.checkoutCreationAvailable ||
+      !context.sessionRecoveryAvailable ||
+      context.adapter === null ||
+      context.provider === null ||
+      context.expectedLivemode === null ||
+      context.providerScope === null ||
+      context.buyerUserId !== durable.buyerUserId ||
+      startInput.idempotencyKey !== durable.idempotencyKey ||
+      !isCanonicalUuid(durable.orderId) ||
+      !isCanonicalUuid(durable.attemptId) ||
+      !isSha256(durable.requestHash) ||
+      !isSha256(durable.providerRequestHash) ||
+      durable.providerIdempotencyKey !== `checkout_attempt:${durable.attemptId}` ||
+      durable.provider !== context.provider ||
+      durable.providerLivemode !== context.expectedLivemode ||
+      durable.providerScope !== context.providerScope ||
+      context.adapter.context.provider !== durable.provider ||
+      context.adapter.context.livemode !== durable.providerLivemode ||
+      context.adapter.context.scope !== durable.providerScope ||
+      exactDurable === null ||
+      !isSha256(expectedStoredPricingRevision) ||
+      input.checkoutService.revalidateCanonicalForProviderCreate === undefined
+    ) {
+      return Object.freeze({ status: "conflict" });
+    }
+
+    let guarded: CheckoutSessionQuoteResult;
+    try {
+      guarded = await input.checkoutService.revalidateCanonicalForProviderCreate({
+        buyerUserId: context.buyerUserId,
+        idempotencyKey: startInput.idempotencyKey,
+        paymentProviderAvailable: context.checkoutCreationAvailable,
+        request: startInput.request,
+        expectedStoredPricingRevision,
+        ...(startInput.attributionCookie === undefined
+          ? {}
+          : { attributionCookie: startInput.attributionCookie }),
+      });
+    } catch {
+      return Object.freeze({ status: "conflict" });
+    }
+
+    if (guarded.status === "PRICE_CHANGED") {
+      return isSha256(guarded.pricingRevision) &&
+        safePriceChangedCart(guarded.cart)
+        ? guarded
+        : Object.freeze({ status: "conflict" });
+    }
+    if (guarded.status === "CHECKOUT_UNAVAILABLE") {
+      return safeCheckoutUnavailableReasons(guarded.reasons)
+        ? guarded
+        : Object.freeze({ status: "conflict" });
+    }
+    if (guarded.status === "invalid_request") {
+      return Object.freeze({ status: "invalid" });
+    }
+    if (
+      guarded.status === "internal_conflict" ||
+      guarded.status === "idempotency_conflict" ||
+      guarded.status === "loaded" ||
+      guarded.status === "review_rejected"
+    ) return Object.freeze({ status: "conflict" });
+    if (guarded.status === "denied") {
+      return Object.freeze({
+        status: guarded.reasons.includes("payment_provider_unavailable")
+          ? ("unavailable" as const)
+          : ("invalid" as const),
+      });
+    }
+    if (
+      guarded.status === "quote_invalid" ||
+      guarded.status === "quote_unavailable"
+    ) return Object.freeze({ status: "unavailable" });
+    if (guarded.status !== "quoted") {
+      return Object.freeze({ status: "conflict" });
+    }
+
+    const plan = projectAuthoritativeCheckoutPlan(guarded.plan);
+    if (
+      plan === null ||
+      plan.kind !== "canonical_variant" ||
+      !isSha256(guarded.pricingRevision) ||
+      guarded.cart === undefined ||
+      !safePriceChangedCart(guarded.cart)
+    ) return Object.freeze({ status: "conflict" });
+    const priceChanged = Object.freeze({
+      status: "PRICE_CHANGED" as const,
+      pricingRevision: guarded.pricingRevision,
+      cart: guarded.cart,
+    });
+    if (
+      !plan.decision.permitted ||
+      plan.decision.reviewRequired ||
+      guarded.quote.status !== "ready" ||
+      plan.totals === null
+    ) return priceChanged;
+
+    let freshExact: ExactProviderCheckoutRequest | null = null;
+    let freshHash: string | null = null;
+    try {
+      freshExact = requestFromPlan(plan, {
+        provider: durable.provider,
+        providerCustomerEmail: durable.providerCustomerEmail,
+        providerOrigin: durable.providerOrigin,
+        providerExpiresAt: durable.providerExpiresAt,
+      });
+      freshHash = freshExact === null
+        ? null
+        : await hashProviderCheckoutRequest(
+            {
+              provider: durable.provider,
+              providerRequestSchemaVersion: 2,
+              request: freshExact.request,
+              providerBindingSnapshot: freshExact.providerBindingSnapshot!,
+            },
+            input.sha256,
+          );
+    } catch {
+      return Object.freeze({ status: "conflict" });
+    }
+    if (
+      freshExact === null ||
+      freshExact.providerBindingSnapshot === null ||
+      freshHash !== durable.providerRequestHash ||
+      plan.identity.orderId !== durable.orderId ||
+      plan.identity.attemptId !== durable.attemptId ||
+      plan.buyerUserId !== durable.buyerUserId ||
+      plan.idempotencyKey !== durable.idempotencyKey ||
+      plan.requestHash !== durable.requestHash ||
+      !sameJson(freshExact.request, exactDurable.request) ||
+      !sameJson(
+        freshExact.providerBindingSnapshot,
+        durable.providerBindingSnapshot,
+      )
+    ) return priceChanged;
+
+    let reloaded: DurableCheckoutRequest | null;
+    try {
+      reloaded = await input.providerSessionRepository.load({
+        buyerUserId: context.buyerUserId,
+        idempotencyKey: startInput.idempotencyKey,
+      });
+    } catch {
+      return Object.freeze({ status: "conflict" });
+    }
+    if (reloaded === null) return Object.freeze({ status: "conflict" });
+    const reloadedExact = await verifiedDurableRequest(reloaded);
+    if (
+      reloadedExact === null ||
+      !immutableReplayMatches(durable, reloaded, exactDurable, reloadedExact)
+    ) return Object.freeze({ status: "conflict" });
+    const terminal = reloaded.attemptStatus === "completed" ||
+      reloaded.attemptStatus === "expired" ||
+      reloaded.attemptStatus === "failed";
+    const knownSession = reloaded.providerSessionId !== null &&
+      (reloaded.attemptStatus === "open" ||
+        reloaded.attemptStatus === "provider_unknown");
+    const stillProviderless = reloaded.providerSessionId === null &&
+      reloaded.orderState === "checkout_pending" &&
+      (reloaded.attemptStatus === "created" ||
+        reloaded.attemptStatus === "provider_unknown");
+    return terminal || knownSession || stillProviderless
+      ? processDurable(reloaded, contextValue)
+      : Object.freeze({ status: "conflict" });
+  }
+
   return Object.freeze({
     async start(startInput: Readonly<{
       context: ProviderExecutionContextV1;
@@ -517,7 +863,12 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
           });
           return durable === null
             ? Object.freeze({ status: "conflict" })
-            : processDurable(durable, startInput.context);
+            : guardProviderlessCanonicalCreate(
+                durable,
+                startInput.context,
+                startInput,
+                quote.pricingRevision,
+              );
         }
         const plan = projectAuthoritativeCheckoutPlan(quote.plan);
         if (plan === null) return Object.freeze({ status: "conflict" });
@@ -612,7 +963,12 @@ export function createProviderCheckoutOrchestrator(input: Readonly<{
         });
         return durable === null
           ? Object.freeze({ status: "provider_unknown" })
-          : processDurable(durable, startInput.context, schemaVersion === 2);
+          : guardProviderlessCanonicalCreate(
+              durable,
+              startInput.context,
+              startInput,
+              quote.status === "quoted" ? quote.pricingRevision : null,
+            );
       }
       return Object.freeze({ status: "facts_changed_retry" });
     },

@@ -227,6 +227,61 @@ function safePricingRevision(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
 }
 
+function safeNullableMoney(value: unknown): value is number | null {
+  return value === null || safeMoney(value);
+}
+
+function safeCartCurrency(value: unknown): value is string | null {
+  return value === null ||
+    (typeof value === "string" && /^[A-Z]{3}$/u.test(value));
+}
+
+function isSafePriceChangedCart(value: unknown): boolean {
+  if (!exactRecord(value, [
+    "items", "subtotalMinor", "currency", "taxMinor", "shippingMinor",
+    "finalDiscountMinor",
+  ]) || !Array.isArray(value.items) || value.items.length < 1 ||
+    value.items.length > 50 || !safeMoney(value.subtotalMinor) ||
+    !safeCartCurrency(value.currency) || value.taxMinor !== null ||
+    value.shippingMinor !== null || value.finalDiscountMinor !== null) {
+    return false;
+  }
+
+  const seen = new Set<string>();
+  let subtotalMinor = 0;
+  const currencies = new Set<string>();
+  for (let index = 0; index < value.items.length; index += 1) {
+    if (!Object.hasOwn(value.items, index)) return false;
+    const line = value.items[index];
+    if (!exactRecord(line, [
+      "variantId", "quantity", "available", "name", "packageForm",
+      "variantLabel", "sku", "unitAmountMinor", "lineSubtotalMinor",
+      "currency",
+    ]) || !isCanonicalUuid(line.variantId) || seen.has(line.variantId) ||
+      !Number.isSafeInteger(line.quantity) || (line.quantity as number) < 1 ||
+      (line.quantity as number) > 25 || typeof line.available !== "boolean" ||
+      (line.name !== null && !boundedText(line.name)) ||
+      (line.packageForm !== null && !boundedText(line.packageForm)) ||
+      (line.variantLabel !== null && !boundedText(line.variantLabel)) ||
+      (line.sku !== null && !boundedText(line.sku, 120)) ||
+      !safeNullableMoney(line.unitAmountMinor) ||
+      !safeNullableMoney(line.lineSubtotalMinor) ||
+      !safeCartCurrency(line.currency) ||
+      (line.unitAmountMinor !== null && line.lineSubtotalMinor !== null &&
+        line.lineSubtotalMinor !==
+          line.unitAmountMinor * (line.quantity as number))) {
+      return false;
+    }
+    const nextSubtotal = subtotalMinor + (line.lineSubtotalMinor ?? 0);
+    if (!Number.isSafeInteger(nextSubtotal)) return false;
+    subtotalMinor = nextSubtotal;
+    if (line.currency !== null) currencies.add(line.currency);
+    seen.add(line.variantId);
+  }
+  const coherentCurrency = currencies.size === 1 ? [...currencies][0]! : null;
+  return subtotalMinor === value.subtotalMinor && value.currency === coherentCurrency;
+}
+
 function responseMessage(status: unknown, component?: unknown): string {
   if (status === "rate_limited") return "Too many checkout requests. Wait briefly, then retry with the same unchanged request.";
   if (status === "review_required") return "Manual review is required before a hosted payment session can open.";
@@ -524,8 +579,10 @@ export function CheckoutForm({
         navigate(value.hostedUrl);
         return;
       }
-      if (typeof value === "object" && value !== null &&
-        Reflect.get(value, "status") === "PRICE_CHANGED") {
+      if (exactRecord(value, ["status", "pricingRevision", "cart"]) &&
+        value.status === "PRICE_CHANGED" && safePricingRevision(value.pricingRevision) &&
+        isSafePriceChangedCart(value.cart)) {
+        if (keyRef.current?.fingerprint === fingerprint) keyRef.current = null;
         setQuoteView(null);
         setFeedback({
           fingerprint,
