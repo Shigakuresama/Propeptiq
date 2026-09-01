@@ -192,6 +192,22 @@ describe("concentration calculator controlled projection", () => {
   );
 
   it.each([
+    ["colon", "Convert 5 mg to units: 10."],
+    ["parentheses", "Calculate unit (10)."],
+    ["slash", "Calculate units/10."],
+    ["concatenated", "Calculate units10."],
+    ["decimal space", "Calculate units 10.5."],
+    ["leading-decimal slash", "Calculate unit/.5."],
+    ["decimal equals", "Calculate units = 0.25."],
+  ] as const)(
+    "rejects general-scanner-safe generic units before numeric values across %s boundaries",
+    (_label, body) => {
+      expectGeneralScannerAllows(body);
+      expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
+    },
+  );
+
+  it.each([
     ["split units token", "Convert 5 mg to 10 un\u200Bits."],
     ["split put verb", "Pu\u200Bt 5 mg under the tongue."],
     ["split take verb", "Ta\u2060ke 5 mg."],

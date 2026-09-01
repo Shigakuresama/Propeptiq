@@ -195,8 +195,6 @@ const calculatorCopyVocabulary = Object.freeze({
 const calculatorCopyNumberToken = /^\d+(?:[.,]\d+)*$/u;
 const calculatorCopyToken = /[a-z]+|\d+(?:[.,]\d+)*/gu;
 const calculatorCopyCharacters = /^[a-z0-9 \t\r\n.,;:!?()[\]{}+\-*/=%]*$/u;
-const numericGenericUnit =
-  /(?:^|[^a-z0-9])(?:\d+(?:[.,]\d+)*|\.\d+)[\s\p{P}\p{S}]*units?\b/iu;
 
 function isOrdinaryWhitespace(value: string): boolean {
   return value === " " || value === "\t" || value === "\r" || value === "\n";
@@ -221,6 +219,14 @@ function isApprovedCalculatorCopyToken(token: string): boolean {
     category.includes(token));
 }
 
+function combinesGenericUnitsWithNumber(tokens: readonly string[]): boolean {
+  const hasGenericUnit = tokens.some((token) =>
+    token === "unit" || token === "units");
+  const hasNumber = tokens.some((token) =>
+    calculatorCopyNumberToken.test(token));
+  return hasGenericUnit && hasNumber;
+}
+
 function calculatorCopyIsNeutral(title: string, body: string): boolean {
   if (title !== exactPublicCalculatorTitle) return false;
   if (
@@ -234,8 +240,7 @@ function calculatorCopyIsNeutral(title: string, body: string): boolean {
   if (
     normalizedBody.length === 0 ||
     normalizedBody.length > calculatorCopyBounds.maxCharacters ||
-    !calculatorCopyCharacters.test(normalizedBody) ||
-    numericGenericUnit.test(normalizedBody)
+    !calculatorCopyCharacters.test(normalizedBody)
   ) {
     return false;
   }
@@ -243,6 +248,7 @@ function calculatorCopyIsNeutral(title: string, body: string): boolean {
   const tokens = normalizedBody.match(calculatorCopyToken) ?? [];
   return tokens.length > 0 &&
     tokens.length <= calculatorCopyBounds.maxTokens &&
+    !combinesGenericUnitsWithNumber(tokens) &&
     tokens.every(isApprovedCalculatorCopyToken);
 }
 
