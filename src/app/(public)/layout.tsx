@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { getStorefrontPromotionBannerView } from "@/catalog/storefront-promotion-banner-server";
 import { SiteSearchLauncher } from "@/components/search/site-search-launcher";
 import { PromotionBar } from "@/components/site/promotion-bar";
+import { ScrollRevealController } from "@/components/site/scroll-reveal-controller";
 import { SiteFooter } from "@/components/site/site-footer";
 import { SiteHeader } from "@/components/site/site-header";
 
@@ -21,6 +22,7 @@ export default async function PublicLayout({ children }: { children: ReactNode }
       </main>
       <SiteFooter />
       <SiteSearchLauncher />
+      <ScrollRevealController />
     </div>
   );
 }

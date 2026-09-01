@@ -4,8 +4,9 @@ import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getStorefrontPromotionBannerViewMock } = vi.hoisted(() => ({
+const { getStorefrontPromotionBannerViewMock, scrollRevealControllerMock } = vi.hoisted(() => ({
   getStorefrontPromotionBannerViewMock: vi.fn(),
+  scrollRevealControllerMock: vi.fn(() => null),
 }));
 
 vi.mock("@/catalog/storefront-promotion-banner-server", () => ({
@@ -16,6 +17,9 @@ vi.mock("@/components/site/site-header", () => ({
 }));
 vi.mock("@/components/site/site-footer", () => ({
   SiteFooter: () => <footer>Site footer</footer>,
+}));
+vi.mock("@/components/site/scroll-reveal-controller", () => ({
+  ScrollRevealController: scrollRevealControllerMock,
 }));
 
 import PublicLayout from "./layout";
@@ -29,6 +33,7 @@ const winter30 = Object.freeze({
 describe("public layout promotion composition", () => {
   beforeEach(() => {
     getStorefrontPromotionBannerViewMock.mockReset();
+    scrollRevealControllerMock.mockClear();
   });
 
   it("loads the safe view once and places the banner after the header and before main", async () => {
@@ -69,6 +74,8 @@ describe("public layout promotion composition", () => {
     expect(lanes).toHaveLength(1);
     expect(lanes[0]).toBe(root!.lastElementChild);
     expect(screen.getByRole("button", { name: "Search PropeptIQ" })).toBeVisible();
+    expect(scrollRevealControllerMock).toHaveBeenCalledOnce();
+    expect(root!.querySelectorAll("[data-scroll-reveal-controller]")).toHaveLength(0);
   });
 
   it("omits the banner and empty spacing when the safe server view is null", async () => {
@@ -93,6 +100,7 @@ describe("public layout promotion composition", () => {
     expect(screen.queryByText(/WINTER30/u)).toBeNull();
     expect(screen.getByRole("main")).toHaveTextContent("Information remains available");
     expect(root!.lastElementChild).toHaveClass("site-search-launcher-lane");
+    expect(scrollRevealControllerMock).toHaveBeenCalledOnce();
   });
 
   it("renders the unchanged public shell with no fabricated fallback after acquisition failure", async () => {

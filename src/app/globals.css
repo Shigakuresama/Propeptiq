@@ -646,6 +646,17 @@ footer a {
   overscroll-behavior: contain;
 }
 
+.public-layout main section[data-scroll-reveal-state] {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 280ms ease-out, transform 280ms ease-out;
+}
+
+.public-layout main section[data-scroll-reveal-state="pending"] {
+  opacity: 0;
+  transform: translateY(0.625rem);
+}
+
 @media (min-width: 48rem) {
   .site-container {
     padding-inline: 1.5rem;
@@ -852,6 +863,12 @@ footer a {
     transition-duration: 0s !important;
     animation-duration: 0s !important;
     animation-delay: 0s !important;
+  }
+
+  .public-layout main section[data-scroll-reveal-state] {
+    opacity: 1 !important;
+    transform: none !important;
+    transition-duration: 0s !important;
   }
 
   .catalog-listing-card:hover {

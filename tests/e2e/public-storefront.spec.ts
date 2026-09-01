@@ -1303,3 +1303,144 @@ test("captures approved desktop and mobile storefront evidence", async ({ page }
     fullPage: true,
   });
 });
+
+test("scroll reveal keeps server content visible, hides only below-fold sections after hydration, and never replays", async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 375, height: 520 });
+  const serverResponse = await request.get("/");
+  expect(serverResponse.ok()).toBe(true);
+  const serverHtml = await serverResponse.text();
+  expect(serverHtml).toContain("Research materials, documented for laboratory work.");
+  expect(serverHtml).not.toContain("data-scroll-reveal-state");
+
+  await page.goto("/");
+  const sections = page.locator(".public-layout > main section");
+  const firstSection = sections.first();
+  const belowFoldSection = sections.filter({ hasText: "Catalog highlights" });
+
+  await expect(firstSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  await expect(firstSection).toHaveCSS("opacity", "1");
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "pending");
+  const before = await belowFoldSection.evaluate((element) => ({
+    height: (element as HTMLElement).offsetHeight,
+    offsetTop: (element as HTMLElement).offsetTop,
+    width: (element as HTMLElement).offsetWidth,
+  }));
+
+  await belowFoldSection.scrollIntoViewIfNeeded();
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  const after = await belowFoldSection.evaluate((element) => ({
+    height: (element as HTMLElement).offsetHeight,
+    offsetTop: (element as HTMLElement).offsetTop,
+    width: (element as HTMLElement).offsetWidth,
+  }));
+  expect(after).toEqual(before);
+
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+});
+
+test("scroll reveal exposes a pending section to keyboard focus without moving focus", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 375, height: 520 });
+  await page.goto("/");
+  const qualitySection = page.locator(
+    '.public-layout > main section[aria-labelledby="quality-callout-heading"]',
+  );
+  const qualityLink = qualitySection.getByRole("link", { name: "View quality records" });
+
+  await expect(qualitySection).toHaveAttribute("data-scroll-reveal-state", "pending");
+  await qualityLink.evaluate((element) => element.focus({ preventScroll: true }));
+  await expect(qualitySection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  await expect(qualityLink).toBeFocused();
+});
+
+test("scroll reveal reduced motion keeps sections visible with no transition", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.setViewportSize({ width: 375, height: 520 });
+  await page.goto("/");
+  const belowFoldSection = page
+    .locator(".public-layout > main section")
+    .filter({ hasText: "Catalog highlights" });
+
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  expect(await belowFoldSection.evaluate((element) => ({
+    animationDuration: getComputedStyle(element).animationDuration,
+    opacity: getComputedStyle(element).opacity,
+    scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
+    transform: getComputedStyle(element).transform,
+    transitionDuration: getComputedStyle(element).transitionDuration,
+  }))).toEqual({
+    animationDuration: "0s",
+    opacity: "1",
+    scrollBehavior: "auto",
+    transform: "none",
+    transitionDuration: "0s",
+  });
+});
+
+test("JavaScript disabled keeps essential public sections visible and navigable", async ({
+  baseURL,
+  browser,
+}) => {
+  if (baseURL === undefined) throw new Error("Playwright baseURL is required.");
+  const context = await browser.newContext({
+    baseURL,
+    javaScriptEnabled: false,
+    viewport: { width: 375, height: 812 },
+  });
+  const page = await context.newPage();
+  try {
+    await page.goto("/");
+    await expect(
+      page.getByRole("heading", {
+        level: 1,
+        name: "Research materials, documented for laboratory work.",
+      }),
+    ).toBeVisible();
+    const browseCatalog = page.getByRole("link", { name: "Browse catalog" });
+    await expect(browseCatalog).toBeVisible();
+    await browseCatalog.click();
+    await expect(page).toHaveURL(/\/catalog$/u);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Research catalog, organized by product." }),
+    ).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test("scroll reveal public routes stay overflow-free and error-free on mobile and desktop", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  for (const viewport of [
+    { width: 375, height: 812 },
+    { width: 1440, height: 1000 },
+  ]) {
+    await page.setViewportSize(viewport);
+    for (const route of ["/", "/catalog"] as const) {
+      await page.goto(route);
+      const geometry = await page.evaluate(() => ({
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      }));
+      expect(
+        geometry.scrollWidth - geometry.clientWidth,
+        `${route} at ${viewport.width}px`,
+      ).toBeLessThanOrEqual(1);
+    }
+  }
+
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

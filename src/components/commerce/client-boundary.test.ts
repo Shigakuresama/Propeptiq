@@ -13,6 +13,7 @@ const searchClientPaths = [
   "src/components/search/site-search-sheet.tsx",
 ] as const;
 const newsletterClientPath = "src/components/site/newsletter-form.tsx";
+const scrollRevealClientPath = "src/components/site/scroll-reveal-controller.tsx";
 
 const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
@@ -24,6 +25,7 @@ const clientEntries = [
   "src/components/commerce/product-purchase-panel.tsx",
   promotionBarPath,
   newsletterClientPath,
+  scrollRevealClientPath,
   ...searchClientPaths,
   "src/cart/cart-provider.tsx",
 ] as const;
@@ -303,6 +305,16 @@ describe("storefront client boundary", () => {
 
   it("keeps the pure storefront search core free of local runtime dependencies", () => {
     expect(runtimeLocalImports("src/search/storefront-search.ts")).toEqual([]);
+  });
+
+  it("bounds the scroll reveal controller to React, Next navigation, and browser APIs", () => {
+    const contents = source(scrollRevealClientPath);
+
+    expect(runtimeImportSpecifiers(contents)).toEqual(["react", "next/navigation"]);
+    expect(runtimeLocalImports(scrollRevealClientPath)).toEqual([]);
+    expect(contents).not.toMatch(
+      /server-only|process\.env|@\/(?:content|catalog|cart|commerce|newsletter|config|env|db)|checkout|stripe|payment-provider|provider-repositor/iu,
+    );
   });
 
   it("recursively bounds the launcher and Sheet to browser-safe search, href-policy, and UI code", () => {
