@@ -113,6 +113,34 @@ function AcceptedThenRejectedHarness() {
   return <output aria-label="Ordered cart lines">{JSON.stringify(items)}</output>;
 }
 
+function HydratedExistingAddHarness() {
+  const { addVariant, hydrated, items } = useCart();
+  const attempted = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!hydrated || attempted.current) return;
+    attempted.current = true;
+    addVariant("variant-existing", 1, { variantLabel: "Existing" });
+  }, [addVariant, hydrated]);
+
+  return <output aria-label="Hydrated existing cart lines">{JSON.stringify(items)}</output>;
+}
+
+function AcceptedThenQuantityHarness() {
+  const { addVariant, items, setQuantity } = useCart();
+  const attempted = useRef(false);
+
+  useLayoutEffect(() => {
+    if (attempted.current) return;
+    attempted.current = true;
+    addVariant("variant-latest", 1, { variantLabel: "Stale add" });
+    setQuantity("variant-latest", 2);
+    setQuantity("variant-latest", 1);
+  }, [addVariant, setQuantity]);
+
+  return <output aria-label="Latest mutation cart lines">{JSON.stringify(items)}</output>;
+}
+
 describe("CartProvider exact-variant announcements", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -223,6 +251,46 @@ describe("CartProvider exact-variant announcements", () => {
     );
     expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
       "The cart was not changed.",
+    );
+  });
+
+  it("waits for the exact expected post-add quantity before announcing success", async () => {
+    window.localStorage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        items: [{ variantId: "variant-existing", quantity: 24 }],
+      }),
+    );
+
+    render(
+      <CartProvider>
+        <HydratedExistingAddHarness />
+      </CartProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Hydrated existing cart lines")).toHaveTextContent(
+        JSON.stringify([{ variantId: "variant-existing", quantity: 25 }]),
+      );
+    });
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
+      "Cart updated. Existing: 25 units in cart.",
+    );
+  });
+
+  it("lets a newer explicit quantity mutation cancel an older pending success", () => {
+    render(
+      <CartProvider>
+        <AcceptedThenQuantityHarness />
+      </CartProvider>,
+    );
+
+    expect(screen.getByLabelText("Latest mutation cart lines")).toHaveTextContent(
+      JSON.stringify([{ variantId: "variant-latest", quantity: 1 }]),
+    );
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
+      "Quantity updated to 1.",
     );
   });
 

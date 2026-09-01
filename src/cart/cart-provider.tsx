@@ -69,7 +69,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const itemsRef = useRef<CartLine[]>([]);
   const hydratedRef = useRef(false);
   const pendingAddAnnouncement = useRef<
-    Readonly<{ variantId: string; labels: CartAnnouncementLabels }> | null
+    Readonly<{
+      variantId: string;
+      expectedQuantity: number;
+      labels: CartAnnouncementLabels;
+    }> | null
   >(null);
 
   const hydrateCart = useCallback((): CartLine[] => {
@@ -103,6 +107,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     function synchronize(event: StorageEvent) {
       if (event.key === CART_STORAGE_KEY || event.key === LEGACY_CART_STORAGE_KEY) {
+        pendingAddAnnouncement.current = null;
         const loaded = loadCart(window.localStorage);
         if (loaded.status === "ready") {
           const nextItems = [...loaded.items];
@@ -144,6 +149,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
       pendingAddAnnouncement.current = {
         variantId,
+        expectedQuantity: nextQuantity,
         labels: announcementLabels,
       };
       itemsRef.current = nextItems;
@@ -159,7 +165,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     const normalizedQuantity = items.find(
       (item) => item.variantId === pending.variantId,
     )?.quantity;
-    if (normalizedQuantity === undefined) return;
+    if (normalizedQuantity !== pending.expectedQuantity) return;
     pendingAddAnnouncement.current = null;
     setAnnouncement(
       `Cart updated. ${announcementSubject(pending.labels)}: ${normalizedQuantity} unit${normalizedQuantity === 1 ? "" : "s"} in cart.`,
@@ -168,6 +174,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const setQuantity = useCallback((variantId: string, quantity: number) => {
     const current = hydrateCart();
+    pendingAddAnnouncement.current = null;
     const bounded = Math.min(MAX_CART_ITEM_QUANTITY, Math.floor(quantity));
     const next =
       bounded <= 0
@@ -186,6 +193,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [hydrateCart]);
 
   const removeItem = useCallback((variantId: string) => {
+    pendingAddAnnouncement.current = null;
     const nextItems = hydrateCart().filter(
       (item) => item.variantId !== variantId,
     );
@@ -195,6 +203,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [hydrateCart]);
 
   const clearCart = useCallback(() => {
+    pendingAddAnnouncement.current = null;
     hydrateCart();
     itemsRef.current = [];
     setItems([]);
@@ -202,6 +211,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [hydrateCart]);
 
   const acknowledgeLegacyReselection = useCallback(() => {
+    pendingAddAnnouncement.current = null;
     hydrateCart();
     acknowledgeLegacyCartReselection(window.localStorage);
     setLegacyItemCount(null);
