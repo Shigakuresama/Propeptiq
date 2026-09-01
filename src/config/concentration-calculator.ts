@@ -28,73 +28,31 @@ export const concentrationCalculatorConfiguration: ControlledConcentrationCalcul
 
 const exactPublicCalculatorTitle = "Laboratory concentration calculator";
 
-const neutralCalculatorBodyWords: ReadonlySet<string> = new Set([
-  "amount",
-  "amounts",
-  "and",
-  "are",
-  "arithmetic",
-  "bounded",
-  "calculate",
-  "calculates",
-  "calculation",
-  "calculations",
-  "calculator",
-  "concentration",
-  "concentrations",
-  "conversion",
-  "conversions",
-  "convert",
-  "converts",
-  "diluent",
-  "divided",
-  "equals",
-  "for",
-  "from",
-  "in",
-  "input",
-  "inputs",
-  "lab",
-  "laboratory",
-  "mathematical",
-  "mathematics",
-  "mcg",
-  "mg",
-  "ml",
-  "multiplied",
-  "only",
-  "optional",
-  "perform",
-  "performs",
-  "result",
-  "results",
-  "sample",
-  "samples",
-  "to",
-  "unit",
-  "units",
-  "value",
-  "values",
-  "vial",
-  "volume",
-  "volumes",
+const calculatorSpecificProhibitedPatterns: readonly RegExp[] = Object.freeze([
+  /\b(?:draw(?:n|s|ing)?|withdraw(?:n|s|ing)?|syringes?)\b/u,
+  /\b(?:human|patient)\s+(?:use|dose|dosage|dosing|advice|guidance)\b/u,
+  /\b(?:dose|dosage|dosing|treat(?:s|ed|ing|ment)?|advice|recommend(?:ation|ations|ed|ing|s)?|protocols?|administration|administer(?:ed|ing)?|inject(?:ion|ed|ing)?|routes?)\b/u,
+  /\b(?:take|takes|taking|consume[sd]?|consuming|swallow(?:s|ed|ing)?|ingest(?:s|ed|ing)?|inject(?:s|ed|ing)?|administer(?:s|ed|ing)?)\b/u,
+  /\b(?:use|apply)\s+(?:\p{N}|a\b|an\b|the\b|this\b)/u,
+  /\b(?:once|twice|daily|weekly|monthly|hourly|frequency|schedules?|morning|evening|nightly|bedtime)\b/u,
+  /\b(?:every|each|per)\s+(?:other\s+)?(?:days?|weeks?|months?|hours?)\b/u,
+  /\b(?:days?|weeks?|months?|hours?)\b/u,
 ]);
 
 function calculatorCopyIsNeutral(title: string, body: string): boolean {
   if (title !== exactPublicCalculatorTitle) return false;
-  const normalizedBody = body
+  const semanticBody = body
     .normalize("NFKC")
     .toLocaleLowerCase("en-US")
-    .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+    .replace(/[\p{Cc}\p{Cf}\p{P}\p{S}]+/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
-  if (!/^[a-z0-9\s.,:;()/*+=-]+$/u.test(normalizedBody)) return false;
-  if (/\b\d+(?:,\d{3})*(?:\.\d+)?\s+units?\b/u.test(normalizedBody)) {
+  if (semanticBody.length === 0) return false;
+  if (/\b\p{N}+(?:\s+\p{N}+)*\s*units?\b/u.test(semanticBody)) {
     return false;
   }
-  const tokens = normalizedBody.match(/[a-z]+|\d+(?:\.\d+)?/gu);
-  return tokens !== null && tokens.every((token) =>
-    /^\d+(?:\.\d+)?$/u.test(token) || neutralCalculatorBodyWords.has(token));
+  return !calculatorSpecificProhibitedPatterns.some((pattern) =>
+    pattern.test(semanticBody));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

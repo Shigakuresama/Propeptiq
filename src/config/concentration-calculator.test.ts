@@ -83,6 +83,9 @@ describe("concentration calculator controlled projection", () => {
     "Laboratory arithmetic for concentration and unit conversions only.",
     "10 mg / 2 mL = 5 mg/mL. Concentration conversion equals 5,000 mcg/mL.",
     "Vial amount, diluent volume, and optional sample volume are calculation inputs.",
+    "Divide the vial amount in mg by the diluent volume in mL to calculate concentration in mg/mL and mcg/mL.",
+    "Calculate concentration per sample.",
+    "Calculate concentration for each sample.",
   ])("allows bounded neutral calculator body %j", (body) => {
     expect(resolve({ content: [{ ...approvedCopy, body }] })).toMatchObject({
       title: "Laboratory concentration calculator",
@@ -119,8 +122,6 @@ describe("concentration calculator controlled projection", () => {
     ["twice-each-week direction", "Take 5 mg twice each week."],
     ["once", "Calculate concentration once."],
     ["twice", "Calculate concentration twice."],
-    ["per", "Calculate concentration per sample."],
-    ["each", "Calculate concentration each sample."],
     ["bare day", "Calculate concentration day."],
     ["bare week", "Calculate concentration week."],
     ["bare month", "Calculate concentration month."],
@@ -133,6 +134,31 @@ describe("concentration calculator controlled projection", () => {
     ["numeric unit direction", "Calculate 10 units."],
   ] as const)(
     "rejects general-scanner-safe temporal or imperative wording: %s",
+    (_label, body) => {
+      expect(
+        scanPublicCopy(
+          {
+            text: `Laboratory concentration calculator\n${body}`,
+            claims: [],
+          },
+          approvedConfiguration.publicationPolicy,
+        ),
+      ).toMatchObject({ publishable: true, status: "pass", violations: [] });
+      expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
+    },
+  );
+
+  it.each([
+    ["space", "Convert 5 mg to 10 units."],
+    ["hyphen", "Convert 5 mg to 10-units."],
+    ["parentheses", "Convert 5 mg to 10(units)."],
+    ["slash", "Convert 5 mg to 10/units."],
+    ["concatenated", "Convert 5 mg to 10units."],
+    ["decimal hyphen", "Convert 5 mg to 10.5-units."],
+    ["leading-decimal concatenated", "Convert 5 mg to .5units."],
+    ["decimal slash", "Convert 5 mg to 0.25/units."],
+  ] as const)(
+    "rejects general-scanner-safe numeric units across %s boundaries",
     (_label, body) => {
       expect(
         scanPublicCopy(
