@@ -412,6 +412,30 @@ describe("SiteSearchLauncher accessible Sheet behavior", () => {
     }
   });
 
+  it("constrains the semantic footer home brand at the ultra-narrow breakpoint", () => {
+    const ultraNarrowMedia = globalsCss.indexOf("@media (max-width: 17rem)");
+    expect(ultraNarrowMedia).toBeGreaterThanOrEqual(0);
+
+    const brandSelector =
+      '.public-layout > footer .site-container a[href="/"][aria-label$=" home"]';
+    const brand = cssDeclarations(
+      cssRuleBody(globalsCss, brandSelector, ultraNarrowMedia),
+    );
+    expect(brand.get("width")).toBe("100%");
+    expect(brand.get("max-width")).toBe("12rem");
+    expect(brand.has("overflow")).toBe(false);
+    expect(brand.has("overflow-x")).toBe(false);
+    expect(brand.has("text-overflow")).toBe(false);
+
+    const logo = cssDeclarations(
+      cssRuleBody(globalsCss, `${brandSelector} > span`, ultraNarrowMedia),
+    );
+    expect(logo.get("width")).toBe("100%");
+    expect(logo.get("max-width")).toBe("100%");
+    expect(logo.has("overflow")).toBe(false);
+    expect(logo.has("overflow-x")).toBe(false);
+  });
+
   it("keeps the launcher in a centered nonblocking safe-area lane", () => {
     const lane = cssDeclarations(
       cssRuleBody(globalsCss, ".site-search-launcher-lane"),

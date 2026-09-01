@@ -384,7 +384,7 @@ describe("scroll reveal CSS", () => {
       /\.public-layout main section\[data-scroll-reveal-state\]\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*translateY\(0\);[^}]*transition:\s*opacity 280ms ease-out,\s*transform 280ms ease-out;[^}]*\}/su,
     );
     expect(css).toMatch(
-      /\.public-layout main section\[data-scroll-reveal-state="pending"\]\s*\{[^}]*opacity:\s*0;[^}]*transform:\s*translateY\(0\.625rem\);[^}]*\}/su,
+      /\.public-layout main section\[data-scroll-reveal-state="pending"\]\s*\{[^}]*opacity:\s*0;[^}]*transform:\s*translateY\(0\.625rem\);[^}]*transition:\s*none;[^}]*\}/su,
     );
     expect(css).not.toMatch(
       /section\[data-scroll-reveal-state[^}]*\b(?:height|margin|padding|position|will-change|transition-delay)\s*:/su,

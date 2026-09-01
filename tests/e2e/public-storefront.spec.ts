@@ -210,6 +210,30 @@ function rectanglesIntersect(
     left.bottom > right.top;
 }
 
+async function horizontalLayout(page: Page) {
+  return page.evaluate(() => {
+    const clientWidth = document.documentElement.clientWidth;
+    return {
+      clientWidth,
+      offenders: [...document.querySelectorAll("body *")]
+        .map((element) => {
+          const bounds = element.getBoundingClientRect();
+          return {
+            className: element.getAttribute("class") ?? "",
+            left: bounds.left,
+            right: bounds.right,
+            tagName: element.tagName,
+            text: element.textContent?.trim().slice(0, 80) ?? "",
+            width: bounds.width,
+          };
+        })
+        .filter(({ left, right }) => left < -1 || right > clientWidth + 1)
+        .slice(0, 20),
+      scrollWidth: document.documentElement.scrollWidth,
+    };
+  });
+}
+
 async function seedLocalTestCart(page: import("@playwright/test").Page, quantity = 1) {
   await page.evaluate(({ variantId, requestedQuantity }) => {
     window.localStorage.setItem(
@@ -983,7 +1007,11 @@ test("mobile navigation traps focus, closes on Escape, and restores trigger focu
 }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
-  const trigger = page.locator('[data-slot="sheet-trigger"]');
+  const trigger = page.getByRole("button", {
+    name: "Open navigation",
+    exact: true,
+    includeHidden: true,
+  });
   await expect(trigger).toHaveAccessibleName("Open navigation");
   await trigger.focus();
   await page.keyboard.press("Enter");
@@ -1113,10 +1141,11 @@ test("explicit 200% CSS rendering pass remains operable without horizontal overf
   await page.evaluate(() => {
     document.documentElement.style.zoom = "2";
   });
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-  );
-  expect(overflow).toBeLessThanOrEqual(1);
+  const layout = await horizontalLayout(page);
+  expect(
+    layout.scrollWidth - layout.clientWidth,
+    `catalog 200% zoom overflow: ${JSON.stringify(layout)}`,
+  ).toBeLessThanOrEqual(1);
   await expect(page.getByRole("button", { name: "Open navigation" })).toBeVisible();
   await page.screenshot({
     path: path.join(screenshotDirectory, "catalog-css-zoom-200.png"),
@@ -1143,13 +1172,10 @@ test("homepage current catalog remains reachable at 200% CSS zoom without horizo
   await browseCatalog.focus();
   await expect(browseCatalog).toBeFocused();
 
-  const layout = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
+  const layout = await horizontalLayout(page);
   expect(
     layout.scrollWidth - layout.clientWidth,
-    `homepage 200% zoom overflow: scrollWidth=${layout.scrollWidth}, clientWidth=${layout.clientWidth}`,
+    `homepage 200% zoom overflow: ${JSON.stringify(layout)}`,
   ).toBeLessThanOrEqual(1);
 });
 

@@ -604,6 +604,12 @@ footer a {
   padding-bottom: calc(var(--site-search-reserved-height) + env(safe-area-inset-bottom, 0px));
 }
 
+.public-layout > footer nav a {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .site-search-launcher-lane {
   position: fixed;
   left: 50%;
@@ -655,6 +661,7 @@ footer a {
 .public-layout main section[data-scroll-reveal-state="pending"] {
   opacity: 0;
   transform: translateY(0.625rem);
+  transition: none;
 }
 
 @media (min-width: 48rem) {
@@ -742,12 +749,12 @@ footer a {
     min-width: 0;
   }
 
-  .public-layout > footer .site-container > div:first-child > a[href="/"] {
+  .public-layout > footer .site-container a[href="/"][aria-label$=" home"] {
     width: 100%;
     max-width: 12rem;
   }
 
-  .public-layout > footer .site-container > div:first-child > a[href="/"] > span {
+  .public-layout > footer .site-container a[href="/"][aria-label$=" home"] > span {
     width: 100%;
     max-width: 100%;
   }
