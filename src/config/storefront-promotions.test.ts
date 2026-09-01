@@ -100,6 +100,72 @@ describe("storefront promotion owner configuration", () => {
     ).toEqual(["ends-later", "starts-now"]);
   });
 
+  it("keeps a campaign inactive before a start one nanosecond after the sampled instant", () => {
+    expect(
+      resolveActiveConfiguredAutomaticPromotions(
+        [
+          configuredPromotion({
+            id: "starts-one-nanosecond-later",
+            startAt: "2026-09-01T12:00:00.000000001Z",
+          }),
+        ],
+        now,
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps a campaign active before an end one nanosecond after the sampled instant", () => {
+    expect(
+      resolveActiveConfiguredAutomaticPromotions(
+        [
+          configuredPromotion({
+            id: "ends-one-nanosecond-later",
+            endAt: "2026-09-01T12:00:00.000000001Z",
+          }),
+        ],
+        now,
+      )?.map((promotion) => promotion.id),
+    ).toEqual(["ends-one-nanosecond-later"]);
+  });
+
+  it("keeps starts inclusive and ends exclusive at the exact nanosecond sample", () => {
+    expect(
+      resolveActiveConfiguredAutomaticPromotions(
+        [
+          configuredPromotion({
+            id: "starts-exactly",
+            startAt: "2026-09-01T12:00:00.000000000Z",
+          }),
+          configuredPromotion({
+            id: "ends-exactly",
+            endAt: "2026-09-01T12:00:00.000000000Z",
+          }),
+        ],
+        now,
+      )?.map((promotion) => promotion.id),
+    ).toEqual(["starts-exactly"]);
+  });
+
+  it("uses the same nanosecond boundary rules before the Unix epoch", () => {
+    const beforeEpoch = new Date("1969-12-31T23:59:59.000Z");
+
+    expect(
+      resolveActiveConfiguredAutomaticPromotions(
+        [
+          configuredPromotion({
+            id: "negative-starts-one-nanosecond-later",
+            startAt: "1969-12-31T23:59:59.000000001Z",
+          }),
+          configuredPromotion({
+            id: "negative-ends-one-nanosecond-later",
+            endAt: "1969-12-31T23:59:59.000000001Z",
+          }),
+        ],
+        beforeEpoch,
+      )?.map((promotion) => promotion.id),
+    ).toEqual(["negative-ends-one-nanosecond-later"]);
+  });
+
   it("accepts an otherwise-valid promotion interval shorter than one millisecond", () => {
     expect(
       storefrontPromotionMatchesConfiguration(

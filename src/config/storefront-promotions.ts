@@ -51,6 +51,7 @@ const configurationKeys = Object.freeze([
 ] as const);
 const MAX_CONFIGURED_PROMOTIONS = 100;
 const MAX_SCOPE_TARGETS = 1_000;
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
 
 function daysInMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -286,14 +287,22 @@ export function resolveActiveConfiguredAutomaticPromotions(
       ids.add(promotion.id);
       normalized.push(promotion);
     }
-    const nowMs = now.getTime();
+    const nowInstant = BigInt(now.getTime()) * NANOSECONDS_PER_MILLISECOND;
     const active = normalized
-      .filter((promotion) =>
-        promotion.enabled &&
-        promotion.applicationMode === "automatic" &&
-        (promotion.startAt === null || nowMs >= Date.parse(promotion.startAt)) &&
-        (promotion.endAt === null || nowMs < Date.parse(promotion.endAt)),
-      )
+      .filter((promotion) => {
+        if (!promotion.enabled || promotion.applicationMode !== "automatic") {
+          return false;
+        }
+        if (promotion.startAt !== null) {
+          const startInstant = strictInstantEpochNanoseconds(promotion.startAt);
+          if (startInstant === null || nowInstant < startInstant) return false;
+        }
+        if (promotion.endAt !== null) {
+          const endInstant = strictInstantEpochNanoseconds(promotion.endAt);
+          if (endInstant === null || nowInstant >= endInstant) return false;
+        }
+        return true;
+      })
       .sort((left, right) => left.id.localeCompare(right.id, "en-US"));
     return Object.freeze(active);
   } catch {
@@ -327,7 +336,8 @@ function strictInstantEpochNanoseconds(value: unknown): bigint | null {
   const millisecondsWithinSecond = BigInt(fraction.slice(0, 3));
   const epochMilliseconds = BigInt(Date.parse(value));
   return (
-    (epochMilliseconds - millisecondsWithinSecond) * 1_000_000n +
+    (epochMilliseconds - millisecondsWithinSecond) *
+      NANOSECONDS_PER_MILLISECOND +
     BigInt(fraction)
   );
 }
