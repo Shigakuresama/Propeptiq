@@ -61,6 +61,16 @@ describe("parseStorefrontBindings", () => {
     })).toThrow(/duplicate IDs/iu);
   });
 
+  it.each([
+    ["missing related target", ["10000000-0000-4000-8000-000000000099"]],
+    ["self reference", [approved.products[0].id]],
+  ])("rejects %s", (_label, relatedProductIds) => {
+    expect(() => parseStorefrontBindings({
+      ...approved,
+      products: [{ ...approved.products[0], relatedProductIds }],
+    })).toThrow(/relationships must reference another bound product/iu);
+  });
+
   it("does not infer an amount or package quantity from a label", () => {
     const withoutCanonicalFacts: Record<string, unknown> = {
       ...approved.variants[0],

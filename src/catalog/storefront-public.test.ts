@@ -200,9 +200,13 @@ describe("public storefront projection", () => {
     const browseOnly = buildFixtureCatalog().products.find((entry) => entry.kind === "browse_only")!;
     const catalog = { ...buildFixtureCatalog(), products: [target, current, pending, mappingMissing, mixed, unavailable, empty, browseOnly] };
     const withRelations = { ...current, relatedProductIds: [mixed.id, pending.id, mappingMissing.id, target.id, target.id, "missing", current.id, browseOnly.slug, empty.id, unavailable.id] };
+    const catalogSnapshot = JSON.stringify(catalog);
+    const currentSnapshot = JSON.stringify(withRelations);
     const result = resolvePublicStorefrontRelatedProducts(catalog, withRelations);
     expect(result.map((product) => product.id)).toEqual([mixed.id, pending.id, mappingMissing.id, target.id]);
     expect(Object.isFrozen(result)).toBe(true);
+    expect(JSON.stringify(catalog)).toBe(catalogSnapshot);
+    expect(JSON.stringify(withRelations)).toBe(currentSnapshot);
   });
   it("retains all 56 products and 103 display configurations with empty canonical data", () => {
     const catalog = buildFixtureCatalog({

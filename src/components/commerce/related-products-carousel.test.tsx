@@ -58,10 +58,16 @@ describe("RelatedProductsCarousel", () => {
     expect(previous).toHaveAttribute("aria-controls", list.id);
     expect(capturedCards).toHaveLength(2);
     expect(capturedCards.every((card) => card.priority === false && card.pricing === pricing)).toBe(true);
-    await user.click(previous);
+    previous.focus();
+    await user.keyboard("{Enter}");
+    expect(document.activeElement).toBe(previous);
     expect(scrollBy).toHaveBeenLastCalledWith({ left: -640, behavior: "smooth" });
     Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: true })) });
     await user.click(next);
     expect(scrollBy).toHaveBeenLastCalledWith({ left: 640, behavior: "auto" });
+    Reflect.deleteProperty(window, "matchMedia");
+    await user.click(next);
+    expect(scrollBy).toHaveBeenLastCalledWith({ left: 640, behavior: "smooth" });
+    expect((RelatedProductsCarousel as unknown as { toString(): string }).toString()).not.toMatch(/setTimeout|setInterval|autoplay|clone/iu);
   });
 });

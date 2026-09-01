@@ -414,6 +414,18 @@ test("owner-supplied catalog is complete, price-free, and serves every illustrat
   expect(unknown?.status()).toBe(404);
 });
 
+test("retained browse-only item has no related carousel or eager related media", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/catalog/items/tirzepatide");
+  await expect(page.getByRole("heading", { name: "Frequently Researched Together", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Previous related products" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Next related products" })).toHaveCount(0);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(1);
+  const images = await page.locator("main img").evaluateAll((entries) => entries.map((image) => ({ loading: (image as HTMLImageElement).loading, fetchPriority: image.getAttribute("fetchpriority") })));
+  expect(images.filter((image) => image.loading !== "lazy" || image.fetchPriority === "high")).toHaveLength(1);
+});
+
 test("home and browse catalog hydrate without application console errors", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (message) => {
