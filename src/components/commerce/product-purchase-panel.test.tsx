@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { testCanonicalProduct, testPricingContext, testPublicVariant } from "./storefront-test-fixtures";
 import { testWinter30 } from "./storefront-test-fixtures";
@@ -23,7 +23,8 @@ describe("ProductPurchasePanel", () => {
     render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext()} /></CartProvider>);
     fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: String(quantity) } });
     const summary = screen.getByRole("status", { name: "Purchase summary" });
-    expect(summary).toHaveTextContent(standard); expect(summary).toHaveTextContent(effective); expect(summary).toHaveTextContent(discount); expect(summary).toHaveTextContent(savings); expect(summary).toHaveTextContent(String(quantity)); expect(summary).toHaveTextContent(subtotal);
+    const dl = summary.querySelector("dl")!; const pair = (label: string) => { const dt = within(dl).getByText(label); return dt.nextElementSibling!; };
+    expect(pair("Standard unit price")).toHaveTextContent(standard); expect(pair("Effective unit price")).toHaveTextContent(effective); expect(pair("Discount")).toHaveTextContent(discount); expect(pair("Savings")).toHaveTextContent(savings); expect(pair("Quantity")).toHaveTextContent(String(quantity)); expect(pair("Subtotal")).toHaveTextContent(subtotal); expect(pair("Effective unit price")).toHaveClass("font-semibold");
     if (quantity === 1) expect(summary.querySelector("del")).toBeNull(); else expect(summary.querySelector("del")).not.toBeNull();
   });
 

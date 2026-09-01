@@ -72,7 +72,8 @@ export function publicVariantPurchaseState(
   variant: Pick<PublicStorefrontVariant, "availability" | "priceStatus" | "baseUnitMinor" | "currency" | "checkoutReady">,
   mode: PricePresentationMode,
 ): PublicVariantPurchaseState {
-  if (variant.availability === "unavailable" || variant.priceStatus === "unavailable") return "unavailable";
+  if (variant.availability === "unavailable") return "unavailable";
+  if (variant.priceStatus === "unavailable") return "pricing_pending";
   if (variant.priceStatus === "pending") {
     return variant.availability === "preview_only" && variant.baseUnitMinor === 0 && variant.currency === "USD" && variant.checkoutReady === false && mode !== "production"
       ? "local_preview"

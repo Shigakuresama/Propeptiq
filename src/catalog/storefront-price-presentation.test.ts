@@ -12,6 +12,7 @@ import {
   type PricePresentationMode,
   type PublicStorefrontPricingContext,
 } from "./storefront-price-presentation";
+import { publicVariantPurchaseState } from "./storefront-price-presentation";
 
 const evaluatedAt = "2026-08-31T12:00:00.000Z";
 
@@ -97,6 +98,23 @@ describe("canAddPublicVariant", () => {
     ["unavailable price", variant({ priceStatus: "unavailable", availability: "unavailable", baseUnitMinor: null, currency: null, checkoutReady: false }), "preview", false],
   ] as const)("fails closed for %s", (_label, input, mode, expected) => {
     expect(canAddPublicVariant(input, mode)).toBe(expected);
+  });
+});
+
+describe("public variant state equivalence", () => {
+  it.each([
+    ["available active ready", variant(), "ready", "priced"],
+    ["available active mapping missing", variant({ checkoutReady: false }), "checkout_unavailable", "priced"],
+    ["unavailable active", variant({ availability: "unavailable", checkoutReady: false }), "unavailable", "unavailable"],
+    ["available unavailable malformed", variant({ priceStatus: "unavailable", checkoutReady: false, baseUnitMinor: null, currency: null }), "pricing_pending", "pending"],
+    ["pending null", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: null, currency: null, checkoutReady: false }), "pricing_pending", "pending"],
+    ["pending positive", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 1000, currency: "USD", checkoutReady: false }), "pricing_pending", "pending"],
+    ["pending zero preview", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, currency: "USD", checkoutReady: false }), "local_preview", "priced"],
+    ["active zero", variant({ baseUnitMinor: 0, checkoutReady: false }), "pricing_pending", "pending"],
+    ["active non USD", variant({ currency: null, checkoutReady: false }), "pricing_pending", "pending"],
+  ] as const)("agrees for %s", (_name, input, expectedState, expectedPresentation) => {
+    expect(publicVariantPurchaseState(input, "preview")).toBe(expectedState);
+    expect(resolvePublicVariantPrice({ variant: input, productId: "product-alpha", quantity: 1, pricing: pricing("preview", []) }).state).toBe(expectedPresentation);
   });
 });
 
