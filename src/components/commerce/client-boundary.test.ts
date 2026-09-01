@@ -247,6 +247,25 @@ describe("storefront client boundary", () => {
     expect(runtimeLocalImports("src/search/storefront-search.ts")).toEqual([]);
   });
 
+  it("keeps catalog discovery data serializable and imports only the browser-safe core at runtime", () => {
+    const explorerRuntimeImports = runtimeImportSpecifiers(
+      source("src/components/commerce/catalog-explorer.tsx"),
+    );
+
+    expect(explorerRuntimeImports).toContain("@/search/storefront-search");
+    expect(explorerRuntimeImports).not.toContain("@/search/catalog-discovery");
+    for (const forbiddenImport of [
+      "@/catalog/storefront-public-server",
+      "@/search/storefront-index",
+      "@/catalog/storefront-price-presentation",
+    ]) {
+      expect(explorerRuntimeImports).not.toContain(forbiddenImport);
+    }
+    expect(source("src/components/commerce/catalog-explorer.tsx")).not.toMatch(
+      /\/api\/storefront-search|public-information|database|process\.env|stripe|checkout/iu,
+    );
+  });
+
   it("recursively bounds panel runtime imports and excludes server authorities", () => {
     const pending = ["src/components/commerce/product-purchase-panel.tsx", "src/components/commerce/related-products-carousel.tsx", "src/components/commerce/laboratory-concentration-calculator.tsx"];
     const visited = new Set<string>();
