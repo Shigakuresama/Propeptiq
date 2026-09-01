@@ -28,31 +28,222 @@ export const concentrationCalculatorConfiguration: ControlledConcentrationCalcul
 
 const exactPublicCalculatorTitle = "Laboratory concentration calculator";
 
-const calculatorSpecificProhibitedPatterns: readonly RegExp[] = Object.freeze([
-  /\b(?:draw(?:n|s|ing)?|withdraw(?:n|s|ing)?|syringes?)\b/u,
-  /\b(?:human|patient)\s+(?:use|dose|dosage|dosing|advice|guidance)\b/u,
-  /\b(?:dose|dosage|dosing|treat(?:s|ed|ing|ment)?|advice|recommend(?:ation|ations|ed|ing|s)?|protocols?|administration|administer(?:ed|ing)?|inject(?:ion|ed|ing)?|routes?)\b/u,
-  /\b(?:take|takes|taking|consume[sd]?|consuming|swallow(?:s|ed|ing)?|ingest(?:s|ed|ing)?|inject(?:s|ed|ing)?|administer(?:s|ed|ing)?)\b/u,
-  /\b(?:use|apply)\s+(?:\p{N}|a\b|an\b|the\b|this\b)/u,
-  /\b(?:once|twice|daily|weekly|monthly|hourly|frequency|schedules?|morning|evening|nightly|bedtime)\b/u,
-  /\b(?:every|each|per)\s+(?:other\s+)?(?:days?|weeks?|months?|hours?)\b/u,
-  /\b(?:days?|weeks?|months?|hours?)\b/u,
-]);
+const calculatorCopyBounds = Object.freeze({
+  maxCharacters: 4_096,
+  maxTokens: 256,
+});
+
+const calculatorCopyVocabulary = Object.freeze({
+  functionWords: Object.freeze([
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "each",
+    "for",
+    "from",
+    "in",
+    "into",
+    "is",
+    "it",
+    "of",
+    "on",
+    "only",
+    "or",
+    "per",
+    "that",
+    "the",
+    "these",
+    "this",
+    "those",
+    "to",
+    "when",
+    "which",
+    "with",
+    "without",
+  ]),
+  laboratoryMathNouns: Object.freeze([
+    "amount",
+    "amounts",
+    "arithmetic",
+    "calculation",
+    "calculations",
+    "calculator",
+    "calculators",
+    "concentration",
+    "concentrations",
+    "conversion",
+    "conversions",
+    "decimal",
+    "decimals",
+    "diluent",
+    "diluents",
+    "formula",
+    "formulas",
+    "input",
+    "inputs",
+    "laboratory",
+    "material",
+    "materials",
+    "mathematics",
+    "measurement",
+    "measurements",
+    "result",
+    "results",
+    "sample",
+    "samples",
+    "value",
+    "values",
+    "vial",
+    "vials",
+    "volume",
+    "volumes",
+  ]),
+  safeMathVerbs: Object.freeze([
+    "calculate",
+    "calculated",
+    "calculates",
+    "calculating",
+    "contain",
+    "contained",
+    "containing",
+    "contains",
+    "convert",
+    "converted",
+    "converting",
+    "converts",
+    "display",
+    "displayed",
+    "displaying",
+    "displays",
+    "divide",
+    "divided",
+    "divides",
+    "dividing",
+    "enter",
+    "entered",
+    "entering",
+    "enters",
+    "equal",
+    "equaled",
+    "equaling",
+    "equals",
+    "multiply",
+    "multiplied",
+    "multiplies",
+    "multiplying",
+    "perform",
+    "performed",
+    "performing",
+    "performs",
+    "produce",
+    "produced",
+    "produces",
+    "producing",
+    "provide",
+    "provided",
+    "provides",
+    "providing",
+    "select",
+    "selected",
+    "selecting",
+    "selects",
+    "show",
+    "showing",
+    "shown",
+    "shows",
+  ]),
+  safeModifiers: Object.freeze([
+    "approved",
+    "bounded",
+    "current",
+    "exact",
+    "finite",
+    "first",
+    "given",
+    "laboratory",
+    "mathematical",
+    "neutral",
+    "numeric",
+    "optional",
+    "plain",
+    "positive",
+    "selected",
+    "supplied",
+    "then",
+    "total",
+  ]),
+  canonicalUnits: Object.freeze([
+    "mcg",
+    "mg",
+    "microgram",
+    "micrograms",
+    "milligram",
+    "milligrams",
+    "milliliter",
+    "milliliters",
+    "ml",
+    "unit",
+    "units",
+  ]),
+});
+
+const calculatorCopyNumberToken = /^\d+(?:[.,]\d+)*$/u;
+const calculatorCopyToken = /[a-z]+|\d+(?:[.,]\d+)*/gu;
+const calculatorCopyCharacters = /^[a-z0-9 \t\r\n.,;:!?()[\]{}+\-*/=%]*$/u;
+const numericGenericUnit =
+  /(?:^|[^a-z0-9])(?:\d+(?:[.,]\d+)*|\.\d+)[\s\p{P}\p{S}]*units?\b/iu;
+
+function isOrdinaryWhitespace(value: string): boolean {
+  return value === " " || value === "\t" || value === "\r" || value === "\n";
+}
+
+function hasUnexpectedControlOrWhitespace(value: string): boolean {
+  for (const character of value) {
+    if (/\p{Cf}/u.test(character)) return true;
+    if (/\p{Cc}/u.test(character) && !isOrdinaryWhitespace(character)) {
+      return true;
+    }
+    if (/\s/u.test(character) && !isOrdinaryWhitespace(character)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isApprovedCalculatorCopyToken(token: string): boolean {
+  if (calculatorCopyNumberToken.test(token)) return true;
+  return Object.values(calculatorCopyVocabulary).some((category) =>
+    category.includes(token));
+}
 
 function calculatorCopyIsNeutral(title: string, body: string): boolean {
   if (title !== exactPublicCalculatorTitle) return false;
-  const semanticBody = body
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .replace(/[\p{Cc}\p{Cf}\p{P}\p{S}]+/gu, " ")
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (semanticBody.length === 0) return false;
-  if (/\b\p{N}+(?:\s+\p{N}+)*\s*units?\b/u.test(semanticBody)) {
+  if (
+    body.length > calculatorCopyBounds.maxCharacters ||
+    hasUnexpectedControlOrWhitespace(body)
+  ) {
     return false;
   }
-  return !calculatorSpecificProhibitedPatterns.some((pattern) =>
-    pattern.test(semanticBody));
+
+  const normalizedBody = body.normalize("NFKC").toLocaleLowerCase("en-US");
+  if (
+    normalizedBody.length === 0 ||
+    normalizedBody.length > calculatorCopyBounds.maxCharacters ||
+    !calculatorCopyCharacters.test(normalizedBody) ||
+    numericGenericUnit.test(normalizedBody)
+  ) {
+    return false;
+  }
+
+  const tokens = normalizedBody.match(calculatorCopyToken) ?? [];
+  return tokens.length > 0 &&
+    tokens.length <= calculatorCopyBounds.maxTokens &&
+    tokens.every(isApprovedCalculatorCopyToken);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

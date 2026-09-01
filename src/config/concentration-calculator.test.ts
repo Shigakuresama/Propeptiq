@@ -43,6 +43,18 @@ function resolve(overrides: Partial<Parameters<typeof resolvePublicConcentration
   });
 }
 
+function expectGeneralScannerAllows(body: string): void {
+  expect(
+    scanPublicCopy(
+      {
+        text: `Laboratory concentration calculator\n${body}`,
+        claims: [],
+      },
+      approvedConfiguration.publicationPolicy,
+    ),
+  ).toMatchObject({ publishable: true, status: "pass", violations: [] });
+}
+
 describe("concentration calculator controlled projection", () => {
   it("keeps production configuration empty and disabled by default", () => {
     expect(concentrationCalculatorConfiguration).toBeNull();
@@ -84,6 +96,12 @@ describe("concentration calculator controlled projection", () => {
     "10 mg / 2 mL = 5 mg/mL. Concentration conversion equals 5,000 mcg/mL.",
     "Vial amount, diluent volume, and optional sample volume are calculation inputs.",
     "Divide the vial amount in mg by the diluent volume in mL to calculate concentration in mg/mL and mcg/mL.",
+    "Multiply the concentration in mg/mL by the selected sample volume in mL to calculate the material contained in the sample in mg and mcg.",
+    "This calculator performs mathematical conversions only.",
+    "Enter the vial amount and diluent volume as calculation inputs. The calculator divides the amount by the volume and displays concentration results.",
+    "Optional sample volume calculates the material contained in that sample.",
+    "Divide milligrams by milliliters to calculate milligrams per milliliter and micrograms per milliliter.",
+    "Calculate concentration.\n\tThis calculator performs mathematical conversions only.",
     "Calculate concentration per sample.",
     "Calculate concentration for each sample.",
   ])("allows bounded neutral calculator body %j", (body) => {
@@ -135,15 +153,23 @@ describe("concentration calculator controlled projection", () => {
   ] as const)(
     "rejects general-scanner-safe temporal or imperative wording: %s",
     (_label, body) => {
-      expect(
-        scanPublicCopy(
-          {
-            text: `Laboratory concentration calculator\n${body}`,
-            claims: [],
-          },
-          approvedConfiguration.publicationPolicy,
-        ),
-      ).toMatchObject({ publishable: true, status: "pass", violations: [] });
+      expectGeneralScannerAllows(body);
+      expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
+    },
+  );
+
+  it.each([
+    ["under-the-tongue direction", "Put 5 mg under the tongue."],
+    ["beneath-the-tongue direction", "Place 5 mg beneath the tongue."],
+    ["inside-the-mouth direction", "Hold 5 mg inside the mouth."],
+    ["skin direction", "Rub 5 mg on the skin."],
+    ["nasal direction", "Spray 5 mg into the nose."],
+    ["rectal direction", "Insert 5 mg in the rectum."],
+    ["drink direction", "Sip 5 mg with water."],
+  ] as const)(
+    "rejects general-scanner-safe administration wording: %s",
+    (_label, body) => {
+      expectGeneralScannerAllows(body);
       expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
     },
   );
@@ -160,18 +186,46 @@ describe("concentration calculator controlled projection", () => {
   ] as const)(
     "rejects general-scanner-safe numeric units across %s boundaries",
     (_label, body) => {
-      expect(
-        scanPublicCopy(
-          {
-            text: `Laboratory concentration calculator\n${body}`,
-            claims: [],
-          },
-          approvedConfiguration.publicationPolicy,
-        ),
-      ).toMatchObject({ publishable: true, status: "pass", violations: [] });
+      expectGeneralScannerAllows(body);
       expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
     },
   );
+
+  it.each([
+    ["split units token", "Convert 5 mg to 10 un\u200Bits."],
+    ["split put verb", "Pu\u200Bt 5 mg under the tongue."],
+    ["split take verb", "Ta\u2060ke 5 mg."],
+    ["split place verb", "Pla\u200Bce 5 mg beneath the tongue."],
+  ] as const)(
+    "rejects general-scanner-safe Unicode format-control bypass: %s",
+    (_label, body) => {
+      expectGeneralScannerAllows(body);
+      expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
+    },
+  );
+
+  it.each([
+    ["vertical tab", "Calculate\u000Bconcentration values."],
+    ["nonbreaking space", "Calculate\u00A0concentration values."],
+  ] as const)(
+    "rejects non-ordinary whitespace/control input: %s",
+    (_label, body) => {
+      expectGeneralScannerAllows(body);
+      expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
+    },
+  );
+
+  it("bounds controlled copy length before projection", () => {
+    const body = `Calculate${" ".repeat(10_000)}concentration values.`;
+    expectGeneralScannerAllows(body);
+    expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
+  });
+
+  it("bounds controlled copy token count before projection", () => {
+    const body = "Calculate ".repeat(300).trim();
+    expectGeneralScannerAllows(body);
+    expect(resolve({ content: [{ ...approvedCopy, body }] })).toBeNull();
+  });
 
   it("permits preview only outside a production identity", () => {
     expect(resolve({ mode: "preview" })).not.toBeNull();
