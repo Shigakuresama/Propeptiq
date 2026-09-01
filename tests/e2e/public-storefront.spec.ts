@@ -2,6 +2,52 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { createElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import { FaqSection } from "../../src/components/site/faq-section";
+
+type PlaywrightTransformedHostElement = Readonly<{
+  __pw_type: "jsx";
+  type: string;
+  props: Readonly<Record<string, unknown>>;
+  key: string | number | undefined;
+}>;
+
+function playwrightHostTreeToReact(node: unknown): ReactNode {
+  if (
+    node === null ||
+    node === undefined ||
+    typeof node === "string" ||
+    typeof node === "number" ||
+    typeof node === "boolean"
+  ) {
+    return node;
+  }
+  if (Array.isArray(node)) return node.map(playwrightHostTreeToReact);
+  if (
+    typeof node !== "object" ||
+    (node as { __pw_type?: unknown }).__pw_type !== "jsx" ||
+    typeof (node as { type?: unknown }).type !== "string"
+  ) {
+    throw new TypeError("Unexpected transformed FAQ server markup.");
+  }
+
+  const element = node as PlaywrightTransformedHostElement;
+  const { children, ...attributes } = element.props;
+  const props: Record<string, unknown> = { ...attributes };
+  if (element.key !== undefined) props.key = element.key;
+  const childNodes = children === undefined
+    ? []
+    : Array.isArray(children)
+      ? children
+      : [children];
+  return createElement(
+    element.type,
+    props,
+    ...childNodes.map(playwrightHostTreeToReact),
+  );
+}
 
 const publicRoutes = [
   "/",
@@ -66,6 +112,41 @@ type SearchRequestEvidence = Readonly<{
   pathname: string;
   search: string;
 }>;
+
+test("FAQ native disclosure toggles with Enter and Space while keyboard focus remains visible", async ({
+  page,
+}) => {
+  const fictionalEntries = Object.freeze([
+    Object.freeze({
+      id: "fictional-browser-question",
+      question: "Fictional browser question?",
+      answer: "Fictional browser answer.",
+      anchor: "faq-fictional-browser-question" as const,
+    }),
+  ]);
+  const markup = renderToStaticMarkup(
+    playwrightHostTreeToReact(FaqSection({ entries: fictionalEntries })),
+  );
+
+  await page.goto("/");
+  await page.setContent(`<!doctype html><html><body>${markup}</body></html>`);
+
+  const details = page.locator("details#faq-fictional-browser-question");
+  const summary = details.locator("summary");
+  await summary.focus();
+  await expect(summary).toBeFocused();
+  expect(await summary.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+
+  await page.keyboard.press("Enter");
+  await expect(details).toHaveAttribute("open", "");
+  await expect(summary).toBeFocused();
+  expect(await summary.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+
+  await page.keyboard.press("Space");
+  await expect(details).not.toHaveAttribute("open", "");
+  await expect(summary).toBeFocused();
+  expect(await summary.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+});
 
 async function interceptFictionalSearch(
   page: Page,

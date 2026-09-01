@@ -1,11 +1,16 @@
 import { render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { testPricingContext } from "@/components/commerce/storefront-test-fixtures";
 
-const { getPublicStorefrontViewMock, getPublicGrowthProjectionMock } = vi.hoisted(() => ({
+const {
+  getPublicStorefrontViewMock,
+  getPublicGrowthProjectionMock,
+  getPublicStorefrontContentViewMock,
+} = vi.hoisted(() => ({
   getPublicStorefrontViewMock: vi.fn(),
   getPublicGrowthProjectionMock: vi.fn(),
+  getPublicStorefrontContentViewMock: vi.fn(),
 }));
 
 vi.mock("@/catalog/storefront-public-server", () => ({
@@ -13,6 +18,9 @@ vi.mock("@/catalog/storefront-public-server", () => ({
 }));
 vi.mock("@/growth/public-growth-server", () => ({
   getPublicGrowthProjection: getPublicGrowthProjectionMock,
+}));
+vi.mock("@/content/storefront-public-content-server", () => ({
+  getPublicStorefrontContentView: getPublicStorefrontContentViewMock,
 }));
 vi.mock("@/components/site/page-transition", () => ({
   PageTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -49,6 +57,14 @@ const activeReferralPolicy = {
 describe("public home growth projection", () => {
   const pricing = testPricingContext("test");
 
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getPublicStorefrontContentViewMock.mockResolvedValue({
+      homepage: { whyChoose: [], faqs: [] },
+      information: [],
+    });
+  });
+
   it("shows the program strip only from an active server projection", async () => {
     getPublicStorefrontViewMock.mockResolvedValue({
       catalog: { products: [], displayConfigurationCount: 103 },
@@ -78,6 +94,7 @@ describe("public home growth projection", () => {
     expect(within(explainer).getByRole("link", { name: "Share a research set" })).toHaveAttribute("href", "/research-sets");
     expect(explainer).not.toHaveTextContent(/\$|%|save|member|limited|hurry|popular/iu);
     expect(getPublicStorefrontViewMock).toHaveBeenCalledTimes(1);
+    expect(getPublicStorefrontContentViewMock).toHaveBeenCalledTimes(1);
     const highlights = screen.getByText("Catalog highlights");
     const quality = screen.getByRole("heading", { name: "Follow the record, not an unsupported claim." });
     expect(highlights.compareDocumentPosition(explainer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -120,6 +137,83 @@ describe("public home growth projection", () => {
 
       expect(screen.queryByRole("region", { name: "Active rewards program" })).toBeNull();
       expect(screen.queryByRole("region", { name: "Growth programs" })).toBeNull();
+    },
+  );
+
+  it("loads approved homepage content once and passes only its safe homepage projection", async () => {
+    getPublicStorefrontViewMock.mockResolvedValue({
+      catalog: { products: [], displayConfigurationCount: 0 },
+      pricing,
+    });
+    getPublicGrowthProjectionMock.mockResolvedValue({ status: "inactive" });
+    getPublicStorefrontContentViewMock.mockResolvedValue({
+      homepage: {
+        whyChoose: [{
+          id: "fictional-value",
+          title: "Fictional value",
+          body: "Fictional value body.",
+        }],
+        faqs: [{
+          id: "fictional-question",
+          question: "Fictional question?",
+          answer: "Fictional answer.",
+          anchor: "faq-fictional-question",
+        }],
+      },
+      information: [{
+        id: "must-not-render",
+        title: "Private information wrapper fixture",
+        href: "/quality-records",
+        description: "Must not render from the page wrapper.",
+        keywords: [],
+        status: "approved",
+      }],
+      rawRecords: [{ approvalNote: "must-not-render" }],
+    });
+
+    render(await HomePage());
+
+    expect(getPublicStorefrontContentViewMock).toHaveBeenCalledOnce();
+    expect(screen.getByRole("heading", { name: "Why choose PropeptIQ" })).toBeVisible();
+    expect(screen.getByText("Fictional value body.")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Frequently Asked Questions" })).toBeVisible();
+    expect(screen.getByText("Fictional answer.")).toBeInTheDocument();
+    expect(screen.queryByText("Private information wrapper fixture")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/approvalNote|must-not-render/iu);
+  });
+
+  it.each(["rejects", "throws synchronously"] as const)(
+    "keeps storefront and growth rendering when the content-view accessor unexpectedly %s",
+    async (failureMode) => {
+    getPublicStorefrontViewMock.mockResolvedValue({
+      catalog: { products: [], displayConfigurationCount: 103 },
+      pricing,
+    });
+    getPublicGrowthProjectionMock.mockResolvedValue({
+      status: "active",
+      projection: {
+        loyalty: activeLoyaltyPolicy,
+        referral: null,
+        affiliate: null,
+        terms: { rewards: null, partner: null },
+      },
+    });
+      if (failureMode === "rejects") {
+        getPublicStorefrontContentViewMock.mockRejectedValue(
+          new Error("private-content-fixture"),
+        );
+      } else {
+        getPublicStorefrontContentViewMock.mockImplementation(() => {
+          throw new Error("private-content-fixture");
+        });
+      }
+
+      render(await HomePage());
+
+      expect(screen.getByText("Current catalog")).toBeVisible();
+      expect(screen.getByRole("region", { name: "Active rewards program" })).toBeVisible();
+      expect(screen.queryByRole("heading", { name: "Why choose PropeptIQ" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Frequently Asked Questions" })).toBeNull();
     },
   );
 });

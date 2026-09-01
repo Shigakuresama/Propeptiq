@@ -6,13 +6,22 @@ import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
 import { ProgramStrip } from "@/components/growth/program-strip";
+import { FaqSection } from "@/components/site/faq-section";
 import { ProofRail } from "@/components/site/proof-rail";
+import { WhyChoosePropeptIQ } from "@/components/site/why-choose-propeptiq";
 import { Button } from "@/components/ui/button";
+import type { ApprovedHomepageContent } from "@/content/storefront-content";
 import type { LoyaltyPolicy } from "@/domain/rewards";
 import type { ReferralPolicy } from "@/domain/referrals";
 import { researchRestrictions } from "@/lib/site-content";
 
+const emptyHomepageContent: ApprovedHomepageContent = Object.freeze({
+  whyChoose: Object.freeze([]),
+  faqs: Object.freeze([]),
+});
+
 export function PublicHome({
+  homepageContent = emptyHomepageContent,
   loyaltyPolicy = null,
   referralPolicy = null,
   syntheticLocal = false,
@@ -20,6 +29,7 @@ export function PublicHome({
   variantCount,
   pricing,
 }: {
+  homepageContent?: ApprovedHomepageContent | undefined;
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
   syntheticLocal?: boolean;
@@ -151,6 +161,9 @@ export function PublicHome({
           </div>
         </section>
       ) : null}
+
+      <WhyChoosePropeptIQ items={homepageContent.whyChoose} />
+      <FaqSection entries={homepageContent.faqs} />
 
       <section className="border-t border-border py-14 lg:py-16" aria-labelledby="quality-callout-heading">
         <div className="site-container grid gap-6 md:grid-cols-[auto_1fr_auto] md:items-center">
