@@ -99,6 +99,20 @@ function ImmediateAddHarness() {
   return <output aria-label="Immediate cart lines">{JSON.stringify(items)}</output>;
 }
 
+function AcceptedThenRejectedHarness() {
+  const { addVariant, items } = useCart();
+  const attempted = useRef(false);
+
+  useLayoutEffect(() => {
+    if (attempted.current) return;
+    attempted.current = true;
+    addVariant("variant-00", 1, { variantLabel: "Existing" });
+    addVariant("variant-51", 1, { variantLabel: "Rejected" });
+  }, [addVariant]);
+
+  return <output aria-label="Ordered cart lines">{JSON.stringify(items)}</output>;
+}
+
 describe("CartProvider exact-variant announcements", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -180,6 +194,35 @@ describe("CartProvider exact-variant announcements", () => {
     );
     expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
       "Cart updated. Synthetic Product Alpha, Immediate: 1 unit in cart.",
+    );
+  });
+
+  it("keeps a newer explicit rejection authoritative over an older pending success", () => {
+    window.localStorage.setItem(
+      CART_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        items: Array.from({ length: 50 }, (_, index) => ({
+          variantId: `variant-${String(index).padStart(2, "0")}`,
+          quantity: 1,
+        })),
+      }),
+    );
+
+    render(
+      <CartProvider>
+        <AcceptedThenRejectedHarness />
+      </CartProvider>,
+    );
+
+    expect(screen.getByLabelText("Ordered cart lines")).toHaveTextContent(
+      JSON.stringify({ variantId: "variant-00", quantity: 2 }),
+    );
+    expect(screen.getByLabelText("Ordered cart lines")).not.toHaveTextContent(
+      "variant-51",
+    );
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
+      "The cart was not changed.",
     );
   });
 

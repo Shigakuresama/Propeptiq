@@ -137,6 +137,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         (item) => item.variantId === variantId,
       )?.quantity ?? 0;
       if (nextQuantity <= previousQuantity) {
+        pendingAddAnnouncement.current = null;
         setAnnouncement("The cart was not changed.");
         return false;
       }
