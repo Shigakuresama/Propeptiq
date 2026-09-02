@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Winter30PromotionView } from "@/catalog/storefront-promotion-banner";
 
 const { getStorefrontPromotionBannerViewMock, scrollRevealControllerMock } = vi.hoisted(() => ({
   getStorefrontPromotionBannerViewMock: vi.fn(),
@@ -27,8 +28,9 @@ import PublicLayout from "./layout";
 const winter30 = Object.freeze({
   id: "winter30" as const,
   code: "WINTER30" as const,
+  displayName: "Winter Sale" as const,
   percentage: 30 as const,
-});
+}) satisfies Winter30PromotionView;
 
 describe("public layout promotion composition", () => {
   beforeEach(() => {
