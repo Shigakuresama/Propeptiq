@@ -4,7 +4,7 @@ import { browseCatalogProducts } from "./browse-catalog";
 import type { BrowseCatalogProduct } from "./browse-catalog";
 
 const DNS_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
-const OBSERVED_AT = "2026-09-02T02:04:54.0166213-07:00";
+export const STOREFRONT_CATALOG_AUDIT_TIMESTAMP = "2026-09-02T02:04:54.0166213-07:00";
 const EVIDENCE_SOURCE = "Amino Club" as const;
 const EVIDENCE_BASIS = "ordinary_one_vial_list_price" as const;
 
@@ -46,7 +46,7 @@ export type StorefrontCatalogDecisionManifest = Readonly<{
 }>;
 
 const decision = (browseSlug: string, browseCode: string, baseUnitMinor: number, url: string): StorefrontCatalogPriceDecision => ({
-  browseSlug, browseCode, baseUnitMinor, currency: "USD", url, observedAt: OBSERVED_AT,
+  browseSlug, browseCode, baseUnitMinor, currency: "USD", url, observedAt: STOREFRONT_CATALOG_AUDIT_TIMESTAMP,
 });
 
 const amino = (slug: string) => `https://www.aminoclub.com/us/products/${slug}`;
@@ -98,7 +98,7 @@ function validDecision(candidate: StorefrontCatalogPriceDecision): void {
   if (!candidate || typeof candidate !== "object" || candidate.currency !== "USD" || !Number.isSafeInteger(candidate.baseUnitMinor) || candidate.baseUnitMinor <= 0) fail("Invalid storefront catalog price decision");
   if (Object.keys(candidate).sort().join(",") !== "baseUnitMinor,browseCode,browseSlug,currency,observedAt,url") fail("Invalid storefront catalog price decision shape");
   if (!/^https:\/\/www\.aminoclub\.com\/us\/products\/[a-z0-9-]+$/u.test(candidate.url)) fail("Invalid storefront catalog evidence URL");
-  if (candidate.observedAt !== OBSERVED_AT) fail("Invalid storefront catalog observation timestamp");
+  if (candidate.observedAt !== STOREFRONT_CATALOG_AUDIT_TIMESTAMP) fail("Invalid storefront catalog observation timestamp");
 }
 
 export function buildStorefrontCatalogDecisionManifest(

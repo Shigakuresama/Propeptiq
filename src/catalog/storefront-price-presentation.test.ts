@@ -86,7 +86,7 @@ describe("canAddPublicVariant", () => {
     ["active null amount", variant({ baseUnitMinor: null }), "preview", false],
     ["active null currency", variant({ currency: null }), "preview", false],
     ["active unavailable", variant({ availability: "unavailable" }), "preview", false],
-    ["active preview only", variant({ availability: "preview_only" }), "preview", false],
+    ["active preview only", variant({ availability: "preview_only", checkoutReady: false }), "preview", true],
     ["pending explicit preview zero", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "preview", true],
     ["pending explicit local zero", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "local", true],
     ["pending explicit test zero", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "test", true],
@@ -198,6 +198,8 @@ describe("resolvePublicVariantPrice", () => {
       variant: variant({ availability: "preview_only" }), productId: "product-alpha", quantity: 1,
       pricing: pricing("production", [winter30]),
     })).toMatchObject({ state: "priced", purchaseState: "checkout_unavailable" });
+    expect(canAddPublicVariant(variant({ availability: "preview_only", checkoutReady: false }), "production")).toBe(false);
+    expect(canAddPublicVariant(variant({ availability: "preview_only", checkoutReady: false }), "local")).toBe(true);
   });
 
   it("treats unavailable inventory as unavailable before money arithmetic", () => {

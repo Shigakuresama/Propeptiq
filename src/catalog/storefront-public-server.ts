@@ -5,8 +5,8 @@ import { cache } from "react";
 
 import { hasProductionIdentity, type ServerEnv } from "@/config/env-schema";
 import {
-  resolveUnreconciledActiveConfiguredAutomaticPromotions,
   resolveActiveConfiguredAutomaticPromotions,
+  storefrontPromotionMatchesConfiguration,
   STOREFRONT_PROMOTIONS,
 } from "@/config/storefront-promotions";
 import { storefrontContentRecords, type ControlledContentRecord } from "@/content/storefront-content";
@@ -36,7 +36,7 @@ import {
   projectAutomaticStorefrontPromotions,
   type PromotionProjectionDiagnostic,
 } from "./storefront-promotion-projection";
-import type { PricePresentationMode, PublicStorefrontPricingContext } from "./storefront-price-presentation";
+import type { PricePresentationMode, PublicStorefrontAutomaticPromotion, PublicStorefrontPricingContext } from "./storefront-price-presentation";
 
 export type PublicStorefrontView = Readonly<{ catalog: PublicStorefrontCatalog; pricing: PublicStorefrontPricingContext }>;
 
@@ -133,44 +133,62 @@ export async function loadPublicStorefrontView(
       reportPromotionDiagnostic(diagnostic);
     }
   }
-  const configuredDisplayFacts = buildConfiguredDisplayVariantFacts(catalogData);
+  const configuredDisplayFacts = buildConfiguredDisplayVariantFacts({ ...catalogData, bindings });
   runtimeVariantFacts = Object.freeze([
     ...runtimeVariantFacts,
     ...configuredDisplayFacts.filter((fact) => !databaseOwnedVariantIds.has(fact.variantId)),
   ]);
-  if (!shouldLoadDatabase) {
-    const activeConfigured = resolveActiveConfiguredAutomaticPromotions(
-      dependencies.configuredPromotions ?? STOREFRONT_PROMOTIONS,
-      now,
-    );
-    if (activeConfigured !== null) {
-      automaticPromotions = Object.freeze(activeConfigured
-        .filter((promotion) => promotion.enabled && promotion.applicationMode === "automatic")
-        .map((promotion) => Object.freeze({
-          ...promotion,
-          enabled: true as const,
-          applicationMode: "automatic" as const,
-        })));
+  const staticDisplayIds = new Set(configuredDisplayFacts.map((fact) => fact.variantId));
+  const survivingStaticIds = new Set([...staticDisplayIds].filter((id) => !databaseOwnedVariantIds.has(id)));
+  const activeConfigured = resolveActiveConfiguredAutomaticPromotions(
+    dependencies.configuredPromotions ?? STOREFRONT_PROMOTIONS, now,
+  );
+  const authoritativePromotions = automaticPromotions;
+  const dbFactIds = new Set(runtimeVariantFacts.filter((fact) => !survivingStaticIds.has(fact.variantId)).map((fact) => fact.variantId));
+  const scopedPromotions: PublicStorefrontAutomaticPromotion[] = [];
+  if (activeConfigured !== null) {
+    for (const configuration of activeConfigured) {
+      if (!configuration.enabled || configuration.applicationMode !== "automatic") continue;
+      const authoritative = authoritativePromotions.find((promotion) => promotion.id === configuration.id);
+      const exact = authoritative !== undefined && storefrontPromotionMatchesConfiguration(authoritative, configuration);
+      const staticIds = [...survivingStaticIds].filter((variantId) => {
+        const fact = configuredDisplayFacts.find((candidate) => candidate.variantId === variantId);
+        return fact !== undefined && promotionApplies(configuration, { id: variantId, productId: fact.productId, variantId });
+      });
+      const dbIds = exact && authoritative
+        ? [...dbFactIds].filter((variantId) => {
+            const fact = runtimeVariantFacts.find((candidate) => candidate.variantId === variantId);
+            return fact !== undefined && promotionApplies(authoritative, { id: variantId, productId: fact.productId, variantId });
+          })
+        : [];
+      const variantIds = [...new Set([...staticIds, ...dbIds])];
+      if (variantIds.length === 0) continue;
+      scopedPromotions.push(Object.freeze({ ...configuration, enabled: true as const, applicationMode: "automatic" as const,
+        scope: Object.freeze({ kind: "variants" as const, variantIds: Object.freeze(variantIds) }) }));
     }
   }
-  const unreconciled =
-    resolveUnreconciledActiveConfiguredAutomaticPromotions(
-      dependencies.configuredPromotions ?? STOREFRONT_PROMOTIONS,
-      automaticPromotions,
-      now,
-    );
-  runtimeVariantFacts = Object.freeze(
-    runtimeVariantFacts.filter((fact) => {
-      if (fact.priceStatus !== "active") return true;
-      if (unreconciled === null) return false;
-      return !unreconciled.some((promotion) =>
-        promotionApplies(promotion, {
-          productId: fact.productId,
-          variantId: fact.variantId,
-        }),
-      );
-    }),
-  );
+  for (const authoritative of authoritativePromotions) {
+    if (scopedPromotions.some((promotion) => promotion.id === authoritative.id) ||
+      activeConfigured?.some((configuration) => configuration.id === authoritative.id)) continue;
+    const variantIds = [...dbFactIds].filter((variantId) => {
+      const fact = runtimeVariantFacts.find((candidate) => candidate.variantId === variantId);
+      return fact !== undefined && promotionApplies(authoritative, { id: variantId, productId: fact.productId, variantId });
+    });
+    if (variantIds.length > 0) scopedPromotions.push(Object.freeze({ ...authoritative,
+      scope: Object.freeze({ kind: "variants" as const, variantIds: Object.freeze(variantIds) }) }));
+  }
+  automaticPromotions = Object.freeze(scopedPromotions);
+  const configuredById = activeConfigured;
+  runtimeVariantFacts = Object.freeze(runtimeVariantFacts.filter((fact) => {
+    if (fact.priceStatus !== "active" || survivingStaticIds.has(fact.variantId)) return true;
+    if (configuredById === null) return false;
+    return configuredById.every((configuration) => {
+      if (!configuration.enabled || configuration.applicationMode !== "automatic") return true;
+      if (!promotionApplies(configuration, { id: fact.variantId, productId: fact.productId, variantId: fact.variantId })) return true;
+      const authoritative = authoritativePromotions.find((promotion) => promotion.id === configuration.id);
+      return authoritative !== undefined && storefrontPromotionMatchesConfiguration(authoritative, configuration);
+    });
+  }));
   const catalog = buildPublicStorefrontCatalog({
     configuredPublicationId: environment.BROWSE_CATALOG_PUBLICATION,
     catalogData: { products: catalogData.products, bindings },

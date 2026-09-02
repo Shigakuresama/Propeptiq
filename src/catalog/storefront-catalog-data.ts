@@ -1,10 +1,9 @@
 import { browseCatalogProducts } from "./browse-catalog";
-import { storefrontCatalogDecisionManifest } from "./storefront-catalog-manifest";
+import { storefrontCatalogDecisionManifest, STOREFRONT_CATALOG_AUDIT_TIMESTAMP } from "./storefront-catalog-manifest";
 import { parseStorefrontBindings } from "./storefront-bindings";
 import type { StorefrontBinding, StorefrontProduct } from "./storefront-types";
 
 export type StorefrontCatalogData = Readonly<{ products: readonly StorefrontProduct[]; bindings: StorefrontBinding }>;
-const CATALOG_RECORD_AT = "2026-09-02T02:04:54.0166213-07:00";
 
 function amountFromLabel(label: string): { value: number; unit: "mg" | "mcg" | "iu" } | null {
   const match = /^(\d+(?:\.\d+)?)\s*(mg|mcg|iu)$/iu.exec(label.trim());
@@ -25,7 +24,7 @@ const products: StorefrontProduct[] = browseCatalogProducts.map((browse, index) 
   const defaultVariant = variants.find((variant) => variant.decisionStatus === "approved_candidate") ?? variants[0]!;
   return { id: manifest.id, slug: browse.slug, name: browse.name, category: browse.category, description: null,
     image: { ...browse.image, width: 1254, height: 1254 }, aliases: [browse.sourceName], popularityRank: index + 1,
-    releasedAt: CATALOG_RECORD_AT, defaultVariantId: defaultVariant.id, variantIds: manifest.variantIds, relatedProductIds: [], contentIds: [] };
+    releasedAt: STOREFRONT_CATALOG_AUDIT_TIMESTAMP, defaultVariantId: defaultVariant.id, variantIds: manifest.variantIds, relatedProductIds: [], contentIds: [] };
 });
 const variants = browseCatalogProducts.flatMap((browse) => browse.variants.map((source) => {
   const decision = decisionsByKey.get(`${browse.slug}:${source.code}`)!;

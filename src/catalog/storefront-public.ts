@@ -439,7 +439,10 @@ export function buildRuntimeVariantPresentationFacts(input: Readonly<{
 export function buildConfiguredDisplayVariantFacts(
   catalogData: StorefrontCatalogData,
 ): readonly RuntimeVariantPresentationFact[] {
-  return Object.freeze(catalogData.bindings.variants.map((variant) =>
+  return Object.freeze(catalogData.bindings.variants.filter((variant) =>
+    variant.priceStatus === "pending" && variant.availability === "preview_only" &&
+    variant.stripeProductId === null && variant.stripePriceId === null
+  ).map((variant) =>
     variant.baseUnitMinor > 0
       ? Object.freeze({ variantId: variant.id, productId: variant.productId, priceStatus: "active" as const,
           baseUnitMinor: variant.baseUnitMinor, currency: "USD" as const, availability: "preview_only" as const,

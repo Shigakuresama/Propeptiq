@@ -279,6 +279,19 @@ function environment(overrides: Record<string, string | undefined> = {}) {
 }
 
 describe("public storefront server acquisition", () => {
+  it("applies configured WINTER30 to static display facts when database is disabled", async () => {
+    const view = await loadPublicStorefrontView(environment(), {
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+      now: () => new Date("2026-08-31T12:00:00.000Z"),
+    });
+    expect(view.pricing.automaticPromotions).toHaveLength(1);
+    expect(view.pricing.automaticPromotions[0]).toMatchObject({ id: "winter30", discountBps: 3_000 });
+    expect(view.pricing.automaticPromotions[0]?.scope.kind).toBe("variants");
+    const product = view.catalog.products.find((entry) => entry.slug === "tirzepatide");
+    expect(product?.kind).toBe("canonical");
+  });
+
   it.each([
     ["database disabled", environment(), boundCatalogData],
     [
@@ -306,9 +319,13 @@ describe("public storefront server acquisition", () => {
 
     expect(loadDatabaseRecords).not.toHaveBeenCalled();
     expect(view.catalog.products).toHaveLength(56);
-    expect(view.pricing.automaticPromotions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "winter30", discountBps: 3_000 }),
-    ]));
+    if (catalogData.products.length === 0) {
+      expect(view.pricing.automaticPromotions).toEqual([]);
+    } else if (catalogData === storefrontCatalogData) {
+      expect(view.pricing.automaticPromotions).toHaveLength(1);
+    } else {
+      expect(view.pricing.automaticPromotions).toEqual([]);
+    }
     expect(Object.isFrozen(view.pricing.automaticPromotions)).toBe(true);
   });
 

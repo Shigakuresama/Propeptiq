@@ -54,9 +54,10 @@ export function canAddPublicVariant(
   mode: PricePresentationMode,
 ): boolean {
   if (variant.priceStatus === "active") {
-    return variant.availability === "available" &&
+    return (variant.availability === "available" || variant.availability === "preview_only") &&
       variant.baseUnitMinor !== null && Number.isSafeInteger(variant.baseUnitMinor) &&
-      variant.baseUnitMinor > 0 && variant.currency === "USD" && variant.checkoutReady === true;
+      variant.baseUnitMinor > 0 && variant.currency === "USD" &&
+      (variant.checkoutReady === true || (variant.availability === "preview_only" && mode !== "production"));
   }
   if (variant.priceStatus === "pending") {
     return mode !== "production" && variant.availability === "preview_only" &&
@@ -79,7 +80,8 @@ export function publicVariantPurchaseState(
       ? "local_preview"
       : "pricing_pending";
   }
-  if (variant.priceStatus !== "active" || variant.availability !== "available" || variant.baseUnitMinor === null || !Number.isSafeInteger(variant.baseUnitMinor) || variant.baseUnitMinor <= 0 || variant.currency !== "USD") return "pricing_pending";
+  if (variant.priceStatus !== "active" || (variant.availability !== "available" && variant.availability !== "preview_only") || variant.baseUnitMinor === null || !Number.isSafeInteger(variant.baseUnitMinor) || variant.baseUnitMinor <= 0 || variant.currency !== "USD") return "pricing_pending";
+  if (variant.availability === "preview_only") return mode === "production" ? "checkout_unavailable" : "local_preview";
   return variant.checkoutReady === true ? "ready" : "checkout_unavailable";
 }
 
@@ -153,9 +155,9 @@ export function resolvePublicVariantPrice(input: Readonly<{
     state: "priced",
     purchaseState: previewZero
       ? "local_preview"
-      : variant.checkoutReady === true && variant.availability === "available"
-        ? "ready"
-        : "checkout_unavailable",
+      : variant.availability === "preview_only"
+        ? (pricing.mode === "production" ? "checkout_unavailable" : "local_preview")
+        : variant.checkoutReady === true ? "ready" : "checkout_unavailable",
     price: publicPrice,
   };
 }

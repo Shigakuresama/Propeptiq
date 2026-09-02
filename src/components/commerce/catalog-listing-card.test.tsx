@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
-import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
+import { parseStorefrontBindings } from "@/catalog/storefront-bindings";
 import {
   buildPublicStorefrontCatalog,
   storefrontImageMetadata,
@@ -66,7 +66,7 @@ describe("CatalogListingCard", () => {
   it("retains an illustrated browse-only entry with honest pending pricing and no cart action", () => {
     const product = buildPublicStorefrontCatalog({
       configuredPublicationId: browseCatalogPublicationId,
-      catalogData: storefrontCatalogData,
+      catalogData: { products: [], bindings: parseStorefrontBindings({ products: [], variants: [] }) },
       runtimeVariantFacts: [],
       controlledContent: [],
       verifiedImageMetadata: storefrontImageMetadata,

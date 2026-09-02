@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { browseCatalogProducts, browseCatalogVariantCount } from "./browse-catalog";
 import { storefrontCatalogData } from "./storefront-catalog-data";
+import { buildConfiguredDisplayVariantFacts } from "./storefront-public";
 import { storefrontCatalogDecisionManifest } from "./storefront-catalog-manifest";
 
 describe("canonical storefront catalog data", () => {
@@ -22,5 +23,19 @@ describe("canonical storefront catalog data", () => {
     const variants = storefrontCatalogData.bindings.variants.filter((v) => v.productId === tirzepatide?.id);
     expect(variants.find((v) => v.browseCode === "TR30")).toMatchObject({ baseUnitMinor: 5999, priceStatus: "pending", availability: "preview_only", stripePriceId: null });
     expect(variants.find((v) => v.browseCode === "TR5")).toMatchObject({ baseUnitMinor: 0, priceStatus: "pending" });
+  });
+
+  it("only projects deliberately pending preview bindings", () => {
+    expect(buildConfiguredDisplayVariantFacts(storefrontCatalogData)).toHaveLength(103);
+    const altered = {
+      ...storefrontCatalogData,
+      bindings: {
+        ...storefrontCatalogData.bindings,
+        variants: storefrontCatalogData.bindings.variants.map((variant, index) =>
+          index === 0 ? { ...variant, priceStatus: "active" as const, availability: "available" as const, stripeProductId: "prod" , stripePriceId: "price" } : variant,
+        ),
+      },
+    };
+    expect(buildConfiguredDisplayVariantFacts(altered)).toHaveLength(102);
   });
 });
