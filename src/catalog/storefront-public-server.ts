@@ -6,6 +6,7 @@ import { cache } from "react";
 import { hasProductionIdentity, type ServerEnv } from "@/config/env-schema";
 import {
   resolveUnreconciledActiveConfiguredAutomaticPromotions,
+  resolveActiveConfiguredAutomaticPromotions,
   STOREFRONT_PROMOTIONS,
 } from "@/config/storefront-promotions";
 import { storefrontContentRecords, type ControlledContentRecord } from "@/content/storefront-content";
@@ -25,6 +26,7 @@ import {
 } from "./storefront-catalog-data";
 import {
   buildPublicStorefrontCatalog,
+  buildConfiguredDisplayVariantFacts,
   buildRuntimeVariantPresentationFacts,
   storefrontImageMetadata,
   type PublicStorefrontCatalog,
@@ -109,6 +111,7 @@ export async function loadPublicStorefrontView(
   let automaticPromotions = Object.freeze(
     [],
   ) as PublicStorefrontPricingContext["automaticPromotions"];
+  let databaseOwnedVariantIds = new Set<string>();
   if (shouldLoadDatabase) {
     const records = await (
       dependencies.loadDatabaseRecords ?? defaultDatabaseLoader
@@ -116,6 +119,7 @@ export async function loadPublicStorefrontView(
     if (records.source !== "production") {
       throw new Error("Storefront database loader returned a non-production source");
     }
+    databaseOwnedVariantIds = new Set(records.variants.map((variant) => variant.id));
     runtimeVariantFacts = buildRuntimeVariantPresentationFacts({
       records,
       bindings,
@@ -127,6 +131,26 @@ export async function loadPublicStorefrontView(
       dependencies.reportPromotionDiagnostic ?? defaultPromotionDiagnosticReporter;
     for (const diagnostic of promotionProjection.diagnostics) {
       reportPromotionDiagnostic(diagnostic);
+    }
+  }
+  const configuredDisplayFacts = buildConfiguredDisplayVariantFacts(catalogData);
+  runtimeVariantFacts = Object.freeze([
+    ...runtimeVariantFacts,
+    ...configuredDisplayFacts.filter((fact) => !databaseOwnedVariantIds.has(fact.variantId)),
+  ]);
+  if (!shouldLoadDatabase) {
+    const activeConfigured = resolveActiveConfiguredAutomaticPromotions(
+      dependencies.configuredPromotions ?? STOREFRONT_PROMOTIONS,
+      now,
+    );
+    if (activeConfigured !== null) {
+      automaticPromotions = Object.freeze(activeConfigured
+        .filter((promotion) => promotion.enabled && promotion.applicationMode === "automatic")
+        .map((promotion) => Object.freeze({
+          ...promotion,
+          enabled: true as const,
+          applicationMode: "automatic" as const,
+        })));
     }
   }
   const unreconciled =

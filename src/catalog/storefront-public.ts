@@ -90,7 +90,7 @@ export type RuntimeVariantPresentationFact = Readonly<
       priceStatus: "active";
       baseUnitMinor: number;
       currency: "USD";
-      availability: "available" | "unavailable";
+      availability: "preview_only" | "available" | "unavailable";
       availableQuantity: number;
       paymentMappingStatus: "configured_match" | "missing_or_mismatched";
       checkoutReady: boolean;
@@ -433,6 +433,21 @@ export function buildRuntimeVariantPresentationFacts(input: Readonly<{
   }
 
   return parseRuntimeVariantPresentationFacts(facts);
+}
+
+/** Static, reviewed reference prices are presentation-only and never checkout-ready. */
+export function buildConfiguredDisplayVariantFacts(
+  catalogData: StorefrontCatalogData,
+): readonly RuntimeVariantPresentationFact[] {
+  return Object.freeze(catalogData.bindings.variants.map((variant) =>
+    variant.baseUnitMinor > 0
+      ? Object.freeze({ variantId: variant.id, productId: variant.productId, priceStatus: "active" as const,
+          baseUnitMinor: variant.baseUnitMinor, currency: "USD" as const, availability: "preview_only" as const,
+          availableQuantity: 0, paymentMappingStatus: "missing_or_mismatched" as const, checkoutReady: false })
+      : Object.freeze({ variantId: variant.id, productId: variant.productId, priceStatus: "pending" as const,
+          baseUnitMinor: 0, currency: "USD" as const, availability: "preview_only" as const,
+          availableQuantity: 0, paymentMappingStatus: "missing_or_mismatched" as const, checkoutReady: false }),
+  ));
 }
 
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {

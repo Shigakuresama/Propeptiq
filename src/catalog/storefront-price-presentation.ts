@@ -104,7 +104,7 @@ export function resolvePublicVariantPrice(input: Readonly<{
 
   const activePrice =
     variant.priceStatus === "active" &&
-    variant.availability === "available" &&
+    (variant.availability === "available" || variant.availability === "preview_only") &&
     variant.baseUnitMinor !== null &&
     Number.isSafeInteger(variant.baseUnitMinor) &&
     variant.baseUnitMinor > 0 &&
@@ -153,7 +153,7 @@ export function resolvePublicVariantPrice(input: Readonly<{
     state: "priced",
     purchaseState: previewZero
       ? "local_preview"
-      : variant.checkoutReady === true
+      : variant.checkoutReady === true && variant.availability === "available"
         ? "ready"
         : "checkout_unavailable",
     price: publicPrice,
@@ -162,9 +162,11 @@ export function resolvePublicVariantPrice(input: Readonly<{
 
 export function selectCardVariant(input: Readonly<{ product: { kind: "canonical"; id: string; variants: readonly PublicStorefrontVariant[]; defaultVariantId: string }; pricing: PublicStorefrontPricingContext }>): PublicStorefrontVariant | null {
   const candidates = input.product.variants.flatMap((variant) => {
-    if (variant.availability !== "available") return [];
+    if (variant.availability === "unavailable") return [];
     const presentation = resolvePublicVariantPrice({ variant, productId: input.product.id, quantity: 1, pricing: input.pricing });
-    return presentation.state === "priced" ? [{ variant, amount: presentation.price.effectiveUnitMinor }] : [];
+    return presentation.state === "priced" && presentation.price.baseUnitMinor > 0
+      ? [{ variant, amount: presentation.price.effectiveUnitMinor }]
+      : [];
   });
   return [...candidates].sort((a, b) => a.amount - b.amount || a.variant.label.localeCompare(b.variant.label, "en-US") || a.variant.id.localeCompare(b.variant.id))[0]?.variant ?? input.product.variants.find((variant) => variant.id === input.product.defaultVariantId) ?? null;
 }

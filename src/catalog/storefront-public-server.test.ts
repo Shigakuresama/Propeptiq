@@ -282,12 +282,8 @@ describe("public storefront server acquisition", () => {
   it.each([
     ["database disabled", environment(), boundCatalogData],
     [
-      "empty canonical bindings",
-      environment({
-        DATABASE_MODE: "test",
-        TEST_DATABASE_URL: "postgresql://fixture:fixture@127.0.0.1:5432/fixture",
-        TEST_DATABASE_CONFIRMATION: "isolated-test-database",
-      }),
+      "database disabled with canonical catalog",
+      environment(),
       storefrontCatalogData,
     ],
     [
@@ -310,7 +306,9 @@ describe("public storefront server acquisition", () => {
 
     expect(loadDatabaseRecords).not.toHaveBeenCalled();
     expect(view.catalog.products).toHaveLength(56);
-    expect(view.pricing.automaticPromotions).toEqual([]);
+    expect(view.pricing.automaticPromotions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "winter30", discountBps: 3_000 }),
+    ]));
     expect(Object.isFrozen(view.pricing.automaticPromotions)).toBe(true);
   });
 
@@ -363,10 +361,11 @@ describe("public storefront server acquisition", () => {
   it("does not treat DATABASE_MODE=test as presentation test mode", async () => {
     const view = await loadPublicStorefrontView(environment({
       DATABASE_MODE: "test",
+      CATALOG_DEMO_MODE: "enabled",
       TEST_DATABASE_URL: "postgresql://fixture:fixture@127.0.0.1:5432/fixture",
       TEST_DATABASE_CONFIRMATION: "isolated-test-database",
     }), {
-      catalogData: storefrontCatalogData,
+      catalogData: boundCatalogData,
       controlledContent: [],
       verifiedImageMetadata: storefrontImageMetadata,
       nodeEnv: "production",

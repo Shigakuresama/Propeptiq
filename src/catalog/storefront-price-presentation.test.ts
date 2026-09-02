@@ -182,7 +182,6 @@ describe("resolvePublicVariantPrice", () => {
     ["active null", variant({ baseUnitMinor: null })],
     ["active null currency", variant({ currency: null })],
     ["active unsupported currency", { ...variant(), currency: "EUR" } as unknown as PublicStorefrontVariant],
-    ["active preview-only", variant({ availability: "preview_only" })],
     ["pending positive", variant({ priceStatus: "pending", availability: "preview_only", checkoutReady: false })],
     ["pending null", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: null, currency: null, checkoutReady: false })],
     ["pending available", variant({ priceStatus: "pending", availability: "available", baseUnitMinor: 0, checkoutReady: false })],
@@ -192,6 +191,13 @@ describe("resolvePublicVariantPrice", () => {
     expect(resolvePublicVariantPrice({
       variant: input, productId: "product-alpha", quantity: 1, pricing: pricing("preview", [winter30]),
     })).toEqual({ state: "pending", purchaseState: "pricing_pending", reason: "pricing_coming_soon" });
+  });
+
+  it("shows reviewed preview prices without making them checkout-ready", () => {
+    expect(resolvePublicVariantPrice({
+      variant: variant({ availability: "preview_only" }), productId: "product-alpha", quantity: 1,
+      pricing: pricing("production", [winter30]),
+    })).toMatchObject({ state: "priced", purchaseState: "checkout_unavailable" });
   });
 
   it("treats unavailable inventory as unavailable before money arithmetic", () => {
