@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 const origin = "http://127.0.0.1:4631";
-const productId = "61000000-0000-4000-8000-000000000001";
+const variantId = "55000000-0000-4000-8000-000000000001";
 const referralCode = "ref_LocalRuntimeReferrer01";
 const sharedSetCode = "set_LocalRuntimeResearch01";
 const seededAffiliateProfileId = "6c000000-0000-4000-8000-000000000008";
@@ -56,20 +56,20 @@ async function signInAs(page: Page, actor: string) {
   await expect(page).toHaveURL(/\/checkout$/u);
 }
 
-async function seedCart(page: Page, quantity = 10) {
+async function seedCart(page: Page, quantity = 2) {
   await page.goto("/cart");
   await page.evaluate(({ id, count }) => {
-    localStorage.setItem("propeptiq.cart.v1", JSON.stringify({
-      version: 1,
-      items: [{ productId: id, quantity: count }],
+    localStorage.setItem("propeptiq.cart.v2", JSON.stringify({
+      version: 2,
+      items: [{ variantId: id, quantity: count }],
     }));
-    dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v1" }));
-  }, { id: productId, count: quantity });
+    dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2", storageArea: window.localStorage }));
+  }, { id: variantId, count: quantity });
 }
 
 function checkoutBody() {
   return {
-    items: [{ productId, quantity: 10 }],
+    items: [{ variantId, quantity: 2 }],
     destination: {
       recipientName: "Synthetic Growth Buyer",
       line1: "100 Test Way",
@@ -79,8 +79,7 @@ function checkoutBody() {
       postalCode: "90001",
       countryCode: "US",
     },
-    promotionIds: [],
-    rewardRedemptionPoints: 2_000,
+    rewardRedemptionPoints: 1_000,
   };
 }
 
@@ -125,20 +124,26 @@ test("binds a referral cookie and reserves authoritative points only once", asyn
     data: checkoutBody(),
   });
   expect(quote.status()).toBe(200);
-  expect(await quote.json()).toMatchObject({
+  const quoteBody = await quote.json();
+  expect(quoteBody).toMatchObject({
     status: "quoted",
+    pricingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
     quote: {
-      referralDiscountMinor: 2_400,
+      referralDiscountMinor: 480,
       rewardsBenefitAvailable: true,
-      rewardRedemptionPoints: 2_000,
-      rewardRedemptionMinor: 2_000,
+      rewardRedemptionPoints: 1_000,
+      rewardRedemptionMinor: 1_000,
     },
   });
   expect((await inspectGrowth(request)).rewardReservationCount).toBe(0);
 
+  const sessionRequestBody = {
+    ...checkoutBody(),
+    pricingRevision: quoteBody.pricingRevision,
+  };
   const session = await page.request.post("/api/checkout/sessions", {
     headers: { Origin: origin, "Content-Type": "application/json", "Idempotency-Key": firstKey },
-    data: checkoutBody(),
+    data: sessionRequestBody,
   });
   expect(session.status()).toBe(200);
   const sessionBody = await session.json();
@@ -146,15 +151,12 @@ test("binds a referral cookie and reserves authoritative points only once", asyn
   const reserved = await inspectGrowth(request);
   expect(reserved).toMatchObject({ rewardReservationCount: 1, rewardLedgerCount: 3 });
 
-  const secondQuote = await page.request.post("/api/checkout/quote", {
-    headers: { Origin: origin, "Content-Type": "application/json", "Idempotency-Key": "6d000000-0000-4000-8000-000000000002" },
-    data: checkoutBody(),
+  const replay = await page.request.post("/api/checkout/sessions", {
+    headers: { Origin: origin, "Content-Type": "application/json", "Idempotency-Key": firstKey },
+    data: sessionRequestBody,
   });
-  expect(secondQuote.status()).toBe(200);
-  expect(await secondQuote.json()).toMatchObject({
-    status: "quoted",
-    quote: { rewardsBenefitAvailable: false, rewardsUnavailableReason: "insufficient_balance" },
-  });
+  expect(replay.status()).toBe(200);
+  expect(await replay.json()).toEqual(sessionBody);
   expect(await inspectGrowth(request)).toEqual(reserved);
 
   await page.goto(sessionBody.hostedUrl);
@@ -185,7 +187,9 @@ test("lets an active owner create one code and one pending partner application",
   const referralForm = page.getByRole("form", { name: "Activate referral code" });
   await referralForm.getByRole("checkbox").check();
   await referralForm.getByRole("button", { name: "Activate referral code" }).click();
-  await expect(page.getByRole("status")).toContainText("Referral code activated");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Referral code activated" }),
+  ).toContainText("Referral code activated");
   await expect(page.getByText(/\/r\/ref_LocalOwner/u)).toBeVisible();
   expect((await inspectGrowth(request)).referralCodeCount).toBe(2);
 
@@ -195,7 +199,9 @@ test("lets an active owner create one code and one pending partner application",
   await partnerForm.getByLabel("Promotion method").selectOption("website");
   await partnerForm.getByRole("checkbox").check();
   await partnerForm.getByRole("button", { name: "Submit partner application" }).click();
-  await expect(page.getByRole("status")).toContainText("Partner application submitted");
+  await expect(
+    page.getByRole("status").filter({ hasText: "Partner application submitted" }),
+  ).toContainText("Partner application submitted");
   await expect(page.getByText("Pending", { exact: true })).toBeVisible();
   expect((await inspectGrowth(request)).affiliateProfileCount).toBe(2);
 });
@@ -221,7 +227,7 @@ test("keeps each signed owner confined to their own private growth history", asy
   await expect(page.getByText("Refund reversal", { exact: true })).toHaveCount(0);
 });
 
-test("projects a privacy-safe shared set and adds only current IDs and quantities", async ({ page }) => {
+test("projects a privacy-safe product-only shared set without inventing variant cart identity", async ({ page }) => {
   await page.goto(`/sets/${sharedSetCode}`);
   await expect(page.getByText("Synthetic local test only", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Synthetic analytical reference set" })).toBeVisible();
@@ -230,12 +236,15 @@ test("projects a privacy-safe shared set and adds only current IDs and quantitie
   expect(html).not.toContain("fixed-growth-owner@local.test");
   expect(html).not.toContain("50000000-0000-4000-8000-000000000007");
   expect(html).not.toMatch(/commission|payout|available points/i);
-  await page.getByRole("button", { name: "Add set to cart" }).click();
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("propeptiq.cart.v1") ?? "null"));
-  expect(saved).toEqual({ version: 1, items: [
-    { productId: "61000000-0000-4000-8000-000000000001", quantity: 2 },
-    { productId: "61000000-0000-4000-8000-000000000002", quantity: 1 },
-  ] });
+  const cartBefore = await page.evaluate(() => localStorage.getItem("propeptiq.cart.v2"));
+  await expect(page.getByRole("button", { name: "Variant selection unavailable" })).toBeDisabled();
+  await expect(page.getByRole("status").filter({
+    hasText: "Select exact variants before adding a research set",
+  })).toContainText(
+    "Select exact variants before adding a research set",
+  );
+  expect(await page.evaluate(() => localStorage.getItem("propeptiq.cart.v2")))
+    .toBe(cartBefore);
 });
 
 test("supports one-MFA-admin policy, affiliate, payout, and redacted-audit lifecycles", async ({ page, request }) => {

@@ -8,6 +8,7 @@ import {
   resolvePublishedBrowseCatalog,
   validateBrowseCatalogManifest,
 } from "./browse-catalog-publication";
+import { storefrontCatalogData } from "./storefront-catalog-data";
 
 describe("owner browse-catalog publication", () => {
   it("pins the exact SHA-256 of the supplied owner PDF and normalized rows", () => {
@@ -22,7 +23,7 @@ describe("owner browse-catalog publication", () => {
   });
 
   it("defaults closed when no publication is authorized", () => {
-    expect(resolvePublishedBrowseCatalog(undefined)).toEqual({
+    expect(resolvePublishedBrowseCatalog(undefined, storefrontCatalogData.bindings)).toEqual({
       publicationId: null,
       products: [],
       variantCount: 0,
@@ -30,7 +31,10 @@ describe("owner browse-catalog publication", () => {
   });
 
   it("publishes all owner-supplied rows only for the exact manifest ID", () => {
-    const catalog = resolvePublishedBrowseCatalog(browseCatalogPublicationId);
+    const catalog = resolvePublishedBrowseCatalog(
+      browseCatalogPublicationId,
+      storefrontCatalogData.bindings,
+    );
 
     expect(catalog.publicationId).toBe(browseCatalogPublicationId);
     expect(catalog.products).toHaveLength(56);
@@ -40,7 +44,10 @@ describe("owner browse-catalog publication", () => {
   });
 
   it("fails closed for a configured publication mismatch", () => {
-    expect(() => resolvePublishedBrowseCatalog("wrong-publication")).toThrow(
+    expect(() => resolvePublishedBrowseCatalog(
+      "wrong-publication",
+      storefrontCatalogData.bindings,
+    )).toThrow(
       "Browse catalog publication does not match the owner manifest",
     );
   });

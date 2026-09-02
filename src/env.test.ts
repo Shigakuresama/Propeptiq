@@ -84,6 +84,7 @@ describe("parseServerEnv", () => {
     expect(env).toMatchObject({
       APP_ENV: "local",
       CATALOG_DEMO_MODE: "disabled",
+      RECONSTITUTION_CALCULATOR_MODE: "disabled",
       LOCAL_TEST_DRIVER: "disabled",
       AUTH_MODE: "disabled",
       DATABASE_MODE: "disabled",
@@ -97,6 +98,43 @@ describe("parseServerEnv", () => {
       FULFILLMENT_MODE: "disabled",
     });
     expect(env.BROWSE_CATALOG_PUBLICATION).toBeUndefined();
+  });
+
+  it("accepts explicit preview and approved calculator modes outside the forbidden matrix", () => {
+    expect(
+      parseServerEnv({ RECONSTITUTION_CALCULATOR_MODE: "preview" })
+        .RECONSTITUTION_CALCULATOR_MODE,
+    ).toBe("preview");
+    expect(
+      parseServerEnv({ RECONSTITUTION_CALCULATOR_MODE: "approved" })
+        .RECONSTITUTION_CALCULATOR_MODE,
+    ).toBe("approved");
+  });
+
+  it("rejects an invalid calculator mode", () => {
+    expect(() =>
+      parseServerEnv({ RECONSTITUTION_CALCULATOR_MODE: "enabled" }),
+    ).toThrow(/RECONSTITUTION_CALCULATOR_MODE/);
+  });
+
+  it("rejects calculator preview for a production identity", () => {
+    expect(() =>
+      parseServerEnv({
+        ...productionIdentity,
+        RECONSTITUTION_CALCULATOR_MODE: "preview",
+      }),
+    ).toThrow(
+      /RECONSTITUTION_CALCULATOR_MODE: RECONSTITUTION_CALCULATOR_MODE=preview is not permitted for a production identity/,
+    );
+  });
+
+  it("keeps approved calculator mode syntactically available for a production identity", () => {
+    expect(
+      parseServerEnv({
+        ...productionIdentity,
+        RECONSTITUTION_CALCULATOR_MODE: "approved",
+      }).RECONSTITUTION_CALCULATOR_MODE,
+    ).toBe("approved");
   });
 
   it("accepts a non-secret owner browse-catalog publication ID", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CircleAlert, Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import { Minus, Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -15,7 +15,6 @@ import {
   type CartPreviewItem,
   canContinueFromPreview,
 } from "@/cart/preview-types";
-import { DataLabel, EmptyState, Notice, RecordPanel } from "@/components/design-system/archive-primitives";
 import { Button } from "@/components/ui/button";
 
 function formatMoney(amountMinor: number, currency: string): string {
@@ -27,15 +26,19 @@ function formatMoney(amountMinor: number, currency: string): string {
 
 export function CartView({
   checkoutIntent,
+  navigate = (url) => window.location.assign(url),
 }: {
   checkoutIntent: string | null;
+  navigate?: (url: string) => void;
 }) {
   const {
     items,
     hydrated,
+    legacyItemCount,
     setQuantity,
     removeItem,
     clearCart,
+    acknowledgeLegacyReselection,
   } = useCart();
   const cartKey = JSON.stringify(items);
   const [previewState, setPreviewState] = useState<{
@@ -110,7 +113,8 @@ export function CartView({
   const displayedItems: readonly CartPreviewItem[] =
     preview?.items ??
     items.map((item) => ({
-      ...item,
+      quantity: item.quantity,
+      variantId: item.variantId,
       available: false,
       name: null,
       packageForm: null,
@@ -122,52 +126,63 @@ export function CartView({
   function beginCheckoutHandoff() {
     const handoff = prepareCheckoutHandoff(window.localStorage, items);
     setHandoffMessage(`Saving ${handoff.itemCount} requested unit${handoff.itemCount === 1 ? "" : "s"} for checkout.`);
-    window.location.assign(handoff.returnTo);
+    navigate(handoff.returnTo);
   }
 
   if (!hydrated) {
     return <div className="cart-loading" aria-label="Loading saved cart" />;
   }
 
+  if (legacyItemCount !== null) {
+    return (
+      <section className="empty-record" aria-labelledby="cart-reselection-heading">
+        <h2 id="cart-reselection-heading" className="font-heading text-section text-ink">
+          Choose your variants again.
+        </h2>
+        <p className="mt-4 max-w-[60ch] leading-7 text-muted-ink">
+          Your saved cart contains {legacyItemCount} requested unit{legacyItemCount === 1 ? "" : "s"} from an older cart format. Choose each exact variant again before continuing.
+        </p>
+        <div className="mt-7 flex flex-wrap gap-3">
+          <Button type="button" className="action-primary" onClick={acknowledgeLegacyReselection}>
+            Clear old cart and choose variants
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/catalog">Return to catalog</Link>
+          </Button>
+        </div>
+      </section>
+    );
+  }
+
   if (items.length === 0) {
     return (
-      <EmptyState
-        description={(
-          <>
-          Add an active catalog record to create a local request. Prices and availability
+      <section className="empty-record">
+        <h2 className="font-heading text-section text-ink">Your cart is empty.</h2>
+        <p className="mt-4 max-w-[60ch] leading-7 text-muted-ink">
+          Add an exact active catalog variant to create a local request. Prices and availability
           will be reloaded from the server.
-          </>
-        )}
-        eyebrow="Saved request"
-        icon={ShoppingBag}
-        title="Your cart is empty."
-        action={(
-          <Button asChild className="action-primary">
-            <Link href="/catalog">Continue to catalog</Link>
-          </Button>
-        )}
-      />
+        </p>
+        <Button asChild className="action-primary mt-7">
+          <Link href="/catalog">Continue to catalog</Link>
+        </Button>
+      </section>
     );
   }
 
   return (
     <div className="cart-layout">
       <section aria-labelledby="cart-items-heading">
-        <RecordPanel className="overflow-hidden">
-          <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border p-5 sm:p-6">
-            <div>
-              <DataLabel>Local cart</DataLabel>
-              <h2 id="cart-items-heading" className="mt-2 font-heading text-3xl text-ink">
-                Requested records
-              </h2>
-            </div>
-            <Button type="button" variant="ghost" className="min-h-11" onClick={clearCart}>
-              Clear cart
-            </Button>
-          </div>
+        <div className="flex items-end justify-between gap-4 border-b border-border pb-5">
+          <h2 id="cart-items-heading" className="font-heading text-3xl text-ink">
+            Requested records
+          </h2>
+          <Button type="button" variant="ghost" className="min-h-11" onClick={clearCart}>
+            Clear cart
+          </Button>
+        </div>
 
         {error ? (
-          <Notice className="mx-5 mt-5 text-base sm:mx-6" icon={CircleAlert} tone="danger" title="Server preview unavailable">
+          <div className="error-record mt-6 text-base leading-7" role="alert">
             <p>The authoritative cart preview is unavailable. Retry before continuing.</p>
             <Button
               type="button"
@@ -177,34 +192,24 @@ export function CartView({
             >
               Retry current cart facts
             </Button>
-          </Notice>
+          </div>
         ) : null}
         {loading ? (
-          <div className="cart-loading mx-5 mt-5 sm:mx-6" aria-label="Refreshing authoritative cart preview" />
+          <div className="cart-loading mt-6" aria-label="Refreshing authoritative cart preview" />
         ) : null}
 
-        <ul className="divide-y divide-border px-5 sm:px-6" aria-live="polite">
+        <ul className="divide-y divide-border" aria-live="polite">
           {displayedItems.map((item) => {
-            const label = item.name ?? item.productId;
+            const label = item.name ?? item.variantId;
             return (
-              <li className="py-6" key={item.productId}>
+              <li className="py-7" key={item.variantId}>
                 <div className="grid gap-5 sm:grid-cols-[1fr_auto] sm:items-start">
-                  <div className="min-w-0">
-                    <DataLabel>Catalog record</DataLabel>
-                    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-3">
-                      <p className="min-w-0 break-words font-heading text-2xl text-ink">{label}</p>
-                      {!loading && preview ? (
-                        <span className="status-pill">
-                          {item.available ? "Server confirmed" : "Unavailable"}
-                        </span>
-                      ) : !loading ? (
-                        <span className="status-pill">Not verified</span>
-                      ) : null}
-                    </div>
+                  <div>
+                    <p className="font-heading text-2xl text-ink">{label}</p>
                     {item.packageForm ? (
                       <p className="mt-2 text-base text-muted-ink">{item.packageForm}</p>
                     ) : null}
-                    {!loading && preview && !item.available ? (
+                    {!loading && !item.available ? (
                       <p className="mt-3 text-base font-semibold text-danger">
                         This requested record or quantity is no longer available.
                       </p>
@@ -219,7 +224,7 @@ export function CartView({
                     <div>
                       <label
                         className="mb-2 block text-xs font-semibold text-muted-ink"
-                        htmlFor={`quantity-${item.productId}`}
+                        htmlFor={`quantity-${item.variantId}`}
                       >
                         Quantity
                       </label>
@@ -229,12 +234,12 @@ export function CartView({
                           variant="outline"
                           size="icon"
                           aria-label={`Decrease quantity for ${label}`}
-                          onClick={() => setQuantity(item.productId, item.quantity - 1)}
+                          onClick={() => setQuantity(item.variantId, item.quantity - 1)}
                         >
                           <Minus aria-hidden="true" />
                         </Button>
                         <input
-                          id={`quantity-${item.productId}`}
+                          id={`quantity-${item.variantId}`}
                           aria-label={`Quantity for ${label}`}
                           inputMode="numeric"
                           min="1"
@@ -244,7 +249,7 @@ export function CartView({
                           onChange={(event) => {
                             const quantity = event.currentTarget.valueAsNumber;
                             if (Number.isFinite(quantity)) {
-                              setQuantity(item.productId, quantity);
+                              setQuantity(item.variantId, quantity);
                             }
                           }}
                         />
@@ -253,7 +258,7 @@ export function CartView({
                           variant="outline"
                           size="icon"
                           aria-label={`Increase quantity for ${label}`}
-                          onClick={() => setQuantity(item.productId, item.quantity + 1)}
+                          onClick={() => setQuantity(item.variantId, item.quantity + 1)}
                         >
                           <Plus aria-hidden="true" />
                         </Button>
@@ -264,7 +269,7 @@ export function CartView({
                       variant="ghost"
                       size="icon"
                       aria-label={`Remove ${label} from cart`}
-                      onClick={() => removeItem(item.productId)}
+                      onClick={() => removeItem(item.variantId)}
                     >
                       <Trash2 aria-hidden="true" />
                     </Button>
@@ -274,52 +279,52 @@ export function CartView({
             );
           })}
         </ul>
-        </RecordPanel>
       </section>
 
       <aside className="cart-summary" aria-labelledby="cart-summary-heading">
-        <DataLabel>Server preview</DataLabel>
+        <p className="eyebrow">Server preview</p>
         <h2 id="cart-summary-heading" className="mt-3 font-heading text-3xl text-ink">
           Order summary
         </h2>
-        <dl className="mt-7 divide-y divide-border border-y border-border text-base">
-          <div className="flex justify-between gap-5 py-3">
+        <dl className="mt-7 space-y-3 border-y border-border py-5 text-base">
+          <div className="flex justify-between gap-5">
             <dt>Merchandise subtotal</dt>
-            <dd className="text-right font-semibold tabular-nums">
+            <dd className="tabular-nums">
               {preview?.currency
                 ? formatMoney(preview.subtotalMinor, preview.currency)
                 : "Unavailable"}
             </dd>
           </div>
-          <div className="flex justify-between gap-5 py-3">
+          <div className="flex justify-between gap-5">
             <dt>Promotion</dt>
-            <dd className="text-right">Calculated at checkout</dd>
+            <dd>Calculated at checkout</dd>
           </div>
-          <div className="flex justify-between gap-5 py-3">
+          <div className="flex justify-between gap-5">
             <dt>Referral benefit</dt>
-            <dd className="text-right">Available after checkout quote</dd>
+            <dd>Available after checkout quote</dd>
           </div>
-          <div className="flex justify-between gap-5 py-3">
+          <div className="flex justify-between gap-5">
             <dt>Points redemption</dt>
-            <dd className="text-right">Available after checkout quote</dd>
+            <dd>Available after checkout quote</dd>
           </div>
-          <div className="flex justify-between gap-5 py-3">
+          <div className="flex justify-between gap-5">
             <dt>Tax</dt>
-            <dd className="text-right">Not yet calculated</dd>
+            <dd>Not yet calculated</dd>
           </div>
-          <div className="flex justify-between gap-5 py-3">
+          <div className="flex justify-between gap-5">
             <dt>Shipping</dt>
-            <dd className="text-right">Not yet calculated</dd>
+            <dd>Not yet calculated</dd>
           </div>
-          <div className="flex justify-between gap-5 py-4 font-semibold">
+          <div className="flex justify-between gap-5 border-t border-border pt-3 font-semibold">
             <dt>Total</dt>
-            <dd className="text-right">Available after checkout quote</dd>
+            <dd>Available after checkout quote</dd>
           </div>
         </dl>
 
         {preview?.requiresAcknowledgement ? (
-          <Notice className="mt-6" icon={AlertTriangle} tone="warning" title="Cart facts changed or became unavailable">
-            <p>
+          <div className="warning-record mt-6">
+            <p className="font-semibold">Cart facts changed or became unavailable.</p>
+            <p className="mt-2 text-base leading-7">
               Requested IDs and quantities were preserved. Review the server facts before continuing.
             </p>
             {preview.items.every((item) => item.available) ? (
@@ -332,7 +337,7 @@ export function CartView({
                 Acknowledge server changes
               </Button>
             ) : null}
-          </Notice>
+          </div>
         ) : null}
 
         {checkoutIntent ? (

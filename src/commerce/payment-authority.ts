@@ -18,6 +18,7 @@ export function hasExactCheckoutProviderArtifact(input: Readonly<{
   return (
     typeof input.providerRequestHash === "string" &&
     isSha256(input.providerRequestHash) &&
-    Number(input.providerRequestSchemaVersion) === 1
+    (input.providerRequestSchemaVersion === 1 ||
+      input.providerRequestSchemaVersion === 2)
   );
 }

@@ -1,7 +1,17 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { browseCatalogProducts } from "@/catalog/browse-catalog";
+import { CartProvider } from "@/cart/cart-provider";
+import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
+import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
+import {
+  buildPublicStorefrontCatalog,
+  storefrontImageMetadata,
+} from "@/catalog/storefront-public";
+import {
+  testCanonicalProduct,
+  testPricingContext,
+} from "@/components/commerce/storefront-test-fixtures";
 import { PublicHome } from "@/components/site/public-home";
 import type { LoyaltyPolicy } from "@/domain/rewards";
 
@@ -20,10 +30,23 @@ const activeLoyaltyPolicy: LoyaltyPolicy = {
   supersededAt: null,
 };
 
+const publicCatalog = buildPublicStorefrontCatalog({
+  configuredPublicationId: browseCatalogPublicationId,
+  catalogData: storefrontCatalogData,
+  runtimeVariantFacts: [],
+  controlledContent: [],
+  verifiedImageMetadata: storefrontImageMetadata,
+});
+const pricing = testPricingContext("test");
+
 describe("public storefront semantics", () => {
   it("uses the shared decorative science field without adding accessible noise", () => {
     const { container } = render(
-      <PublicHome products={browseCatalogProducts} variantCount={103} />,
+      <PublicHome
+        products={publicCatalog.products}
+        variantCount={publicCatalog.displayConfigurationCount}
+        pricing={pricing}
+      />,
     );
 
     const field = container.querySelector("[data-science-field='lattice']");
@@ -33,7 +56,13 @@ describe("public storefront semantics", () => {
   });
 
   it("presents the owner-supplied catalog without inventing commerce facts", () => {
-    render(<PublicHome products={browseCatalogProducts} variantCount={103} />);
+    render(
+      <PublicHome
+        products={publicCatalog.products}
+        variantCount={publicCatalog.displayConfigurationCount}
+        pricing={pricing}
+      />,
+    );
 
     expect(
       screen.getByRole("heading", {
@@ -41,9 +70,7 @@ describe("public storefront semantics", () => {
         name: "Research materials, documented with greater clarity.",
       }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("For legitimate laboratory and research use only."),
-    ).toBeVisible();
+    expect(screen.getByText("For legitimate laboratory and research use only.")).toBeVisible();
     expect(screen.getByText("Not for human or veterinary use.")).toBeVisible();
     expect(screen.getByRole("link", { name: "Browse catalog" })).toHaveAttribute(
       "href",
@@ -54,24 +81,28 @@ describe("public storefront semantics", () => {
       "/cart",
     );
     expect(screen.getByText("56")).toBeVisible();
-    const catalogExplanation = screen.getByText(/Product families spanning 103 supplied package configurations/iu);
+    const catalogExplanation = screen.getByText(
+      /Product families spanning 103 supplied package configurations/iu,
+    );
     expect(catalogExplanation).toHaveClass("text-base");
     expect(catalogExplanation).not.toHaveClass("text-sm");
     expect(screen.getByText("Tirzepatide")).toBeVisible();
     expect(
-      screen.getByRole("link", { name: /open catalog dossier: tirzepatide/i }),
-    ).toHaveAttribute("href", `/catalog/items/${browseCatalogProducts[0]!.slug}`);
+      screen.getByRole("link", { name: /view catalog item: tirzepatide/i }),
+    ).toHaveAttribute("href", `/catalog/items/${publicCatalog.products[0]!.slug}`);
     expect(document.body).not.toHaveTextContent(/server-provided prices/i);
     expect(screen.queryByText(/apply|researcher approval/i)).toBeNull();
   });
 
-  it("omits the highlights movement when no approved products are available", () => {
-    render(<PublicHome products={[]} variantCount={0} />);
+  it("keeps the catalog path visible when no approved products are available", () => {
+    render(<PublicHome products={[]} variantCount={0} pricing={pricing} />);
 
     expect(screen.getByText("00")).toBeVisible();
-    expect(screen.getByText(/Product families spanning 0 supplied package configurations/iu)).toBeVisible();
-    expect(screen.queryByText("Catalog highlights")).toBeNull();
-    expect(screen.queryByRole("list", { name: "Catalog highlights" })).toBeNull();
+    expect(
+      screen.getByText(/Product families spanning 0 supplied package configurations/iu),
+    ).toBeVisible();
+    expect(screen.getByText("Catalog highlights")).toBeVisible();
+    expect(screen.getByRole("list", { name: "Catalog highlights" })).toBeEmptyDOMElement();
     expect(
       screen.getByRole("heading", { level: 2, name: "Explore the full research catalog." }),
     ).toBeVisible();
@@ -104,8 +135,9 @@ describe("public storefront semantics", () => {
     render(
       <PublicHome
         loyaltyPolicy={activeLoyaltyPolicy}
-        products={browseCatalogProducts}
-        variantCount={103}
+        products={publicCatalog.products}
+        variantCount={publicCatalog.displayConfigurationCount}
+        pricing={pricing}
       />,
     );
 
@@ -134,5 +166,29 @@ describe("public storefront semantics", () => {
     expect(programs.compareDocumentPosition(documentation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(documentation.compareDocumentPosition(restriction) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(restriction.compareDocumentPosition(closingAction) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("uses neutral catalog snapshot copy when canonical commerce rows exist", () => {
+    render(
+      <CartProvider>
+        <PublicHome
+          products={[testCanonicalProduct()]}
+          variantCount={1}
+          pricing={pricing}
+        />
+      </CartProvider>,
+    );
+
+    expect(
+      screen.getAllByText(
+        /current price and availability snapshots are displayed where configured and revalidated before checkout/iu,
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText(
+        /purchasing and operational availability remain separate from this browse-only collection/iu,
+      ),
+    ).toBeNull();
+    expect(screen.queryByText(/prices are intentionally excluded/iu)).toBeNull();
   });
 });

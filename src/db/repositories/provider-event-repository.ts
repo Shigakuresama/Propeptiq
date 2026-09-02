@@ -14,6 +14,8 @@ import type {
   ProviderEventNormalizationResultV1,
   RefundProviderEventV1,
   RefundReconciliationProviderEventV1,
+  InvoiceProviderEventV1,
+  CreditNoteProviderEventV1,
 } from "@/commerce/provider-events";
 import {
   parseKnownProviderEventConflictV1,
@@ -24,6 +26,7 @@ import {
   projectProviderEventAuthorityV1,
   type ProviderEventAuthorityV1,
 } from "@/commerce/stripe-webhook-verifier";
+import { settlementWindowClosesAt } from "@/domain/settlement";
 import {
   transitionOrder,
   transitionPayment,
@@ -522,6 +525,8 @@ type AttemptRow = Readonly<{
   providerSessionId: string | null;
   providerLivemode: boolean | null;
   providerScope: string | null;
+  taxReady: boolean;
+  taxQuoteReference: string | null;
 }>;
 
 type OrderRow = Readonly<{
@@ -545,10 +550,20 @@ type PaymentRow = Readonly<{
 
 type ReservationRow = Readonly<{
   id: string;
+  variantId: string | null;
+  orderItemVariantId: string | null;
+  lotVariantId: string | null;
   state: "active" | "released" | "expired" | "consumed";
   quantityReserved: number | string;
   quantityRemaining: number | string;
 }>;
+
+function reservationVariantIdentityIsCoherent(reservation: ReservationRow): boolean {
+  return reservation.orderItemVariantId === null
+    ? reservation.variantId === null && reservation.lotVariantId === null
+    : reservation.variantId === reservation.orderItemVariantId &&
+      reservation.lotVariantId === reservation.orderItemVariantId;
+}
 
 function safeNonnegativeInteger(value: unknown): number | null {
   const converted = Number(value);
@@ -741,7 +756,9 @@ async function discoverCheckoutAttempt(
             provider_request_id AS "providerRequestId",
             provider_session_id AS "providerSessionId",
             provider_livemode AS "providerLivemode",
-            provider_scope AS "providerScope"
+            provider_scope AS "providerScope",
+            tax_ready AS "taxReady",
+            tax_quote_reference AS "taxQuoteReference"
      FROM checkout_attempts
      WHERE id = $1::uuid OR order_id = $2::uuid
      ORDER BY id`,
@@ -861,7 +878,9 @@ async function processCheckoutEvent(
             provider_request_id AS "providerRequestId",
             provider_session_id AS "providerSessionId",
             provider_livemode AS "providerLivemode",
-            provider_scope AS "providerScope"
+            provider_scope AS "providerScope",
+            tax_ready AS "taxReady",
+            tax_quote_reference AS "taxQuoteReference"
      FROM checkout_attempts WHERE id = $1::uuid FOR UPDATE`,
     [event.attemptId],
   ));
@@ -892,10 +911,16 @@ async function processCheckoutEvent(
     ],
   ));
   const reservations = rows<ReservationRow>(await client.query(
-    `SELECT id::text AS id, state, quantity_reserved AS "quantityReserved",
-            quantity_remaining AS "quantityRemaining"
-     FROM inventory_reservations
-     WHERE checkout_attempt_id = $1::uuid ORDER BY id FOR UPDATE`,
+    `SELECT reservation.id::text AS id, reservation.variant_id::text AS "variantId",
+            item.variant_id::text AS "orderItemVariantId",
+            lot.variant_id::text AS "lotVariantId", reservation.state,
+            reservation.quantity_reserved AS "quantityReserved",
+            reservation.quantity_remaining AS "quantityRemaining"
+     FROM inventory_reservations reservation
+     JOIN order_items item ON item.id = reservation.order_item_id
+     JOIN lots lot ON lot.id = reservation.lot_id
+     WHERE reservation.checkout_attempt_id = $1::uuid
+     ORDER BY reservation.id FOR UPDATE OF reservation, item, lot`,
     [event.attemptId],
   ));
   if (
@@ -973,7 +998,9 @@ async function processCheckoutEvent(
   }
   const exactVerifiedPayment =
     matchingPayment !== undefined && matchingPaymentIsCoherent;
-  const reservationStateIsKnown = allActive || allReleased || allConsumed;
+  const reservationStateIsKnown =
+    reservations.every(reservationVariantIdentityIsCoherent) &&
+    (allActive || allReleased || allConsumed);
   if (order.state === "cancelled" && allActive) {
     return finishBusinessConflict(
       client,
@@ -1015,6 +1042,9 @@ async function processCheckoutEvent(
       stableUuid(keyedUuid, `provider-event:${row.id}:payment-verified`);
     const paidOrderStates: readonly OrderState[] = [
       "paid_pending_fulfillment",
+      // Settlement-pending IS paid. Omitting it would make a replayed provider
+      // event conflict on an order that is legitimately paid but not releasable.
+      "paid_pending_settlement",
       "paid_on_hold",
       "ready_for_fulfillment",
       "fulfillment_in_progress",
@@ -1163,6 +1193,38 @@ async function processCheckoutEvent(
           now,
         ],
       );
+      // Tax is server-computed and sent to the provider as a plain line item, so
+      // the sale never reaches Stripe Tax reporting on its own. Enqueue the
+      // recording here, inside the transaction that verifies payment, so it
+      // inherits the same atomicity and lease-based retry as every other effect.
+      // Read from the exact attempt this event names, already locked above, so
+      // the calculation always matches the amount charged. An order may carry
+      // several attempts, and the order's newest one is not necessarily this
+      // one. A permitted attempt always has tax_ready, but the guard stays so a
+      // non-permitted path can never enqueue a reference-less effect.
+      if (attempt.taxReady && attempt.taxQuoteReference !== null) {
+        await client.query(
+          `INSERT INTO downstream_effects
+             (id, order_id, provider_event_id, effect_type, payload,
+              idempotency_key, status, attempt_count, created_at, updated_at)
+           VALUES ($1, $2, $3, 'stripe_tax_transaction', $4::jsonb, $5,
+                   'pending', 0, $6, $6)
+           ON CONFLICT (idempotency_key) DO NOTHING`,
+          [
+            stableUuid(keyedUuid, `payment-event:${paymentEventId}:tax-effect`),
+            order.id,
+            row.id,
+            JSON.stringify({
+              schemaVersion: 1,
+              orderId: order.id,
+              verifiedPaymentEventId: paymentEventId,
+              calculationReference: attempt.taxQuoteReference,
+            }),
+            `payment_event:${paymentEventId}:stripe_tax_transaction`,
+            now,
+          ],
+        );
+      }
     }
   } else if (event.eventType === "checkout.session.async_payment_failed") {
     if (verifiedPayments.length === 0) {
@@ -1401,7 +1463,9 @@ async function loadAndLockFinancialContext(
             provider_request_id AS "providerRequestId",
             provider_session_id AS "providerSessionId",
             provider_livemode AS "providerLivemode",
-            provider_scope AS "providerScope"
+            provider_scope AS "providerScope",
+            tax_ready AS "taxReady",
+            tax_quote_reference AS "taxQuoteReference"
      FROM checkout_attempts WHERE id = $1::uuid FOR UPDATE`,
     [sourceEvent.attemptId],
   ));
@@ -1940,6 +2004,386 @@ async function processRefundEvent(
   return finishProcessed(client, row.id, now);
 }
 
+/**
+ * Records a credit note against the order its invoice is bound to.
+ *
+ * Deliberately applies NO order state transition. A credit note is a ledger
+ * fact, not a payment outcome: refunds have their own authority, evidence and
+ * state machine in this repository, and routing a credit note through them
+ * would let an accounting document move fulfilment state.
+ *
+ * What it does do is make the fact durable and attributable. Stripe's own
+ * guidance is that an unhandled credit_note.created silently diverges the
+ * provider's view from the internal ledger; enqueuing it as an effect is how
+ * an external ledger or ERP sync learns about it.
+ *
+ * The order is resolved through order_invoices, and any binding status is
+ * accepted because a credit note legitimately follows an already-paid invoice.
+ */
+async function processCreditNoteEvent(
+  client: ProviderEventSqlClient,
+  row: LockedProviderEventRow,
+  event: CreditNoteProviderEventV1,
+  authority: Readonly<{
+    provider: "stripe";
+    expectedLivemode: boolean;
+    providerScope: string;
+  }>,
+  now: Date,
+  keyedUuid: KeyedUuidGenerator,
+): Promise<ProcessingResult> {
+  if (event.livemode !== authority.expectedLivemode) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "provider_authority_mismatch",
+      keyedUuid,
+    );
+  }
+
+  const bindings = rows<{ orderId: string }>(await client.query(
+    `SELECT order_id::text AS "orderId"
+       FROM order_invoices
+      WHERE provider = $1 AND provider_invoice_id = $2
+      FOR UPDATE`,
+    [authority.provider, event.invoiceId],
+  ));
+  const binding = bindings[0];
+  if (binding === undefined) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "payment_identity_mismatch",
+      keyedUuid,
+    );
+  }
+
+  await client.query(
+    `INSERT INTO downstream_effects
+       (id, order_id, provider_event_id, effect_type, payload,
+        idempotency_key, status, attempt_count, created_at, updated_at)
+     VALUES ($1, $2, $3, 'credit_note_recorded', $4::jsonb, $5,
+             'pending', 0, $6, $6)
+     ON CONFLICT (idempotency_key) DO NOTHING`,
+    [
+      stableUuid(keyedUuid, `credit-note:${event.creditNoteId}`),
+      binding.orderId,
+      row.id,
+      JSON.stringify({
+        schemaVersion: 1,
+        orderId: binding.orderId,
+        creditNoteId: event.creditNoteId,
+        invoiceId: event.invoiceId,
+        amountMinor: event.amountMinor,
+      }),
+      `credit_note:${event.creditNoteId}`,
+      now,
+    ],
+  );
+
+  return finishProcessed(client, row.id, now);
+}
+
+/**
+ * Reconciles invoice payment facts against the locked durable invoice and order.
+ * Exact paid events enter paid_pending_settlement and may schedule its durable
+ * settlement window; exact failures can reverse only while settlement is pending.
+ * Contradictory identity, status, collection, currency, or amount facts conflict
+ * before any payment evidence or order transition is written.
+ */
+async function processInvoiceEvent(
+  client: ProviderEventSqlClient,
+  row: LockedProviderEventRow,
+  event: InvoiceProviderEventV1,
+  authority: Readonly<{
+    provider: "stripe";
+    expectedLivemode: boolean;
+    providerScope: string;
+  }>,
+  now: Date,
+  keyedUuid: KeyedUuidGenerator,
+  settlementWindowBusinessDays?: number,
+): Promise<ProcessingResult> {
+  if (event.livemode !== authority.expectedLivemode) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "provider_authority_mismatch",
+      keyedUuid,
+    );
+  }
+
+  // invoice.finalized never moves an order. invoice.paid settles it, and
+  // invoice.payment_failed reverses a settlement that has not yet closed.
+  // Treat a recognized event with contradictory facts as a conflict rather
+  // than silently ignoring it.
+  const settles = event.eventType === "invoice.paid";
+  const reverses = event.eventType === "invoice.payment_failed";
+  if (!settles && !reverses) {
+    return finishProcessed(client, row.id, now);
+  }
+
+  // Resolve the order from OUR durable binding, never from the provider's
+  // metadata.orderId. An invoice we did not issue must not move money state.
+  const bindings = rows<{
+    orderId: string;
+    amountDueMinor: number | string | null;
+    status: string;
+  }>(await client.query(
+    `SELECT order_id::text AS "orderId",
+            amount_due_minor AS "amountDueMinor", status
+       FROM order_invoices
+      WHERE provider = $1 AND provider_invoice_id = $2
+      FOR UPDATE`,
+    [authority.provider, event.invoiceId],
+  ));
+  const binding = bindings[0];
+  if (binding === undefined || binding.orderId !== event.orderId) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "payment_identity_mismatch",
+      keyedUuid,
+    );
+  }
+
+  const orders = rows<{
+    id: string;
+    state: OrderState;
+    currency: string;
+    totalMinor: number | string;
+  }>(
+    await client.query(
+      `SELECT id::text AS id, state, currency, total_minor AS "totalMinor"
+         FROM orders WHERE id = $1::uuid FOR UPDATE`,
+      [binding.orderId],
+    ),
+  );
+  const order = orders[0];
+  if (order === undefined) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "payment_identity_mismatch",
+      keyedUuid,
+    );
+  }
+  const durableAmountDueMinor = safeNonnegativeInteger(binding.amountDueMinor);
+  const orderTotalMinor = safeNonnegativeInteger(order.totalMinor);
+  if (
+    binding.status !== "open" ||
+    event.collectionMethod !== "send_invoice" ||
+    durableAmountDueMinor === null ||
+    durableAmountDueMinor <= 0 ||
+    orderTotalMinor === null ||
+    orderTotalMinor <= 0 ||
+    durableAmountDueMinor !== orderTotalMinor ||
+    event.amountDueMinor !== durableAmountDueMinor ||
+    event.amountDueMinor <= 0 ||
+    event.currency !== order.currency.toLowerCase()
+  ) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "payment_identity_mismatch",
+      keyedUuid,
+    );
+  }
+
+  if (reverses) {
+    if (event.status !== "open" || event.amountPaidMinor !== 0) {
+      return finishBusinessConflict(
+        client,
+        row,
+        now,
+        "payment_identity_mismatch",
+        keyedUuid,
+      );
+    }
+    // ACH funds pulled back before the window closed. This is the case the
+    // whole Option B policy exists to catch: cancel the pending settlement
+    // rather than record a reversal after goods have shipped. docs/adr/0006.
+    //
+    // Only an order still awaiting settlement can be reversed here. One that
+    // already left that state is out of scope for this event and must not be
+    // dragged backwards by a late or spurious failure.
+    if (order.state !== "paid_pending_settlement") {
+      return finishProcessed(client, row.id, now);
+    }
+    // A settlement-pending order carries payment evidence by definition, and
+    // isValidOrderSnapshot requires it. Load the real id rather than null, or
+    // the transition is refused as an invalid snapshot.
+    const evidence = rows<{ id: string }>(await client.query(
+      `SELECT id::text AS id FROM payment_events
+        WHERE order_id = $1::uuid AND event_type = 'payment_verified'
+        ORDER BY occurred_at DESC LIMIT 1`,
+      [order.id],
+    ));
+    const paymentEvidenceId = evidence[0]?.id ?? null;
+    if (paymentEvidenceId === null) {
+      return finishBusinessConflict(
+        client,
+        row,
+        now,
+        "payment_identity_mismatch",
+        keyedUuid,
+      );
+    }
+    const reversal = transitionOrder(
+      {
+        orderId: order.id,
+        state: order.state,
+        paymentEvidenceId,
+        reviewRequestId: null,
+        fulfillmentReleaseVersion: null,
+        lastFulfillmentReleaseVersion: 0,
+        carrierHandoffAt: null,
+      },
+      {
+        type: "payment_funding_reversed",
+        source: "verified_provider_event",
+        providerEvidenceId: event.invoiceId,
+      },
+    );
+    if (!reversal.ok) {
+      return finishBusinessConflict(
+        client,
+        row,
+        now,
+        "order_transition_mismatch",
+        keyedUuid,
+      );
+    }
+    await client.query(
+      `UPDATE orders SET state = $2::order_state, updated_at = $3 WHERE id = $1`,
+      [order.id, reversal.value.snapshot.state, now],
+    );
+    return finishProcessed(client, row.id, now);
+  }
+
+  if (
+    event.status !== "paid" ||
+    event.amountPaidMinor !== durableAmountDueMinor ||
+    event.amountPaidMinor <= 0
+  ) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "payment_identity_mismatch",
+      keyedUuid,
+    );
+  }
+
+  const idempotencyKey = `${authority.provider}:invoice:${event.invoiceId}`;
+  const existing = rows<{ id: string }>(await client.query(
+    `SELECT id::text AS id FROM payment_events
+      WHERE idempotency_key = $1 FOR UPDATE`,
+    [idempotencyKey],
+  ));
+  if (existing.length > 0) {
+    // A replayed invoice.paid is idempotent success, not a second payment.
+    return finishProcessed(client, row.id, now);
+  }
+
+  const paymentEventId = stableUuid(
+    keyedUuid,
+    `invoice-payment:${event.invoiceId}`,
+  );
+  // settlementRequired routes to paid_pending_settlement rather than a
+  // releasable state: ACH funds can still be pulled back. docs/adr/0006.
+  const transition = transitionOrder(
+    {
+      orderId: order.id,
+      state: order.state,
+      paymentEvidenceId: null,
+      reviewRequestId: null,
+      fulfillmentReleaseVersion: null,
+      lastFulfillmentReleaseVersion: 0,
+      carrierHandoffAt: null,
+    },
+    {
+      type: "payment_verified",
+      source: "verified_provider_event",
+      paymentEvidenceId: paymentEventId,
+      reservationDisposition: "active",
+      settlementRequired: true,
+    },
+  );
+  if (!transition.ok) {
+    return finishBusinessConflict(
+      client,
+      row,
+      now,
+      "order_transition_mismatch",
+      keyedUuid,
+    );
+  }
+
+  await client.query(
+    `INSERT INTO payment_events
+       (id, provider_event_id, order_id, event_type, provider_payment_id,
+        idempotency_key, amount_minor, currency, occurred_at)
+     VALUES ($1, $2, $3, 'payment_verified', $4, $5, $6, $7, $8)`,
+    [
+      paymentEventId,
+      row.id,
+      order.id,
+      event.invoiceId,
+      idempotencyKey,
+      event.amountPaidMinor,
+      order.currency,
+      event.providerCreatedAt,
+    ],
+  );
+  await client.query(
+    `UPDATE orders SET state = $2::order_state, updated_at = $3 WHERE id = $1`,
+    [order.id, transition.value.snapshot.state, now],
+  );
+
+  // Schedule the release durably rather than in process, so a restart cannot
+  // lose a pending settlement. An unconfigured or invalid window schedules
+  // NOTHING: the order stays held until an operator acts, which is the
+  // fail-closed direction. See docs/adr/0006.
+  const closesAt =
+    settlementWindowBusinessDays === undefined
+      ? null
+      : settlementWindowClosesAt(now, settlementWindowBusinessDays);
+  if (closesAt !== null) {
+    await client.query(
+      `INSERT INTO downstream_effects
+         (id, order_id, provider_event_id, effect_type, payload,
+          idempotency_key, status, attempt_count, available_at,
+          created_at, updated_at)
+       VALUES ($1, $2, $3, 'settlement_window_elapsed', $4::jsonb, $5,
+               'pending', 0, $6, $7, $7)
+       ON CONFLICT (idempotency_key) DO NOTHING`,
+      [
+        stableUuid(keyedUuid, `invoice-settlement:${event.invoiceId}`),
+        order.id,
+        row.id,
+        JSON.stringify({
+          schemaVersion: 1,
+          orderId: order.id,
+          verifiedPaymentEventId: paymentEventId,
+          closesAt: closesAt.toISOString(),
+        }),
+        `payment_event:${paymentEventId}:settlement_window_elapsed`,
+        closesAt,
+        now,
+      ],
+    );
+  }
+
+  return finishProcessed(client, row.id, now);
+}
+
 async function processRefundReconciliationEvent(
   client: ProviderEventSqlClient,
   row: LockedProviderEventRow,
@@ -2236,6 +2680,7 @@ async function processClaimInTransaction(
     authority: ProviderEventAuthorityV1;
     now: Date;
     keyedUuid: KeyedUuidGenerator;
+    settlementWindowBusinessDays?: number;
   }>,
 ): Promise<ProcessingResult> {
   const claim = projectProviderEventClaimV1(input.claim);
@@ -2349,12 +2794,48 @@ async function processClaimInTransaction(
       input.keyedUuid,
     );
   }
-  return processDisputeEvent(
+  if (event.kind === "credit_note") {
+    return processCreditNoteEvent(
+      client,
+      row,
+      event,
+      authority,
+      input.now,
+      input.keyedUuid,
+    );
+  }
+  if (event.kind === "invoice") {
+    return processInvoiceEvent(
+      client,
+      row,
+      event,
+      authority,
+      input.now,
+      input.keyedUuid,
+      input.settlementWindowBusinessDays,
+    );
+  }
+  if (event.kind === "dispute") {
+    return processDisputeEvent(
+      client,
+      row,
+      event,
+      authority,
+      input.now,
+      input.keyedUuid,
+    );
+  }
+  // Exhaustiveness fence. Every normalized kind must be dispatched explicitly:
+  // a new kind added to NormalizedProviderEventV1 without a branch here fails
+  // this assignment at compile time instead of silently falling through to the
+  // dispute processor. If one ever reaches here at runtime, refuse to guess.
+  const unhandled: never = event;
+  void unhandled;
+  return finishBusinessConflict(
     client,
     row,
-    event,
-    authority,
     input.now,
+    "stored_event_incoherent",
     input.keyedUuid,
   );
 }
@@ -2445,6 +2926,12 @@ export function createProviderEventRepository(
   dependencies: Readonly<{
     runSerializableTransaction: ProviderEventTransactionRunner;
     keyedUuid?: KeyedUuidGenerator;
+    /**
+     * Business days a reversible invoice payment is held before release.
+     * Absent means no release is ever scheduled - the order stays in
+     * settlement until an operator acts. See docs/adr/0006.
+     */
+    settlementWindowBusinessDays?: number;
   }>,
 ): ProviderEventRepository {
   return Object.freeze({
@@ -2470,6 +2957,12 @@ export function createProviderEventRepository(
           (client) => processClaimInTransaction(client, {
             ...input,
             keyedUuid: dependencies.keyedUuid!,
+            ...(dependencies.settlementWindowBusinessDays === undefined
+              ? {}
+              : {
+                  settlementWindowBusinessDays:
+                    dependencies.settlementWindowBusinessDays,
+                }),
           }),
           {
             isolationLevel: "serializable",

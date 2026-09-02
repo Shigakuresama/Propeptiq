@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { hashCheckoutRequest } from "@/commerce/checkout-identity";
+import type { StorefrontPromotionConfiguration } from "@/config/storefront-promotions";
 import {
   createCheckoutService,
   projectAuthoritativeCheckoutPlan,
@@ -25,6 +26,7 @@ const ids = {
   order: "20000000-0000-4000-8000-000000000003",
   attempt: "20000000-0000-4000-8000-000000000004",
   product: "20000000-0000-4000-8000-000000000005",
+  product2: "20000000-0000-4000-8000-000000000025",
   group: "20000000-0000-4000-8000-000000000006",
   price: "20000000-0000-4000-8000-000000000007",
   lot: "20000000-0000-4000-8000-000000000008",
@@ -40,6 +42,9 @@ const ids = {
   affiliateProfile: "20000000-0000-4000-8000-000000000019",
   affiliatePolicy: "20000000-0000-4000-8000-000000000020",
   affiliateUser: "20000000-0000-4000-8000-000000000021",
+  variant: "20000000-0000-4000-8000-000000000022",
+  variant2: "20000000-0000-4000-8000-000000000023",
+  promotion: "20000000-0000-4000-8000-000000000024",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -830,6 +835,7 @@ describe("authoritative checkout service", () => {
       reviewRequired: true,
       hasReservations: false,
       quoteSnapshot: null,
+      pricingRevision: null,
     });
     await expect(
       service.quote({
@@ -879,6 +885,7 @@ describe("authoritative checkout service", () => {
         reviewRequired: false,
         hasReservations: attemptStatus === "provider_unknown",
         quoteSnapshot,
+        pricingRevision: null,
       });
 
       const replay: CheckoutQuoteResult = await service.quote({
@@ -895,6 +902,7 @@ describe("authoritative checkout service", () => {
         attemptStatus,
         orderState,
         quoteSnapshot,
+        pricingRevision: null,
       });
       expect(Reflect.ownKeys(replay).toSorted()).toEqual(
         [
@@ -903,6 +911,7 @@ describe("authoritative checkout service", () => {
           "orderId",
           "orderState",
           "quoteSnapshot",
+          "pricingRevision",
           "status",
         ].toSorted(),
       );
@@ -916,4 +925,1211 @@ describe("authoritative checkout service", () => {
       expect(taxQuote).not.toHaveBeenCalled();
     },
   );
+});
+
+const variantRequest = {
+  items: [{ variantId: ids.variant, quantity: 2 }],
+  destination: request.destination,
+};
+
+const variantFacts = Object.freeze({
+  buyer: facts.buyer,
+  items: Object.freeze([Object.freeze({
+    variantId: ids.variant,
+    productId: ids.product,
+    sku: "TEST-ALPHA-5MG",
+    variantLabel: "5 mg test fixture",
+    productName: "Synthetic Reference A",
+    packageForm: "Sealed test unit",
+    policyGroupId: ids.group,
+    productActive: true,
+    policyGroupActive: true,
+    variantActive: true,
+    availabilityRevision: "variant-revision-1",
+    inventoryRevision: "inventory-revision-1",
+    price: Object.freeze({
+      id: ids.price,
+      version: 1,
+      status: "active" as const,
+      amountMinor: 5_000,
+      currency: "USD",
+      effectiveAt: "2026-08-01T00:00:00.000Z",
+    }),
+    stripeProductId: "prod_synthetic_task5",
+    stripePriceId: "price_synthetic_task5",
+    destination: facts.items[0]!.destination,
+    eligibleLots: facts.items[0]!.eligibleLots,
+  })]),
+  automaticPromotions: Object.freeze([]),
+});
+
+function automaticPromotion(change: Record<string, unknown> = {}) {
+  return Object.freeze({
+    recordId: ids.promotion,
+    campaignKey: "winter30",
+    version: 1,
+    id: "winter30",
+    displayName: "Winter Sale",
+    displayCode: "WINTER30",
+    discountBps: 3_000,
+    enabled: true,
+    startAt: null,
+    endAt: null,
+    timezone: "America/Los_Angeles",
+    scope: Object.freeze({ kind: "sitewide" as const }),
+    applicationMode: "automatic" as const,
+    ...change,
+  });
+}
+
+function setupVariant(
+  factChanges: Record<string, unknown> = {},
+  options: Readonly<{
+    referralDiscountMinor?: number;
+    rewardsQuoteResult?: CheckoutRewardsQuote;
+    configuredPromotions?: unknown;
+    useDefaultConfiguredPromotions?: boolean;
+  }> = {},
+) {
+  const loadedFacts = Object.freeze({ ...variantFacts, ...factChanges });
+  const repository = {
+    findAttempt: vi.fn<CheckoutRepository["findAttempt"]>(async () => null),
+    loadVariantFacts: vi.fn(async () => ({ ok: true as const, value: loadedFacts })),
+    loadProviderCreateVariantFacts: vi.fn(async () => ({
+      ok: true as const,
+      value: loadedFacts,
+    })),
+    findExactReview: vi.fn(async () => null),
+    prepare: vi.fn(async (plan: { decision: { reviewRequired: boolean }; identity: { orderId: string; attemptId: string }; browserQuote: unknown }) => ({
+      status: plan.decision.reviewRequired ? "review_required" as const : "prepared" as const,
+      orderId: plan.identity.orderId,
+      attemptId: plan.identity.attemptId,
+      reviewRequestId: null,
+      quote: plan.browserQuote,
+    })),
+    releaseDefiniteFailure: vi.fn(async () => ({ status: "released" as const })),
+  };
+  const shippingQuote = vi.fn(async (input: { bindingHash: string }) => ({
+    status: "ready" as const,
+    bindingHash: input.bindingHash,
+    reference: "ship_variant_synthetic",
+    service: "Synthetic Ground",
+    amountMinor: 700,
+    currency: "USD" as const,
+  }));
+  const taxQuote = vi.fn(async (input: { bindingHash: string }) => ({
+    status: "ready" as const,
+    bindingHash: input.bindingHash,
+    reference: "tax_variant_synthetic",
+    amountMinor: 325,
+    currency: "USD" as const,
+  }));
+  const referralService = {
+    quoteCustomerReferral: vi.fn(async () => options.referralDiscountMinor === undefined
+      ? Object.freeze({ status: "unavailable" as const, reason: "attribution_invalid" as const })
+      : Object.freeze({
+          status: "eligible" as const,
+          code: "ref_task5_variant",
+          referralCodeId: ids.referralCode,
+          referrerUserId: ids.referrer,
+          clickedAt: "2026-08-20T12:00:00.000Z",
+          expiresAt: "2026-09-19T12:00:00.000Z",
+          referralPolicyId: ids.referralPolicy,
+          referralPolicyVersion: 1,
+          referralDiscountMinor: options.referralDiscountMinor,
+        })),
+  };
+  const rewardsService = {
+    quoteCheckoutRewards: vi.fn(async () => options.rewardsQuoteResult ?? Object.freeze({
+      status: "unavailable" as const,
+      reason: "configuration_unavailable" as const,
+    })),
+    reserveCheckoutRewards: vi.fn(async () => ({ status: "reserved" as const })),
+  };
+  const service = createCheckoutService({
+    repository: repository as never,
+    shippingQuotePort: { quoteShipping: shippingQuote },
+    taxQuotePort: { quoteTax: taxQuote },
+    sha256,
+    clock: () => new Date(now),
+    keyedUuid(label) {
+      if (label.endsWith(":order")) return ids.order;
+      if (label.endsWith(":attempt")) return ids.attempt;
+      return "20000000-0000-4000-8000-000000000099";
+    },
+    moneyPolicy: {
+      allowedCurrencies: ["USD"],
+      maximumLineCount: 50,
+      maximumQuantityPerLine: 25,
+      maximumOrderAmountMinor: 1_000_000,
+    },
+    referralService,
+    affiliateService: {
+      quoteAffiliateAttribution: vi.fn(async () => Object.freeze({
+        status: "unavailable" as const,
+        reason: "attribution_invalid" as const,
+      })),
+    },
+    rewardsService,
+    ...(options.useDefaultConfiguredPromotions
+      ? {}
+      : {
+          configuredPromotions:
+            options.configuredPromotions ?? Object.freeze([]),
+        }),
+  });
+  return { service, repository, shippingQuote, taxQuote, rewardsService };
+}
+
+describe("authoritative canonical variant quote lifecycle", () => {
+  it("fails the real default active WINTER30 closed before quote or write work when authority is absent", async () => {
+    const { service, repository, shippingQuote, taxQuote, rewardsService } = setupVariant(
+      { automaticPromotions: Object.freeze([]) },
+      { useDefaultConfiguredPromotions: true },
+    );
+
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code: "pricing_coming_soon" }],
+    });
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+    expect(rewardsService.quoteCheckoutRewards).not.toHaveBeenCalled();
+    expect(repository.findExactReview).not.toHaveBeenCalled();
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["discount drift", automaticPromotion({ discountBps: 2_999 })],
+    ["disabled", automaticPromotion({ enabled: false })],
+    ["scheduled", automaticPromotion({ startAt: "2026-08-25T12:00:00.001Z" })],
+    ["expired", automaticPromotion({ endAt: now.toISOString() })],
+  ] as const)("fails default WINTER30 closed for a %s same-ID fact", async (_label, promotion) => {
+    const { service, repository, shippingQuote, taxQuote } = setupVariant(
+      { automaticPromotions: [promotion] },
+      { useDefaultConfiguredPromotions: true },
+    );
+
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code: "pricing_coming_soon" }],
+    });
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("permits the real default when exact persisted WINTER30 retains database identity and gives 30%", async () => {
+    const { service } = setupVariant(
+      { automaticPromotions: [automaticPromotion()] },
+      { useDefaultConfiguredPromotions: true },
+    );
+
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: {
+        promotionDiscountMinor: 3_000,
+        lines: [{ totalMinor: 7_000 }],
+      },
+    });
+    if (result.status !== "quoted") throw new Error("expected exact configured quote");
+    const projected = projectAuthoritativeCheckoutPlan(result.plan);
+    expect(projected).toMatchObject({
+      activeAutomaticPromotions: [{ id: "winter30", version: 1 }],
+      facts: {
+        automaticPromotions: [{
+          id: "winter30",
+          recordId: ids.promotion,
+          version: 1,
+        }],
+      },
+    });
+  });
+
+  it.each([
+    [
+      "product",
+      {
+        id: "product20",
+        displayName: "Product Offer",
+        displayCode: null,
+        discountBps: 2_000,
+        enabled: true,
+        startAt: null,
+        endAt: null,
+        timezone: "America/Los_Angeles",
+        applicationMode: "automatic",
+        scope: { kind: "products", productIds: [ids.product] },
+      } satisfies StorefrontPromotionConfiguration,
+    ],
+    [
+      "variant",
+      {
+        id: "variant20",
+        displayName: "Variant Offer",
+        displayCode: null,
+        discountBps: 2_000,
+        enabled: true,
+        startAt: null,
+        endAt: null,
+        timezone: "America/Los_Angeles",
+        applicationMode: "automatic",
+        scope: { kind: "variants", variantIds: [ids.variant] },
+      } satisfies StorefrontPromotionConfiguration,
+    ],
+  ] as const)("blocks only the requested line affected by missing %s-scoped authority", async (_label, configuration) => {
+    const secondItem = Object.freeze({
+      ...variantFacts.items[0]!,
+      variantId: ids.variant2,
+      productId: ids.product2,
+      sku: "TEST-BETA-5MG",
+      variantLabel: "5 mg second fixture",
+      price: Object.freeze({
+        ...variantFacts.items[0]!.price,
+        id: "20000000-0000-4000-8000-000000000026",
+      }),
+      stripeProductId: "prod_synthetic_task5_second",
+      stripePriceId: "price_synthetic_task5_second",
+      availabilityRevision: "variant-revision-2",
+      inventoryRevision: "inventory-revision-2",
+      eligibleLots: Object.freeze([Object.freeze({
+        ...variantFacts.items[0]!.eligibleLots[0]!,
+        id: "20000000-0000-4000-8000-000000000027",
+      })]),
+    });
+    const mixedRequest = {
+      ...variantRequest,
+      items: [
+        { variantId: ids.variant, quantity: 2 },
+        { variantId: ids.variant2, quantity: 2 },
+      ],
+    };
+    const mixed = setupVariant(
+      { items: [variantFacts.items[0]!, secondItem] },
+      { configuredPromotions: [configuration] },
+    );
+
+    await expect(mixed.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: mixedRequest,
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code: "pricing_coming_soon" }],
+    });
+    expect(mixed.shippingQuote).not.toHaveBeenCalled();
+    expect(mixed.taxQuote).not.toHaveBeenCalled();
+    expect(mixed.repository.prepare).not.toHaveBeenCalled();
+
+    const unrelated = setupVariant(
+      { items: [secondItem] },
+      { configuredPromotions: [configuration] },
+    );
+    await expect(unrelated.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: {
+        ...variantRequest,
+        items: [{ variantId: ids.variant2, quantity: 2 }],
+      },
+    })).resolves.toMatchObject({ status: "quoted" });
+  });
+
+  it("blocks every requested variant for invalid owner input", async () => {
+    const secondItem = Object.freeze({
+      ...variantFacts.items[0]!,
+      variantId: ids.variant2,
+      productId: ids.product2,
+      sku: "TEST-BETA-5MG",
+      price: Object.freeze({
+        ...variantFacts.items[0]!.price,
+        id: "20000000-0000-4000-8000-000000000026",
+      }),
+      availabilityRevision: "variant-revision-2",
+      inventoryRevision: "inventory-revision-2",
+      eligibleLots: Object.freeze([Object.freeze({
+        ...variantFacts.items[0]!.eligibleLots[0]!,
+        id: "20000000-0000-4000-8000-000000000027",
+      })]),
+    });
+    const { service, shippingQuote, taxQuote, repository } = setupVariant(
+      { items: [variantFacts.items[0]!, secondItem] },
+      { configuredPromotions: {} },
+    );
+
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: {
+        ...variantRequest,
+        items: [
+          { variantId: ids.variant, quantity: 2 },
+          { variantId: ids.variant2, quantity: 2 },
+        ],
+      },
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [
+        { variantId: ids.variant, code: "pricing_coming_soon" },
+        { variantId: ids.variant2, code: "pricing_coming_soon" },
+      ],
+    });
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("fails the locked session path closed before prepare when configured authority disappears", async () => {
+    const exact = setupVariant(
+      { automaticPromotions: [automaticPromotion()] },
+      { useDefaultConfiguredPromotions: true },
+    );
+    const quoted = await exact.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted") throw new Error("expected exact initial quote");
+
+    const missing = setupVariant(
+      { automaticPromotions: [] },
+      { useDefaultConfiguredPromotions: true },
+    );
+    await expect((missing.service as unknown as {
+      quoteForSession: (input: unknown) => Promise<unknown>;
+    }).quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code: "pricing_coming_soon" }],
+    });
+    expect(missing.shippingQuote).not.toHaveBeenCalled();
+    expect(missing.taxQuote).not.toHaveBeenCalled();
+    expect(missing.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each(["created", "provider_unknown"] as const)(
+    "keeps an ordinary %s replay loaded but forces a fresh canonical provider-create revalidation",
+    async (attemptStatus) => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: attemptStatus,
+      orderState: "checkout_pending",
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: quoted.pricingRevision,
+    });
+    vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+    vi.mocked(fixture.repository.loadProviderCreateVariantFacts).mockClear();
+
+    await expect((fixture.service as unknown as {
+      quoteForSession: (input: unknown) => Promise<unknown>;
+    }).quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toMatchObject({ status: "loaded", attemptStatus });
+    expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+
+    const revalidate = (fixture.service as unknown as {
+      revalidateCanonicalForProviderCreate?: (input: unknown) => Promise<unknown>;
+    }).revalidateCanonicalForProviderCreate;
+    expect(revalidate).toBeTypeOf("function");
+    if (revalidate === undefined) return;
+
+    await expect(revalidate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toMatchObject({
+      status: "quoted",
+      pricingRevision: quoted.pricingRevision,
+      quote: quoted.quote,
+    });
+    expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+    expect(fixture.repository.loadProviderCreateVariantFacts).toHaveBeenCalledTimes(1);
+    expect(fixture.repository.loadProviderCreateVariantFacts).toHaveBeenCalledWith({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: variantRequest,
+      now,
+    });
+    expect(fixture.repository.prepare).not.toHaveBeenCalled();
+    },
+  );
+
+  it("returns internal conflict before fresh facts when the stored revision changed after the initial load", async () => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: "e".repeat(64),
+    }));
+    vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+    vi.mocked(fixture.repository.loadProviderCreateVariantFacts).mockClear();
+    fixture.shippingQuote.mockClear();
+    fixture.taxQuote.mockClear();
+    const operation = (fixture.service as unknown as {
+      revalidateCanonicalForProviderCreate: (input: unknown) => Promise<unknown>;
+    }).revalidateCanonicalForProviderCreate;
+
+    await expect(operation({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toEqual({ status: "internal_conflict" });
+    expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+    expect(fixture.repository.loadProviderCreateVariantFacts).not.toHaveBeenCalled();
+    expect(fixture.shippingQuote).not.toHaveBeenCalled();
+    expect(fixture.taxQuote).not.toHaveBeenCalled();
+    expect(fixture.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each(["missing", "malformed"] as const)(
+    "rejects a %s stored canonical quote snapshot before fresh facts",
+    async (snapshotKind) => {
+      const fixture = setupVariant();
+      const quoted = await fixture.service.quote({
+        buyerUserId: ids.buyer,
+        idempotencyKey: ids.key,
+        paymentProviderAvailable: true,
+        request: variantRequest,
+      });
+      if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+        throw new Error("expected initial canonical quote");
+      }
+      vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+        orderId: ids.order,
+        attemptId: ids.attempt,
+        requestHash: await hashCheckoutRequest(variantRequest, sha256),
+        status: "created" as const,
+        orderState: "checkout_pending" as const,
+        permitted: true,
+        reviewRequired: false,
+        hasReservations: true,
+        quoteSnapshot: snapshotKind === "missing"
+          ? null
+          : Object.freeze({ ...quoted.quote, reasons: Object.freeze(["unexpected"]) }),
+        pricingRevision: quoted.pricingRevision,
+      }));
+      vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+      vi.mocked(fixture.repository.loadProviderCreateVariantFacts).mockClear();
+      const operation = (fixture.service as unknown as {
+        revalidateCanonicalForProviderCreate: (input: unknown) => Promise<unknown>;
+      }).revalidateCanonicalForProviderCreate;
+
+      await expect(operation({
+        buyerUserId: ids.buyer,
+        idempotencyKey: ids.key,
+        paymentProviderAvailable: true,
+        expectedStoredPricingRevision: quoted.pricingRevision,
+        request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+      })).resolves.toEqual({ status: "internal_conflict" });
+      expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+      expect(fixture.repository.loadProviderCreateVariantFacts).not.toHaveBeenCalled();
+      expect(fixture.repository.prepare).not.toHaveBeenCalled();
+    },
+  );
+
+  it("treats a changed client acknowledgement as PRICE_CHANGED only after the stored pair is validated", async () => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: quoted.pricingRevision,
+    }));
+    vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+    vi.mocked(fixture.repository.loadProviderCreateVariantFacts).mockClear();
+    const operation = (fixture.service as unknown as {
+      revalidateCanonicalForProviderCreate: (input: unknown) => Promise<unknown>;
+    }).revalidateCanonicalForProviderCreate;
+
+    await expect(operation({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: "f".repeat(64) },
+    })).resolves.toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: quoted.pricingRevision,
+    });
+    expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+    expect(fixture.repository.loadProviderCreateVariantFacts).toHaveBeenCalledTimes(1);
+    expect(fixture.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("keeps merchandise pricing revision stable across raw inventory-only movement", async () => {
+    const initial = setupVariant();
+    const initialQuote = await initial.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (initialQuote.status !== "quoted" || initialQuote.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const movedInventory = setupVariant({
+      items: [Object.freeze({
+        ...variantFacts.items[0]!,
+        inventoryRevision: "inventory-revision-after-unrelated-movement",
+        eligibleLots: Object.freeze([Object.freeze({
+          ...variantFacts.items[0]!.eligibleLots[0]!,
+          availableQuantity: 9,
+        })]),
+      })],
+    });
+
+    const movedQuote = await movedInventory.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+
+    expect(movedQuote).toMatchObject({
+      status: "quoted",
+      pricingRevision: initialQuote.pricingRevision,
+    });
+  });
+
+  it.each([
+    ["missing port", undefined],
+    ["authority conflict", Object.freeze({
+      ok: false as const,
+      reasons: Object.freeze(["provider_create_authority_conflict"]),
+    })],
+    ["unexpected failure", Object.freeze({
+      ok: false as const,
+      reasons: Object.freeze(["unexpected_repository_reason"]),
+    })],
+    ["malformed result", null],
+  ] as const)("fails forced provider-create revalidation closed for %s", async (
+    _label,
+    providerCreateResult,
+  ) => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: quoted.pricingRevision,
+    }));
+    if (providerCreateResult === undefined) {
+      Object.defineProperty(fixture.repository, "loadProviderCreateVariantFacts", {
+        configurable: true,
+        value: undefined,
+      });
+    } else {
+      vi.mocked(fixture.repository.loadProviderCreateVariantFacts)
+        .mockResolvedValue(providerCreateResult as never);
+    }
+    vi.mocked(fixture.repository.loadVariantFacts).mockClear();
+    fixture.shippingQuote.mockClear();
+    fixture.taxQuote.mockClear();
+
+    await expect(fixture.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toEqual({ status: "internal_conflict" });
+    expect(fixture.repository.loadVariantFacts).not.toHaveBeenCalled();
+    expect(fixture.shippingQuote).not.toHaveBeenCalled();
+    expect(fixture.taxQuote).not.toHaveBeenCalled();
+    expect(fixture.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("fails a rejected provider-create fact transaction closed", async () => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: quoted.pricingRevision,
+    }));
+    vi.mocked(fixture.repository.loadProviderCreateVariantFacts)
+      .mockRejectedValue(new Error("synthetic exhausted transaction retry"));
+    fixture.shippingQuote.mockClear();
+    fixture.taxQuote.mockClear();
+
+    await expect(fixture.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toEqual({ status: "internal_conflict" });
+    expect(fixture.shippingQuote).not.toHaveBeenCalled();
+    expect(fixture.taxQuote).not.toHaveBeenCalled();
+    expect(fixture.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("returns PRICE_CHANGED for a stored schema-1 revision after validating the pair", async () => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted") throw new Error("expected canonical quote");
+    const schemaOneRevision = "1".repeat(64);
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: schemaOneRevision,
+    }));
+    fixture.shippingQuote.mockClear();
+    fixture.taxQuote.mockClear();
+
+    await expect(fixture.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: schemaOneRevision,
+      request: { ...variantRequest, pricingRevision: schemaOneRevision },
+    })).resolves.toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: quoted.pricingRevision,
+    });
+    expect(fixture.repository.loadProviderCreateVariantFacts).toHaveBeenCalledTimes(1);
+    expect(fixture.shippingQuote).not.toHaveBeenCalled();
+    expect(fixture.taxQuote).not.toHaveBeenCalled();
+  });
+
+  it("returns the current safe cart when fresh canonical pricing changed after a valid stored revision", async () => {
+    const initial = setupVariant();
+    const quoted = await initial.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    const changed = setupVariant({
+      items: [Object.freeze({
+        ...variantFacts.items[0]!,
+        price: Object.freeze({
+          ...variantFacts.items[0]!.price,
+          version: 2,
+          amountMinor: 6_000,
+        }),
+      })],
+    });
+    vi.mocked(changed.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "provider_unknown" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: quoted.pricingRevision,
+    }));
+    const operation = (changed.service as unknown as {
+      revalidateCanonicalForProviderCreate: (input: unknown) => Promise<unknown>;
+    }).revalidateCanonicalForProviderCreate;
+
+    await expect(operation({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      cart: { items: [{ variantId: ids.variant, unitAmountMinor: 5_520 }] },
+    });
+    expect(changed.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", Object.freeze([])],
+    ["duplicate", Object.freeze([automaticPromotion(), automaticPromotion()])],
+    ["malformed", Object.freeze([Object.freeze({
+      ...automaticPromotion(),
+      displayName: "",
+    })])],
+    ["disabled", Object.freeze([automaticPromotion({ enabled: false })])],
+    ["scheduled", Object.freeze([automaticPromotion({
+      startAt: "2026-08-25T12:00:00.001Z",
+    })])],
+    ["expired", Object.freeze([automaticPromotion({ endAt: now.toISOString() })])],
+    ["drifted", Object.freeze([automaticPromotion({ discountBps: 2_999 })])],
+  ] as const)("fails a prepared replay closed for %s WINTER30 authority", async (
+    _label,
+    automaticPromotions,
+  ) => {
+    const exact = setupVariant(
+      { automaticPromotions: [automaticPromotion()] },
+      { useDefaultConfiguredPromotions: true },
+    );
+    const quoted = await exact.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial WINTER30 quote");
+    }
+    const missing = setupVariant(
+      { automaticPromotions: automaticPromotions as never },
+      { useDefaultConfiguredPromotions: true },
+    );
+    vi.mocked(missing.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: quoted.pricingRevision,
+    }));
+    const operation = (missing.service as unknown as {
+      revalidateCanonicalForProviderCreate: (input: unknown) => Promise<unknown>;
+    }).revalidateCanonicalForProviderCreate;
+
+    await expect(operation({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code: "pricing_coming_soon" }],
+    });
+    expect(missing.shippingQuote).not.toHaveBeenCalled();
+    expect(missing.taxQuote).not.toHaveBeenCalled();
+    expect(missing.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("detects a complete stored/fresh quote change even when merchandise pricing revision and dollars match", async () => {
+    const rewards = (pendingBaseEarnPoints: number): CheckoutRewardsQuote => Object.freeze({
+      status: "applied" as const,
+      rewardAccountId: ids.rewardAccount,
+      loyaltyPolicyId: ids.loyaltyPolicy,
+      loyaltyPolicyVersion: 1,
+      termsVersionId: ids.growthTerms,
+      termsContentHash: "a".repeat(64),
+      redemptionPoints: 500,
+      redemptionMinor: 500,
+      maximumPoints: 1_000,
+      eligibleMerchandiseMinor: 9_200,
+      pendingBaseEarnPoints,
+    });
+    const rewardsRequest = Object.freeze({
+      ...variantRequest,
+      rewardRedemptionPoints: 500,
+    });
+    const initial = setupVariant({}, { rewardsQuoteResult: rewards(100) });
+    const quoted = await initial.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: rewardsRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial rewards quote");
+    }
+    const changed = setupVariant({}, { rewardsQuoteResult: rewards(101) });
+    vi.mocked(changed.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(rewardsRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: quoted.quote,
+      pricingRevision: quoted.pricingRevision,
+    }));
+    const operation = (changed.service as unknown as {
+      revalidateCanonicalForProviderCreate: (input: unknown) => Promise<unknown>;
+    }).revalidateCanonicalForProviderCreate;
+
+    await expect(operation({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...rewardsRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: quoted.pricingRevision,
+    });
+    expect(changed.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("detects an equal-dollar acquisition-source change in the complete stored quote", async () => {
+    const fixture = setupVariant();
+    const quoted = await fixture.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected initial canonical quote");
+    }
+    expect(quoted.quote.promotionDiscountMinor).toBeGreaterThan(0);
+    const storedQuote = Object.freeze({
+      ...quoted.quote,
+      promotionDiscountMinor: 0,
+      referralDiscountMinor: quoted.quote.promotionDiscountMinor,
+    });
+    vi.mocked(fixture.repository.findAttempt).mockResolvedValue(Object.freeze({
+      orderId: ids.order,
+      attemptId: ids.attempt,
+      requestHash: await hashCheckoutRequest(variantRequest, sha256),
+      status: "created" as const,
+      orderState: "checkout_pending" as const,
+      permitted: true,
+      reviewRequired: false,
+      hasReservations: true,
+      quoteSnapshot: storedQuote,
+      pricingRevision: quoted.pricingRevision,
+    }));
+    const operation = (fixture.service as unknown as {
+      revalidateCanonicalForProviderCreate: (input: unknown) => Promise<unknown>;
+    }).revalidateCanonicalForProviderCreate;
+
+    await expect(operation({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: quoted.pricingRevision,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    })).resolves.toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: quoted.pricingRevision,
+    });
+    expect(fixture.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["disabled", automaticPromotion({ enabled: false }), 9_200],
+    ["scheduled", automaticPromotion({ startAt: "2026-08-25T12:00:00.001Z" }), 9_200],
+    ["expired", automaticPromotion({ endAt: now.toISOString() }), 9_200],
+    ["partial scope", automaticPromotion({ scope: { kind: "variants", variantIds: [ids.variant2] } }), 9_200],
+    ["active inclusive start", automaticPromotion({ startAt: now.toISOString() }), 7_000],
+  ] as const)("resolves %s promotion only from server time and scope", async (_label, promotion, expectedSubtotal) => {
+    const { service } = setupVariant({ automaticPromotions: [promotion] });
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: { lines: [{ totalMinor: expectedSubtotal }] },
+    });
+  });
+
+  it("chooses the best overlapping promotion deterministically", async () => {
+    const { service } = setupVariant({
+      automaticPromotions: [
+        automaticPromotion({ id: "spring20", campaignKey: "spring20", discountBps: 2_000 }),
+        automaticPromotion(),
+      ],
+    });
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: { promotionDiscountMinor: 3_000, discountMinor: 3_000 },
+    });
+  });
+
+  it("carries every active applicable promotion identity into a review plan, including the losing candidate", async () => {
+    const reviewBuyer = {
+      ...variantFacts.buyer,
+      status: "review" as const,
+    };
+    const { service } = setupVariant({
+      buyer: reviewBuyer,
+      automaticPromotions: [
+        automaticPromotion({
+          recordId: "20000000-0000-4000-8000-000000000081",
+          id: "spring20",
+          campaignKey: "spring20",
+          version: 2,
+          discountBps: 2_000,
+        }),
+        automaticPromotion(),
+      ],
+    });
+
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: { status: "review_required", promotionDiscountMinor: 3_000 },
+    });
+    if (result.status !== "quoted") throw new Error("expected review quote");
+    expect(projectAuthoritativeCheckoutPlan(result.plan)).toMatchObject({
+      activeAutomaticPromotions: [
+        { id: "spring20", version: 2 },
+        { id: "winter30", version: 1 },
+      ],
+    });
+  });
+
+  it.each([
+    ["pending price", { price: { ...variantFacts.items[0]!.price, status: "pending", amountMinor: 0 } }, "pricing_coming_soon"],
+    ["zero price", { price: { ...variantFacts.items[0]!.price, amountMinor: 0 } }, "pricing_coming_soon"],
+    ["missing mapping", { stripePriceId: null }, "payment_mapping_missing"],
+    ["invalid currency", { price: { ...variantFacts.items[0]!.price, currency: "EUR" } }, "invalid_currency"],
+    ["unavailable inventory", { eligibleLots: [], inventoryRevision: "inventory-revision-2" }, "unavailable"],
+  ] as const)("returns CHECKOUT_UNAVAILABLE for %s before quotes or writes", async (_label, change, code) => {
+    const { service, repository, shippingQuote, taxQuote } = setupVariant({
+      items: [{ ...variantFacts.items[0]!, ...change }],
+    });
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variant, code }],
+    });
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("returns PRICE_CHANGED with refreshed safe cart before reservation on a stale session", async () => {
+    const first = setupVariant({ automaticPromotions: [automaticPromotion()] });
+    const quoted = await first.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    expect(quoted.status).toBe("quoted");
+    if (quoted.status !== "quoted") throw new Error("expected initial quote");
+
+    const changed = setupVariant({
+      items: [{
+        ...variantFacts.items[0]!,
+        price: { ...variantFacts.items[0]!.price, version: 2, amountMinor: 6_000 },
+      }],
+      automaticPromotions: [automaticPromotion()],
+    });
+    const result = await (changed.service as unknown as { quoteForSession: (input: unknown) => Promise<unknown> }).quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    expect(result).toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
+      cart: {
+        items: [{ variantId: ids.variant, unitAmountMinor: 4_200 }],
+      },
+    });
+    expect(changed.repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("does not trust a claimed inactive WINTER30 or a mixed claimed product/variant relationship", async () => {
+    const { service, repository } = setupVariant({
+      automaticPromotions: [automaticPromotion({ enabled: false })],
+    });
+    for (const hostile of [
+      { ...variantRequest, promotionIds: ["winter30"] },
+      { ...variantRequest, items: [{ variantId: ids.variant, productId: ids.product, quantity: 2 }] },
+    ]) {
+      await expect(service.quote({
+        buyerUserId: ids.buyer,
+        idempotencyKey: ids.key,
+        paymentProviderAvailable: true,
+        request: hostile,
+      })).resolves.toEqual({ status: "invalid_request", reason: "checkout_input_invalid" });
+    }
+    expect(repository.loadVariantFacts).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [2_000, 3_000, 0],
+    [4_000, 0, 4_000],
+  ] as const)("selects one storefront/referral winner at %i referral minor", async (referralMinor, promotionMinor, referralExpected) => {
+    const rewardsQuoteResult = Object.freeze({
+      status: "applied" as const,
+      rewardAccountId: ids.rewardAccount,
+      loyaltyPolicyId: ids.loyaltyPolicy,
+      loyaltyPolicyVersion: 1,
+      termsVersionId: ids.growthTerms,
+      termsContentHash: "a".repeat(64),
+      redemptionPoints: 500,
+      redemptionMinor: 500,
+      maximumPoints: 1_000,
+      eligibleMerchandiseMinor: 6_000,
+      pendingBaseEarnPoints: 100,
+    });
+    const { service } = setupVariant(
+      { automaticPromotions: [automaticPromotion()] },
+      { referralDiscountMinor: referralMinor, rewardsQuoteResult },
+    );
+    const result = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: ids.key,
+      paymentProviderAvailable: true,
+      attributionCookie: "signed-referral-cookie",
+      request: { ...variantRequest, rewardRedemptionPoints: 500 },
+    });
+    expect(result).toMatchObject({
+      status: "quoted",
+      quote: {
+        promotionDiscountMinor: promotionMinor,
+        referralDiscountMinor: referralExpected,
+        rewardRedemptionMinor: 500,
+        discountMinor: Math.max(3_000, referralMinor) + 500,
+      },
+    });
+    if (result.status !== "quoted") throw new Error("expected acquisition quote");
+    expect(projectAuthoritativeCheckoutPlan(result.plan)?.rewardsQuote).toMatchObject({
+      status: "applied",
+      redemptionPoints: 500,
+    });
+  });
 });

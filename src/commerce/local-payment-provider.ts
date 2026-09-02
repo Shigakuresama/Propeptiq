@@ -3,7 +3,7 @@ import "server-only";
 import { LOCAL_PAYMENT_PROVIDER_SCOPE } from "@/commerce/checkout-ports";
 import type {
   ProviderRefundRequestV1,
-  StripeCheckoutRequestV1,
+  StripeCheckoutRequest,
 } from "@/commerce/provider-contracts";
 import type {
   CheckoutProviderResult,
@@ -39,7 +39,7 @@ type RefundState =
 
 type CheckoutRecord = {
   requestJson: string;
-  request: StripeCheckoutRequestV1;
+  request: StripeCheckoutRequest;
   sessionId: string;
   state: CheckoutState;
 };

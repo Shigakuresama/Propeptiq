@@ -45,6 +45,8 @@ const ids = {
   disputeEvent: "81000000-0000-4000-8000-000000000030",
   review: "81000000-0000-4000-8000-000000000031",
   newerAttestation: "81000000-0000-4000-8000-000000000032",
+  variantA: "81000000-0000-4000-8000-000000000033",
+  variantB: "81000000-0000-4000-8000-000000000034",
 } as const;
 
 const now = new Date("2026-08-26T12:00:00.000Z");
@@ -139,7 +141,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          provider_session_id, provider_request_hash, provider_customer_email,
          provider_origin, provider_request_schema_version, provider_livemode,
          provider_scope, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at)
+         shipping_service, expires_at, review_authorization_mode)
       VALUES
         ('${ids.attempt}', '${ids.order}', '${ids.buyer}', 'fulfillment-checkout-6f',
          '${"2".repeat(64)}', 'completed', 'pass', 'pass', 'pass', 'pass',
@@ -147,7 +149,8 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          'checkout_attempt:${ids.attempt}', 'cs_fulfillment_6f', '${"3".repeat(64)}',
          'private-buyer@example.test', 'http://localhost:3000', 1, false,
          'local_test:synthetic-propeptiq-v1', 'tax_fulfillment_6f',
-         'ship_fulfillment_6f', 'synthetic_ground', '2027-08-26T12:00:00.000Z');
+         'ship_fulfillment_6f', 'synthetic_ground', '2027-08-26T12:00:00.000Z',
+         'none');
       INSERT INTO provider_events
         (id, provider, provider_event_id, payload_hash, status, attempt_count,
          received_at, processed_at, event_type, schema_version,
@@ -285,6 +288,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
   async function seedBuyerReview(options: Readonly<{
     outcome?: "approved" | "rejected";
     coversBuyerReview?: boolean;
+    authorizationMode?: "bound" | "none";
   }> = {}) {
     await client.exec(
       `UPDATE buyer_profiles SET status = 'review' WHERE user_id = '${ids.buyer}'`,
@@ -338,7 +342,130 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
         options.coversBuyerReview ?? true,
       ],
     );
+    await client.query(
+      `INSERT INTO checkout_attempt_review_bindings
+        (checkout_attempt_id, order_id, review_request_id,
+         review_snapshot_hash, bound_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4,
+               '2026-08-25T12:00:00.000Z')`,
+      [ids.attempt, ids.order, ids.review, reviewHash],
+    );
+    if ((options.authorizationMode ?? "bound") === "bound") {
+      await client.exec(`
+        ALTER TABLE checkout_attempts
+          DISABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+        UPDATE checkout_attempts SET review_authorization_mode = 'bound'
+        WHERE id = '${ids.attempt}';
+        ALTER TABLE checkout_attempts
+          ENABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+      `);
+    }
     return reviewInput;
+  }
+
+  async function expectNoFulfillmentAuthority(): Promise<void> {
+    expect((await client.query(`
+      SELECT
+        (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+        (SELECT count(*)::int FROM downstream_effects) AS effects,
+        (SELECT state FROM shipments WHERE id = '${ids.shipment}') AS shipment
+    `)).rows).toEqual([{ releases: 0, effects: 0, shipment: "pending" }]);
+  }
+
+  async function setMigrationEraAuthorizationMode(): Promise<void> {
+    await client.exec(`
+      ALTER TABLE checkout_attempts
+        DISABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+      UPDATE checkout_attempts SET review_authorization_mode = NULL
+      WHERE id = '${ids.attempt}';
+      ALTER TABLE checkout_attempts
+        ENABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+    `);
+  }
+
+  async function setCanonicalReservationVariantIdentities(): Promise<void> {
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${ids.variantA}', '${ids.productA}', 'FULFILLMENT-VARIANT-A',
+         'Fulfillment variant A', 5, 'mg', 1, 'active'),
+        ('${ids.variantB}', '${ids.productB}', 'FULFILLMENT-VARIANT-B',
+         'Fulfillment variant B', 10, 'mg', 1, 'active');
+      UPDATE product_prices
+      SET variant_id = CASE id
+        WHEN '${ids.priceA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END
+      WHERE id IN ('${ids.priceA}', '${ids.priceB}');
+      UPDATE order_items
+      SET variant_id = CASE id
+        WHEN '${ids.itemA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END
+      WHERE id IN ('${ids.itemA}', '${ids.itemB}');
+      UPDATE lots
+      SET variant_id = CASE product_id
+        WHEN '${ids.productA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END
+      WHERE id IN ('${ids.lotA1}', '${ids.lotA2}', '${ids.lotB}');
+      UPDATE inventory_reservations
+      SET variant_id = CASE product_id
+        WHEN '${ids.productA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END
+      WHERE id IN ('${ids.reservationA1}', '${ids.reservationA2}', '${ids.reservationB}');
+    `);
+  }
+
+  async function setSchema2CheckoutProviderArtifact(): Promise<void> {
+    await setCanonicalReservationVariantIdentities();
+    await client.query(
+      `UPDATE checkout_attempts
+       SET provider_request_schema_version = 2,
+           provider_binding_snapshot = $1::jsonb
+       WHERE id = $2::uuid`,
+      [
+        JSON.stringify({
+          schemaVersion: 2,
+          lines: [
+            {
+              variantId: ids.variantA,
+              productId: ids.productA,
+              sku: "FULFILLMENT-VARIANT-A",
+              productName: "Reference A",
+              variantLabel: "Fulfillment variant A",
+              requestedQuantity: 3,
+              netLineMinor: 3_000,
+              baseUnitMinor: 1_000,
+              currency: "USD",
+              priceBookId: ids.priceA,
+              priceVersion: 1,
+              stripeProductId: "prod_fulfillment_a",
+              stripePriceId: "price_fulfillment_a",
+            },
+            {
+              variantId: ids.variantB,
+              productId: ids.productB,
+              sku: "FULFILLMENT-VARIANT-B",
+              productName: "Reference B",
+              variantLabel: "Fulfillment variant B",
+              requestedQuantity: 2,
+              netLineMinor: 2_000,
+              baseUnitMinor: 1_000,
+              currency: "USD",
+              priceBookId: ids.priceB,
+              priceVersion: 1,
+              stripeProductId: "prod_fulfillment_b",
+              stripePriceId: "price_fulfillment_b",
+            },
+          ],
+        }),
+        ids.attempt,
+      ],
+    );
   }
 
   it("returns before authorization and preserves a byte-equivalent authority snapshot for disabled or forged context", async () => {
@@ -443,7 +570,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          provider_session_id, provider_request_hash, provider_customer_email,
          provider_origin, provider_request_schema_version, provider_livemode,
          provider_scope, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at)
+         shipping_service, expires_at, review_authorization_mode)
       VALUES
         ('${reverseAttempt}', '${reverseOrder}', '${ids.staff}',
          'reverse-checkout-6f', '${"9".repeat(64)}', 'completed',
@@ -454,7 +581,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          'http://localhost:3000', 1, false,
          'local_test:synthetic-propeptiq-v1', 'tax_reverse_6f',
          'ship_reverse_6f', 'synthetic_ground',
-         '2027-08-26T12:00:00.000Z');
+         '2027-08-26T12:00:00.000Z', 'none');
       INSERT INTO provider_events
         (id, provider, provider_event_id, payload_hash, status, attempt_count,
          received_at, processed_at, event_type, schema_version,
@@ -514,6 +641,10 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
   });
 
   it("atomically hands off every line/lot exactly once with one redacted effect and audit", async () => {
+    expect((await client.query<{ mode: string }>(`
+      SELECT review_authorization_mode AS mode
+      FROM checkout_attempts WHERE id = '${ids.attempt}'
+    `)).rows).toEqual([{ mode: "none" }]);
     await expect(setup().handoff(command())).resolves.toEqual({ status: "handed_off" });
     const releaseId = keyedUuid(`fulfillment-release:${ids.order}:1`);
     const effectId = keyedUuid(`fulfillment-handoff-effect:${releaseId}`);
@@ -646,6 +777,68 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
     ]);
   });
 
+  it("accepts canonical checkout provider schema 2 as paid fulfillment authority", async () => {
+    await setSchema2CheckoutProviderArtifact();
+
+    await expect(setup().handoff(command())).resolves.toEqual({
+      status: "handed_off",
+    });
+  });
+
+  it("fails closed for a bound attempt whose binding is missing after review facts relax", async () => {
+    await seedBuyerReview();
+    await client.exec(`
+      DELETE FROM checkout_attempt_review_bindings
+      WHERE checkout_attempt_id = '${ids.attempt}';
+      UPDATE buyer_profiles SET status = 'active'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("fails closed for a bound review whose exact facts no longer match even when current facts allow", async () => {
+    await seedBuyerReview();
+    await client.exec(`
+      UPDATE buyer_profiles SET status = 'active'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("fails closed when a none-authorized attempt possesses any review binding", async () => {
+    await seedBuyerReview({ authorizationMode: "none" });
+    await client.exec(`
+      UPDATE buyer_profiles SET status = 'active'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("fails closed when current facts require review for a none-authorized attempt", async () => {
+    await client.exec(`
+      UPDATE buyer_profiles SET status = 'review'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("fails closed for a fulfillment-eligible migration-era attempt with ambiguous authorization", async () => {
+    await client.exec(`
+      ALTER TABLE checkout_attempts
+        DISABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+      UPDATE checkout_attempts SET review_authorization_mode = NULL
+      WHERE id = '${ids.attempt}';
+      ALTER TABLE checkout_attempts
+        ENABLE TRIGGER checkout_attempt_review_authorization_mode_immutable;
+    `);
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expectNoFulfillmentAuthority();
+  });
+
   it("retries 40001 then 40P01 with the same captured now and deterministic identities", async () => {
     let attempts = 0;
     const sleeps: string[] = [];
@@ -703,6 +896,52 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
     }
   });
 
+  it("hands off a canonical reservation tuple only when every variant identity is exact", async () => {
+    await setCanonicalReservationVariantIdentities();
+    await expect(setup().handoff(command())).resolves.toEqual({ status: "handed_off" });
+    expect((await client.query(`SELECT
+      (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+      (SELECT count(*)::int FROM inventory_events WHERE event_type = 'consume') AS consumes,
+      (SELECT count(*)::int FROM inventory_reservations
+       WHERE variant_id IS NOT NULL AND state = 'consumed') AS canonical_consumed`)).rows[0])
+      .toEqual({ releases: 1, consumes: 3, canonical_consumed: 3 });
+  });
+
+  it("rejects canonical fulfillment when a reservation omits its exact variant identity", async () => {
+    await setCanonicalReservationVariantIdentities();
+    await client.exec(`UPDATE inventory_reservations
+      SET variant_id = NULL
+      WHERE id = '${ids.reservationA1}'`);
+    await expect(setup().handoff(command())).resolves.toEqual({
+      status: "held",
+      reasons: expect.arrayContaining([
+        "inventory_reservation_missing",
+        "reserved_lot_unavailable",
+      ]),
+    });
+    await expectNoFulfillmentAuthority();
+  });
+
+  it("rejects terminal replay when a consumed canonical reservation loses its variant identity", async () => {
+    await setCanonicalReservationVariantIdentities();
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    const before = await client.query(`SELECT
+      (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+      (SELECT count(*)::int FROM inventory_events WHERE event_type = 'consume') AS consumes,
+      (SELECT count(*)::int FROM downstream_effects
+       WHERE effect_type = 'fulfillment_handed_off') AS effects`);
+    await client.exec(`UPDATE inventory_reservations
+      SET variant_id = NULL
+      WHERE id = '${ids.reservationA1}'`);
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "conflict" });
+    expect((await client.query(`SELECT
+      (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+      (SELECT count(*)::int FROM inventory_events WHERE event_type = 'consume') AS consumes,
+      (SELECT count(*)::int FROM downstream_effects
+       WHERE effect_type = 'fulfillment_handed_off') AS effects`)).rows).toEqual(before.rows);
+  });
+
   it("accepts only a complete terminal handoff replay and never repairs a partial tuple", async () => {
     const repository = setup();
     await repository.handoff(command());
@@ -723,6 +962,71 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
     await client.exec(`DELETE FROM downstream_effects`);
     await expect(repository.handoff(command())).resolves.toEqual({ status: "conflict" });
     expect((await client.query(`SELECT count(*)::int AS count FROM downstream_effects`)).rows).toEqual([{ count: 0 }]);
+  });
+
+  it("replays a proven historical handoff with a migration-era null authorization mode", async () => {
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    await setMigrationEraAuthorizationMode();
+    const before = await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `);
+    await expect(repository.handoff(command())).resolves.toEqual({
+      status: "already_handed_off",
+    });
+    expect((await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `)).rows).toEqual(before.rows);
+  });
+
+  it("allows the exact exception transition after a proven null-mode handoff", async () => {
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    const before = await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `);
+    await setMigrationEraAuthorizationMode();
+    await expect(repository.transitionShipment({
+      ...command(), action: "record_exception",
+    })).resolves.toEqual({ status: "exception" });
+    expect((await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `)).rows).toEqual(before.rows);
+  });
+
+  it("allows the exact delivered transition after a proven null-mode handoff", async () => {
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    const before = await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `);
+    await setMigrationEraAuthorizationMode();
+    await expect(repository.transitionShipment({
+      ...command(), action: "deliver",
+    })).resolves.toEqual({ status: "delivered" });
+    expect((await client.query<{ releases: number; effects: number }>(`
+      SELECT (SELECT count(*)::int FROM fulfillment_releases) AS releases,
+             (SELECT count(*)::int FROM downstream_effects) AS effects
+    `)).rows).toEqual(before.rows);
+  });
+
+  it("rejects null-mode terminal text without an exact durable handoff tuple", async () => {
+    const repository = setup();
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "handed_off" });
+    await setMigrationEraAuthorizationMode();
+    await client.exec(`
+      DELETE FROM downstream_effects
+      WHERE order_id = '${ids.order}' AND effect_type = 'fulfillment_handed_off';
+    `);
+    await expect(repository.handoff(command())).resolves.toEqual({ status: "conflict" });
+    await expect(repository.transitionShipment({
+      ...command(), action: "deliver",
+    })).resolves.toEqual({ status: "conflict" });
   });
 
   it("replays the immutable historical review binding after current buyer review status drifts", async () => {
@@ -777,7 +1081,7 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          provider_session_id, provider_request_hash, provider_customer_email,
          provider_origin, provider_request_schema_version, provider_livemode,
          provider_scope, tax_quote_reference, shipping_quote_reference,
-         shipping_service, expires_at, created_at)
+         shipping_service, expires_at, created_at, review_authorization_mode)
       VALUES
         ('81000000-0000-4000-8000-000000000112',
          '81000000-0000-4000-8000-000000000110', '${ids.buyer}',
@@ -789,7 +1093,9 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
          'later-reservation@example.test', 'http://localhost:3000', 1, false,
          'local_test:synthetic-propeptiq-v1', 'tax_later_reservation_6f',
          'ship_later_reservation_6f', 'synthetic_ground',
-         '2026-08-26T13:00:00.000Z', '2026-08-26T12:00:00.000Z');
+         '2026-08-26T13:00:00.000Z', '2026-08-26T12:00:00.000Z',
+         'none');
+
       UPDATE lots SET available_quantity = available_quantity - 1
       WHERE id = '${ids.lotA1}';
       INSERT INTO inventory_reservations
@@ -1361,10 +1667,15 @@ describe("atomic fulfillment PostgreSQL repository on PGlite", () => {
   ])("denies reuse after exact %s drift without selecting another review", async (_label, mutation) => {
     await seedBuyerReview();
     await client.exec(mutation);
-    await expect(setup().handoff(command())).resolves.toMatchObject({
-      status: "held",
-      reasons: expect.arrayContaining(["buyer_review_not_covered"]),
-    });
+    const result = await setup().handoff(command());
+    if (_label === "review buyer coverage") {
+      expect(result).toMatchObject({
+        status: "held",
+        reasons: expect.arrayContaining(["buyer_review_not_covered"]),
+      });
+    } else {
+      expect(result).toEqual({ status: "conflict" });
+    }
     expect((await client.query(`
       SELECT
         (SELECT count(*)::int FROM fulfillment_releases) AS releases,

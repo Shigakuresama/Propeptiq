@@ -1,20 +1,25 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { cache } from "react";
 
-import { getPublicBrowseCatalog } from "@/catalog/browse-catalog-server";
+import { findPublicStorefrontProduct, resolvePublicStorefrontRelatedProducts } from "@/catalog/storefront-public";
+import { getPublicStorefrontView } from "@/catalog/storefront-public-server";
 import { CatalogItemDetail } from "@/components/commerce/catalog-item-detail";
 import { PageTransition } from "@/components/site/page-transition";
+import { getPublicConcentrationCalculatorConfiguration } from "@/config/concentration-calculator-server";
 
 type CatalogItemPageProps = {
   params: Promise<{ slug: string }>;
 };
 
+const getPublicStorefrontViewForRequest = cache(getPublicStorefrontView);
+
 export async function generateMetadata({
   params,
 }: CatalogItemPageProps): Promise<Metadata> {
   const { slug } = await params;
-  const catalog = await getPublicBrowseCatalog();
-  const product = catalog.products.find((entry) => entry.slug === slug);
+  const view = await getPublicStorefrontViewForRequest();
+  const product = findPublicStorefrontProduct(view.catalog, slug);
   return product
     ? {
         title: product.name,
@@ -25,13 +30,24 @@ export async function generateMetadata({
 
 export default async function CatalogItemPage({ params }: CatalogItemPageProps) {
   const { slug } = await params;
-  const catalog = await getPublicBrowseCatalog();
-  const product = catalog.products.find((entry) => entry.slug === slug);
+  const [view, calculator] = await Promise.all([
+    getPublicStorefrontViewForRequest(),
+    getPublicConcentrationCalculatorConfiguration(),
+  ]);
+  const product = findPublicStorefrontProduct(view.catalog, slug);
   if (!product) notFound();
+  const relatedProducts = product.kind === "canonical"
+    ? resolvePublicStorefrontRelatedProducts(view.catalog, product)
+    : Object.freeze([]);
 
   return (
     <PageTransition>
-      <CatalogItemDetail product={product} />
+      <CatalogItemDetail
+        calculator={calculator}
+        product={product}
+        pricing={view.pricing}
+        relatedProducts={relatedProducts}
+      />
     </PageTransition>
   );
 }

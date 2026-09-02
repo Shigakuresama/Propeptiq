@@ -10,7 +10,6 @@ import {
 } from "@/cart/preview-presentation";
 import { canContinueFromPreview, type CartPreview } from "@/cart/preview-types";
 import { isCanonicalUuid } from "@/commerce/checkout-identity";
-import { DataLabel, RecordPanel } from "@/components/design-system/archive-primitives";
 import { Button } from "@/components/ui/button";
 
 type PromotionOption = Readonly<{ id: string; name: string }>;
@@ -35,9 +34,11 @@ type SafeQuote = Readonly<{
   rewardsBenefitAvailable: boolean;
   rewardsUnavailableReason: string | null;
   lines: readonly Readonly<{
-    productId: string;
+    variantId: string;
+    sku: string;
+    variantLabel: string;
     productName: string;
-    packageForm: string;
+    packageForm?: string;
     quantity: number;
     unitAmountMinor: number;
     subtotalMinor: number;
@@ -49,6 +50,7 @@ type SafeQuote = Readonly<{
 type QuoteView = Readonly<{
   fingerprint: string;
   body: string;
+  pricingRevision: string;
   quote: SafeQuote;
 }>;
 
@@ -146,15 +148,20 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
     return null;
   }
   const lines: Array<SafeQuote["lines"][number]> = [];
-  const productIds = new Set<string>();
+  const variantIds = new Set<string>();
   let lineSubtotal = 0;
   let lineDiscount = 0;
   for (const line of value.lines) {
-    if (!exactRecord(line, [
-      "productId", "productName", "packageForm", "quantity", "unitAmountMinor",
+    if (!recordWithRequiredAndAllowedKeys(line, [
+      "variantId", "sku", "variantLabel", "productName", "quantity", "unitAmountMinor",
       "subtotalMinor", "discountMinor", "totalMinor",
-    ]) || !isCanonicalUuid(line.productId) || productIds.has(line.productId) ||
-      !boundedText(line.productName) || !boundedText(line.packageForm) ||
+    ], new Set([
+      "variantId", "sku", "variantLabel", "productName", "packageForm", "quantity",
+      "unitAmountMinor", "subtotalMinor", "discountMinor", "totalMinor",
+    ])) || !isCanonicalUuid(line.variantId) || variantIds.has(line.variantId) ||
+      !boundedText(line.sku, 120) || !boundedText(line.variantLabel) ||
+      !boundedText(line.productName) ||
+      (Object.hasOwn(line, "packageForm") && !boundedText(line.packageForm)) ||
       !Number.isSafeInteger(line.quantity) || (line.quantity as number) < 1 || (line.quantity as number) > 25 ||
       !safeMoney(line.unitAmountMinor) || !safeMoney(line.subtotalMinor) ||
       !safeMoney(line.discountMinor) || !safeMoney(line.totalMinor) ||
@@ -162,13 +169,17 @@ function parseSafeQuote(value: unknown): SafeQuote | null {
       line.discountMinor > line.subtotalMinor ||
       line.totalMinor !== line.subtotalMinor - line.discountMinor
     ) return null;
-    productIds.add(line.productId);
+    variantIds.add(line.variantId);
     lineSubtotal += line.subtotalMinor;
     lineDiscount += line.discountMinor;
     lines.push({
-      productId: line.productId,
+      variantId: line.variantId,
+      sku: line.sku,
+      variantLabel: line.variantLabel,
       productName: line.productName,
-      packageForm: line.packageForm,
+      ...(Object.hasOwn(line, "packageForm")
+        ? { packageForm: line.packageForm as string }
+        : {}),
       quantity: line.quantity as number,
       unitAmountMinor: line.unitAmountMinor,
       subtotalMinor: line.subtotalMinor,
@@ -212,11 +223,72 @@ function safeIso(value: unknown): value is string {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
 }
 
+function safePricingRevision(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function safeNullableMoney(value: unknown): value is number | null {
+  return value === null || safeMoney(value);
+}
+
+function safeCartCurrency(value: unknown): value is string | null {
+  return value === null ||
+    (typeof value === "string" && /^[A-Z]{3}$/u.test(value));
+}
+
+function isSafePriceChangedCart(value: unknown): boolean {
+  if (!exactRecord(value, [
+    "items", "subtotalMinor", "currency", "taxMinor", "shippingMinor",
+    "finalDiscountMinor",
+  ]) || !Array.isArray(value.items) || value.items.length < 1 ||
+    value.items.length > 50 || !safeMoney(value.subtotalMinor) ||
+    !safeCartCurrency(value.currency) || value.taxMinor !== null ||
+    value.shippingMinor !== null || value.finalDiscountMinor !== null) {
+    return false;
+  }
+
+  const seen = new Set<string>();
+  let subtotalMinor = 0;
+  const currencies = new Set<string>();
+  for (let index = 0; index < value.items.length; index += 1) {
+    if (!Object.hasOwn(value.items, index)) return false;
+    const line = value.items[index];
+    if (!exactRecord(line, [
+      "variantId", "quantity", "available", "name", "packageForm",
+      "variantLabel", "sku", "unitAmountMinor", "lineSubtotalMinor",
+      "currency",
+    ]) || !isCanonicalUuid(line.variantId) || seen.has(line.variantId) ||
+      !Number.isSafeInteger(line.quantity) || (line.quantity as number) < 1 ||
+      (line.quantity as number) > 25 || typeof line.available !== "boolean" ||
+      (line.name !== null && !boundedText(line.name)) ||
+      (line.packageForm !== null && !boundedText(line.packageForm)) ||
+      (line.variantLabel !== null && !boundedText(line.variantLabel)) ||
+      (line.sku !== null && !boundedText(line.sku, 120)) ||
+      !safeNullableMoney(line.unitAmountMinor) ||
+      !safeNullableMoney(line.lineSubtotalMinor) ||
+      !safeCartCurrency(line.currency) ||
+      (line.unitAmountMinor !== null && line.lineSubtotalMinor !== null &&
+        line.lineSubtotalMinor !==
+          line.unitAmountMinor * (line.quantity as number))) {
+      return false;
+    }
+    const nextSubtotal = subtotalMinor + (line.lineSubtotalMinor ?? 0);
+    if (!Number.isSafeInteger(nextSubtotal)) return false;
+    subtotalMinor = nextSubtotal;
+    if (line.currency !== null) currencies.add(line.currency);
+    seen.add(line.variantId);
+  }
+  const coherentCurrency = currencies.size === 1 ? [...currencies][0]! : null;
+  return subtotalMinor === value.subtotalMinor && value.currency === coherentCurrency;
+}
+
 function responseMessage(status: unknown, component?: unknown): string {
   if (status === "rate_limited") return "Too many checkout requests. Wait briefly, then retry with the same unchanged request.";
   if (status === "review_required") return "Manual review is required before a hosted payment session can open.";
   if (status === "denied") return "Checkout is not permitted for the current authoritative facts.";
   if (status === "invalid_request") return "The checkout request is invalid. Review the destination and cart, then try again.";
+  if (status === "PRICE_CHANGED") return "The authoritative price changed. Review and calculate the current total again before continuing.";
+  if (status === "CHECKOUT_UNAVAILABLE") return "One or more variants cannot be checked out with the current authoritative facts.";
   if (status === "quote_unavailable" && component === "shipping") return "Shipping facts are temporarily unavailable. No total or paid state is being claimed.";
   if (status === "quote_unavailable" && component === "tax") return "Tax facts are temporarily unavailable. No total or paid state is being claimed.";
   if (status === "facts_changed_retry") return "Checkout facts changed. Calculate a new authoritative total before retrying.";
@@ -240,7 +312,6 @@ function rewardsUnavailableCopy(reason: string | null): string | null {
 }
 
 export function CheckoutForm({
-  promotions,
   syntheticLocal = false,
   navigate = (url) => window.location.assign(url),
 }: {
@@ -250,7 +321,6 @@ export function CheckoutForm({
 }) {
   const { items, hydrated } = useCart();
   const [destination, setDestination] = useState(initialDestination);
-  const [promotionId, setPromotionId] = useState("");
   const [rewardRedemptionPoints, setRewardRedemptionPoints] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [quoteView, setQuoteView] = useState<QuoteView | null>(null);
@@ -277,7 +347,7 @@ export function CheckoutForm({
   const presentationLoadedRef = useRef(false);
 
   const checkoutItems = useMemo(
-    () => items.map((item) => ({ productId: item.productId.toLowerCase(), quantity: item.quantity })),
+    () => items.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
     [items],
   );
   const requestedRewardPoints = Number(rewardRedemptionPoints);
@@ -294,11 +364,10 @@ export function CheckoutForm({
       postalCode: destination.postalCode.trim(),
       countryCode: "US" as const,
     },
-    promotionIds: promotionId ? [promotionId.toLowerCase()] : [],
     ...(hasValidRequestedRewardPoints
       ? { rewardRedemptionPoints: requestedRewardPoints }
       : {}),
-  }), [checkoutItems, destination, hasValidRequestedRewardPoints, promotionId, requestedRewardPoints]);
+  }), [checkoutItems, destination, hasValidRequestedRewardPoints, requestedRewardPoints]);
   const fingerprint = useMemo(() => JSON.stringify(normalizedRequest), [normalizedRequest]);
   const cartKey = useMemo(() => JSON.stringify(checkoutItems), [checkoutItems]);
   const currentFeedback = feedback?.fingerprint === fingerprint ? feedback : null;
@@ -333,20 +402,20 @@ export function CheckoutForm({
         if (
           parsed === null || parsed.items.length !== checkoutItems.length ||
           parsed.items.some((line, index) =>
-            line.productId !== checkoutItems[index]?.productId ||
+            line.variantId !== checkoutItems[index]?.variantId ||
             line.quantity !== checkoutItems[index]?.quantity)
         ) throw new Error("Authoritative cart preview is incoherent");
         return parsed;
       })
       .then((preview) => {
-        const priorById = new Map(retained?.items.map((line) => [line.productId, line]));
-        const currentIds = new Set(preview.items.map((line) => line.productId));
+        const priorById = new Map(retained?.items.map((line) => [line.variantId, line]));
+        const currentIds = new Set(preview.items.map((line) => line.variantId));
         const changes = [
-          ...(retained?.items.filter((line) => !currentIds.has(line.productId))
-            .map((line) => `Removed request: ${line.name ?? line.productId}`) ?? []),
+          ...(retained?.items.filter((line) => !currentIds.has(line.variantId))
+            .map((line) => `Removed request: ${line.name ?? line.variantId}`) ?? []),
           ...preview.items.flatMap((line) => {
-            const prior = priorById.get(line.productId);
-            const label = line.name ?? prior?.name ?? line.productId;
+            const prior = priorById.get(line.variantId);
+            const label = line.name ?? prior?.name ?? line.variantId;
             if (!line.available) return [`Unavailable request: ${label}`];
             if (prior && prior.quantity !== line.quantity) return [`Quantity adjusted in preview: ${label}`];
             if (prior && (prior.name !== line.name || prior.packageForm !== line.packageForm ||
@@ -448,11 +517,17 @@ export function CheckoutForm({
         body,
       });
       const value: unknown = await response.json();
-      if (exactRecord(value, ["status", "quote"]) &&
+      if (exactRecord(value, ["status", "pricingRevision", "quote"]) &&
+        safePricingRevision(value.pricingRevision) &&
         (value.status === "quoted" || value.status === "review_required")) {
         const quote = parseSafeQuote(value.quote);
         if (quote !== null) {
-          setQuoteView({ fingerprint, body, quote });
+          setQuoteView({
+            fingerprint,
+            body,
+            pricingRevision: value.pricingRevision,
+            quote,
+          });
           setFeedback({
             fingerprint,
             message: quote.status === "ready"
@@ -492,13 +567,28 @@ export function CheckoutForm({
       const response = await fetch("/api/checkout/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey() },
-        body: quoteView.body,
+        body: JSON.stringify({
+          ...normalizedRequest,
+          pricingRevision: quoteView.pricingRevision,
+        }),
       });
       const value: unknown = await response.json();
       if (exactRecord(value, ["status", "orderId", "hostedUrl", "expiresAt"]) &&
         value.status === "open" && isCanonicalUuid(value.orderId) &&
         safeHostedUrl(value.hostedUrl) && safeIso(value.expiresAt)) {
         navigate(value.hostedUrl);
+        return;
+      }
+      if (exactRecord(value, ["status", "pricingRevision", "cart"]) &&
+        value.status === "PRICE_CHANGED" && safePricingRevision(value.pricingRevision) &&
+        isSafePriceChangedCart(value.cart)) {
+        if (keyRef.current?.fingerprint === fingerprint) keyRef.current = null;
+        setQuoteView(null);
+        setFeedback({
+          fingerprint,
+          message: responseMessage("PRICE_CHANGED"),
+          lastFailed: "quote",
+        });
         return;
       }
       setFeedback({
@@ -522,12 +612,11 @@ export function CheckoutForm({
     ? null
     : rewardsUnavailableCopy(quoteView.quote.rewardsUnavailableReason);
   return (
-    <section aria-labelledby="checkout-form-heading">
-      <RecordPanel className="p-5 sm:p-7">
-      <DataLabel>Authoritative checkout</DataLabel>
+    <section className="record-card" aria-labelledby="checkout-form-heading">
+      <p className="eyebrow">Authoritative checkout</p>
       <h2 id="checkout-form-heading" className="mt-3 font-heading text-3xl">Destination and totals</h2>
       <p className="mt-3 text-base leading-7 text-muted-ink">
-        Product IDs and quantities come from your browser-saved cart. The server reloads every price, discount, availability, destination, shipping, and tax fact.
+        Your browser sends only canonical variant identifiers, quantities, destination, and optional reward points. Current prices and automatic promotions are resolved by the server.
       </p>
       {syntheticLocal ? (
         <p className="warning-record mt-5 font-semibold">Synthetic local test only</p>
@@ -555,7 +644,7 @@ export function CheckoutForm({
       {currentPreview?.requiresAcknowledgement ? (
         <section className="warning-record mt-6 text-base leading-7" aria-labelledby="preview-change-heading">
           <h3 id="preview-change-heading" className="font-semibold">Server preview changed or became unavailable.</h3>
-          <p className="mt-2">Your requested product IDs and quantities were not replaced. Review the current server facts before checkout.</p>
+          <p className="mt-2">Your requested variant identifiers and quantities were not replaced. Review the current server facts before checkout.</p>
           {previewState.changes.length ? (
             <ul className="mt-3 list-disc space-y-2 pl-5">
               {previewState.changes.map((change) => <li key={change}>{change}</li>)}
@@ -590,80 +679,64 @@ export function CheckoutForm({
       ) : null}
 
       <form ref={formRef} className="mt-8 grid gap-6" onSubmit={submitQuote} noValidate>
-        <section className="record-panel-recessed p-4 sm:p-5" aria-labelledby="destination-fields-heading">
-          <DataLabel>01 / Destination</DataLabel>
-          <h3 id="destination-fields-heading" className="mt-3 font-heading text-2xl">Research delivery destination</h3>
-          <p className="mt-2 text-base leading-7 text-muted-ink">Required destination facts are checked against current server policy when the quote is requested.</p>
-          <div className="mt-6 grid gap-6">
-            <div className="grid gap-5 sm:grid-cols-2">
-              <Field id="recipientName" label="Recipient name" error={errors.recipientName}>
-                <input id="recipientName" name="recipientName" className="form-input" autoComplete="name" maxLength={120} required aria-required="true" value={destination.recipientName} aria-invalid={Boolean(errors.recipientName)} aria-describedby={errors.recipientName ? "recipientName-error" : undefined} onChange={(event) => updateField("recipientName", event.currentTarget.value)} />
-              </Field>
-              <Field id="countryCode" label="Country">
-                <input id="countryCode" name="countryCode" className="form-input" value="United States (US)" readOnly />
-              </Field>
-            </div>
-            <Field id="line1" label="Address line 1" error={errors.line1}>
-              <input id="line1" name="line1" className="form-input" autoComplete="address-line1" maxLength={120} required aria-required="true" value={destination.line1} aria-invalid={Boolean(errors.line1)} aria-describedby={errors.line1 ? "line1-error" : undefined} onChange={(event) => updateField("line1", event.currentTarget.value)} />
-            </Field>
-            <Field id="line2" label="Address line 2 (optional)">
-              <input id="line2" name="line2" className="form-input" autoComplete="address-line2" maxLength={120} value={destination.line2} onChange={(event) => updateField("line2", event.currentTarget.value)} />
-            </Field>
-            <div className="grid gap-5 sm:grid-cols-3">
-              <Field id="city" label="City" error={errors.city}>
-                <input id="city" name="city" className="form-input" autoComplete="address-level2" maxLength={100} required aria-required="true" value={destination.city} aria-invalid={Boolean(errors.city)} aria-describedby={errors.city ? "city-error" : undefined} onChange={(event) => updateField("city", event.currentTarget.value)} />
-              </Field>
-              <Field id="stateCode" label="State or district" error={errors.stateCode}>
-                <select id="stateCode" name="stateCode" className="form-input" autoComplete="address-level1" required aria-required="true" value={destination.stateCode} aria-invalid={Boolean(errors.stateCode)} aria-describedby={errors.stateCode ? "stateCode-error" : undefined} onChange={(event) => updateField("stateCode", event.currentTarget.value)}>
-                  <option value="">Select</option>
-                  {stateCodes.map((state) => <option key={state} value={state}>{state}</option>)}
-                </select>
-              </Field>
-              <Field id="postalCode" label="Postal code" error={errors.postalCode}>
-                <input id="postalCode" name="postalCode" className="form-input" autoComplete="postal-code" inputMode="numeric" maxLength={10} required aria-required="true" value={destination.postalCode} aria-invalid={Boolean(errors.postalCode)} aria-describedby={errors.postalCode ? "postalCode-error" : undefined} onChange={(event) => updateField("postalCode", event.currentTarget.value)} />
-              </Field>
-            </div>
-          </div>
-        </section>
-        <section className="record-panel-recessed p-4 sm:p-5" aria-labelledby="benefit-fields-heading">
-          <DataLabel>02 / Optional benefits</DataLabel>
-          <h3 id="benefit-fields-heading" className="mt-3 font-heading text-2xl">Promotion and points</h3>
-          <div className="mt-6 grid gap-6 sm:grid-cols-2">
-            <Field id="promotionId" label="Promotion (optional)">
-              <select id="promotionId" name="promotionId" className="form-input" value={promotionId} onChange={(event) => {
-                setPromotionId(event.currentTarget.value);
-                setQuoteView(null);
-                setFeedback(null);
-              }}>
-                <option value="">No promotion</option>
-                {promotions.map((promotion) => <option key={promotion.id} value={promotion.id}>{promotion.name}</option>)}
-              </select>
-            </Field>
-            <Field
-              id="rewardRedemptionPoints"
-              label="Points to redeem (optional)"
-              error={errors.rewardRedemptionPoints}
-            >
-              <input
-                id="rewardRedemptionPoints"
-                name="rewardRedemptionPoints"
-                className="form-input"
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={Number.MAX_SAFE_INTEGER}
-                step={1}
-                value={rewardRedemptionPoints}
-                aria-invalid={Boolean(errors.rewardRedemptionPoints)}
-                aria-describedby={errors.rewardRedemptionPoints ? "rewardRedemptionPoints-error" : undefined}
-                onChange={(event) => updateRewardRedemptionPoints(event.currentTarget.value)}
-              />
-            </Field>
-          </div>
-        </section>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field id="recipientName" label="Recipient name" error={errors.recipientName}>
+            <input id="recipientName" name="recipientName" className="form-input" autoComplete="name" maxLength={120} required aria-required="true" value={destination.recipientName} aria-invalid={Boolean(errors.recipientName)} aria-describedby={errors.recipientName ? "recipientName-error" : undefined} onChange={(event) => updateField("recipientName", event.currentTarget.value)} />
+          </Field>
+          <Field id="countryCode" label="Country">
+            <input id="countryCode" name="countryCode" className="form-input" value="United States (US)" readOnly />
+          </Field>
+        </div>
+        <Field id="line1" label="Address line 1" error={errors.line1}>
+          <input id="line1" name="line1" className="form-input" autoComplete="address-line1" maxLength={120} required aria-required="true" value={destination.line1} aria-invalid={Boolean(errors.line1)} aria-describedby={errors.line1 ? "line1-error" : undefined} onChange={(event) => updateField("line1", event.currentTarget.value)} />
+        </Field>
+        <Field id="line2" label="Address line 2 (optional)">
+          <input id="line2" name="line2" className="form-input" autoComplete="address-line2" maxLength={120} value={destination.line2} onChange={(event) => updateField("line2", event.currentTarget.value)} />
+        </Field>
+        <div className="grid gap-5 sm:grid-cols-3">
+          <Field id="city" label="City" error={errors.city}>
+            <input id="city" name="city" className="form-input" autoComplete="address-level2" maxLength={100} required aria-required="true" value={destination.city} aria-invalid={Boolean(errors.city)} aria-describedby={errors.city ? "city-error" : undefined} onChange={(event) => updateField("city", event.currentTarget.value)} />
+          </Field>
+          <Field id="stateCode" label="State or district" error={errors.stateCode}>
+            <select id="stateCode" name="stateCode" className="form-input" autoComplete="address-level1" required aria-required="true" value={destination.stateCode} aria-invalid={Boolean(errors.stateCode)} aria-describedby={errors.stateCode ? "stateCode-error" : undefined} onChange={(event) => updateField("stateCode", event.currentTarget.value)}>
+              <option value="">Select</option>
+              {stateCodes.map((state) => <option key={state} value={state}>{state}</option>)}
+            </select>
+          </Field>
+          <Field id="postalCode" label="Postal code" error={errors.postalCode}>
+            <input id="postalCode" name="postalCode" className="form-input" autoComplete="postal-code" inputMode="numeric" maxLength={10} required aria-required="true" value={destination.postalCode} aria-invalid={Boolean(errors.postalCode)} aria-describedby={errors.postalCode ? "postalCode-error" : undefined} onChange={(event) => updateField("postalCode", event.currentTarget.value)} />
+          </Field>
+        </div>
+        <p className="info-record text-base leading-7">
+          Eligible automatic promotions are selected from current server facts; no promotion claim is sent by this form.
+        </p>
+        <Field
+          id="rewardRedemptionPoints"
+          label="Points to redeem (optional)"
+          error={errors.rewardRedemptionPoints}
+        >
+          <input
+            id="rewardRedemptionPoints"
+            name="rewardRedemptionPoints"
+            className="form-input"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={Number.MAX_SAFE_INTEGER}
+            step={1}
+            value={rewardRedemptionPoints}
+            aria-invalid={Boolean(errors.rewardRedemptionPoints)}
+            aria-describedby={errors.rewardRedemptionPoints ? "rewardRedemptionPoints-error" : undefined}
+            onChange={(event) => updateRewardRedemptionPoints(event.currentTarget.value)}
+          />
+        </Field>
         {errors.items ? <p id="items-error" className="error-record text-base" role="alert">{errors.items}</p> : null}
-        <Button type="submit" className="action-primary min-h-12 w-full sm:w-auto" disabled={busy !== null || items.length === 0 || !previewCanContinue}>
-          {busy === "quote" ? "Getting authoritative quote…" : "Get authoritative quote"}
+        <Button
+          type="submit"
+          className="action-primary min-h-12 w-full sm:w-auto"
+          disabled={busy !== null || !previewCanContinue}
+        >
+          {busy === "quote" ? "Getting authoritative quote…" : "Calculate authoritative total"}
         </Button>
       </form>
 
@@ -680,13 +753,13 @@ export function CheckoutForm({
       ) : null}
 
       {quoteView?.fingerprint === fingerprint ? (
-        <section className="record-panel-recessed mt-8 p-5 sm:p-6" aria-labelledby="authoritative-total-heading">
-          <DataLabel>Current server result</DataLabel>
+        <section className="mt-8 border-t border-border pt-8" aria-labelledby="authoritative-total-heading">
+          <p className="eyebrow">Current server result</p>
           <h3 id="authoritative-total-heading" className="mt-3 font-heading text-3xl">Authoritative total</h3>
           <ul className="mt-5 grid gap-3 p-0">
             {quoteView.quote.lines.map((line) => (
-              <li key={line.productId} className="flex flex-wrap justify-between gap-3 border-b border-border pb-3">
-                <span><strong>{line.productName}</strong><span className="block text-base text-muted-ink">{line.packageForm} · {line.quantity} × {money(line.unitAmountMinor)}</span></span>
+              <li key={line.variantId} className="flex flex-wrap justify-between gap-3 border-b border-border pb-3">
+                <span><strong>{line.productName}</strong><span className="block text-base text-muted-ink">{line.variantLabel} · {line.quantity} × {money(line.unitAmountMinor)}</span></span>
                 <span className="tabular-nums">{money(line.totalMinor)}</span>
               </li>
             ))}
@@ -730,7 +803,6 @@ export function CheckoutForm({
           )}
         </section>
       ) : null}
-      </RecordPanel>
     </section>
   );
 }

@@ -7,7 +7,7 @@ import { createCheckoutServerRuntime } from "@/commerce/server-runtime";
 import type { ServerEnv } from "@/config/env-schema";
 
 const environment = {
-  APP_ENV: "local", APP_ORIGIN: "http://127.0.0.1:4631", CATALOG_DEMO_MODE: "enabled", LOCAL_TEST_DRIVER: "enabled",
+  APP_ENV: "local", APP_ORIGIN: "http://127.0.0.1:4631", CATALOG_DEMO_MODE: "enabled", RECONSTITUTION_CALCULATOR_MODE: "disabled", LOCAL_TEST_DRIVER: "enabled",
   LOCAL_TEST_SECRET: "local-commerce-event-secret-at-least-32-characters", RATE_LIMIT_SECRET: "local-commerce-rate-secret-at-least-32-characters",
   VERCEL_ENV: "development", VERCEL_TARGET_ENV: "development", AUTH_MODE: "disabled", DATABASE_MODE: "disabled", PAYMENTS_MODE: "disabled",
   STORAGE_MODE: "disabled", EMAIL_MODE: "disabled", COMMERCE_LIVE_CAPABILITY: "disabled", PAYMENTS_LIVE_CAPABILITY: "disabled",
@@ -36,6 +36,57 @@ async function openHostedSession(idempotencyKey: string) {
     driver,
     orderId: result.orderId,
     sessionId: result.url.split("/").at(-1)!,
+  };
+}
+
+async function openCanonicalHostedSession(idempotencyKey: string) {
+  const driver = getLocalTestDriver();
+  const identity = driver.loadIdentityByClerkId(
+    "LOCAL_TEST_ONLY_PROPEPTIQ_91C4E7_NON_ADMIN",
+  );
+  const principal = identity ? driver.loadPrincipal(identity.clerkUserId) : null;
+  const runtime = await createCheckoutServerRuntime({
+    environment,
+    identity,
+    principal,
+    localDriver: driver,
+  });
+  const request = {
+    items: [{
+      variantId: "55000000-0000-4000-8000-000000000001",
+      quantity: 2,
+    }],
+    destination: {
+      recipientName: "Synthetic Buyer",
+      line1: "100 Test Way",
+      line2: null,
+      city: "Los Angeles",
+      stateCode: "CA",
+      postalCode: "90001",
+      countryCode: "US" as const,
+    },
+  };
+  const quoted = await runtime!.quoteCheckout({
+    buyerUserId: ownerUserId,
+    idempotencyKey,
+    request,
+  });
+  if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+    throw new Error("expected local canonical quote");
+  }
+  const opened = await runtime!.startSession({
+    buyerUserId: ownerUserId,
+    idempotencyKey,
+    request: { ...request, pricingRevision: quoted.pricingRevision },
+  });
+  if (opened.status !== "open") throw new Error("expected local canonical session");
+  return {
+    driver,
+    idempotencyKey,
+    orderId: opened.orderId,
+    sessionId: opened.url.split("/").at(-1)!,
+    pricingRevision: quoted.pricingRevision,
+    request,
   };
 }
 
@@ -70,6 +121,57 @@ describe("guarded local commerce driver", () => {
     expect(targets.refundId).toMatch(/^[0-9a-f-]{36}$/u);
     expect(targets.fulfillmentOrderId).toMatch(/^[0-9a-f-]{36}$/u);
     expect(driver.loadOrder("50000000-0000-4000-8000-000000000001", "local-order-customer")).not.toBeNull();
+  });
+
+  it("loads the clearly labeled local/test canonical variant from existing demo records", async () => {
+    const commerce = getLocalTestDriver().commerce;
+    const repository = commerce.checkoutRepository;
+    expect(repository.loadVariantFacts).toBeTypeOf("function");
+    expect(repository.loadProviderCreateVariantFacts).toBeTypeOf("function");
+
+    const loaded = await repository.loadVariantFacts!({
+      buyerUserId: ownerUserId,
+      request: {
+        items: [{ variantId: "55000000-0000-4000-8000-000000000001", quantity: 2 }],
+        destination: {
+          recipientName: "Synthetic Buyer",
+          line1: "100 Test Way",
+          line2: null,
+          city: "Los Angeles",
+          stateCode: "CA",
+          postalCode: "90001",
+          countryCode: "US",
+        },
+      },
+      now: new Date("2026-08-26T12:00:00.000Z"),
+    });
+
+    expect(loaded).toMatchObject({
+      ok: true,
+      value: {
+        items: [{
+          variantId: "55000000-0000-4000-8000-000000000001",
+          productId: "61000000-0000-4000-8000-000000000001",
+          sku: "SYNTHETIC-ALPHA-5MG",
+          price: {
+            id: "62000000-0000-4000-8000-000000000001",
+            amountMinor: 2_400,
+            currency: "USD",
+          },
+          eligibleLots: [{ id: "63000000-0000-4000-8000-000000000001" }],
+        }],
+        automaticPromotions: [],
+      },
+    });
+    expect(commerce.cartPreviewSource()).toEqual({
+      variants: [expect.objectContaining({
+        variantId: "55000000-0000-4000-8000-000000000001",
+        productId: "61000000-0000-4000-8000-000000000001",
+        baseUnitMinor: 2_400,
+        availability: "available",
+        availableQuantity: 12,
+      })],
+    });
   });
 
   it("keeps hosted return pending until one internally authenticated event and replays once", async () => {
@@ -156,5 +258,39 @@ describe("guarded local commerce driver", () => {
       secret: eventSecret,
     })).toBeNull();
     expect(driver.commerce.inspect()).toEqual(before);
+  });
+
+  it("fails local provider-create facts closed after canonical reservations become terminal", async () => {
+    const driver = getLocalTestDriver();
+    driver.commerce.reset();
+    const created = await openCanonicalHostedSession(
+      "6c000000-0000-4000-8000-000000000005",
+    );
+    const attemptId = attemptIdFromSession(created.sessionId);
+    await driver.commerce.checkoutRepository.releaseDefiniteFailure({
+      authority: "authoritative_provider_terminal",
+      providerEvidenceId: "synthetic-terminal-provider-create-evidence",
+      attemptId,
+      orderId: created.orderId,
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${attemptId}`,
+      cause: "definite_rejection",
+      targetAttemptStatus: "failed",
+    });
+
+    await expect(
+      driver.commerce.checkoutRepository.loadProviderCreateVariantFacts!({
+        buyerUserId: ownerUserId,
+        idempotencyKey: created.idempotencyKey,
+        orderId: created.orderId,
+        attemptId,
+        expectedStoredPricingRevision: created.pricingRevision,
+        request: created.request,
+        now: new Date(),
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reasons: ["provider_create_authority_conflict"],
+    });
   });
 });

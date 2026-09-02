@@ -5,6 +5,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -12,7 +13,13 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { destinationPolicies, productPrices, products, promotions } from "./catalog";
+import {
+  destinationPolicies,
+  productPrices,
+  products,
+  productVariants,
+  promotions,
+} from "./catalog";
 import {
   buyerStatusEnum,
   checkoutAttemptStatusEnum,
@@ -87,6 +94,7 @@ export const orderItems = pgTable(
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "restrict" }),
+    variantId: uuid("variant_id"),
     productPriceId: uuid("product_price_id").notNull(),
     destinationPolicyId: uuid("destination_policy_id")
       .notNull()
@@ -107,11 +115,27 @@ export const orderItems = pgTable(
       table.orderId,
       table.productId,
     ),
+    unique("order_items_id_order_product_variant_unique").on(
+      table.id,
+      table.orderId,
+      table.productId,
+      table.variantId,
+    ),
     unique("order_items_id_order_unique").on(table.id, table.orderId),
     foreignKey({
       columns: [table.productPriceId, table.productId],
       foreignColumns: [productPrices.id, productPrices.productId],
       name: "order_items_price_product_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.variantId, table.productId],
+      foreignColumns: [productVariants.id, productVariants.productId],
+      name: "order_items_variant_product_fk",
+    }).onDelete("restrict"),
+    foreignKey({
+      columns: [table.productPriceId, table.variantId],
+      foreignColumns: [productPrices.id, productPrices.variantId],
+      name: "order_items_price_variant_fk",
     }).onDelete("restrict"),
     check("order_items_name_nonblank", nonblank(table.productNameSnapshot)),
     check("order_items_package_nonblank", nonblank(table.packageFormSnapshot)),
@@ -142,6 +166,9 @@ export const checkoutAttempts = pgTable(
     buyerUserId: uuid("buyer_user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
     idempotencyKey: text("idempotency_key").notNull(),
     requestHash: text("request_hash").notNull(),
+    canonicalPricingRevision: text("canonical_pricing_revision"),
+    canonicalQuoteSnapshot: jsonb("canonical_quote_snapshot"),
+    reviewAuthorizationMode: text("review_authorization_mode"),
     status: checkoutAttemptStatusEnum("status").default("created").notNull(),
     accountGate: checkoutGateResultEnum("account_gate").notNull(),
     attestationGate: checkoutGateResultEnum("attestation_gate").notNull(),
@@ -162,6 +189,7 @@ export const checkoutAttempts = pgTable(
     providerCustomerEmail: text("provider_customer_email"),
     providerOrigin: text("provider_origin"),
     providerRequestSchemaVersion: integer("provider_request_schema_version"),
+    providerBindingSnapshot: jsonb("provider_binding_snapshot"),
     providerLivemode: boolean("provider_livemode"),
     providerScope: text("provider_scope"),
     taxQuoteReference: text("tax_quote_reference"),
@@ -184,6 +212,18 @@ export const checkoutAttempts = pgTable(
     ),
     check("checkout_attempts_idempotency_nonblank", nonblank(table.idempotencyKey)),
     check("checkout_attempts_request_hash", sha256(table.requestHash)),
+    check(
+      "checkout_attempts_canonical_replay_coherent",
+      sql`(${table.canonicalPricingRevision} is null and ${table.canonicalQuoteSnapshot} is null)
+          or (${table.canonicalPricingRevision} is not null
+            and ${sha256(table.canonicalPricingRevision)}
+            and ${table.canonicalQuoteSnapshot} is not null)`,
+    ),
+    check(
+      "checkout_attempts_review_authorization_mode",
+      sql`${table.reviewAuthorizationMode} is null
+          or ${table.reviewAuthorizationMode} in ('bound', 'none')`,
+    ),
     check("checkout_attempts_provider_request_hash", sql`${table.providerRequestHash} is null or ${sha256(table.providerRequestHash)}`),
     check(
       "checkout_attempts_quote_references_coherent",
@@ -202,6 +242,7 @@ export const checkoutAttempts = pgTable(
             and ${table.providerExpiresAt} is null
             and ${table.providerCustomerEmail} is null and ${table.providerOrigin} is null
             and ${table.providerRequestSchemaVersion} is null
+            and ${table.providerBindingSnapshot} is null
             and ${table.providerLivemode} is null and ${table.providerScope} is null)
           or (${table.provider} is not null and ${nonblank(table.provider)}
             and ${table.providerRequestId} is not null and ${nonblank(table.providerRequestId)}
@@ -209,7 +250,11 @@ export const checkoutAttempts = pgTable(
             and ${table.providerExpiresAt} is not null
             and ${table.providerCustomerEmail} is not null and ${nonblank(table.providerCustomerEmail)}
             and ${table.providerOrigin} is not null and ${nonblank(table.providerOrigin)}
-            and ${table.providerRequestSchemaVersion} = 1
+            and ((${table.providerRequestSchemaVersion} = 1
+                    and ${table.providerBindingSnapshot} is null)
+              or (${table.providerRequestSchemaVersion} = 2
+                    and ${table.providerBindingSnapshot} is not null
+                    and ${table.providerBindingSnapshot}->>'schemaVersion' = '2'))
             and ${table.providerLivemode} is not null
             and ${table.providerScope} is not null and ${nonblank(table.providerScope)}
             and (${table.providerSessionId} is null or ${nonblank(table.providerSessionId)}))`,
@@ -287,6 +332,54 @@ export const orderPromotionAllocations = pgTable("order_promotion_allocations", 
   foreignKey({ columns: [table.applicationId, table.orderId], foreignColumns: [orderPromotionApplications.id, orderPromotionApplications.orderId], name: "order_promotion_allocations_application_order_fk" }).onDelete("cascade"),
   foreignKey({ columns: [table.orderItemId, table.orderId], foreignColumns: [orderItems.id, orderItems.orderId], name: "order_promotion_allocations_item_order_fk" }).onDelete("restrict"),
   check("order_promotion_allocations_discount_nonnegative", safeNonnegativeMoney(table.allocatedDiscountMinor)),
+]);
+
+/**
+ * Durable binding between an order and the Stripe invoice issued for it.
+ *
+ * One order carries at most one invoice: `orderId` is the primary key, so a
+ * repeat issue attempt cannot bill an institutional buyer twice. The provider
+ * invoice id is separately unique, so the same invoice cannot be bound to two
+ * orders. Together these are what let an inbound invoice provider event be
+ * resolved to an order from OUR record rather than from provider-supplied
+ * metadata. See docs/adr/0006.
+ */
+export const orderInvoices = pgTable("order_invoices", {
+  orderId: uuid("order_id").primaryKey().references(() => orders.id, { onDelete: "restrict" }),
+  provider: text("provider").notNull(),
+  providerInvoiceId: text("provider_invoice_id"),
+  hostedInvoiceUrl: text("hosted_invoice_url"),
+  amountDueMinor: integer("amount_due_minor"),
+  status: text("status").default("pending").notNull(),
+  evidenceCode: text("evidence_code"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+}, (table) => [
+  unique("order_invoices_provider_invoice_unique").on(table.provider, table.providerInvoiceId),
+  check("order_invoices_provider", sql`${table.provider} = 'stripe'`),
+  check(
+    "order_invoices_status",
+    sql`${table.status} in ('pending','open','unavailable','unknown')`,
+  ),
+  // An open invoice must carry a complete provider binding; anything else must
+  // not claim one. This is what stops a half-written row reading as billable.
+  check(
+    "order_invoices_open_coherent",
+    sql`(${table.status} = 'open'
+          and ${table.providerInvoiceId} is not null and ${nonblank(table.providerInvoiceId)}
+          and ${table.hostedInvoiceUrl} is not null and ${nonblank(table.hostedInvoiceUrl)}
+          and ${table.amountDueMinor} is not null and ${table.amountDueMinor} >= 0)
+        or (${table.status} <> 'open'
+          and ${table.hostedInvoiceUrl} is null
+          and ${table.amountDueMinor} is null)`,
+  ),
+  check(
+    "order_invoices_evidence_coherent",
+    sql`(${table.status} in ('unavailable','unknown') and ${table.evidenceCode} is not null
+          and ${nonblank(table.evidenceCode)})
+        or (${table.status} not in ('unavailable','unknown') and ${table.evidenceCode} is null)`,
+  ),
+  check("order_invoices_timestamps", sql`${table.updatedAt} >= ${table.createdAt}`),
 ]);
 
 export const orderShippingAddresses = pgTable("order_shipping_addresses", {

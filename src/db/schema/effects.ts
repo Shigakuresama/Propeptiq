@@ -12,6 +12,12 @@ export const downstreamEffects = pgTable("downstream_effects", {
   payload: jsonb("payload").notNull(),
   idempotencyKey: text("idempotency_key").notNull(),
   status: text("status").default("pending").notNull(),
+  /**
+   * Earliest instant this effect may be claimed. Defaults to now so every
+   * existing effect stays immediately claimable; a settlement hold sets it
+   * forward so the window survives a restart. See docs/adr/0006.
+   */
+  availableAt: timestamp("available_at", { withTimezone: true }).defaultNow().notNull(),
   attemptCount: integer("attempt_count").default(0).notNull(),
   leaseToken: text("lease_token"),
   leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),

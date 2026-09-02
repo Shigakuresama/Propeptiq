@@ -22,6 +22,28 @@ function candidate(
 }
 
 describe("scanPublicCopy", () => {
+  it("allows neutral calculator copy and blocks the prohibited public legacy term", () => {
+    const policy = { version: "synthetic-calculator-policy", activeLotEvidenceIds: [] };
+    expect(
+      scanPublicCopy(
+        {
+          text: "Laboratory concentration calculator\nMathematical conversions only; no use recommendations are provided.",
+          claims: [],
+        },
+        policy,
+      ),
+    ).toMatchObject({ publishable: true, status: "pass", violations: [] });
+    expect(
+      scanPublicCopy(
+        { text: "Laboratory reconstitution calculator", claims: [] },
+        policy,
+      ),
+    ).toMatchObject({
+      publishable: false,
+      status: "blocked",
+      violations: [expect.objectContaining({ code: "reconstitution" })],
+    });
+  });
   it("allows ordinary copy without an embedded research-use disclaimer or COA", () => {
     expect(scanPublicCopy(candidate(), policy)).toEqual({
       publishable: true,

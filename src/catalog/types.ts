@@ -1,4 +1,10 @@
 export type CatalogSource = "production" | "synthetic-demo";
+
+export type {
+  PriceStatus,
+  StorefrontProduct,
+  VariantAvailability,
+} from "./storefront-types";
 export type ProductStatus = "draft" | "active" | "retired";
 export type LotStatus =
   | "draft"
@@ -28,7 +34,7 @@ export type CatalogPriceRecord = {
   id: string;
   productId: string;
   version: number;
-  amountMinor: number;
+  amountMinor: number | null;
   currency: string;
   effectiveAt: string;
   supersededAt: string | null;
@@ -85,6 +91,11 @@ export type CatalogPromotionTargetRecord = {
   targetKind: "product" | "policy_group";
   productId: string | null;
   policyGroupId: string | null;
+};
+
+export type CatalogPromotionVariantTargetRecord = {
+  promotionId: string;
+  variantId: string;
 };
 
 export type CatalogRecordSet = {

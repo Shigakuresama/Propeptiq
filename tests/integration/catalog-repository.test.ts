@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { loadDatabaseCatalogRecords } from "@/catalog/database-catalog";
 import {
+  syntheticDemoCatalogRecords,
+  syntheticWinter30PromotionFixture,
+} from "@/catalog/demo-fixtures";
+import { WINTER30_STOREFRONT_PROMOTION } from "@/config/storefront-promotions";
+import {
   buildPublicCatalog,
   findPublicProduct,
 } from "@/catalog/public-catalog";
@@ -15,6 +20,27 @@ describe("database catalog projection", () => {
   afterEach(async () => {
     await client?.close();
     client = undefined;
+  });
+
+  it("derives the synthetic WINTER30 database fixture from the owner configuration", () => {
+    expect(syntheticWinter30PromotionFixture).toEqual({
+      campaignKey: WINTER30_STOREFRONT_PROMOTION.id,
+      displayName: WINTER30_STOREFRONT_PROMOTION.displayName,
+      displayCode: WINTER30_STOREFRONT_PROMOTION.displayCode,
+      basisPoints: WINTER30_STOREFRONT_PROMOTION.discountBps,
+      enabled: WINTER30_STOREFRONT_PROMOTION.enabled,
+      startsAt: WINTER30_STOREFRONT_PROMOTION.startAt,
+      endsAt: WINTER30_STOREFRONT_PROMOTION.endAt,
+      timezone: WINTER30_STOREFRONT_PROMOTION.timezone,
+      applicationMode: WINTER30_STOREFRONT_PROMOTION.applicationMode,
+      scope: WINTER30_STOREFRONT_PROMOTION.scope.kind,
+    });
+    expect(
+      syntheticDemoCatalogRecords.promotions.filter(
+        (promotion) =>
+          "campaignKey" in promotion && promotion.campaignKey === "winter30",
+      ),
+    ).toEqual([expect.objectContaining(syntheticWinter30PromotionFixture)]);
   });
 
   it("projects only stored catalog facts with canonical promotions and evidence relationships", async () => {
@@ -69,6 +95,42 @@ describe("database catalog projection", () => {
       currency: null,
       configuration: {},
     });
+  });
+
+  it("keeps an unbound legacy browse record publishable without creating checkout variant facts", async () => {
+    client = await createMigratedPglite();
+    await client.exec(`
+      INSERT INTO product_policy_groups (id, slug, name, active)
+      VALUES ('11000000-0000-4000-8000-000000000001', 'legacy-browse', 'Legacy browse', true);
+      INSERT INTO products
+        (id, slug, name, package_form, material_identity, policy_group_id, status)
+      VALUES ('11000000-0000-4000-8000-000000000002', 'legacy-browse-record',
+        'Legacy browse record', 'sealed unit', 'Legacy browse identity',
+        '11000000-0000-4000-8000-000000000001', 'active');
+      INSERT INTO product_prices
+        (id, product_id, version, amount_minor, currency, effective_at)
+      VALUES ('11000000-0000-4000-8000-000000000003',
+        '11000000-0000-4000-8000-000000000002', 1, 2400, 'USD',
+        '2026-01-01T00:00:00.000Z');
+      INSERT INTO lots
+        (id, product_id, supplier_name, supplier_lot_code, received_quantity,
+         available_quantity, status, expires_at)
+      VALUES ('11000000-0000-4000-8000-000000000004',
+        '11000000-0000-4000-8000-000000000002', 'Legacy supplier',
+        'LEGACY-BROWSE-LOT', 2, 2, 'released', '2027-01-01T00:00:00.000Z');
+    `);
+
+    const records = await loadDatabaseCatalogRecords(client);
+    const publicCatalog = buildPublicCatalog(records, {
+      now: new Date("2026-08-30T12:00:00.000Z"),
+    });
+    expect(findPublicProduct(publicCatalog, "legacy-browse-record")).not.toBeNull();
+
+    const variants = await client.query<{ count: number }>(`
+      SELECT count(*)::int AS count FROM product_variants
+      WHERE product_id = '11000000-0000-4000-8000-000000000002'
+    `);
+    expect(variants.rows).toEqual([{ count: 0 }]);
   });
 
   it("loads directly persisted unsafe active rows while the public read boundary sanitizes or excludes them", async () => {

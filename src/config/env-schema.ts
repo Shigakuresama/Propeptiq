@@ -3,6 +3,7 @@ import { z } from "zod";
 const capabilityMode = z.enum(["disabled", "test", "live"]);
 const appEnvironment = z.enum(["local", "preview", "production"]);
 const catalogDemoMode = z.enum(["disabled", "enabled"]);
+const concentrationCalculatorMode = z.enum(["disabled", "preview", "approved"]);
 const localTestDriver = z.enum(["disabled", "enabled"]);
 const vercelEnvironment = z.enum(["development", "preview", "production"]);
 const nonBlank = z.string().trim().min(1);
@@ -46,6 +47,17 @@ const generatedSecret = z
     (value) => new Set(value).size >= 8 && !isRepeatedShortPattern(value),
     { message: "Expected generated secret material with sufficient variation" },
   );
+const settlementWindowDays = z.coerce.number().int().min(1).max(90);
+/** Owner-configured Stripe ShippingRate backing the shipping quote port. */
+const stripeShippingRateId = z.string().min(1).refine(
+  (value) => value === value.trim() && /^shr_[A-Za-z0-9]{8,64}$/u.test(value),
+  { message: "Expected a Stripe shr_ shipping rate ID" },
+);
+/** Stripe Tax product tax code; general tangible goods for physical catalog items. */
+const stripeTaxCode = z.string().min(1).refine(
+  (value) => value === value.trim() && /^txcd_[0-9]{8}$/u.test(value),
+  { message: "Expected a Stripe txcd_ tax code" },
+);
 const stripeAccountId = z.string().min(1).refine(
   (value) =>
     value === value.trim() && /^acct_[A-Za-z0-9]{8,64}$/u.test(value),
@@ -80,6 +92,7 @@ const rawServerEnvSchema = z.object({
   APP_ENV: appEnvironment.default("local"),
   APP_ORIGIN: urlValue.optional(),
   CATALOG_DEMO_MODE: catalogDemoMode.default("disabled"),
+  RECONSTITUTION_CALCULATOR_MODE: concentrationCalculatorMode.default("disabled"),
   BROWSE_CATALOG_PUBLICATION: nonBlank.optional(),
   LOCAL_TEST_DRIVER: localTestDriver.default("disabled"),
   LOCAL_TEST_SECRET: z.string().min(32).optional(),
@@ -114,6 +127,14 @@ const rawServerEnvSchema = z.object({
   STRIPE_ACCOUNT_ID: stripeAccountId.optional(),
   STRIPE_SECRET_KEY: nonBlank.optional(),
   STRIPE_WEBHOOK_SECRET: nonBlank.optional(),
+  STRIPE_SHIPPING_RATE_ID: stripeShippingRateId.optional(),
+  /**
+   * Business days a reversible (ACH) invoice payment is held before the order
+   * may be released. See docs/adr/0006. Unset means NO release: an absent
+   * window must never degrade into shipping immediately.
+   */
+  INVOICE_SETTLEMENT_WINDOW_DAYS: settlementWindowDays.optional(),
+  STRIPE_TAX_CODE: stripeTaxCode.optional(),
   BLOB_READ_WRITE_TOKEN: nonBlank.optional(),
   RESEND_API_KEY: nonBlank.optional(),
   RESEND_FROM: nonBlank.pipe(z.email()).optional(),
@@ -239,6 +260,18 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
       code: "custom",
       path: ["CATALOG_DEMO_MODE"],
       message: "CATALOG_DEMO_MODE cannot be enabled for a production identity",
+    });
+  }
+
+  if (
+    env.RECONSTITUTION_CALCULATOR_MODE === "preview" &&
+    productionDeployment
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["RECONSTITUTION_CALCULATOR_MODE"],
+      message:
+        "RECONSTITUTION_CALCULATOR_MODE=preview is not permitted for a production identity",
     });
   }
 

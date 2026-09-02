@@ -54,7 +54,7 @@ const previewEnvironment = parseServerEnv({
   PAYMENTS_LIVE_CAPABILITY: "disabled",
 });
 const body = {
-  items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }],
+  items: [{ variantId: "20000000-0000-4000-8000-000000000001", quantity: 2 }],
   destination: {
     recipientName: "Synthetic Research Buyer",
     line1: "100 Test Way",
@@ -64,14 +64,14 @@ const body = {
     postalCode: "90001",
     countryCode: "US",
   },
-  promotionIds: ["66000000-0000-4000-8000-000000000001"],
+  pricingRevision: "a".repeat(64),
 };
 
-function request(requestOrigin = origin) {
+function request(requestOrigin = origin, payload: unknown = body) {
   return new Request(`${requestOrigin}/api/checkout/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json", "idempotency-key": idempotencyKey, origin: requestOrigin },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -121,6 +121,61 @@ describe("POST /api/checkout/sessions", () => {
       request: body,
       attributionCookie: null,
     });
+  });
+
+  it("returns exact 409 PRICE_CHANGED with refreshed safe variant lines and no hosted URL", async () => {
+    startSession.mockResolvedValueOnce({
+      status: "PRICE_CHANGED",
+      pricingRevision: "b".repeat(64),
+      cart: {
+        items: [{
+          variantId: "20000000-0000-4000-8000-000000000001",
+          quantity: 2,
+          available: true,
+          name: "Synthetic local test only — Alpha",
+          variantLabel: "5 mg test fixture",
+          unitAmountMinor: 1_680,
+          lineSubtotalMinor: 3_360,
+          currency: "USD",
+        }],
+        subtotalMinor: 3_360,
+        currency: "USD",
+        taxMinor: null,
+        shippingMinor: null,
+        finalDiscountMinor: null,
+      },
+    });
+
+    const response = await POST(request());
+    expect(response.status).toBe(409);
+    const result = await response.json();
+    expect(result).toEqual({
+      status: "PRICE_CHANGED",
+      pricingRevision: "b".repeat(64),
+      cart: expect.objectContaining({
+        items: [expect.objectContaining({
+          variantId: "20000000-0000-4000-8000-000000000001",
+          unitAmountMinor: 1_680,
+        })],
+      }),
+    });
+    expect(JSON.stringify(result)).not.toMatch(/stripe|provider|productId/iu);
+  });
+
+  it.each([
+    ["pricingRevision", undefined],
+    ["pricingRevision", "a".repeat(63)],
+    ["productId", "20000000-0000-4000-8000-000000000010"],
+    ["promotionIds", ["winter30"]],
+    ["totalMinor", 3_360],
+  ])("rejects hostile or missing session authority %s before runtime delegation", async (field, value) => {
+    const payload = { ...body } as Record<string, unknown>;
+    if (value === undefined) delete payload[field];
+    else payload[field] = value;
+    const response = await POST(request(origin, payload));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ status: "invalid_request" });
+    expect(startSession).not.toHaveBeenCalled();
   });
 
   it("returns the closed no-store envelope without a session operation for the exact Preview matrix", async () => {

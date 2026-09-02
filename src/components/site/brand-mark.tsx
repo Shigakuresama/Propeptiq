@@ -2,6 +2,23 @@ import Image from "next/image";
 
 import { cn } from "@/lib/utils";
 
+export function BrandMark({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn("relative block size-10 shrink-0", className)}
+    >
+      <Image
+        alt=""
+        className="object-contain object-center"
+        fill
+        sizes="40px"
+        src="/brand/propeptiq-logo.png"
+      />
+    </span>
+  );
+}
+
 export function BrandLogo({
   className,
   decorative = false,

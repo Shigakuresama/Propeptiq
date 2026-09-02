@@ -8,6 +8,7 @@ import type {
 import type { VerifiedIdentity } from "@/auth/identity";
 import type { CheckoutRepository } from "@/commerce/checkout-service";
 import type { ShippingQuotePort, TaxQuotePort } from "@/commerce/checkout-ports";
+import type { CartPreviewSource } from "@/cart/preview";
 import type { CheckoutSuccessReadModel } from "@/commerce/checkout-success-read";
 import type { FulfillmentCommandRepository } from "@/commerce/fulfillment-service";
 import type { PaymentProvider } from "@/commerce/payment-provider";
@@ -29,7 +30,7 @@ import type {
 import type { RewardsCheckoutAtomicPort } from "@/growth/rewards-service";
 import type { ReferralCandidateLookup } from "@/growth/referral-service";
 import type { RateLimitStore } from "@/security/rate-limit";
-import type { StorageVerifier } from "@/security/storage";
+import type { StorageVerifier, StorageWriter } from "@/security/storage";
 
 export type LocalActorOption = Readonly<{
   key: string;
@@ -78,6 +79,7 @@ export type LocalCommerceInspectionV1 = Readonly<{
 
 export type LocalCommerceDriverV1 = Readonly<{
   checkoutRepository: CheckoutRepository;
+  cartPreviewSource: () => CartPreviewSource;
   providerSessionRepository: ProviderSessionRepository;
   paymentProvider: PaymentProvider;
   shippingQuotePort: ShippingQuotePort;
@@ -180,6 +182,7 @@ export type LocalTestDriver = Readonly<{
   accountRepository: AccountRepository;
   adminRepository: AdminRepository;
   storageVerifier: StorageVerifier;
+  storageWriter: StorageWriter;
   loadAccount: (userId: string) => AccountSummary | null;
   loadCurrentAttestation: () => Readonly<{ version: number; policyText: string }> | null;
   listOrders: (userId: string) => readonly OrderSummary[];

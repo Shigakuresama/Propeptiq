@@ -1,4 +1,19 @@
+import { WINTER30_STOREFRONT_PROMOTION } from "@/config/storefront-promotions";
+
 import type { CatalogRecordSet } from "./types";
+
+export const syntheticWinter30PromotionFixture = Object.freeze({
+  campaignKey: WINTER30_STOREFRONT_PROMOTION.id,
+  displayName: WINTER30_STOREFRONT_PROMOTION.displayName,
+  displayCode: WINTER30_STOREFRONT_PROMOTION.displayCode,
+  basisPoints: WINTER30_STOREFRONT_PROMOTION.discountBps,
+  enabled: WINTER30_STOREFRONT_PROMOTION.enabled,
+  startsAt: WINTER30_STOREFRONT_PROMOTION.startAt,
+  endsAt: WINTER30_STOREFRONT_PROMOTION.endAt,
+  timezone: WINTER30_STOREFRONT_PROMOTION.timezone,
+  applicationMode: WINTER30_STOREFRONT_PROMOTION.applicationMode,
+  scope: WINTER30_STOREFRONT_PROMOTION.scope.kind,
+} as const);
 
 /** Development/test fixture only. Every value is synthetic and non-operational. */
 export const syntheticDemoCatalogRecords: CatalogRecordSet = {
@@ -160,6 +175,18 @@ export const syntheticDemoCatalogRecords: CatalogRecordSet = {
       startsAt: null,
       endsAt: null,
       configuration: { productIds: ["61000000-0000-4000-8000-000000000002"] },
+    },
+    {
+      id: "66000000-0000-4000-8000-000000000006",
+      code: syntheticWinter30PromotionFixture.displayCode,
+      version: 1,
+      name: syntheticWinter30PromotionFixture.displayName,
+      kind: "discount",
+      status: "active",
+      amountMinor: null,
+      currency: null,
+      configuration: {},
+      ...syntheticWinter30PromotionFixture,
     },
   ],
   promotionTargets: [

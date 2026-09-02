@@ -210,6 +210,40 @@ describe("refund and fulfillment PostgreSQL repository on PGlite", () => {
     });
   }
 
+  it("accepts canonical checkout provider schema 2 as refund authority", async () => {
+    await client.query(
+      `UPDATE checkout_attempts
+       SET provider_request_schema_version = 2,
+           provider_binding_snapshot = $1::jsonb
+       WHERE id = $2::uuid`,
+      [
+        JSON.stringify({
+          schemaVersion: 2,
+          lines: [{
+            variantId: "77000000-0000-4000-8000-000000000011",
+            productId: "77000000-0000-4000-8000-000000000012",
+            sku: "REFUND-SCHEMA-2",
+            productName: "Synthetic refund authority item",
+            variantLabel: "5 mg",
+            requestedQuantity: 1,
+            netLineMinor: 5_000,
+            baseUnitMinor: 5_000,
+            currency: "USD",
+            priceBookId: "77000000-0000-4000-8000-000000000013",
+            priceVersion: 1,
+            stripeProductId: "prod_refund_schema_2",
+            stripePriceId: "price_refund_schema_2",
+          }],
+        }),
+        ids.attempt,
+      ],
+    );
+
+    await expect(claim()).resolves.toMatchObject({
+      status: "call_required",
+    });
+  });
+
   it("commits the exact submitted request/hash/attempt before returning an immutable create descriptor", async () => {
     const result = await claim();
     expect(result.status).toBe("call_required");

@@ -5,8 +5,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 
 const origin = "http://127.0.0.1:4631";
-const productId = "61000000-0000-4000-8000-000000000001";
-const promotionId = "66000000-0000-4000-8000-000000000001";
+const variantId = "55000000-0000-4000-8000-000000000001";
 const localTestSecret = "task5-local-driver-secret-at-least-32-chars";
 const screenshotDirectory = path.resolve(
   process.cwd(),
@@ -50,8 +49,10 @@ async function inspectCommerce(request: APIRequestContext): Promise<Inspection> 
 async function signInAs(page: Page, actor: string) {
   await page.goto("/sign-in");
   await page.getByRole("radio", { name: actor }).check();
-  await page.getByRole("button", { name: "Continue to checkout" }).click();
-  await expect(page).toHaveURL(/\/checkout$/u);
+  await Promise.all([
+    page.waitForURL(/\/checkout$/u),
+    page.getByRole("button", { name: "Continue to checkout" }).click(),
+  ]);
 }
 
 async function seedCart(page: Page, quantity = 2) {
@@ -59,12 +60,12 @@ async function seedCart(page: Page, quantity = 2) {
   await expect(page.getByLabel("Loading saved cart")).toHaveCount(0);
   await page.evaluate(({ id, requestedQuantity }) => {
     window.localStorage.setItem(
-      "propeptiq.cart.v1",
-      JSON.stringify({ version: 1, items: [{ productId: id, quantity: requestedQuantity }] }),
+      "propeptiq.cart.v2",
+      JSON.stringify({ version: 2, items: [{ variantId: id, quantity: requestedQuantity }] }),
     );
     window.sessionStorage.removeItem("propeptiq.cart-preview.presentation.v1");
-    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v1" }));
-  }, { id: productId, requestedQuantity: quantity });
+    window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2", storageArea: window.localStorage }));
+  }, { id: variantId, requestedQuantity: quantity });
   await expect(page.getByRole("link", { name: `Cart, ${quantity} requested units` })).toBeVisible();
 }
 
@@ -80,123 +81,34 @@ async function fillDestination(page: Page, stateCode: "CA" | "OR" | "NV" | "DE")
   await page.getByLabel("City").fill("Los Angeles");
   await page.getByLabel("State or district").selectOption(stateCode);
   await page.getByLabel("Postal code").fill("90001");
-  await page.getByLabel("Promotion (optional)").selectOption(promotionId);
-}
-
-const commerceContractRoutes = ["checkout", "success", "orders", "shipments"] as const;
-type CommerceContractRoute = typeof commerceContractRoutes[number];
-type CommerceContractActor = "administrator" | "customer";
-
-async function createPendingCommerceSuccess(page: Page) {
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await openBuyerCheckout(page);
-  await fillDestination(page, "CA");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
-  await page.getByRole("button", { name: "Continue to hosted payment" }).click();
-  await page.getByRole("button", { name: "Return without payment event" }).click();
-  return page.url();
-}
-
-async function openCommerceContractRoute(
-  page: Page,
-  route: CommerceContractRoute,
-  successUrl: string,
-  currentActor: CommerceContractActor | null,
-): Promise<CommerceContractActor> {
-  const requiredActor = route === "shipments" ? "administrator" : "customer";
-  if (currentActor !== requiredActor) {
-    await signInAs(
-      page,
-      requiredActor === "administrator"
-        ? "Fixed capable administrator"
-        : "Fixed non-administrator",
-    );
-  }
-  if (route === "shipments") {
-    await page.goto("/admin/shipments");
-    await expect(page.getByRole("form", { name: /Handoff shipment/ })).toBeVisible();
-    return requiredActor;
-  }
-  if (route === "checkout") {
-    await seedCart(page);
-    await page.goto("/checkout");
-    await expect(page.getByLabel("Recipient name")).toBeVisible();
-    return requiredActor;
-  }
-  if (route === "success") {
-    await page.goto(successUrl);
-    await expect(page.getByRole("heading", { name: "Payment verification pending" })).toBeVisible();
-    return requiredActor;
-  }
-  await page.goto("/account/orders");
-  await expect(page.getByRole("heading", { name: "Order history" })).toBeVisible();
-  return requiredActor;
-}
-
-async function assertCommerceResponsiveMatrix(
-  page: Page,
-  successUrl: string,
-  widths: readonly number[],
-) {
-  for (const width of widths) {
-    let currentActor: CommerceContractActor | null = null;
-    await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
-    for (const route of commerceContractRoutes) {
-      currentActor = await openCommerceContractRoute(
-        page,
-        route,
-        successUrl,
-        currentActor,
-      );
-      await expect(page.locator("main#main-content")).toBeVisible();
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      );
-      expect(overflow, `${route} at ${width}px`).toBeLessThanOrEqual(1);
-      expect(
-        (await new AxeBuilder({ page }).analyze()).violations,
-        `${route} Axe at ${width}px`,
-      ).toEqual([]);
-
-      if (route === "shipments") {
-        const trigger = page.getByRole("button", { name: "Open administration navigation" });
-        if (width < 1280) await expect(trigger).toBeVisible();
-        else await expect(trigger).toBeHidden();
-        const aside = page.locator('nav[aria-label="Administration"]');
-        if (width >= 1280) await expect(aside).toBeVisible();
-        else await expect(aside).toBeHidden();
-      } else {
-        const trigger = page.getByRole("button", { name: "Open account navigation" });
-        const desktop = page.locator('nav[aria-label="Account"]');
-        if (width < 1280) {
-          await expect(trigger).toBeVisible();
-          await expect(desktop).toBeHidden();
-        } else {
-          await expect(trigger).toBeHidden();
-          await expect(desktop).toBeVisible();
-        }
-      }
-
-      if (width === 375) {
-        await page.keyboard.press("Tab");
-        const skip = page.getByRole("link", { name: "Skip to main content" });
-        await expect(skip).toBeFocused();
-        await page.keyboard.press("Enter");
-        await expect(page.locator("main#main-content")).toBeFocused();
-      }
-    }
-  }
 }
 
 function checkoutBody(stateCode: "CA" | "OR" | "NV" | "DE") {
   return {
-    items: [{ productId, quantity: 2 }],
+    items: [{ variantId, quantity: 2 }],
     destination: {
       recipientName: "Synthetic Research Buyer", line1: "100 Test Way", line2: null,
       city: "Los Angeles", stateCode, postalCode: "90001", countryCode: "US",
     },
-    promotionIds: [promotionId],
   };
+}
+
+async function checkoutSessionBody(
+  page: Page,
+  headers: Readonly<Record<string, string>>,
+  stateCode: "CA" | "OR" | "NV" | "DE",
+) {
+  const quote = await page.request.post("/api/checkout/quote", {
+    headers,
+    data: checkoutBody(stateCode),
+  });
+  expect(quote.status()).toBe(200);
+  const body = await quote.json();
+  expect(body).toMatchObject({
+    status: stateCode === "OR" ? "review_required" : "quoted",
+    pricingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
+  });
+  return { ...checkoutBody(stateCode), pricingRevision: body.pricingRevision as string };
 }
 
 async function captureBrowserChannels(
@@ -257,9 +169,10 @@ test("replays one exact hosted session and conflicts on changed facts for the sa
     "Content-Type": "application/json",
     "Idempotency-Key": "6c000000-0000-4000-8000-000000000003",
   };
+  const sessionRequest = await checkoutSessionBody(page, headers, "CA");
   const first = await page.request.post("/api/checkout/sessions", {
     headers,
-    data: checkoutBody("CA"),
+    data: sessionRequest,
   });
   const firstBody = await first.json();
   expect({ httpStatus: first.status(), body: firstBody }).toEqual({
@@ -277,7 +190,7 @@ test("replays one exact hosted session and conflicts on changed facts for the sa
 
   const replay = await page.request.post("/api/checkout/sessions", {
     headers,
-    data: checkoutBody("CA"),
+    data: sessionRequest,
   });
   expect(replay.status()).toBe(200);
   expect(await replay.json()).toEqual(firstBody);
@@ -286,8 +199,8 @@ test("replays one exact hosted session and conflicts on changed facts for the sa
   const changed = await page.request.post("/api/checkout/sessions", {
     headers,
     data: {
-      ...checkoutBody("CA"),
-      destination: { ...checkoutBody("CA").destination, postalCode: "90002" },
+      ...sessionRequest,
+      destination: { ...sessionRequest.destination, postalCode: "90002" },
     },
   });
   expect(changed.status()).toBe(409);
@@ -311,13 +224,13 @@ test("renders exact CA totals and keeps hosted return pending until one internal
   page.on("response", (response) => networkMetadata.push(response.url(), JSON.stringify(response.headers())));
   await openBuyerCheckout(page);
   await fillDestination(page, "CA");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
   await expect(page.getByRole("heading", { name: "Authoritative total" })).toBeVisible();
   await expect(page.getByText("Synthetic Reference Alpha — Demo Only", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("−$4.80", { exact: true })).toBeVisible();
+  await expect(page.getByText("−$3.84", { exact: true })).toBeVisible();
   await expect(page.getByText("$5.00", { exact: true })).toBeVisible();
   await expect(page.getByText("$3.21", { exact: true })).toBeVisible();
-  await expect(page.getByText("$51.41", { exact: true })).toBeVisible();
+  await expect(page.getByText("$52.37", { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.screenshot({ path: path.join(screenshotDirectory, "checkout-ready-1440.png"), fullPage: true });
 
@@ -377,7 +290,7 @@ test("renders exact CA totals and keeps hosted return pending until one internal
     eventId: `local-event:${sessionId}`,
     sessionId,
     orderId,
-    amountMinor: 5_141,
+    amountMinor: 5_237,
     currency: "USD",
   });
   const signature = createHmac("sha256", localTestSecret).update(signedPayload).digest();
@@ -399,7 +312,7 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
   await page.setViewportSize({ width: 375, height: 812 });
   await openBuyerCheckout(page);
   await fillDestination(page, "OR");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
   await expect(page.getByText("Manual review is required", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to hosted payment" })).toHaveCount(0);
   const reviewHeaders = {
@@ -407,9 +320,10 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
     "Content-Type": "application/json",
     "Idempotency-Key": "6c000000-0000-4000-8000-000000000002",
   };
+  const reviewSessionRequest = await checkoutSessionBody(page, reviewHeaders, "OR");
   const firstReview = await page.request.post("/api/checkout/sessions", {
     headers: reviewHeaders,
-    data: checkoutBody("OR"),
+    data: reviewSessionRequest,
   });
   expect(firstReview.status()).toBe(202);
   const firstReviewBody = await firstReview.json();
@@ -418,7 +332,7 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
   expect(reviewed.reviewRequestCount).toBe(1);
   const replayReview = await page.request.post("/api/checkout/sessions", {
     headers: reviewHeaders,
-    data: checkoutBody("OR"),
+    data: reviewSessionRequest,
   });
   expect(replayReview.status()).toBe(202);
   expect(await replayReview.json()).toEqual(firstReviewBody);
@@ -426,14 +340,17 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
   await page.screenshot({ path: path.join(screenshotDirectory, "checkout-review-375.png"), fullPage: true });
 
   await page.getByLabel("State or district").selectOption("NV");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
   await expect(page.getByText(/checkout is not permitted/i)).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to hosted payment" })).toHaveCount(0);
   await page.screenshot({ path: path.join(screenshotDirectory, "checkout-blocked-375.png"), fullPage: true });
 
   await page.getByLabel("State or district").selectOption("DE");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
-  await expect(page.getByText(/checkout is not permitted/i)).toBeVisible();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
+  await expect(page.getByText(
+    "One or more variants cannot be checked out with the current authoritative facts.",
+    { exact: true },
+  )).toBeVisible();
   await expect(page.getByRole("button", { name: "Try authoritative quote again" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to hosted payment" })).toHaveCount(0);
   expect((await inspectCommerce(request)).providerSessionCount).toBe(0);
@@ -442,7 +359,7 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
 test("owner success URLs fail closed for malformed and cross-owner reads", async ({ page, request }) => {
   await openBuyerCheckout(page);
   await fillDestination(page, "CA");
-  await page.getByRole("button", { name: "Get authoritative quote" }).click();
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
   await page.getByRole("button", { name: "Continue to hosted payment" }).click();
   await page.getByRole("button", { name: "Return without payment event" }).click();
   const ownerSuccessUrl = page.url();
@@ -456,162 +373,190 @@ test("owner success URLs fail closed for malformed and cross-owner reads", async
   expect((await inspectCommerce(request)).paymentTransitionCount).toBe(0);
 });
 
-test(
-  "staff refund, hold, handoff, delivery, and exception commands have once-only read-back",
-  { tag: "@isolated" },
-  async ({ page, request }) => {
-    await signInAs(page, "Fixed capable administrator");
-    await page.goto("/admin/refunds");
-    const refundForm = page.getByRole("form", { name: /Submit or recover refund/ });
-    await refundForm.getByRole("button", { name: "Submit guarded command" }).click();
-    await expect(page.getByRole("status")).toContainText(/awaiting a signed provider event|recorded/i);
-    const refunded = await inspectCommerce(request);
-    await page.getByRole("form", { name: /Submit or recover refund/ }).getByRole("button", { name: "Submit guarded command" }).click();
-    await expect(page.getByRole("status")).toBeVisible();
-    expect(await inspectCommerce(request)).toEqual(refunded);
+test("staff refund, hold, handoff, delivery, and exception commands have once-only read-back", async ({ page, request }) => {
+  await signInAs(page, "Fixed capable administrator");
+  await page.goto("/admin/refunds");
+  const refundForm = page.getByRole("form", { name: /Submit or recover refund/ });
+  await refundForm.getByRole("button", { name: "Submit guarded command" }).click();
+  const refundStatus = page.getByRole("status").filter({
+    hasText: /awaiting a signed provider event|recorded/i,
+  });
+  await expect(refundStatus).toContainText(/awaiting a signed provider event|recorded/i);
+  const refunded = await inspectCommerce(request);
+  await page.getByRole("form", { name: /Submit or recover refund/ }).getByRole("button", { name: "Submit guarded command" }).click();
+  await expect(refundStatus).toBeVisible();
+  expect(await inspectCommerce(request)).toEqual(refunded);
 
-    await page.goto("/admin/orders");
-    const focusTarget = await page.getByRole("form", { name: /Clear fulfillment hold/ })
-      .locator('input[name="orderId"]')
-      .inputValue();
-    await page.goto(`/admin/orders?command=clear-hold&target=${focusTarget}&result=ineligible`);
-    const failedCommand = page.getByRole("alert").filter({ hasText: "Command not completed" });
-    await expect(failedCommand).toContainText("Command not completed");
-    await expect(failedCommand).toBeFocused();
-    await page.goto("/admin/orders");
-    await page.getByRole("form", { name: /Clear fulfillment hold/ }).getByRole("button", { name: "Submit guarded command" }).click();
-    await expect(page.getByRole("status")).toContainText(/hold was cleared once/i);
-    const cleared = await inspectCommerce(request);
-    await page.goto("/admin/shipments");
-    await page.getByRole("form", { name: /Handoff shipment/ }).getByRole("button", { name: "Submit guarded command" }).click();
-    await expect(page.getByRole("status")).toContainText(/handed off once/i);
-    const handedOff = await inspectCommerce(request);
-    expect(handedOff.releaseCount).toBe(cleared.releaseCount + 1);
-    expect(handedOff.shipmentHandoffCount).toBe(cleared.shipmentHandoffCount + 1);
-    await page.setViewportSize({ width: 1024, height: 900 });
-    await page.screenshot({ path: path.join(screenshotDirectory, "admin-shipment-actions-1024.png"), fullPage: true });
+  await page.goto("/admin/orders");
+  const focusTarget = await page.getByRole("form", { name: /Clear fulfillment hold/ })
+    .locator('input[name="orderId"]')
+    .inputValue();
+  await page.goto(`/admin/orders?command=clear-hold&target=${focusTarget}&result=ineligible`);
+  const failedCommand = page.getByRole("alert").filter({ hasText: "Command not completed" });
+  await expect(failedCommand).toContainText("Command not completed");
+  await expect(failedCommand).toBeFocused();
+  await page.goto("/admin/orders");
+  await page.getByRole("form", { name: /Clear fulfillment hold/ }).getByRole("button", { name: "Submit guarded command" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /hold was cleared once/i }),
+  ).toContainText(/hold was cleared once/i);
+  const cleared = await inspectCommerce(request);
+  await page.goto("/admin/shipments");
+  await page.getByRole("form", { name: /Handoff shipment/ }).getByRole("button", { name: "Submit guarded command" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /handed off once/i }),
+  ).toContainText(/handed off once/i);
+  const handedOff = await inspectCommerce(request);
+  expect(handedOff.releaseCount).toBe(cleared.releaseCount + 1);
+  expect(handedOff.shipmentHandoffCount).toBe(cleared.shipmentHandoffCount + 1);
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.screenshot({ path: path.join(screenshotDirectory, "admin-shipment-actions-1024.png"), fullPage: true });
 
-    await page.getByRole("form", { name: /Mark shipment delivered/ }).getByRole("button", { name: "Submit guarded command" }).click();
-    await expect(page.getByRole("status")).toContainText(/marked delivered once/i);
-    const delivered = await inspectCommerce(request);
-    expect(delivered.deliveryCount).toBe(handedOff.deliveryCount + 1);
+  await page.getByRole("form", { name: /Mark shipment delivered/ }).getByRole("button", { name: "Submit guarded command" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /marked delivered once/i }),
+  ).toContainText(/marked delivered once/i);
+  const delivered = await inspectCommerce(request);
+  expect(delivered.deliveryCount).toBe(handedOff.deliveryCount + 1);
 
-    await resetCommerce(request);
-    await page.goto("/admin/orders");
-    await page.getByRole("form", { name: /Clear fulfillment hold/ }).getByRole("button", { name: "Submit guarded command" }).click();
-    await expect(page.getByRole("status")).toContainText(/hold was cleared once/i);
-    await page.goto("/admin/shipments");
-    await page.getByRole("form", { name: /Handoff shipment/ }).getByRole("button", { name: "Submit guarded command" }).click();
-    await expect(page.getByRole("status")).toContainText(/handed off once/i);
-    const beforeException = await inspectCommerce(request);
-    await page.getByRole("form", { name: /Record shipment exception/ }).getByRole("button", { name: "Submit guarded command" }).click();
-    await expect(page.getByRole("status")).toContainText(/exception was recorded once/i);
-    const excepted = await inspectCommerce(request);
-    expect(excepted.exceptionCount).toBe(beforeException.exceptionCount + 1);
-    await page.reload();
-    expect(await inspectCommerce(request)).toEqual(excepted);
-  },
-);
+  await resetCommerce(request);
+  await page.goto("/admin/orders");
+  await page.getByRole("form", { name: /Clear fulfillment hold/ }).getByRole("button", { name: "Submit guarded command" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /hold was cleared once/i }),
+  ).toContainText(/hold was cleared once/i);
+  await page.goto("/admin/shipments");
+  await page.getByRole("form", { name: /Handoff shipment/ }).getByRole("button", { name: "Submit guarded command" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /handed off once/i }),
+  ).toContainText(/handed off once/i);
+  const beforeException = await inspectCommerce(request);
+  await page.getByRole("form", { name: /Record shipment exception/ }).getByRole("button", { name: "Submit guarded command" }).click();
+  await expect(
+    page.getByRole("status").filter({ hasText: /exception was recorded once/i }),
+  ).toContainText(/exception was recorded once/i);
+  const excepted = await inspectCommerce(request);
+  expect(excepted.exceptionCount).toBe(beforeException.exceptionCount + 1);
+  await page.reload();
+  expect(await inspectCommerce(request)).toEqual(excepted);
+});
 
-test(
-  "commerce pages preserve narrow and tablet responsive, keyboard, and accessibility contracts",
-  { tag: "@isolated" },
-  async ({ page }) => {
-    const successUrl = await createPendingCommerceSuccess(page);
-    await assertCommerceResponsiveMatrix(page, successUrl, [375, 768]);
-  },
-);
+test("required commerce pages preserve responsive, keyboard, and accessibility contracts", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openBuyerCheckout(page);
+  await fillDestination(page, "CA");
+  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
+  await page.getByRole("button", { name: "Continue to hosted payment" }).click();
+  await page.getByRole("button", { name: "Return without payment event" }).click();
+  const successUrl = page.url();
+  const routes = ["checkout", "success", "orders", "shipments"] as const;
 
-test(
-  "commerce pages preserve desktop responsive and accessibility contracts",
-  { tag: "@isolated" },
-  async ({ page }) => {
-    const successUrl = await createPendingCommerceSuccess(page);
-    await assertCommerceResponsiveMatrix(page, successUrl, [1024, 1440]);
-  },
-);
-
-test(
-  "commerce pages preserve mobile sheets, zoom targets, and reduced motion",
-  { tag: "@isolated" },
-  async ({ page }) => {
-    const successUrl = await createPendingCommerceSuccess(page);
-    await page.setViewportSize({ width: 375, height: 812 });
-    let currentActor: CommerceContractActor | null = null;
-    for (const [route, triggerName] of [
-      ["orders", "Open account navigation"],
-      ["shipments", "Open administration navigation"],
-    ] as const) {
-      currentActor = await openCommerceContractRoute(
-        page,
-        route,
-        successUrl,
-        currentActor,
-      );
-      const trigger = page.getByRole("button", { name: triggerName });
-      await trigger.focus();
-      await page.keyboard.press("Enter");
-      const sheet = page.locator('[data-slot="sheet-content"]');
-      await expect(sheet).toBeVisible();
-      await page.keyboard.press("Tab");
-      expect(
-        await page.evaluate(
-          () => Boolean(document.activeElement?.closest('[data-slot="sheet-content"]')),
-        ),
-      ).toBe(true);
-      await page.keyboard.press("Escape");
-      await expect(sheet).toBeHidden();
-      await expect(trigger).toBeFocused();
+  const openRoute = async (route: typeof routes[number]) => {
+    if (route === "shipments") {
+      await signInAs(page, "Fixed capable administrator");
+      await page.goto("/admin/shipments");
+      await expect(page.getByRole("form", { name: /Handoff shipment/ })).toBeVisible();
+      return;
     }
-
-    await page.setViewportSize({ width: 1024, height: 900 });
-    currentActor = null;
-    for (const route of commerceContractRoutes) {
-      currentActor = await openCommerceContractRoute(
-        page,
-        route,
-        successUrl,
-        currentActor,
-      );
-      await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
-      // This is the brief's labeled CSS-zoom proxy, not literal browser zoom.
-      expect(
-        await page.evaluate(
-          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        ),
-        `${route} at the 200% CSS-zoom proxy`,
-      ).toBeLessThanOrEqual(1);
-      const requiredControls = route === "checkout"
-        ? page.getByLabel(/Recipient name|State or district/)
-        : route === "success"
-          ? page.getByRole("link", { name: "View order history" })
-          : route === "orders"
-            ? page.getByRole("link", { name: "View order" }).first()
-            : page.getByRole("form", { name: /Handoff shipment/ })
-              .getByRole("button", { name: "Submit guarded command" });
-      await expect(requiredControls.first()).toBeVisible();
-      const targets = await requiredControls.evaluateAll((elements) => elements.map((element) => {
-        const box = element.getBoundingClientRect();
-        return {
-          width: box.width,
-          height: box.height,
-          order: getComputedStyle(element).order,
-          tabIndex: (element as HTMLElement).tabIndex,
-        };
-      }));
-      expect(targets.length).toBeGreaterThan(0);
-      expect(
-        targets.every(
-          (target) => target.width >= 44
-            && target.height >= 44
-            && target.order === "0"
-            && target.tabIndex >= 0,
-        ),
-      ).toBe(true);
+    await signInAs(page, "Fixed non-administrator");
+    if (route === "checkout") {
+      await seedCart(page);
+      await page.goto("/checkout");
+      await expect(page.getByLabel("Recipient name")).toBeVisible();
+      return;
     }
+    if (route === "success") {
+      await page.goto(successUrl);
+      await expect(page.getByRole("heading", { name: "Payment verification pending" })).toBeVisible();
+      return;
+    }
+    await page.goto("/account/orders");
+    await expect(page.getByRole("heading", { name: "Order history" })).toBeVisible();
+  };
 
-    await expect(page.locator("body")).toHaveCSS("animation-duration", "0s");
-    await expect(page.locator("body")).toHaveCSS("transition-duration", "0s");
-    await expect(page.locator("html")).toHaveCSS("scroll-behavior", "auto");
-  },
-);
+  for (const width of [375, 768, 1024, 1440]) {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
+    for (const route of routes) {
+      await openRoute(route);
+      await expect(page.locator("main#main-content")).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `${route} at ${width}px`).toBeLessThanOrEqual(1);
+      expect((await new AxeBuilder({ page }).analyze()).violations, `${route} Axe at ${width}px`).toEqual([]);
+
+      if (route === "shipments") {
+        const trigger = page.getByRole("button", { name: "Open administration navigation" });
+        if (width < 1280) await expect(trigger).toBeVisible();
+        else await expect(trigger).toBeHidden();
+        const aside = page.locator('nav[aria-label="Administration"]');
+        if (width >= 1280) await expect(aside).toBeVisible();
+        else await expect(aside).toBeHidden();
+      } else {
+        const trigger = page.getByRole("button", { name: "Open account navigation" });
+        const desktop = page.locator('nav[aria-label="Account"]');
+        if (width < 1280) {
+          await expect(trigger).toBeVisible();
+          await expect(desktop).toBeHidden();
+        } else {
+          await expect(trigger).toBeHidden();
+          await expect(desktop).toBeVisible();
+        }
+      }
+
+      if (width === 375) {
+        await page.keyboard.press("Tab");
+        const skip = page.getByRole("link", { name: "Skip to main content" });
+        await expect(skip).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(page.locator("main#main-content")).toBeFocused();
+      }
+    }
+  }
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  for (const [route, triggerName] of [
+    ["orders", "Open account navigation"],
+    ["shipments", "Open administration navigation"],
+  ] as const) {
+    await openRoute(route);
+    const trigger = page.getByRole("button", { name: triggerName });
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const sheet = page.locator('[data-slot="sheet-content"]');
+    await expect(sheet).toBeVisible();
+    await page.keyboard.press("Tab");
+    expect(await page.evaluate(() => Boolean(document.activeElement?.closest('[data-slot="sheet-content"]')))).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(sheet).toBeHidden();
+    await expect(trigger).toBeFocused();
+  }
+
+  await page.setViewportSize({ width: 1024, height: 900 });
+  for (const route of routes) {
+    await openRoute(route);
+    await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+    // This is the brief's labeled CSS-zoom proxy, not literal browser zoom.
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
+      `${route} at the 200% CSS-zoom proxy`,
+    ).toBeLessThanOrEqual(1);
+    const requiredControls = route === "checkout"
+      ? page.getByLabel(/Recipient name|State or district/)
+      : route === "success"
+        ? page.getByRole("link", { name: "View order history" })
+        : route === "orders"
+          ? page.getByRole("link", { name: "View order" }).first()
+          : page.getByRole("form", { name: /Handoff shipment/ }).getByRole("button", { name: "Submit guarded command" });
+    await expect(requiredControls.first()).toBeVisible();
+    const targets = await requiredControls.evaluateAll((elements) => elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return { width: box.width, height: box.height, order: getComputedStyle(element).order, tabIndex: (element as HTMLElement).tabIndex };
+    }));
+    expect(targets.length).toBeGreaterThan(0);
+    expect(targets.every((target) => target.width >= 44 && target.height >= 44 && target.order === "0" && target.tabIndex >= 0)).toBe(true);
+  }
+
+  await expect(page.locator("body")).toHaveCSS("animation-duration", "0s");
+  await expect(page.locator("body")).toHaveCSS("transition-duration", "0s");
+  await expect(page.locator("html")).toHaveCSS("scroll-behavior", "auto");
+});

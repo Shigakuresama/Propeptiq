@@ -1,6 +1,12 @@
 import { isSha256 } from "@/commerce/checkout-identity";
 import {
+  createStripeProviderBindingSnapshotV2,
+  type StripeProviderBindingSnapshotV2,
+} from "@/commerce/provider-contracts";
+import {
+  parseCheckoutQuoteRequest,
   parseCheckoutRequest,
+  type CheckoutQuoteRequest,
   type CheckoutRequest,
 } from "@/domain/checkout";
 
@@ -84,7 +90,7 @@ export type TaxQuotePort = Readonly<{
   quoteTax: (request: TaxQuoteRequest) => Promise<unknown>;
 }>;
 
-export type ProviderPreparation = Readonly<{
+type ProviderPreparationBase = Readonly<{
   authority: "server_prepared_provider_request";
   provider: "stripe" | "local_test";
   providerIdempotencyKey: string;
@@ -92,13 +98,28 @@ export type ProviderPreparation = Readonly<{
   providerExpiresAt: string;
   providerCustomerEmail: string;
   providerOrigin: string;
-  providerRequestSchemaVersion: 1;
   providerLivemode: boolean;
   providerScope: string;
 }>;
 
-export type RewardsCheckoutRequest = CheckoutRequest &
-  Readonly<{ rewardRedemptionPoints?: number }>;
+export type ProviderPreparation =
+  | Readonly<ProviderPreparationBase & {
+      providerRequestSchemaVersion: 1;
+      providerBindingSnapshot?: never;
+    }>
+  | Readonly<ProviderPreparationBase & {
+      providerRequestSchemaVersion: 2;
+      providerBindingSnapshot: StripeProviderBindingSnapshotV2;
+    }>;
+
+export type RewardsCheckoutQuoteRequest = CheckoutQuoteRequest;
+export type RewardsCheckoutRequest = CheckoutRequest;
+export type LegacyRewardsCheckoutRequest = Readonly<{
+  items: readonly Readonly<{ productId: string; quantity: number }>[];
+  destination: CheckoutQuoteRequest["destination"];
+  promotionIds: readonly string[];
+  rewardRedemptionPoints?: number;
+}>;
 
 export const LOCAL_PAYMENT_PROVIDER_SCOPE =
   "local_test:synthetic-propeptiq-v1" as const;
@@ -218,38 +239,75 @@ function fail(field: string): ContractResult<never> {
 export function parseRewardsCheckoutRequest(
   value: unknown,
 ): ContractResult<RewardsCheckoutRequest> {
+  const parsed = parseCheckoutRequest(value);
+  return parsed.ok
+    ? Object.freeze({ ok: true, value: parsed.value })
+    : fail(parsed.error.field);
+}
+
+export function parseRewardsCheckoutQuoteRequest(
+  value: unknown,
+): ContractResult<RewardsCheckoutQuoteRequest> {
+  const parsed = parseCheckoutQuoteRequest(value);
+  return parsed.ok
+    ? Object.freeze({ ok: true, value: parsed.value })
+    : fail(parsed.error.field);
+}
+
+export function parseLegacyRewardsCheckoutRequest(
+  value: unknown,
+): ContractResult<LegacyRewardsCheckoutRequest> {
   if (!isRecord(value)) return fail("request");
   const hasRewards = Object.hasOwn(value, "rewardRedemptionPoints");
-  const expected = [
+  if (!exactKeys(value, [
     "items",
     "destination",
     "promotionIds",
     ...(hasRewards ? ["rewardRedemptionPoints"] : []),
-  ];
-  if (!exactKeys(value, expected)) return fail("request");
-  if (
-    hasRewards &&
-    (!Number.isSafeInteger(value.rewardRedemptionPoints) ||
-      (value.rewardRedemptionPoints as number) <= 0)
-  ) {
-    return fail("request.rewardRedemptionPoints");
+  ]) || !Array.isArray(value.items) || !Array.isArray(value.promotionIds)) {
+    return fail("request");
   }
-  const base = parseCheckoutRequest({
-    items: value.items,
+  const items: Array<{ productId: string; quantity: number }> = [];
+  for (const candidate of value.items) {
+    if (!isRecord(candidate) || !exactKeys(candidate, ["productId", "quantity"])) {
+      return fail("request");
+    }
+    items.push({
+      productId: candidate.productId as string,
+      quantity: candidate.quantity as number,
+    });
+  }
+  const quote = parseCheckoutQuoteRequest({
+    items: items.map((item) => ({
+      variantId: item.productId,
+      quantity: item.quantity,
+    })),
     destination: value.destination,
-    promotionIds: value.promotionIds,
+    ...(hasRewards
+      ? { rewardRedemptionPoints: value.rewardRedemptionPoints }
+      : {}),
   });
-  if (!base.ok) return fail("request");
+  if (!quote.ok || value.promotionIds.length > 1) return fail("request");
+  const promotionIds: string[] = [];
+  for (const promotionId of value.promotionIds) {
+    if (typeof promotionId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(promotionId)) {
+      return fail("request");
+    }
+    promotionIds.push(promotionId.toLowerCase());
+  }
   return Object.freeze({
     ok: true,
-    value: Object.freeze(
-      hasRewards
-        ? {
-            ...base.value,
-            rewardRedemptionPoints: value.rewardRedemptionPoints as number,
-          }
-        : base.value,
-    ),
+    value: Object.freeze({
+      items: Object.freeze(quote.value.items.map((item) => Object.freeze({
+        productId: item.variantId,
+        quantity: item.quantity,
+      }))),
+      destination: quote.value.destination,
+      promotionIds: Object.freeze(promotionIds),
+      ...(hasRewards
+        ? { rewardRedemptionPoints: quote.value.rewardRedemptionPoints! }
+        : {}),
+    }),
   });
 }
 
@@ -355,8 +413,15 @@ export function parseProviderPreparation(
   value: unknown,
   expected: Readonly<{ attemptId: string; now: Date }>,
 ): ContractResult<ProviderPreparation> {
+  if (!isRecord(value)) return fail("providerPreparation");
+  const schemaVersion = value.providerRequestSchemaVersion;
+  const binding = schemaVersion === 2 && isRecord(value.providerBindingSnapshot)
+    ? value.providerBindingSnapshot
+    : null;
+  const parsedBinding = binding === null
+    ? null
+    : createStripeProviderBindingSnapshotV2(binding.lines);
   if (
-    !isRecord(value) ||
     !exactKeys(value, [
       "authority",
       "provider",
@@ -368,6 +433,7 @@ export function parseProviderPreparation(
       "providerRequestSchemaVersion",
       "providerLivemode",
       "providerScope",
+      ...(schemaVersion === 2 ? ["providerBindingSnapshot"] : []),
     ]) ||
     value.authority !== "server_prepared_provider_request" ||
     (value.provider !== "stripe" && value.provider !== "local_test") ||
@@ -377,7 +443,14 @@ export function parseProviderPreparation(
     typeof value.providerExpiresAt !== "string" ||
     !isCanonicalProviderEmail(value.providerCustomerEmail) ||
     !isCanonicalProviderOrigin(value.providerOrigin, value.provider) ||
-    value.providerRequestSchemaVersion !== 1 ||
+    (schemaVersion !== 1 && schemaVersion !== 2) ||
+    (schemaVersion === 2 &&
+      (binding === null ||
+        !exactKeys(binding, ["schemaVersion", "lines"]) ||
+        binding.schemaVersion !== 2 ||
+        parsedBinding === null ||
+        !parsedBinding.ok ||
+        JSON.stringify(parsedBinding.value) !== JSON.stringify(binding))) ||
     typeof value.providerLivemode !== "boolean" ||
     !isCoherentProviderScope(
       value.provider,
@@ -400,19 +473,30 @@ export function parseProviderPreparation(
   ) {
     return fail("providerPreparation.providerExpiresAt");
   }
+  const common = {
+    authority: "server_prepared_provider_request" as const,
+    provider: value.provider as ProviderPreparationBase["provider"],
+    providerIdempotencyKey: value.providerIdempotencyKey,
+    providerRequestHash: value.providerRequestHash,
+    providerExpiresAt: value.providerExpiresAt,
+    providerCustomerEmail: value.providerCustomerEmail,
+    providerOrigin: value.providerOrigin,
+    providerLivemode: value.providerLivemode,
+    providerScope: value.providerScope,
+  };
+  if (schemaVersion === 1) {
+    return Object.freeze({
+      ok: true as const,
+      value: Object.freeze({ ...common, providerRequestSchemaVersion: 1 as const }),
+    });
+  }
+  if (parsedBinding === null || !parsedBinding.ok) return fail("providerPreparation");
   return Object.freeze({
-    ok: true,
+    ok: true as const,
     value: Object.freeze({
-      authority: "server_prepared_provider_request" as const,
-      provider: value.provider,
-      providerIdempotencyKey: value.providerIdempotencyKey,
-      providerRequestHash: value.providerRequestHash,
-      providerExpiresAt: value.providerExpiresAt,
-      providerCustomerEmail: value.providerCustomerEmail,
-      providerOrigin: value.providerOrigin,
-      providerRequestSchemaVersion: 1,
-      providerLivemode: value.providerLivemode,
-      providerScope: value.providerScope,
+      ...common,
+      providerRequestSchemaVersion: 2 as const,
+      providerBindingSnapshot: parsedBinding.value,
     }),
   });
 }

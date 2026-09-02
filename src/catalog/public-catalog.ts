@@ -222,6 +222,30 @@ function targetApplies(
   );
 }
 
+type PositiveLegacyCatalogPriceRecord = CatalogPriceRecord &
+  Readonly<{ amountMinor: number }>;
+
+function isLegacyProductPrice(
+  price: CatalogPriceRecord,
+): price is PositiveLegacyCatalogPriceRecord {
+  const persisted = price as CatalogPriceRecord & {
+    variantId?: string | null;
+    priceStatus?: "pending" | "active" | "unavailable";
+  };
+  return (
+    (persisted.variantId === undefined || persisted.variantId === null) &&
+    (persisted.priceStatus === undefined || persisted.priceStatus === "active") &&
+    typeof persisted.amountMinor === "number" &&
+    Number.isSafeInteger(persisted.amountMinor) &&
+    persisted.amountMinor > 0
+  );
+}
+
+function isLegacyProductLot(lot: CatalogLotRecord): boolean {
+  const persisted = lot as CatalogLotRecord & { variantId?: string | null };
+  return persisted.variantId === undefined || persisted.variantId === null;
+}
+
 export function buildPublicCatalog(
   records: CatalogRecordSet,
   options: { now?: Date } = {},
@@ -251,6 +275,7 @@ export function buildPublicCatalog(
       const expiresAt = lot.expiresAt ? new Date(lot.expiresAt).getTime() : null;
       return (
         activeProductIds.has(lot.productId) &&
+        isLegacyProductLot(lot) &&
         lot.status === "released" &&
         lot.availableQuantity > 0 &&
         passesOrdinaryPublicCopy(lot.supplierLotCode) &&
@@ -307,20 +332,22 @@ export function buildPublicCatalog(
   const productFacts = new Map<
     string,
     {
-      price: CatalogPriceRecord;
+      price: PositiveLegacyCatalogPriceRecord;
       lots: CatalogLotRecord[];
       primaryLot: CatalogLotRecord;
     }
   >();
   for (const product of activeProducts) {
     const currentPrices = records.prices.filter(
-      (candidate) =>
+      (candidate): candidate is PositiveLegacyCatalogPriceRecord =>
+        isLegacyProductPrice(candidate) &&
         candidate.productId === product.id &&
         candidate.supersededAt === null &&
         new Date(candidate.effectiveAt).getTime() <= now.getTime(),
     );
     const price =
-      currentPrices.length === 1 && currentPrices[0]?.currency === "USD"
+      currentPrices.length === 1 &&
+      currentPrices[0]?.currency === "USD"
         ? currentPrices[0]
         : undefined;
     const lots = releasedLots.filter((lot) => lot.productId === product.id);

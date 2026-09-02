@@ -67,6 +67,12 @@ function repositories(): RequestRepositories {
       },
     },
     storageVerifier: { mode: "disabled", verify: async () => ({ exists: false, sha256: null }) },
+    storageWriter: {
+      mode: "disabled",
+      write: async () => {
+        throw new Error("Storage writes are not used by account updates");
+      },
+    },
     loadAccount: async () => null,
     loadCurrentAttestation: async () => ({ version: 1, policyText: "Research only." }),
     listOrders: async () => [],

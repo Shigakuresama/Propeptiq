@@ -5,23 +5,36 @@ import {
   hashCheckoutRequest,
   hashReviewSnapshot,
   isCanonicalUuid,
+  isSha256,
   type CheckoutIdentity,
   type KeyedUuidGenerator,
   type Sha256Hasher,
 } from "@/commerce/checkout-identity";
 import {
+  parseLegacyRewardsCheckoutRequest,
   parseProviderPreparation,
+  parseRewardsCheckoutQuoteRequest,
   parseRewardsCheckoutRequest,
   parseShippingQuoteResult,
   parseTaxQuoteResult,
+  type LegacyRewardsCheckoutRequest,
   type ProviderPreparation,
   type ShippingQuote,
   type ShippingQuotePort,
   type TaxQuote,
   type TaxQuotePort,
-  type RewardsCheckoutRequest,
+  type RewardsCheckoutQuoteRequest,
 } from "@/commerce/checkout-ports";
-import type { CheckoutRequest } from "@/domain/checkout";
+import { buildSafeCartPreview, type SafeCartPreview } from "@/cart/preview";
+import {
+  resolveUnreconciledActiveConfiguredAutomaticPromotions,
+  STOREFRONT_PROMOTIONS,
+} from "@/config/storefront-promotions";
+import type {
+  CheckoutQuoteRequest,
+  CheckoutUnavailable,
+  PriceChanged,
+} from "@/domain/checkout";
 import {
   evaluateCheckout,
   type BuyerStatus,
@@ -39,6 +52,14 @@ import {
   type PromotionRecord,
 } from "@/domain/promotions";
 import type { OrderState } from "@/domain/orders";
+import {
+  calculateVariantLinePrice,
+  isStorefrontPromotionActive,
+  promotionApplies,
+  quantityDiscountBps,
+  resolveEffectiveDiscount,
+  type StorefrontPromotion,
+} from "@/domain/storefront-pricing";
 import type {
   CheckoutRewardsQuote,
   AppliedCheckoutRewards,
@@ -94,6 +115,46 @@ export type AuthoritativeCheckoutFacts = Readonly<{
   promotion: PromotionRecord | null;
 }>;
 
+export type AuthoritativeAutomaticPromotion = StorefrontPromotion &
+  Readonly<{
+    recordId: string;
+    campaignKey: string;
+    version: number;
+  }>;
+
+export type AuthoritativeVariantCheckoutItemFact = Readonly<{
+  variantId: string;
+  productId: string;
+  sku: string;
+  variantLabel: string;
+  productName: string;
+  packageForm: string;
+  policyGroupId: string;
+  productActive: boolean;
+  policyGroupActive: boolean;
+  variantActive: boolean;
+  availabilityRevision: string;
+  inventoryRevision: string;
+  price: Readonly<{
+    id: string;
+    version: number;
+    status: "pending" | "active" | "unavailable";
+    amountMinor: number;
+    currency: string;
+    effectiveAt: string;
+  }>;
+  stripeProductId: string | null;
+  stripePriceId: string | null;
+  destination: DestinationResolution;
+  eligibleLots: readonly AuthoritativeLotFact[];
+}>;
+
+export type AuthoritativeVariantCheckoutFacts = Readonly<{
+  buyer: AuthoritativeCheckoutFacts["buyer"];
+  items: readonly AuthoritativeVariantCheckoutItemFact[];
+  automaticPromotions: readonly AuthoritativeAutomaticPromotion[];
+}>;
+
 export type BrowserCheckoutQuote = Readonly<{
   status: "ready" | "review_required";
   reviewRequired: boolean;
@@ -112,7 +173,10 @@ export type BrowserCheckoutQuote = Readonly<{
   rewardsBenefitAvailable: boolean;
   rewardsUnavailableReason: string | null;
   lines: readonly Readonly<{
-    productId: string;
+    productId?: string;
+    variantId?: string;
+    sku?: string;
+    variantLabel?: string;
     productName: string;
     packageForm: string;
     quantity: number;
@@ -149,6 +213,7 @@ export type StoredCheckoutAttempt = Readonly<{
   reviewRequired: boolean;
   hasReservations: boolean;
   quoteSnapshot: BrowserCheckoutQuote | null;
+  pricingRevision: string | null;
 }>;
 
 export type CheckoutLoadedResult = Readonly<{
@@ -158,10 +223,15 @@ export type CheckoutLoadedResult = Readonly<{
   attemptStatus: CheckoutAttemptStatus;
   orderState: OrderState;
   quoteSnapshot: BrowserCheckoutQuote | null;
+  pricingRevision: string | null;
 }>;
 
 export type FactLoadResult =
   | Readonly<{ ok: true; value: AuthoritativeCheckoutFacts }>
+  | Readonly<{ ok: false; reasons: readonly string[] }>;
+
+export type VariantFactLoadResult =
+  | Readonly<{ ok: true; value: AuthoritativeVariantCheckoutFacts }>
   | Readonly<{ ok: false; reasons: readonly string[] }>;
 
 export type CheckoutPrepareResult =
@@ -214,9 +284,23 @@ export type CheckoutRepository = Readonly<{
   }>) => Promise<StoredCheckoutAttempt | null>;
   loadFacts: (input: Readonly<{
     buyerUserId: string;
-    request: CheckoutRequest;
+    request: LegacyRewardsCheckoutRequest;
     now: Date;
   }>) => Promise<FactLoadResult>;
+  loadVariantFacts?: (input: Readonly<{
+    buyerUserId: string;
+    request: CheckoutQuoteRequest;
+    now: Date;
+  }>) => Promise<VariantFactLoadResult>;
+  loadProviderCreateVariantFacts?: (input: Readonly<{
+    buyerUserId: string;
+    idempotencyKey: string;
+    orderId: string;
+    attemptId: string;
+    expectedStoredPricingRevision: string;
+    request: CheckoutQuoteRequest;
+    now: Date;
+  }>) => Promise<VariantFactLoadResult>;
   findExactReview: (input: Readonly<{
     orderId: string;
     buyerUserId: string;
@@ -231,11 +315,12 @@ export type CheckoutRepository = Readonly<{
   ) => Promise<DefiniteFailureReleaseResult>;
 }>;
 
-export type AuthoritativeCheckoutPlanData = Readonly<{
+export type LegacyAuthoritativeCheckoutPlanData = Readonly<{
+  kind: "legacy_product";
   identity: CheckoutIdentity;
   buyerUserId: string;
   idempotencyKey: string;
-  request: RewardsCheckoutRequest;
+  request: LegacyRewardsCheckoutRequest;
   requestHash: string;
   authoritativeAt: Date;
   factsHash: string;
@@ -259,6 +344,64 @@ export type AuthoritativeCheckoutPlanData = Readonly<{
   browserQuote: BrowserCheckoutQuote;
 }>;
 
+export type AuthoritativeVariantLinePrice = Readonly<{
+  variantId: string;
+  productId: string;
+  sku: string;
+  variantLabel: string;
+  quantity: number;
+  baseUnitMinor: number;
+  effectiveUnitMinor: number;
+  lineSubtotalMinor: number;
+  lineSavingsMinor: number;
+  appliedPromotionIds: readonly string[];
+  priceId: string;
+  priceVersion: number;
+  stripeProductId: string;
+  stripePriceId: string;
+}>;
+
+export type AuthoritativeVariantCheckoutPlanData = Readonly<{
+  kind: "canonical_variant";
+  identity: CheckoutIdentity;
+  buyerUserId: string;
+  idempotencyKey: string;
+  request: RewardsCheckoutQuoteRequest;
+  acknowledgedPricingRevision: string | null;
+  pricingRevision: string;
+  requestHash: string;
+  authoritativeAt: Date;
+  factsHash: string;
+  facts: AuthoritativeVariantCheckoutFacts;
+  effectiveLines: readonly AuthoritativeVariantLinePrice[];
+  activeAutomaticPromotions: readonly Readonly<{
+    id: string;
+    version: number;
+  }>[];
+  reviewSnapshotHash: string | null;
+  exactReview: ExactReviewDecision | null;
+  decision: CheckoutDecision;
+  shippingQuote: ShippingQuote | null;
+  taxQuote: TaxQuote | null;
+  totals: OrderTotals | null;
+  promotionDiscountMinor: number;
+  referralDiscountMinor: number;
+  selectedAcquisitionSource: "promotion" | "referral";
+  promotionAllocations: readonly Readonly<{
+    productId: string;
+    variantId: string;
+    discountMinor: number;
+  }>[];
+  rewardsQuote: CheckoutRewardsQuote | null;
+  referralQuote: EligibleReferralCheckoutQuote | null;
+  affiliateQuote: EligibleAffiliateCheckoutQuote | null;
+  browserQuote: BrowserCheckoutQuote;
+}>;
+
+export type AuthoritativeCheckoutPlanData =
+  | LegacyAuthoritativeCheckoutPlanData
+  | AuthoritativeVariantCheckoutPlanData;
+
 declare const opaquePlan: unique symbol;
 export type AuthoritativeCheckoutPlan = AuthoritativeCheckoutPlanData & {
   readonly [opaquePlan]: true;
@@ -266,6 +409,7 @@ export type AuthoritativeCheckoutPlan = AuthoritativeCheckoutPlanData & {
 
 export type CheckoutQuoteResult =
   | Readonly<{ status: "invalid_request"; reason: "checkout_input_invalid" }>
+  | CheckoutUnavailable
   | Readonly<{ status: "idempotency_conflict" }>
   | Readonly<{ status: "internal_conflict" }>
   | Readonly<{ status: "denied"; reasons: readonly string[] }>
@@ -278,6 +422,8 @@ export type CheckoutQuoteResult =
   | Readonly<{
       status: "quoted";
       quote: BrowserCheckoutQuote;
+      pricingRevision?: string;
+      cart?: SafeCartPreview;
       plan: AuthoritativeCheckoutPlan;
     }>
   | Readonly<{
@@ -286,6 +432,8 @@ export type CheckoutQuoteResult =
       plan: AuthoritativeCheckoutPlan;
     }>
   | CheckoutLoadedResult;
+
+export type CheckoutSessionQuoteResult = CheckoutQuoteResult | PriceChanged;
 
 const plans = new WeakSet<object>();
 const buyerStatuses = new Set<BuyerStatus>(["active", "review", "blocked"]);
@@ -328,7 +476,252 @@ export function projectLoadedCheckoutAttempt(
     attemptStatus: attempt.status,
     orderState: attempt.orderState,
     quoteSnapshot: attempt.quoteSnapshot,
+    pricingRevision: attempt.pricingRevision,
   });
+}
+
+const canonicalReplayQuoteKeys = Object.freeze([
+  "status",
+  "reviewRequired",
+  "reasons",
+  "currency",
+  "subtotalMinor",
+  "discountMinor",
+  "shippingMinor",
+  "taxMinor",
+  "totalMinor",
+  "promotionDiscountMinor",
+  "referralDiscountMinor",
+  "rewardRedemptionPoints",
+  "rewardRedemptionMinor",
+  "pendingBaseEarnPoints",
+  "rewardsBenefitAvailable",
+  "rewardsUnavailableReason",
+  "lines",
+] as const);
+
+const canonicalReplayLineKeys = Object.freeze([
+  "variantId",
+  "sku",
+  "variantLabel",
+  "productName",
+  "packageForm",
+  "quantity",
+  "unitAmountMinor",
+  "subtotalMinor",
+  "discountMinor",
+  "totalMinor",
+] as const);
+
+function exactReplayRecord(
+  value: unknown,
+  requiredKeys: readonly string[],
+  optionalKeys: readonly string[] = [],
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const allowed = new Set([...requiredKeys, ...optionalKeys]);
+  const keys = Reflect.ownKeys(value);
+  return requiredKeys.every((key) => Object.hasOwn(value, key)) &&
+    keys.every((key) => typeof key === "string" && allowed.has(key));
+}
+
+function projectVariantFactLoadResult(value: unknown): VariantFactLoadResult | null {
+  try {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      return null;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return null;
+    const okDescriptor = Object.getOwnPropertyDescriptor(value, "ok");
+    if (okDescriptor === undefined || !("value" in okDescriptor)) return null;
+    if (okDescriptor.value === true) {
+      if (!exactReplayRecord(value, ["ok", "value"])) return null;
+      const factDescriptor = Object.getOwnPropertyDescriptor(value, "value");
+      if (factDescriptor === undefined || !("value" in factDescriptor)) return null;
+      return Object.freeze({
+        ok: true as const,
+        value: factDescriptor.value as AuthoritativeVariantCheckoutFacts,
+      });
+    }
+    if (okDescriptor.value !== false ||
+      !exactReplayRecord(value, ["ok", "reasons"])) return null;
+    const reasonsDescriptor = Object.getOwnPropertyDescriptor(value, "reasons");
+    if (reasonsDescriptor === undefined || !("value" in reasonsDescriptor) ||
+      !Array.isArray(reasonsDescriptor.value) || reasonsDescriptor.value.length === 0 ||
+      reasonsDescriptor.value.length > 12) return null;
+    const reasons: string[] = [];
+    for (let index = 0; index < reasonsDescriptor.value.length; index += 1) {
+      if (!Object.hasOwn(reasonsDescriptor.value, index)) return null;
+      const reason = reasonsDescriptor.value[index];
+      if (typeof reason !== "string" || reason.trim() !== reason ||
+        reason.length === 0 || reason.length > 128) return null;
+      reasons.push(reason);
+    }
+    return Object.freeze({ ok: false as const, reasons: Object.freeze(reasons) });
+  } catch {
+    return null;
+  }
+}
+
+function boundedReplayText(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value.length > 0 &&
+    value.length <= maximum && value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+function replayMoney(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function comparableCanonicalReplayQuote(value: unknown): unknown | null {
+  try {
+    if (!exactReplayRecord(value, canonicalReplayQuoteKeys)) return null;
+    if (
+      (value.status !== "ready" && value.status !== "review_required") ||
+      value.reviewRequired !== (value.status === "review_required") ||
+      value.currency !== "USD" ||
+      !Array.isArray(value.reasons) ||
+      value.reasons.length > 12 ||
+      !Array.isArray(value.lines) ||
+      value.lines.length < 1 ||
+      value.lines.length > 50
+    ) return null;
+
+    const reasons: string[] = [];
+    for (let index = 0; index < value.reasons.length; index += 1) {
+      if (!Object.hasOwn(value.reasons, index)) return null;
+      const reason = value.reasons[index];
+      if (!boundedReplayText(reason, 80)) return null;
+      reasons.push(reason);
+    }
+    if (
+      (value.status === "ready" && reasons.length !== 0) ||
+      (value.status === "review_required" && reasons.length === 0)
+    ) return null;
+
+    const moneyKeys = [
+      "subtotalMinor",
+      "discountMinor",
+      "shippingMinor",
+      "taxMinor",
+      "totalMinor",
+      "promotionDiscountMinor",
+      "referralDiscountMinor",
+      "rewardRedemptionPoints",
+      "rewardRedemptionMinor",
+      "pendingBaseEarnPoints",
+    ] as const;
+    if (
+      moneyKeys.some((key) => !replayMoney(value[key])) ||
+      (value.discountMinor as number) > (value.subtotalMinor as number) ||
+      typeof value.rewardsBenefitAvailable !== "boolean" ||
+      (value.rewardsUnavailableReason !== null &&
+        !boundedReplayText(value.rewardsUnavailableReason, 80))
+    ) return null;
+
+    const lines: Record<string, unknown>[] = [];
+    const variantIds = new Set<string>();
+    let lineSubtotal = 0;
+    let lineDiscount = 0;
+    for (let index = 0; index < value.lines.length; index += 1) {
+      if (!Object.hasOwn(value.lines, index)) return null;
+      const line = value.lines[index];
+      if (!exactReplayRecord(line, canonicalReplayLineKeys, ["productId"])) {
+        return null;
+      }
+      const expectedLineSubtotal = (line.unitAmountMinor as number) *
+        (line.quantity as number);
+      if (
+        !isCanonicalUuid(line.variantId) ||
+        variantIds.has(line.variantId) ||
+        (Object.hasOwn(line, "productId") && !isCanonicalUuid(line.productId)) ||
+        !boundedReplayText(line.sku, 120) ||
+        !boundedReplayText(line.variantLabel, 240) ||
+        !boundedReplayText(line.productName, 240) ||
+        !boundedReplayText(line.packageForm, 240) ||
+        !Number.isSafeInteger(line.quantity) ||
+        (line.quantity as number) < 1 ||
+        (line.quantity as number) > 25 ||
+        !replayMoney(line.unitAmountMinor) ||
+        !replayMoney(line.subtotalMinor) ||
+        !replayMoney(line.discountMinor) ||
+        !replayMoney(line.totalMinor) ||
+        !Number.isSafeInteger(expectedLineSubtotal) ||
+        line.subtotalMinor !== expectedLineSubtotal ||
+        (line.discountMinor as number) > (line.subtotalMinor as number) ||
+        line.totalMinor !==
+          (line.subtotalMinor as number) - (line.discountMinor as number)
+      ) return null;
+      variantIds.add(line.variantId);
+      const nextLineSubtotal = lineSubtotal + (line.subtotalMinor as number);
+      const nextLineDiscount = lineDiscount + (line.discountMinor as number);
+      if (
+        !Number.isSafeInteger(nextLineSubtotal) ||
+        !Number.isSafeInteger(nextLineDiscount)
+      ) return null;
+      lineSubtotal = nextLineSubtotal;
+      lineDiscount = nextLineDiscount;
+      lines.push({
+        variantId: line.variantId,
+        sku: line.sku,
+        variantLabel: line.variantLabel,
+        productName: line.productName,
+        packageForm: line.packageForm,
+        quantity: line.quantity,
+        unitAmountMinor: line.unitAmountMinor,
+        subtotalMinor: line.subtotalMinor,
+        discountMinor: line.discountMinor,
+        totalMinor: line.totalMinor,
+      });
+    }
+    const expectedDiscount = (value.promotionDiscountMinor as number) +
+      (value.referralDiscountMinor as number) +
+      (value.rewardRedemptionMinor as number);
+    const expectedTotal = (value.subtotalMinor as number) -
+      (value.discountMinor as number) + (value.shippingMinor as number) +
+      (value.taxMinor as number);
+    if (
+      lineSubtotal !== value.subtotalMinor ||
+      lineDiscount !== value.discountMinor ||
+      !Number.isSafeInteger(expectedDiscount) ||
+      value.discountMinor !== expectedDiscount ||
+      !Number.isSafeInteger(expectedTotal) ||
+      value.totalMinor !== expectedTotal
+    ) return null;
+
+    return {
+      status: value.status,
+      reviewRequired: value.reviewRequired,
+      reasons,
+      currency: "USD",
+      subtotalMinor: value.subtotalMinor,
+      discountMinor: value.discountMinor,
+      shippingMinor: value.shippingMinor,
+      taxMinor: value.taxMinor,
+      totalMinor: value.totalMinor,
+      promotionDiscountMinor: value.promotionDiscountMinor,
+      referralDiscountMinor: value.referralDiscountMinor,
+      rewardRedemptionPoints: value.rewardRedemptionPoints,
+      rewardRedemptionMinor: value.rewardRedemptionMinor,
+      pendingBaseEarnPoints: value.pendingBaseEarnPoints,
+      rewardsBenefitAvailable: value.rewardsBenefitAvailable,
+      rewardsUnavailableReason: value.rewardsUnavailableReason,
+      lines,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function canonicalReplayQuotesMatch(stored: unknown, fresh: unknown): boolean {
+  const storedComparable = comparableCanonicalReplayQuote(stored);
+  const freshComparable = comparableCanonicalReplayQuote(fresh);
+  return storedComparable !== null && freshComparable !== null &&
+    JSON.stringify(storedComparable) === JSON.stringify(freshComparable);
 }
 
 function toIso(value: string): string | null {
@@ -344,7 +737,7 @@ function safePositive(value: unknown): value is number {
 
 function isFactsValid(
   facts: AuthoritativeCheckoutFacts,
-  request: CheckoutRequest,
+  request: LegacyRewardsCheckoutRequest,
   buyerUserId: string,
   now: Date,
 ): boolean {
@@ -535,6 +928,171 @@ function resultWithOpaquePlan<
   return Object.freeze(result);
 }
 
+function isVariantFactsValid(
+  facts: AuthoritativeVariantCheckoutFacts,
+  request: CheckoutQuoteRequest,
+  buyerUserId: string,
+  now: Date,
+): boolean {
+  if (
+    facts.buyer.userId !== buyerUserId ||
+    typeof facts.buyer.emailVerified !== "boolean" ||
+    !buyerStatuses.has(facts.buyer.status) ||
+    !isCanonicalUuid(facts.buyer.currentAttestationVersionId) ||
+    !safePositive(facts.buyer.currentAttestationVersion) ||
+    facts.items.length !== request.items.length ||
+    !Array.isArray(facts.automaticPromotions)
+  ) return false;
+  const requested = new Map(request.items.map((item) => [item.variantId, item.quantity]));
+  const seen = new Set<string>();
+  for (const item of facts.items) {
+    if (
+      !isCanonicalUuid(item.variantId) ||
+      !isCanonicalUuid(item.productId) ||
+      seen.has(item.variantId) ||
+      !requested.has(item.variantId) ||
+      !isCanonicalUuid(item.policyGroupId) ||
+      !isCanonicalUuid(item.price.id) ||
+      !safePositive(item.price.version) ||
+      !Number.isSafeInteger(item.price.amountMinor) ||
+      item.price.amountMinor < 0 ||
+      !["pending", "active", "unavailable"].includes(item.price.status) ||
+      typeof item.price.currency !== "string" ||
+      item.price.currency.trim() !== item.price.currency ||
+      item.price.currency.length < 3 ||
+      item.price.currency.length > 8 ||
+      toIso(item.price.effectiveAt) === null ||
+      new Date(item.price.effectiveAt).getTime() > now.getTime() ||
+      ![item.sku, item.variantLabel, item.productName, item.packageForm,
+        item.availabilityRevision, item.inventoryRevision].every(
+          (value) => typeof value === "string" && value.trim() === value && value.length > 0,
+        ) ||
+      typeof item.productActive !== "boolean" ||
+      typeof item.policyGroupActive !== "boolean" ||
+      typeof item.variantActive !== "boolean" ||
+      (item.stripeProductId !== null &&
+        (typeof item.stripeProductId !== "string" || item.stripeProductId.trim() === "")) ||
+      (item.stripePriceId !== null &&
+        (typeof item.stripePriceId !== "string" || item.stripePriceId.trim() === "")) ||
+      item.destination.normalizedStateCode !== request.destination.stateCode
+    ) return false;
+    seen.add(item.variantId);
+    const lots = new Set<string>();
+    for (const lot of item.eligibleLots) {
+      if (
+        !isCanonicalUuid(lot.id) || lots.has(lot.id) || lot.status !== "released" ||
+        !safePositive(lot.receivedQuantity) || !safePositive(lot.availableQuantity) ||
+        lot.availableQuantity > lot.receivedQuantity ||
+        (lot.expiresAt !== null &&
+          (toIso(lot.expiresAt) === null || new Date(lot.expiresAt).getTime() <= now.getTime()))
+      ) return false;
+      lots.add(lot.id);
+    }
+  }
+  return true;
+}
+
+function areAutomaticPromotionFactsValid(
+  promotions: readonly AuthoritativeAutomaticPromotion[],
+): boolean {
+  const promotionKeys = new Set<string>();
+  for (const promotion of promotions) {
+    const key = `${promotion.id}:${promotion.version}`;
+    if (
+      promotionKeys.has(key) ||
+      typeof promotion.id !== "string" || promotion.id.trim() === "" ||
+      !isCanonicalUuid(promotion.recordId) ||
+      typeof promotion.campaignKey !== "string" || promotion.campaignKey.trim() === "" ||
+      !safePositive(promotion.version) ||
+      promotion.applicationMode !== "automatic"
+    ) return false;
+    promotionKeys.add(key);
+  }
+  return true;
+}
+
+function variantUnavailableReason(
+  fact: AuthoritativeVariantCheckoutItemFact,
+  quantity: number,
+): CheckoutUnavailable["reasons"][number]["code"] | null {
+  if (fact.price.currency !== "USD") return "invalid_currency";
+  if (fact.price.status === "pending" || fact.price.amountMinor === 0) {
+    return "pricing_coming_soon";
+  }
+  if (fact.stripeProductId === null || fact.stripePriceId === null) {
+    return "payment_mapping_missing";
+  }
+  const availableQuantity = fact.eligibleLots.reduce(
+    (sum, lot) => sum + lot.availableQuantity,
+    0,
+  );
+  if (
+    fact.price.status !== "active" || !fact.variantActive || !fact.productActive ||
+    !fact.policyGroupActive || fact.destination.status === "unavailable" ||
+    availableQuantity < quantity
+  ) return "unavailable";
+  return null;
+}
+
+export function canonicalActiveAutomaticPromotionIdentities(
+  facts: AuthoritativeVariantCheckoutFacts,
+  request: CheckoutQuoteRequest,
+  at: Date,
+): readonly Readonly<{ id: string; version: number }>[] {
+  const requestedVariants = new Set(request.items.map((item) => item.variantId));
+  const identities = facts.automaticPromotions.flatMap((promotion) => {
+    if (
+      promotion.applicationMode !== "automatic" ||
+      !isStorefrontPromotionActive(promotion, at) ||
+      !facts.items.some((item) =>
+        requestedVariants.has(item.variantId) &&
+        promotionApplies(promotion, {
+          variantId: item.variantId,
+          productId: item.productId,
+        }),
+      )
+    ) return [];
+    return [{ id: promotion.id, version: promotion.version }];
+  });
+  return Object.freeze(
+    [...new Map(identities.map((identity) => [
+      `${identity.id}:${identity.version}`,
+      Object.freeze(identity),
+    ])).values()].toSorted((left, right) =>
+      left.id.localeCompare(right.id) || left.version - right.version,
+    ),
+  );
+}
+
+function safeVariantCart(
+  facts: AuthoritativeVariantCheckoutFacts,
+  request: CheckoutQuoteRequest,
+  effectiveLines: readonly Readonly<{
+    variantId: string;
+    effectiveUnitMinor: number;
+    lineSubtotalMinor: number;
+  }>[],
+): SafeCartPreview {
+  const lineByVariant = new Map(effectiveLines.map((line) => [line.variantId, line]));
+  const factByVariant = new Map(facts.items.map((item) => [item.variantId, item]));
+  return buildSafeCartPreview(request.items.map((requested) => {
+    const fact = factByVariant.get(requested.variantId)!;
+    const line = lineByVariant.get(requested.variantId)!;
+    return {
+      variantId: requested.variantId,
+      quantity: requested.quantity,
+      available: variantUnavailableReason(fact, requested.quantity) === null,
+      name: fact.productName,
+      packageForm: fact.packageForm,
+      variantLabel: fact.variantLabel,
+      sku: fact.sku,
+      unitAmountMinor: line.effectiveUnitMinor,
+      lineSubtotalMinor: line.lineSubtotalMinor,
+      currency: fact.price.currency,
+    };
+  }));
+}
+
 export function createCheckoutService(dependencies: Readonly<{
   repository: CheckoutRepository;
   shippingQuotePort: ShippingQuotePort;
@@ -576,7 +1134,658 @@ export function createCheckoutService(dependencies: Readonly<{
       now: Date;
     }>) => Promise<AffiliateCheckoutQuote>;
   }>;
+  configuredPromotions?: unknown;
 }>) {
+  async function quoteCanonicalVariant(
+    input: Readonly<{
+      buyerUserId: string;
+      idempotencyKey: string;
+      paymentProviderAvailable: boolean;
+      attributionCookie?: string | null;
+    }>,
+    request: RewardsCheckoutQuoteRequest,
+    acknowledgedPricingRevision: string | null,
+    forcedFresh?: Readonly<{ expectedStoredPricingRevision: string }>,
+  ): Promise<CheckoutSessionQuoteResult> {
+    const authoritativeAt = dependencies.clock();
+    if (!Number.isFinite(authoritativeAt.getTime())) {
+      return { status: "internal_conflict" };
+    }
+    const identity = createCheckoutIdentity({
+      buyerUserId: input.buyerUserId,
+      idempotencyKey: input.idempotencyKey,
+      keyedUuid: dependencies.keyedUuid,
+    });
+    const requestHash = await hashCheckoutRequest(request, dependencies.sha256);
+    const existing = await dependencies.repository.findAttempt({
+      buyerUserId: input.buyerUserId,
+      idempotencyKey: input.idempotencyKey,
+    });
+    let storedReplayQuote: BrowserCheckoutQuote | null = null;
+    if (existing !== null) {
+      if (existing.requestHash !== requestHash) {
+        return forcedFresh === undefined
+          ? { status: "idempotency_conflict" }
+          : { status: "internal_conflict" };
+      }
+      if (existing.orderId !== identity.orderId || existing.attemptId !== identity.attemptId) {
+        return { status: "internal_conflict" };
+      }
+      if (forcedFresh !== undefined) {
+        if (
+          (existing.status !== "created" && existing.status !== "provider_unknown") ||
+          existing.orderState !== "checkout_pending" ||
+          !existing.permitted ||
+          existing.reviewRequired ||
+          !existing.hasReservations ||
+          !isSha256(existing.pricingRevision) ||
+          existing.pricingRevision !== forcedFresh.expectedStoredPricingRevision ||
+          existing.quoteSnapshot === null ||
+          comparableCanonicalReplayQuote(existing.quoteSnapshot) === null ||
+          existing.quoteSnapshot.status !== "ready" ||
+          existing.quoteSnapshot.reviewRequired
+        ) return { status: "internal_conflict" };
+        storedReplayQuote = existing.quoteSnapshot;
+      } else {
+        const mutableReview = existing.status === "created" &&
+          existing.orderState === "eligibility_review" && !existing.permitted &&
+          existing.reviewRequired && !existing.hasReservations;
+        if (!mutableReview) return projectLoadedCheckoutAttempt(existing);
+      }
+    } else if (forcedFresh !== undefined) {
+      return { status: "internal_conflict" };
+    }
+
+    let loaded: VariantFactLoadResult;
+    if (forcedFresh !== undefined) {
+      const loadProviderCreateVariantFacts =
+        dependencies.repository.loadProviderCreateVariantFacts;
+      if (loadProviderCreateVariantFacts === undefined) {
+        return { status: "internal_conflict" };
+      }
+      let projected: VariantFactLoadResult | null = null;
+      try {
+        projected = projectVariantFactLoadResult(
+          await loadProviderCreateVariantFacts({
+            buyerUserId: input.buyerUserId,
+            idempotencyKey: input.idempotencyKey,
+            orderId: identity.orderId,
+            attemptId: identity.attemptId,
+            expectedStoredPricingRevision:
+              forcedFresh.expectedStoredPricingRevision,
+            request,
+            now: authoritativeAt,
+          }),
+        );
+      } catch {
+        return { status: "internal_conflict" };
+      }
+      if (projected === null) return { status: "internal_conflict" };
+      loaded = projected;
+    } else {
+      if (dependencies.repository.loadVariantFacts === undefined) {
+        return { status: "internal_conflict" };
+      }
+      loaded = await dependencies.repository.loadVariantFacts({
+        buyerUserId: input.buyerUserId,
+        request,
+        now: authoritativeAt,
+      });
+    }
+    if (!loaded.ok) {
+      if (
+        loaded.reasons.length === 1 &&
+        loaded.reasons[0] === "variant_catalog_incomplete"
+      ) {
+        return Object.freeze({
+          status: "CHECKOUT_UNAVAILABLE" as const,
+          reasons: Object.freeze(request.items.map((item) => Object.freeze({
+            variantId: item.variantId,
+            code: "unavailable" as const,
+          }))),
+        });
+      }
+      if (forcedFresh !== undefined) return { status: "internal_conflict" };
+      return { status: "denied", reasons: Object.freeze([...loaded.reasons]) };
+    }
+    const facts = loaded.value;
+    try {
+      if (!isVariantFactsValid(facts, request, input.buyerUserId, authoritativeAt)) {
+        return forcedFresh === undefined
+          ? { status: "denied", reasons: ["authoritative_facts_invalid"] }
+          : { status: "internal_conflict" };
+      }
+    } catch {
+      return forcedFresh === undefined
+        ? { status: "denied", reasons: ["authoritative_facts_invalid"] }
+        : { status: "internal_conflict" };
+    }
+
+    const unreconciled =
+      resolveUnreconciledActiveConfiguredAutomaticPromotions(
+        dependencies.configuredPromotions ?? STOREFRONT_PROMOTIONS,
+        facts.automaticPromotions,
+        authoritativeAt,
+      );
+    if (unreconciled === null) {
+      return Object.freeze({
+        status: "CHECKOUT_UNAVAILABLE" as const,
+        reasons: Object.freeze(request.items.map((item) => Object.freeze({
+          variantId: item.variantId,
+          code: "pricing_coming_soon" as const,
+        }))),
+      });
+    }
+
+    const factByVariant = new Map(facts.items.map((fact) => [fact.variantId, fact]));
+    const unreconciledReasons = request.items.flatMap((requested) => {
+      const fact = factByVariant.get(requested.variantId)!;
+      const affected = unreconciled.some((promotion) =>
+        promotionApplies(promotion, {
+          productId: fact.productId,
+          variantId: fact.variantId,
+        }),
+      );
+      return affected
+        ? [Object.freeze({
+            variantId: fact.variantId,
+            code: "pricing_coming_soon" as const,
+          })]
+        : [];
+    });
+    if (unreconciledReasons.length > 0) {
+      return Object.freeze({
+        status: "CHECKOUT_UNAVAILABLE" as const,
+        reasons: Object.freeze(unreconciledReasons),
+      });
+    }
+    if (!areAutomaticPromotionFactsValid(facts.automaticPromotions)) {
+      return { status: "denied", reasons: ["authoritative_facts_invalid"] };
+    }
+
+    const activeByVariant = new Map<string, AuthoritativeAutomaticPromotion[]>();
+    const priced = [] as Array<Readonly<{
+      variantId: string;
+      effectiveUnitMinor: number;
+      lineSubtotalMinor: number;
+      lineSavingsMinor: number;
+      appliedPromotionIds: readonly string[];
+      activePromotions: readonly AuthoritativeAutomaticPromotion[];
+    }>>;
+    try {
+      for (const requested of request.items) {
+        const fact = factByVariant.get(requested.variantId)!;
+        const active = facts.automaticPromotions.filter((promotion) =>
+          promotion.applicationMode === "automatic" &&
+          isStorefrontPromotionActive(promotion, authoritativeAt) &&
+          promotionApplies(promotion, {
+            variantId: fact.variantId,
+            productId: fact.productId,
+          }),
+        );
+        activeByVariant.set(fact.variantId, active);
+        const effectiveDiscount = resolveEffectiveDiscount({
+          quantityDiscountBps: quantityDiscountBps(requested.quantity),
+          eligiblePromotions: active.map((promotion) => ({
+            id: promotion.id,
+            discountBps: promotion.discountBps!,
+          })),
+        });
+        const line = calculateVariantLinePrice({
+          variantId: fact.variantId,
+          baseUnitMinor: fact.price.amountMinor,
+          quantity: requested.quantity,
+          priceStatus: fact.price.status,
+          effectiveDiscount,
+        });
+        priced.push(Object.freeze({
+          variantId: fact.variantId,
+          effectiveUnitMinor: line.effectiveUnitMinor,
+          lineSubtotalMinor: line.lineSubtotalMinor,
+          lineSavingsMinor: line.lineSavingsMinor,
+          appliedPromotionIds: line.appliedPromotionIds,
+          activePromotions: Object.freeze(active),
+        }));
+      }
+    } catch {
+      return { status: "denied", reasons: ["authoritative_facts_invalid"] };
+    }
+
+    const pricingRevision = await hashCanonicalEnvelope({
+      schemaVersion: 2,
+      kind: "canonical_variant_pricing_revision",
+      lines: request.items.map((requested) => {
+        const fact = factByVariant.get(requested.variantId)!;
+        const line = priced.find((candidate) => candidate.variantId === requested.variantId)!;
+        return {
+          variantId: fact.variantId,
+          productId: fact.productId,
+          sku: fact.sku,
+          priceBookId: fact.price.id,
+          priceVersion: fact.price.version,
+          baseUnitMinor: fact.price.amountMinor,
+          currency: fact.price.currency,
+          availabilityRevision: fact.availabilityRevision,
+          quantity: requested.quantity,
+          activeAutomaticPromotions: line.activePromotions.map((promotion) => ({
+            id: promotion.id,
+            recordId: promotion.recordId,
+            version: promotion.version,
+          })),
+          effectiveUnitMinor: line.effectiveUnitMinor,
+          effectiveLineMinor: line.lineSubtotalMinor,
+          appliedPromotionIds: line.appliedPromotionIds,
+          stripeProductId: fact.stripeProductId,
+          stripePriceId: fact.stripePriceId,
+        };
+      }),
+    }, dependencies.sha256);
+    const cart = safeVariantCart(facts, request, priced);
+    if (forcedFresh !== undefined && (
+      acknowledgedPricingRevision !== forcedFresh.expectedStoredPricingRevision ||
+      pricingRevision !== forcedFresh.expectedStoredPricingRevision
+    )) {
+      return Object.freeze({ status: "PRICE_CHANGED", pricingRevision, cart });
+    }
+    if (forcedFresh === undefined && acknowledgedPricingRevision !== null &&
+      acknowledgedPricingRevision !== pricingRevision) {
+      return Object.freeze({ status: "PRICE_CHANGED", pricingRevision, cart });
+    }
+
+    const unavailableReasons = request.items.flatMap((requested) => {
+      const code = variantUnavailableReason(
+        factByVariant.get(requested.variantId)!,
+        requested.quantity,
+      );
+      return code === null
+        ? []
+        : [Object.freeze({ variantId: requested.variantId, code })];
+    });
+    if (unavailableReasons.length > 0) {
+      return Object.freeze({
+        status: "CHECKOUT_UNAVAILABLE" as const,
+        reasons: Object.freeze(unavailableReasons),
+      });
+    }
+
+    const effectiveLines: AuthoritativeVariantLinePrice[] = priced.map((line) => {
+      const fact = factByVariant.get(line.variantId)!;
+      const quantity = request.items.find((item) => item.variantId === line.variantId)!.quantity;
+      return Object.freeze({
+        variantId: fact.variantId,
+        productId: fact.productId,
+        sku: fact.sku,
+        variantLabel: fact.variantLabel,
+        quantity,
+        baseUnitMinor: fact.price.amountMinor,
+        effectiveUnitMinor: line.effectiveUnitMinor,
+        lineSubtotalMinor: line.lineSubtotalMinor,
+        lineSavingsMinor: line.lineSavingsMinor,
+        appliedPromotionIds: line.appliedPromotionIds,
+        priceId: fact.price.id,
+        priceVersion: fact.price.version,
+        stripeProductId: fact.stripeProductId!,
+        stripePriceId: fact.stripePriceId!,
+      });
+    });
+    const activePromotionIdentities = canonicalActiveAutomaticPromotionIdentities(
+      facts,
+      request,
+      authoritativeAt,
+    );
+    const reviewNeeded = facts.buyer.acceptedAttestationVersionId !== null &&
+      facts.buyer.acceptedAttestationVersionId === facts.buyer.currentAttestationVersionId &&
+      (facts.buyer.status === "review" ||
+        facts.items.some((item) => item.destination.status === "review"));
+    const reviewSnapshotHash = reviewNeeded
+      ? await hashReviewSnapshot({
+          orderId: identity.orderId,
+          buyerUserId: input.buyerUserId,
+          buyerStatus: facts.buyer.status,
+          acceptedAttestationVersionId: facts.buyer.acceptedAttestationVersionId!,
+          currentAttestationVersionId: facts.buyer.currentAttestationVersionId,
+          items: request.items,
+          automaticPromotions: activePromotionIdentities,
+          destination: request.destination,
+          reviewPolicies: canonicalReviewPolicies(
+            facts.items.filter((item) => item.destination.status === "review").map((item) => ({
+              id: item.destination.ruleId!,
+              version: item.destination.ruleVersion!,
+            })),
+          ),
+        }, dependencies.sha256)
+      : null;
+    const exactReview = reviewSnapshotHash === null
+      ? null
+      : await dependencies.repository.findExactReview({
+          orderId: identity.orderId,
+          buyerUserId: input.buyerUserId,
+          snapshotHash: reviewSnapshotHash,
+        });
+    const decision = evaluateCheckout({
+      authenticated: true,
+      buyerStatus: facts.buyer.emailVerified ? facts.buyer.status : null,
+      acceptedAttestationVersion: facts.buyer.acceptedAttestationVersionId,
+      currentAttestationVersion: facts.buyer.currentAttestationVersionId,
+      items: facts.items.map((item) => ({
+        productId: item.productId,
+        active: item.productActive && item.policyGroupActive && item.variantActive,
+        catalogComplete: true,
+        destination: item.destination,
+        inventoryAvailable: item.eligibleLots.reduce(
+          (sum, lot) => sum + lot.availableQuantity,
+          0,
+        ) >= request.items.find((candidate) => candidate.variantId === item.variantId)!.quantity,
+      })),
+      paymentProviderAvailable: input.paymentProviderAvailable,
+      reviewSnapshotHash,
+      reviewDecision: exactReview === null ? null : {
+        reviewSnapshotHash: exactReview.reviewSnapshotHash,
+        outcome: exactReview.outcome,
+        coversBuyerReview: exactReview.coversBuyerReview,
+        destinationRuleIds: exactReview.destinationPolicyIds,
+      },
+    });
+    if (!decision.permitted && !decision.reviewRequired) {
+      return { status: "denied", reasons: decision.reasons };
+    }
+
+    const factsHash = await hashCanonicalEnvelope({
+      schemaVersion: 2,
+      kind: "authoritative_variant_checkout_facts",
+      request,
+      pricingRevision,
+      facts,
+      effectiveLines,
+    }, dependencies.sha256);
+    const grossSubtotalMinor = effectiveLines.reduce(
+      (sum, line) => sum + line.baseUnitMinor * line.quantity,
+      0,
+    );
+    if (typeof input.attributionCookie === "string" && dependencies.referralService === undefined) {
+      return { status: "internal_conflict" };
+    }
+    const referralResult = typeof input.attributionCookie === "string" && dependencies.referralService
+      ? await dependencies.referralService.quoteCustomerReferral({
+          buyerUserId: input.buyerUserId,
+          attributionCookie: input.attributionCookie,
+          merchandiseSubtotalMinor: grossSubtotalMinor,
+          currency: "USD",
+          now: authoritativeAt,
+        })
+      : null;
+    if (referralResult?.status === "internal_conflict") return { status: "internal_conflict" };
+    const referralQuote = referralResult?.status === "eligible" ? referralResult : null;
+    if (typeof input.attributionCookie === "string" && dependencies.affiliateService === undefined) {
+      return { status: "internal_conflict" };
+    }
+    const affiliateResult = typeof input.attributionCookie === "string" && dependencies.affiliateService
+      ? await dependencies.affiliateService.quoteAffiliateAttribution({
+          buyerUserId: input.buyerUserId,
+          attributionCookie: input.attributionCookie,
+          now: authoritativeAt,
+        })
+      : null;
+    if (affiliateResult?.status === "internal_conflict") return { status: "internal_conflict" };
+    const affiliateQuote = affiliateResult?.status === "eligible" ? affiliateResult : null;
+    if (referralQuote !== null && affiliateQuote !== null) return { status: "internal_conflict" };
+
+    const storefrontSavingsMinor = effectiveLines.reduce(
+      (sum, line) => sum + line.lineSavingsMinor,
+      0,
+    );
+    const acquisition = selectBestAcquisitionDiscount({
+      candidates: [
+        { source: "promotion", discountMinor: storefrontSavingsMinor },
+        ...(referralQuote === null ? [] : [{
+          source: "referral" as const,
+          discountMinor: referralQuote.referralDiscountMinor,
+        }]),
+      ],
+    });
+    if (!acquisition.ok) return { status: "internal_conflict" };
+    const promotionDiscountMinor = acquisition.value.source === "promotion"
+      ? acquisition.value.discountMinor : 0;
+    const referralDiscountMinor = acquisition.value.source === "referral"
+      ? acquisition.value.discountMinor : 0;
+    const acquisitionByVariant = new Map<string, number>();
+    if (acquisition.value.source === "promotion") {
+      for (const line of effectiveLines) acquisitionByVariant.set(line.variantId, line.lineSavingsMinor);
+    } else {
+      let remaining = referralDiscountMinor;
+      for (const line of effectiveLines.toSorted((left, right) => left.variantId.localeCompare(right.variantId))) {
+        const gross = line.baseUnitMinor * line.quantity;
+        const allocated = Math.min(remaining, gross);
+        acquisitionByVariant.set(line.variantId, allocated);
+        remaining -= allocated;
+      }
+      if (remaining !== 0) return { status: "internal_conflict" };
+    }
+    const postAcquisitionLines = effectiveLines.map((line) => ({
+      productId: line.variantId,
+      quantity: line.quantity,
+      netAmountMinor: line.baseUnitMinor * line.quantity -
+        (acquisitionByVariant.get(line.variantId) ?? 0),
+    }));
+    const postAcquisitionMinor = postAcquisitionLines.reduce(
+      (sum, line) => sum + line.netAmountMinor,
+      0,
+    );
+    const rewardsQuote = Object.hasOwn(request, "rewardRedemptionPoints")
+      ? dependencies.rewardsService === undefined
+        ? Object.freeze({ status: "unavailable" as const, reason: "configuration_unavailable" as const })
+        : await dependencies.rewardsService.quoteCheckoutRewards({
+            buyerUserId: input.buyerUserId,
+            requestedPoints: request.rewardRedemptionPoints!,
+            postPromotionMerchandiseMinor: postAcquisitionMinor,
+            currency: "USD",
+            now: authoritativeAt,
+          })
+      : null;
+    const rewardRedemptionMinor = rewardsQuote?.status === "applied"
+      ? rewardsQuote.redemptionMinor : 0;
+    let remainingReward = rewardRedemptionMinor;
+    const rewardByVariant = new Map<string, number>();
+    for (const line of postAcquisitionLines.toSorted((left, right) => left.productId.localeCompare(right.productId))) {
+      const allocated = Math.min(remainingReward, line.netAmountMinor);
+      rewardByVariant.set(line.productId, allocated);
+      remainingReward -= allocated;
+    }
+    if (remainingReward !== 0) return { status: "internal_conflict" };
+    const merchandiseLines = postAcquisitionLines.map((line) => ({
+      ...line,
+      netAmountMinor: line.netAmountMinor - (rewardByVariant.get(line.productId) ?? 0),
+    }));
+    const merchandiseTotalMinor = merchandiseLines.reduce((sum, line) => sum + line.netAmountMinor, 0);
+    const shippingBindingHash = await hashCanonicalEnvelope({
+      schemaVersion: 2,
+      kind: "shipping_quote_binding",
+      factsHash,
+      destination: request.destination,
+      items: merchandiseLines,
+      merchandiseTotalMinor,
+      currency: "USD",
+    }, dependencies.sha256);
+    const parsedShipping = parseShippingQuoteResult(
+      await dependencies.shippingQuotePort.quoteShipping({
+        schemaVersion: 1,
+        bindingHash: shippingBindingHash,
+        items: merchandiseLines,
+        merchandiseTotalMinor,
+        currency: "USD",
+        destination: request.destination,
+      }),
+      { bindingHash: shippingBindingHash, currency: "USD" },
+    );
+    if (!parsedShipping.ok) return { status: "quote_invalid", component: "shipping" };
+    if (parsedShipping.value.status === "unavailable") {
+      return { status: "quote_unavailable", component: "shipping", reason: parsedShipping.value.reason };
+    }
+    const shippingQuote = parsedShipping.value;
+    const taxBindingHash = await hashCanonicalEnvelope({
+      schemaVersion: 2,
+      kind: "tax_quote_binding",
+      factsHash,
+      destination: request.destination,
+      items: merchandiseLines,
+      merchandiseTotalMinor,
+      shipping: {
+        amountMinor: shippingQuote.amountMinor,
+        reference: shippingQuote.reference,
+        service: shippingQuote.service,
+      },
+      currency: "USD",
+    }, dependencies.sha256);
+    const parsedTax = parseTaxQuoteResult(
+      await dependencies.taxQuotePort.quoteTax({
+        schemaVersion: 1,
+        bindingHash: taxBindingHash,
+        items: merchandiseLines,
+        merchandiseTotalMinor,
+        shippingMinor: shippingQuote.amountMinor,
+        shippingReference: shippingQuote.reference,
+        shippingService: shippingQuote.service,
+        currency: "USD",
+        destination: request.destination,
+      }),
+      { bindingHash: taxBindingHash, currency: "USD" },
+    );
+    if (!parsedTax.ok) return { status: "quote_invalid", component: "tax" };
+    if (parsedTax.value.status === "unavailable") {
+      return { status: "quote_unavailable", component: "tax", reason: parsedTax.value.reason };
+    }
+    const taxQuote = parsedTax.value;
+    const priceLines = effectiveLines.map((line) => ({
+      authority: "server_resolved_price" as const,
+      productId: line.variantId,
+      priceBookId: line.priceId,
+      priceVersion: String(line.priceVersion),
+      unitAmountMinor: line.baseUnitMinor,
+      currency: "USD" as const,
+      quantity: line.quantity,
+    }));
+    const totalsResult = calculateOrderTotals({
+      lines: priceLines,
+      discount: {
+        authority: "server_calculated_discount",
+        amountMinor: promotionDiscountMinor + referralDiscountMinor + rewardRedemptionMinor,
+        currency: "USD",
+        allocations: priceLines.map((line) => ({
+          productId: line.productId,
+          discountMinor: (acquisitionByVariant.get(line.productId) ?? 0) +
+            (rewardByVariant.get(line.productId) ?? 0),
+        })),
+      },
+      shipping: { authority: "server_resolved_shipping", amountMinor: shippingQuote.amountMinor, currency: "USD" },
+      tax: { authority: "server_calculated_tax", amountMinor: taxQuote.amountMinor, currency: "USD" },
+    }, dependencies.moneyPolicy);
+    if (!totalsResult.ok) return { status: "denied", reasons: [`money_${totalsResult.error.code}`] };
+    const totalByVariant = new Map(totalsResult.value.lines.map((line) => [line.productId, line]));
+    const rewardsProjection = rewardsQuote === null
+      ? {
+          rewardRedemptionPoints: 0,
+          rewardRedemptionMinor: 0,
+          pendingBaseEarnPoints: 0,
+          rewardsBenefitAvailable: false,
+          rewardsUnavailableReason: "not_requested",
+        }
+      : rewardsQuote.status === "applied"
+        ? {
+            rewardRedemptionPoints: rewardsQuote.redemptionPoints,
+            rewardRedemptionMinor: rewardsQuote.redemptionMinor,
+            pendingBaseEarnPoints: rewardsQuote.pendingBaseEarnPoints,
+            rewardsBenefitAvailable: true,
+            rewardsUnavailableReason: null,
+          }
+        : {
+            rewardRedemptionPoints: 0,
+            rewardRedemptionMinor: 0,
+            pendingBaseEarnPoints: 0,
+            rewardsBenefitAvailable: false,
+            rewardsUnavailableReason: rewardsQuote.reason,
+          };
+    const quote: BrowserCheckoutQuote = Object.freeze({
+      status: decision.reviewRequired ? "review_required" : "ready",
+      reviewRequired: decision.reviewRequired,
+      reasons: Object.freeze([...decision.reasons]),
+      currency: "USD",
+      subtotalMinor: totalsResult.value.subtotalMinor,
+      discountMinor: totalsResult.value.discountMinor,
+      shippingMinor: totalsResult.value.shippingMinor,
+      taxMinor: totalsResult.value.taxMinor,
+      totalMinor: totalsResult.value.totalMinor,
+      promotionDiscountMinor,
+      referralDiscountMinor,
+      ...rewardsProjection,
+      lines: Object.freeze(effectiveLines.map((line) => {
+        const fact = factByVariant.get(line.variantId)!;
+        const total = totalByVariant.get(line.variantId)!;
+        return Object.freeze({
+          productId: fact.productId,
+          variantId: fact.variantId,
+          sku: fact.sku,
+          variantLabel: fact.variantLabel,
+          productName: fact.productName,
+          packageForm: fact.packageForm,
+          quantity: line.quantity,
+          unitAmountMinor: line.baseUnitMinor,
+          subtotalMinor: total.subtotalMinor,
+          discountMinor: total.discountMinor,
+          totalMinor: total.totalMinor,
+        });
+      })),
+    });
+    if (
+      forcedFresh !== undefined &&
+      !canonicalReplayQuotesMatch(storedReplayQuote, quote)
+    ) {
+      return Object.freeze({ status: "PRICE_CHANGED", pricingRevision, cart });
+    }
+    const plan = makePlan({
+      kind: "canonical_variant",
+      identity,
+      buyerUserId: input.buyerUserId,
+      idempotencyKey: input.idempotencyKey,
+      request,
+      acknowledgedPricingRevision,
+      pricingRevision,
+      requestHash,
+      authoritativeAt,
+      factsHash,
+      facts,
+      effectiveLines: Object.freeze(effectiveLines),
+      activeAutomaticPromotions: Object.freeze(activePromotionIdentities),
+      reviewSnapshotHash,
+      exactReview,
+      decision,
+      shippingQuote,
+      taxQuote,
+      totals: totalsResult.value,
+      promotionDiscountMinor,
+      referralDiscountMinor,
+      selectedAcquisitionSource: acquisition.value.source,
+      promotionAllocations: Object.freeze(
+        acquisition.value.source === "promotion"
+          ? effectiveLines.map((line) => Object.freeze({
+              productId: line.productId,
+              variantId: line.variantId,
+              discountMinor: line.lineSavingsMinor,
+            }))
+          : [],
+      ),
+      rewardsQuote,
+      referralQuote,
+      affiliateQuote,
+      browserQuote: quote,
+    });
+    return resultWithOpaquePlan({
+      status: "quoted" as const,
+      pricingRevision,
+      cart,
+      quote,
+    }, plan);
+  }
+
   return Object.freeze({
     async quote(input: Readonly<{
       buyerUserId: string;
@@ -597,7 +1806,14 @@ export function createCheckoutService(dependencies: Readonly<{
       ) {
         return { status: "invalid_request", reason: "checkout_input_invalid" };
       }
-      const parsed = parseRewardsCheckoutRequest(input.request);
+      const parsedVariant = parseRewardsCheckoutQuoteRequest(input.request);
+      if (parsedVariant.ok) {
+        const variantResult = await quoteCanonicalVariant(input, parsedVariant.value, null);
+        return variantResult.status === "PRICE_CHANGED"
+          ? { status: "internal_conflict" }
+          : variantResult;
+      }
+      const parsed = parseLegacyRewardsCheckoutRequest(input.request);
       if (!parsed.ok) {
         return { status: "invalid_request", reason: "checkout_input_invalid" };
       }
@@ -769,6 +1985,7 @@ export function createCheckoutService(dependencies: Readonly<{
             dependencies.sha256,
           );
           const plan = makePlan({
+              kind: "legacy_product",
               identity,
               buyerUserId: input.buyerUserId,
               idempotencyKey: input.idempotencyKey,
@@ -1082,6 +2299,7 @@ export function createCheckoutService(dependencies: Readonly<{
         rewardsQuote,
       );
       const plan = makePlan({
+        kind: "legacy_product",
         identity,
         buyerUserId: input.buyerUserId,
         idempotencyKey: input.idempotencyKey,
@@ -1109,6 +2327,116 @@ export function createCheckoutService(dependencies: Readonly<{
         browserQuote: quote,
       });
       return resultWithOpaquePlan({ status: "quoted" as const, quote }, plan);
+    },
+
+    async quoteForSession(input: Readonly<{
+      buyerUserId: string;
+      idempotencyKey: string;
+      paymentProviderAvailable: boolean;
+      attributionCookie?: string | null;
+      request: unknown;
+    }>): Promise<CheckoutSessionQuoteResult> {
+      if (
+        !isCanonicalUuid(input.buyerUserId) ||
+        !isCanonicalUuid(input.idempotencyKey) ||
+        typeof input.paymentProviderAvailable !== "boolean" ||
+        (input.attributionCookie !== undefined &&
+          input.attributionCookie !== null &&
+          (typeof input.attributionCookie !== "string" ||
+            input.attributionCookie.length === 0 ||
+            input.attributionCookie.length > 2_048))
+      ) {
+        return { status: "invalid_request", reason: "checkout_input_invalid" };
+      }
+      const parsedSession = parseRewardsCheckoutRequest(input.request);
+      const parsedQuote = parseRewardsCheckoutQuoteRequest(input.request);
+      if (!parsedSession.ok && !parsedQuote.ok) {
+        return { status: "invalid_request", reason: "checkout_input_invalid" };
+      }
+      let parsed: RewardsCheckoutQuoteRequest;
+      let acknowledgedPricingRevision: string | null;
+      if (parsedSession.ok) {
+        parsed = parsedSession.value;
+        acknowledgedPricingRevision = parsedSession.value.pricingRevision;
+      } else {
+        if (!parsedQuote.ok) {
+          return { status: "invalid_request", reason: "checkout_input_invalid" };
+        }
+        parsed = parsedQuote.value;
+        acknowledgedPricingRevision = null;
+      }
+      const request: RewardsCheckoutQuoteRequest = Object.freeze({
+        items: parsed.items,
+        destination: parsed.destination,
+        ...(Object.hasOwn(parsed, "rewardRedemptionPoints")
+          ? { rewardRedemptionPoints: parsed.rewardRedemptionPoints }
+          : {}),
+      });
+      return quoteCanonicalVariant(
+        input,
+        request,
+        acknowledgedPricingRevision,
+      );
+    },
+
+    async revalidateCanonicalForProviderCreate(input: Readonly<{
+      buyerUserId: string;
+      idempotencyKey: string;
+      paymentProviderAvailable: boolean;
+      request: unknown;
+      expectedStoredPricingRevision: string;
+      attributionCookie?: string | null;
+    }>): Promise<CheckoutSessionQuoteResult> {
+      if (!isSha256(input.expectedStoredPricingRevision)) {
+        return { status: "internal_conflict" };
+      }
+      if (
+        !isCanonicalUuid(input.buyerUserId) ||
+        !isCanonicalUuid(input.idempotencyKey) ||
+        typeof input.paymentProviderAvailable !== "boolean" ||
+        (input.attributionCookie !== undefined &&
+          input.attributionCookie !== null &&
+          (typeof input.attributionCookie !== "string" ||
+            input.attributionCookie.length === 0 ||
+            input.attributionCookie.length > 2_048))
+      ) {
+        return { status: "invalid_request", reason: "checkout_input_invalid" };
+      }
+      const parsed = parseRewardsCheckoutRequest(input.request);
+      if (!parsed.ok) {
+        return { status: "invalid_request", reason: "checkout_input_invalid" };
+      }
+      const request: RewardsCheckoutQuoteRequest = Object.freeze({
+        items: parsed.value.items,
+        destination: parsed.value.destination,
+        ...(Object.hasOwn(parsed.value, "rewardRedemptionPoints")
+          ? { rewardRedemptionPoints: parsed.value.rewardRedemptionPoints }
+          : {}),
+      });
+      let result: CheckoutSessionQuoteResult;
+      try {
+        result = await quoteCanonicalVariant(
+          input,
+          request,
+          parsed.value.pricingRevision,
+          { expectedStoredPricingRevision: input.expectedStoredPricingRevision },
+        );
+      } catch {
+        return { status: "internal_conflict" };
+      }
+      if (result.status === "loaded") return { status: "internal_conflict" };
+      if (result.status !== "quoted") return result;
+      const plan = projectAuthoritativeCheckoutPlan(result.plan);
+      if (
+        plan === null ||
+        plan.kind !== "canonical_variant" ||
+        !plan.decision.permitted ||
+        plan.decision.reviewRequired ||
+        result.quote.status !== "ready" ||
+        !isSha256(result.pricingRevision) ||
+        result.cart === undefined
+      ) return { status: "internal_conflict" };
+      return result;
     },
 
     async prepare(

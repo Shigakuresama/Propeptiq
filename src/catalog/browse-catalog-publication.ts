@@ -4,9 +4,11 @@ import { z } from "zod";
 
 import {
   browseCatalogProducts,
+  projectBrowseCatalogCompatibility,
   type BrowseCatalogProduct,
   validateBrowseCatalogProduct,
 } from "./browse-catalog";
+import type { StorefrontBinding } from "./storefront-types";
 
 export const browseCatalogPublicationId =
   "owner-pdf-2026-08-27-07cd4aa0-v1" as const;
@@ -117,18 +119,19 @@ const unpublishedBrowseCatalog: PublishedBrowseCatalog = Object.freeze({
 
 export function resolvePublishedBrowseCatalog(
   configuredPublication: string | undefined,
+  storefrontBindings: StorefrontBinding,
 ): PublishedBrowseCatalog {
   if (!configuredPublication) return unpublishedBrowseCatalog;
   if (configuredPublication !== ownerBrowseCatalogManifest.publicationId) {
     throw new Error("Browse catalog publication does not match the owner manifest");
   }
+  const compatibilityProjection = projectBrowseCatalogCompatibility(
+    storefrontBindings,
+  );
 
   return Object.freeze({
     publicationId: ownerBrowseCatalogManifest.publicationId,
-    products: ownerBrowseCatalogManifest.products,
-    variantCount: ownerBrowseCatalogManifest.products.reduce(
-      (total, product) => total + product.variants.length,
-      0,
-    ),
+    products: compatibilityProjection.products,
+    variantCount: compatibilityProjection.variantCount,
   });
 }

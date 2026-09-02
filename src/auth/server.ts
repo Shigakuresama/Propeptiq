@@ -36,8 +36,11 @@ import {
   createPostgresAffiliatePayoutCreateTransaction,
   createPostgresAffiliatePayoutPaidTransaction,
 } from "@/growth/affiliate-service";
-import { createRuntimeStorageVerifier } from "@/security/blob-storage";
-import type { StorageVerifier } from "@/security/storage";
+import {
+  createRuntimeStorageVerifier,
+  createRuntimeStorageWriter,
+} from "@/security/blob-storage";
+import type { StorageVerifier, StorageWriter } from "@/security/storage";
 
 import {
   isVerifiedIdentityAt,
@@ -61,6 +64,7 @@ export type RequestRepositories = Readonly<{
   affiliateApplicationAdminRepository: AffiliateApplicationAdminRepository;
   affiliatePayoutAdminRepository: AffiliatePayoutAdminRepository;
   storageVerifier: StorageVerifier;
+  storageWriter: StorageWriter;
   loadAccount: () => Promise<AccountSummary | null>;
   loadCurrentAttestation: () => Promise<Readonly<{ version: number; policyText: string }> | null>;
   listOrders: () => Promise<readonly OrderSummary[]>;
@@ -173,6 +177,7 @@ export function getRequestRepositories(
       affiliateApplicationAdminRepository: driver.growth.affiliateApplicationAdminRepository,
       affiliatePayoutAdminRepository: driver.growth.affiliatePayoutAdminRepository,
       storageVerifier: driver.storageVerifier,
+      storageWriter: driver.storageWriter,
       loadAccount: async () => (ownerId ? driver.loadAccount(ownerId) : null),
       loadCurrentAttestation: async () => driver.loadCurrentAttestation(),
       listOrders: async () => (ownerId ? driver.listOrders(ownerId) : []),
@@ -250,6 +255,7 @@ export function getRequestRepositories(
     affiliateApplicationAdminRepository,
     affiliatePayoutAdminRepository,
     storageVerifier: createRuntimeStorageVerifier(request.environment),
+    storageWriter: createRuntimeStorageWriter(request.environment),
     loadAccount: () =>
       withRuntimeTransaction(request.environment, (client) =>
         loadOwnAccount(databaseQueryPort(client), requireOwner()),

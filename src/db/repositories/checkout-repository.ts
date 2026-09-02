@@ -4,15 +4,18 @@ import {
   hashCanonicalEnvelope,
   hashReviewSnapshot,
   isCanonicalUuid,
+  isSha256,
   type KeyedUuidGenerator,
   type ReviewSnapshotHashInput,
   type Sha256Hasher,
 } from "@/commerce/checkout-identity";
 import {
+  canonicalActiveAutomaticPromotionIdentities,
   projectLoadedCheckoutAttempt,
   type AuthoritativeCheckoutFacts,
   type AuthoritativeCheckoutItemFact,
   type AuthoritativeCheckoutPlanData,
+  type AuthoritativeVariantCheckoutFacts,
   type BrowserCheckoutQuote,
   type CheckoutAttemptStatus,
   type CheckoutPrepareResult,
@@ -22,9 +25,14 @@ import {
   type ExactReviewDecision,
   type FactLoadResult,
   type StoredCheckoutAttempt,
+  type VariantFactLoadResult,
 } from "@/commerce/checkout-service";
-import type { ProviderPreparation } from "@/commerce/checkout-ports";
-import type { CheckoutRequest } from "@/domain/checkout";
+import type {
+  LegacyRewardsCheckoutRequest,
+  ProviderPreparation,
+} from "@/commerce/checkout-ports";
+import { createStripeProviderBindingSnapshotV2 } from "@/commerce/provider-contracts";
+import type { CheckoutQuoteRequest } from "@/domain/checkout";
 import {
   evaluateCheckout,
   resolveDestination,
@@ -32,6 +40,11 @@ import {
   type DestinationRule,
 } from "@/domain/eligibility";
 import type { PromotionRecord } from "@/domain/promotions";
+import { storefrontPromotionMatchesOwnerConfiguration } from "@/config/storefront-promotions";
+import type {
+  StorefrontPromotion,
+  StorefrontPromotionScope,
+} from "@/domain/storefront-pricing";
 import {
   releaseCheckoutRewardsInTransaction,
   reserveCheckoutRewardsInTransaction,
@@ -62,6 +75,44 @@ export type CheckoutTransactionRunner = <Value>(
   work: (client: CheckoutSqlClient) => Promise<Value>,
   options: Readonly<{ isolationLevel: "serializable" }>,
 ) => Promise<Value>;
+
+export type CheckoutVariantFacts = Readonly<{
+  variantId: string;
+  productId: string;
+  sku: string;
+  label: string;
+  canonicalAmount: number | null;
+  amountUnit: "mg" | "mcg" | "iu" | null;
+  packageQuantity: number;
+  variantStatus: "inactive" | "active";
+  productStatus: "draft" | "active" | "retired";
+  stripeProductId: string | null;
+  stripePriceId: string | null;
+  priceId: string;
+  priceVersion: number;
+  priceStatus: "pending" | "active" | "unavailable";
+  amountMinor: number;
+  currency: "USD";
+  effectiveAt: string;
+  availableQuantity: number;
+  checkoutReady: boolean;
+}>;
+
+export type PersistedStorefrontPromotion = StorefrontPromotion &
+  Readonly<{
+    recordId: string;
+    campaignKey: string;
+    version: number;
+  }>;
+
+export type CanonicalCommerceFactsRepository = Readonly<{
+  getCheckoutVariantFacts: (
+    variantId: string,
+  ) => Promise<CheckoutVariantFacts | null>;
+  getAutomaticStorefrontPromotions: () => Promise<
+    readonly PersistedStorefrontPromotion[]
+  >;
+}>;
 
 type BuyerFacts = AuthoritativeCheckoutFacts["buyer"];
 
@@ -94,6 +145,217 @@ function safeInteger(value: number | string): number {
   return result;
 }
 
+function exactRecordKeys(
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return false;
+  const expected = new Set(keys);
+  return (
+    Reflect.ownKeys(value).length === expected.size &&
+    Reflect.ownKeys(value).every(
+      (key) => typeof key === "string" && expected.has(key),
+    )
+  );
+}
+
+const replayQuoteKeys = [
+  "status",
+  "reviewRequired",
+  "reasons",
+  "currency",
+  "subtotalMinor",
+  "discountMinor",
+  "shippingMinor",
+  "taxMinor",
+  "totalMinor",
+  "promotionDiscountMinor",
+  "referralDiscountMinor",
+  "rewardRedemptionPoints",
+  "rewardRedemptionMinor",
+  "pendingBaseEarnPoints",
+  "rewardsBenefitAvailable",
+  "rewardsUnavailableReason",
+  "lines",
+] as const;
+
+const replayLineKeys = [
+  "variantId",
+  "sku",
+  "variantLabel",
+  "productName",
+  "packageForm",
+  "quantity",
+  "unitAmountMinor",
+  "subtotalMinor",
+  "discountMinor",
+  "totalMinor",
+] as const;
+
+function canonicalReplaySnapshot(
+  plan: AuthoritativeCheckoutPlanData,
+): unknown | null {
+  if (plan.kind !== "canonical_variant") return null;
+  return {
+    schemaVersion: 1,
+    kind: "canonical_variant",
+    quote: {
+      ...plan.browserQuote,
+      lines: plan.browserQuote.lines.map((line) => ({
+        variantId: line.variantId,
+        sku: line.sku,
+        variantLabel: line.variantLabel,
+        productName: line.productName,
+        packageForm: line.packageForm,
+        quantity: line.quantity,
+        unitAmountMinor: line.unitAmountMinor,
+        subtotalMinor: line.subtotalMinor,
+        discountMinor: line.discountMinor,
+        totalMinor: line.totalMinor,
+      })),
+    },
+  };
+}
+
+function parseCanonicalReplaySnapshot(value: unknown): BrowserCheckoutQuote | null {
+  if (value === null) return null;
+  if (!exactRecordKeys(value, ["schemaVersion", "kind", "quote"])) return null;
+  if (value.schemaVersion !== 1 || value.kind !== "canonical_variant") return null;
+  const quote = value.quote;
+  if (!exactRecordKeys(quote, replayQuoteKeys)) return null;
+  if (
+    (quote.status !== "ready" && quote.status !== "review_required") ||
+    quote.reviewRequired !== (quote.status === "review_required") ||
+    quote.currency !== "USD" ||
+    !Array.isArray(quote.reasons) ||
+    quote.reasons.length > 12 ||
+    quote.reasons.some((reason) => !nonblank(reason) || reason.length > 80) ||
+    !Array.isArray(quote.lines) ||
+    quote.lines.length < 1 ||
+    quote.lines.length > 50
+  ) {
+    return null;
+  }
+  const moneyKeys = [
+    "subtotalMinor",
+    "discountMinor",
+    "shippingMinor",
+    "taxMinor",
+    "totalMinor",
+    "promotionDiscountMinor",
+    "referralDiscountMinor",
+    "rewardRedemptionPoints",
+    "rewardRedemptionMinor",
+    "pendingBaseEarnPoints",
+  ] as const;
+  if (
+    moneyKeys.some(
+      (key) => !Number.isSafeInteger(quote[key]) || (quote[key] as number) < 0,
+    ) ||
+    typeof quote.rewardsBenefitAvailable !== "boolean" ||
+    (quote.rewardsUnavailableReason !== null &&
+      (!nonblank(quote.rewardsUnavailableReason) ||
+        quote.rewardsUnavailableReason.length > 80))
+  ) {
+    return null;
+  }
+  const lines: BrowserCheckoutQuote["lines"][number][] = [];
+  const variantIds = new Set<string>();
+  let lineSubtotal = 0;
+  let lineDiscount = 0;
+  for (const line of quote.lines) {
+    if (!exactRecordKeys(line, replayLineKeys)) return null;
+    if (
+      !isCanonicalUuid(line.variantId) ||
+      variantIds.has(line.variantId) ||
+      !nonblank(line.sku) ||
+      line.sku.length > 120 ||
+      !nonblank(line.variantLabel) ||
+      line.variantLabel.length > 240 ||
+      !nonblank(line.productName) ||
+      line.productName.length > 240 ||
+      !nonblank(line.packageForm) ||
+      line.packageForm.length > 240 ||
+      !Number.isSafeInteger(line.quantity) ||
+      (line.quantity as number) < 1 ||
+      (line.quantity as number) > 25
+    ) {
+      return null;
+    }
+    const lineMoneyKeys = [
+      "unitAmountMinor",
+      "subtotalMinor",
+      "discountMinor",
+      "totalMinor",
+    ] as const;
+    if (
+      lineMoneyKeys.some(
+        (key) => !Number.isSafeInteger(line[key]) || (line[key] as number) < 0,
+      ) ||
+      line.subtotalMinor !==
+        (line.unitAmountMinor as number) * (line.quantity as number) ||
+      (line.discountMinor as number) > (line.subtotalMinor as number) ||
+      line.totalMinor !==
+        (line.subtotalMinor as number) - (line.discountMinor as number)
+    ) {
+      return null;
+    }
+    variantIds.add(line.variantId);
+    lineSubtotal += line.subtotalMinor as number;
+    lineDiscount += line.discountMinor as number;
+    lines.push(Object.freeze({
+      variantId: line.variantId,
+      sku: line.sku,
+      variantLabel: line.variantLabel,
+      productName: line.productName,
+      packageForm: line.packageForm,
+      quantity: line.quantity as number,
+      unitAmountMinor: line.unitAmountMinor as number,
+      subtotalMinor: line.subtotalMinor as number,
+      discountMinor: line.discountMinor as number,
+      totalMinor: line.totalMinor as number,
+    }));
+  }
+  if (
+    lineSubtotal !== quote.subtotalMinor ||
+    lineDiscount !== quote.discountMinor ||
+    quote.discountMinor !==
+      (quote.promotionDiscountMinor as number) +
+        (quote.referralDiscountMinor as number) +
+        (quote.rewardRedemptionMinor as number) ||
+    quote.totalMinor !==
+      quote.subtotalMinor -
+        quote.discountMinor +
+        (quote.shippingMinor as number) +
+        (quote.taxMinor as number)
+  ) {
+    return null;
+  }
+  return Object.freeze({
+    status: quote.status,
+    reviewRequired: quote.reviewRequired as boolean,
+    reasons: Object.freeze([...(quote.reasons as string[])]),
+    currency: "USD",
+    subtotalMinor: quote.subtotalMinor as number,
+    discountMinor: quote.discountMinor as number,
+    shippingMinor: quote.shippingMinor as number,
+    taxMinor: quote.taxMinor as number,
+    totalMinor: quote.totalMinor as number,
+    promotionDiscountMinor: quote.promotionDiscountMinor as number,
+    referralDiscountMinor: quote.referralDiscountMinor as number,
+    rewardRedemptionPoints: quote.rewardRedemptionPoints as number,
+    rewardRedemptionMinor: quote.rewardRedemptionMinor as number,
+    pendingBaseEarnPoints: quote.pendingBaseEarnPoints as number,
+    rewardsBenefitAvailable: quote.rewardsBenefitAvailable,
+    rewardsUnavailableReason: quote.rewardsUnavailableReason as string | null,
+    lines: Object.freeze(lines),
+  });
+}
+
 function nonblank(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -114,6 +376,289 @@ function isTimestampAtOrBefore(
   if (value === null) return false;
   const timestamp = value instanceof Date ? value.getTime() : new Date(value).getTime();
   return Number.isFinite(timestamp) && timestamp <= authoritativeNow.getTime();
+}
+
+async function getCheckoutVariantFacts(
+  client: CheckoutSqlClient,
+  variantId: string,
+): Promise<CheckoutVariantFacts | null> {
+  if (!isCanonicalUuid(variantId)) return null;
+  type VariantRow = {
+    variantId: string;
+    productId: string;
+    sku: string;
+    label: string;
+    canonicalAmount: string | number | null;
+    amountUnit: "mg" | "mcg" | "iu" | null;
+    packageQuantity: string | number;
+    variantStatus: "inactive" | "active";
+    productStatus: "draft" | "active" | "retired";
+    stripeProductId: string | null;
+    stripePriceId: string | null;
+  };
+  const variants = await client.query<VariantRow>(
+    `SELECT v.id::text AS "variantId", v.product_id::text AS "productId",
+            v.sku, v.label, v.canonical_amount AS "canonicalAmount",
+            v.amount_unit AS "amountUnit",
+            v.package_quantity AS "packageQuantity",
+            v.status AS "variantStatus", p.status AS "productStatus",
+            v.stripe_product_id AS "stripeProductId",
+            v.stripe_price_id AS "stripePriceId"
+     FROM product_variants v
+     JOIN products p ON p.id = v.product_id
+     WHERE v.id = $1::uuid`,
+    [variantId],
+  );
+  if (variants.rows.length !== 1) return null;
+  const variant = variants.rows[0]!;
+
+  type PriceRow = {
+    priceId: string;
+    priceVersion: string | number;
+    priceStatus: "pending" | "active" | "unavailable";
+    amountMinor: string | number | null;
+    currency: string;
+    effectiveAt: Date | string;
+  };
+  const prices = await client.query<PriceRow>(
+    `SELECT id::text AS "priceId", version AS "priceVersion",
+            price_status AS "priceStatus", amount_minor AS "amountMinor",
+            currency, effective_at AS "effectiveAt"
+     FROM product_prices
+     WHERE variant_id = $1::uuid AND currency = 'USD'
+       AND effective_at <= now() AND superseded_at IS NULL
+     ORDER BY version, id`,
+    [variantId],
+  );
+  if (prices.rows.length !== 1) return null;
+  const price = prices.rows[0]!;
+
+  type InventoryRow = { availableQuantity: string | number };
+  const inventory = await client.query<InventoryRow>(
+    `SELECT COALESCE(sum(available_quantity), 0)::bigint AS "availableQuantity"
+     FROM lots
+     WHERE variant_id = $1::uuid AND status = 'released'
+       AND available_quantity > 0
+       AND (expires_at IS NULL OR expires_at > now())`,
+    [variantId],
+  );
+  const availableQuantity = safeInteger(
+    inventory.rows[0]?.availableQuantity ?? 0,
+  );
+  const canonicalAmount =
+    variant.canonicalAmount === null ? null : Number(variant.canonicalAmount);
+  if (
+    !nonblank(variant.sku) ||
+    !nonblank(variant.label) ||
+    !isCanonicalUuid(variant.productId) ||
+    (canonicalAmount !== null &&
+      (!Number.isFinite(canonicalAmount) || canonicalAmount <= 0)) ||
+    (variant.canonicalAmount === null) !== (variant.amountUnit === null) ||
+    price.currency !== "USD"
+  ) {
+    return null;
+  }
+  if (price.amountMinor === null) return null;
+  const amountMinor = safeInteger(price.amountMinor);
+  const stripeMappingsPresent =
+    nonblank(variant.stripeProductId) && nonblank(variant.stripePriceId);
+  return Object.freeze({
+    variantId: variant.variantId,
+    productId: variant.productId,
+    sku: variant.sku,
+    label: variant.label,
+    canonicalAmount,
+    amountUnit: variant.amountUnit,
+    packageQuantity: safeInteger(variant.packageQuantity),
+    variantStatus: variant.variantStatus,
+    productStatus: variant.productStatus,
+    stripeProductId: variant.stripeProductId,
+    stripePriceId: variant.stripePriceId,
+    priceId: price.priceId,
+    priceVersion: safeInteger(price.priceVersion),
+    priceStatus: price.priceStatus,
+    amountMinor,
+    currency: "USD",
+    effectiveAt: toIso(price.effectiveAt),
+    availableQuantity,
+    checkoutReady:
+      variant.variantStatus === "active" &&
+      variant.productStatus === "active" &&
+      price.priceStatus === "active" &&
+      amountMinor > 0 &&
+      availableQuantity > 0 &&
+      stripeMappingsPresent,
+  });
+}
+
+async function getAutomaticStorefrontPromotions(
+  client: CheckoutSqlClient,
+  lock = false,
+  candidateScope?: Readonly<{
+    productIds: readonly string[];
+    policyGroupIds: readonly string[];
+    variantIds: readonly string[];
+    at: Date;
+  }>,
+): Promise<readonly PersistedStorefrontPromotion[]> {
+  type PromotionRow = {
+    recordId: string;
+    campaignKey: string;
+    version: string | number;
+    displayCode: string;
+    displayName: string;
+    kind: "discount" | "bundle" | "subscription" | "loyalty" | "cross_sell";
+    status: "draft" | "active" | "retired";
+    amountMinor: string | number | null;
+    discountBps: string | number | null;
+    currency: string | null;
+    enabled: boolean;
+    startAt: Date | string | null;
+    endAt: Date | string | null;
+    timezone: string;
+    scope: "sitewide" | "products" | "variants";
+  };
+  const candidatePredicate = candidateScope === undefined
+    ? ""
+    : `
+       AND status = 'active' AND enabled = true
+       AND (starts_at IS NULL OR starts_at <= $4::timestamptz)
+       AND (ends_at IS NULL OR ends_at > $4::timestamptz)
+       AND (
+         scope = 'sitewide'
+         OR EXISTS (
+           SELECT 1 FROM promotion_targets pt
+           WHERE pt.promotion_id = p.id
+             AND (
+               (pt.target_kind = 'product' AND pt.product_id = ANY($1::uuid[]))
+               OR (pt.target_kind = 'policy_group'
+                   AND pt.policy_group_id = ANY($2::uuid[]))
+             )
+         )
+         OR EXISTS (
+           SELECT 1 FROM promotion_variant_targets pvt
+           WHERE pvt.promotion_id = p.id
+             AND pvt.variant_id = ANY($3::uuid[])
+         )
+       )`;
+  const parents = await client.query<PromotionRow>(
+    `SELECT id::text AS "recordId", campaign_key AS "campaignKey", version,
+            code AS "displayCode", name AS "displayName", kind, status,
+            amount_minor AS "amountMinor", basis_points AS "discountBps",
+            currency, enabled, starts_at AS "startAt", ends_at AS "endAt",
+            timezone, scope
+     FROM promotions p
+     WHERE campaign_key IS NOT NULL AND application_mode = 'automatic'
+     ${candidatePredicate}
+     ORDER BY campaign_key, version, id${lockSuffix(lock, "p")}`,
+    candidateScope === undefined
+      ? []
+      : [
+          [...candidateScope.productIds].toSorted(),
+          [...candidateScope.policyGroupIds].toSorted(),
+          [...candidateScope.variantIds].toSorted(),
+          candidateScope.at.toISOString(),
+        ],
+  );
+  const result: PersistedStorefrontPromotion[] = [];
+  for (const row of parents.rows) {
+    type TargetRow = {
+      targetKind: "product" | "policy_group";
+      productId: string | null;
+      policyGroupId: string | null;
+    };
+    const targets = await client.query<TargetRow>(
+      `SELECT target_kind AS "targetKind", product_id::text AS "productId",
+              policy_group_id::text AS "policyGroupId"
+       FROM promotion_targets
+       WHERE promotion_id = $1::uuid
+       ORDER BY target_kind, COALESCE(product_id, policy_group_id)${lockSuffix(lock)}`,
+      [row.recordId],
+    );
+    type VariantTargetRow = { variantId: string };
+    const variantTargets = await client.query<VariantTargetRow>(
+      `SELECT variant_id::text AS "variantId"
+       FROM promotion_variant_targets
+       WHERE promotion_id = $1::uuid
+       ORDER BY variant_id${lockSuffix(lock)}`,
+      [row.recordId],
+    );
+    const discountBps =
+      row.discountBps === null ? null : safeInteger(row.discountBps);
+    if (
+      !nonblank(row.campaignKey) ||
+      !nonblank(row.displayCode) ||
+      !nonblank(row.displayName) ||
+      !nonblank(row.timezone) ||
+      row.kind !== "discount" ||
+      row.amountMinor !== null ||
+      row.currency !== null ||
+      discountBps === null ||
+      discountBps < 1 ||
+      discountBps > 10_000
+    ) {
+      continue;
+    }
+
+    let scope: StorefrontPromotionScope | null = null;
+    if (
+      row.scope === "sitewide" &&
+      targets.rows.length === 0 &&
+      variantTargets.rows.length === 0
+    ) {
+      scope = Object.freeze({ kind: "sitewide" });
+    } else if (
+      row.scope === "products" &&
+      targets.rows.length > 0 &&
+      variantTargets.rows.length === 0 &&
+      targets.rows.every(
+        (target) =>
+          target.targetKind === "product" &&
+          target.productId !== null &&
+          isCanonicalUuid(target.productId),
+      )
+    ) {
+      scope = Object.freeze({
+        kind: "products",
+        productIds: Object.freeze(
+          targets.rows.map((target) => target.productId!),
+        ),
+      });
+    } else if (
+      row.scope === "variants" &&
+      targets.rows.length === 0 &&
+      variantTargets.rows.length > 0 &&
+      variantTargets.rows.every((target) => isCanonicalUuid(target.variantId))
+    ) {
+      scope = Object.freeze({
+        kind: "variants",
+        variantIds: Object.freeze(
+          variantTargets.rows.map((target) => target.variantId),
+        ),
+      });
+    }
+    if (scope === null) continue;
+
+    const promotion: PersistedStorefrontPromotion = Object.freeze({
+      recordId: row.recordId,
+      campaignKey: row.campaignKey,
+      version: safeInteger(row.version),
+      id: row.campaignKey,
+      displayName: row.displayName,
+      displayCode: row.displayCode,
+      discountBps,
+      enabled: row.enabled && row.status === "active",
+      startAt: row.startAt === null ? null : toIso(row.startAt),
+      endAt: row.endAt === null ? null : toIso(row.endAt),
+      timezone: row.timezone,
+      scope,
+      applicationMode: "automatic" as const,
+    });
+    if (storefrontPromotionMatchesOwnerConfiguration(promotion)) {
+      result.push(promotion);
+    }
+  }
+  return Object.freeze(result);
 }
 
 async function readBuyerFacts(
@@ -218,6 +763,7 @@ async function readProductCores(
               superseded_at AS "supersededAt"
        FROM product_prices
        WHERE product_id = $1::uuid AND currency = 'USD'
+         AND variant_id IS NULL AND price_status = 'active'
          AND effective_at <= $2::timestamptz AND superseded_at IS NULL
        ORDER BY version, id${lockSuffix(lock)}`,
       [productId, now.toISOString()],
@@ -419,7 +965,7 @@ async function readLots(
             expires_at AS "expiresAt"
      FROM lots
      WHERE product_id = ANY($1::uuid[]) AND status = 'released'
-       AND available_quantity > 0
+       AND variant_id IS NULL AND available_quantity > 0
        AND (expires_at IS NULL OR expires_at > $2::timestamptz)
      ORDER BY id${lockSuffix(lock)}`,
     [[...productIds], now.toISOString()],
@@ -479,7 +1025,7 @@ async function loadFactsFromClient(
   client: CheckoutSqlClient,
   input: Readonly<{
     buyerUserId: string;
-    request: CheckoutRequest;
+    request: LegacyRewardsCheckoutRequest;
     now: Date;
     lock: boolean;
     buyer?: BuyerFacts;
@@ -514,6 +1060,673 @@ async function loadFactsFromClient(
   await input.beforeLots?.();
   const lots = await readLots(client, productIds, input.now, input.lock);
   return { ok: true, value: assembleFacts(buyer, cores, promotion, destinations, lots) };
+}
+
+type VariantCore = Readonly<{
+  variantId: string;
+  productId: string;
+  sku: string;
+  variantLabel: string;
+  productName: string;
+  packageForm: string;
+  policyGroupId: string;
+  productActive: boolean;
+  policyGroupActive: boolean;
+  variantActive: boolean;
+  variantUpdatedAt: string;
+  productUpdatedAt: string;
+  stripeProductId: string | null;
+  stripePriceId: string | null;
+  price: AuthoritativeVariantCheckoutFacts["items"][number]["price"];
+  priceSetRevision: string;
+}>;
+
+type VariantInventoryRow = Readonly<{
+  id: string;
+  variantId: string;
+  productId: string;
+  receivedQuantity: number | string;
+  availableQuantity: number | string;
+  expiresAt: Date | string | null;
+  updatedAt: Date | string;
+}>;
+
+type VariantInventoryOverride = Readonly<{
+  lots: readonly VariantInventoryRow[];
+  revisionByVariant: ReadonlyMap<string, string>;
+}>;
+
+async function loadVariantFactsFromClient(
+  client: CheckoutSqlClient,
+  input: Readonly<{
+    buyerUserId: string;
+    request: CheckoutQuoteRequest;
+    now: Date;
+    lock: boolean;
+    buyer?: BuyerFacts;
+    beforeLots?: () => Promise<void>;
+    inventoryOverride?: VariantInventoryOverride;
+  }>,
+): Promise<VariantFactLoadResult> {
+  const buyer = input.buyer ??
+    await readBuyerFacts(client, input.buyerUserId, input.now, input.lock);
+  if (buyer === null) return { ok: false, reasons: ["account_required"] };
+
+  type VariantRow = {
+    variantId: string;
+    productId: string;
+    sku: string;
+    variantLabel: string;
+    productName: string;
+    packageForm: string;
+    policyGroupId: string;
+    variantStatus: "inactive" | "active";
+    productStatus: "draft" | "active" | "retired";
+    policyGroupActive: boolean;
+    variantUpdatedAt: Date | string;
+    productUpdatedAt: Date | string;
+    stripeProductId: string | null;
+    stripePriceId: string | null;
+  };
+  type PriceRow = {
+    priceId: string;
+    priceVersion: number | string;
+    priceStatus: "pending" | "active" | "unavailable";
+    amountMinor: number | string;
+    currency: string;
+    effectiveAt: Date | string;
+  };
+  const requestedVariantIds = input.request.items
+    .map((item) => item.variantId)
+    .toSorted();
+  if (input.lock) {
+    type IdentityRow = {
+      variantId: string;
+      productId: string;
+      policyGroupId: string;
+    };
+    const discovered = await client.query<IdentityRow>(
+      `SELECT v.id::text AS "variantId", v.product_id::text AS "productId",
+              p.policy_group_id::text AS "policyGroupId"
+       FROM product_variants v
+       JOIN products p ON p.id = v.product_id
+       WHERE v.id = ANY($1::uuid[])
+       ORDER BY v.id`,
+      [requestedVariantIds],
+    );
+    if (
+      discovered.rows.length !== requestedVariantIds.length ||
+      discovered.rows.some(
+        (row, index) => row.variantId !== requestedVariantIds[index],
+      )
+    ) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+    const discoveredByVariant = new Map(
+      discovered.rows.map((row) => [row.variantId, row]),
+    );
+    const productIds = [
+      ...new Set(discovered.rows.map((row) => row.productId)),
+    ].toSorted();
+    const lockedProducts = await client.query<{
+      productId: string;
+      policyGroupId: string;
+    }>(
+      `SELECT p.id::text AS "productId",
+              p.policy_group_id::text AS "policyGroupId"
+       FROM products p
+       WHERE p.id = ANY($1::uuid[])
+       ORDER BY p.id FOR UPDATE`,
+      [productIds],
+    );
+    if (
+      lockedProducts.rows.length !== productIds.length ||
+      lockedProducts.rows.some(
+        (row, index) =>
+          row.productId !== productIds[index] ||
+          discovered.rows
+            .filter((identity) => identity.productId === row.productId)
+            .some((identity) => identity.policyGroupId !== row.policyGroupId),
+      )
+    ) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+    const policyGroupIds = [
+      ...new Set(lockedProducts.rows.map((row) => row.policyGroupId)),
+    ].toSorted();
+    const lockedGroups = await client.query<{ policyGroupId: string }>(
+      `SELECT g.id::text AS "policyGroupId"
+       FROM product_policy_groups g
+       WHERE g.id = ANY($1::uuid[])
+       ORDER BY g.id FOR UPDATE`,
+      [policyGroupIds],
+    );
+    if (
+      lockedGroups.rows.length !== policyGroupIds.length ||
+      lockedGroups.rows.some(
+        (row, index) => row.policyGroupId !== policyGroupIds[index],
+      )
+    ) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+    const lockedVariants = await client.query<{
+      variantId: string;
+      productId: string;
+    }>(
+      `SELECT v.id::text AS "variantId", v.product_id::text AS "productId"
+       FROM product_variants v
+       WHERE v.id = ANY($1::uuid[])
+       ORDER BY v.id FOR UPDATE`,
+      [requestedVariantIds],
+    );
+    if (
+      lockedVariants.rows.length !== requestedVariantIds.length ||
+      lockedVariants.rows.some(
+        (row, index) =>
+          row.variantId !== requestedVariantIds[index] ||
+          discoveredByVariant.get(row.variantId)?.productId !== row.productId,
+      )
+    ) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+  }
+  const cores = new Map<string, VariantCore>();
+  for (const variantId of requestedVariantIds) {
+    const variants = await client.query<VariantRow>(
+      `SELECT v.id::text AS "variantId", v.product_id::text AS "productId",
+              v.sku, v.label AS "variantLabel", p.name AS "productName",
+              p.package_form AS "packageForm",
+              p.policy_group_id::text AS "policyGroupId",
+              v.status AS "variantStatus", p.status AS "productStatus",
+              g.active AS "policyGroupActive", v.updated_at AS "variantUpdatedAt",
+              p.updated_at AS "productUpdatedAt",
+              v.stripe_product_id AS "stripeProductId",
+              v.stripe_price_id AS "stripePriceId"
+       FROM product_variants v
+       JOIN products p ON p.id = v.product_id
+       JOIN product_policy_groups g ON g.id = p.policy_group_id
+       WHERE v.id = $1::uuid`,
+      [variantId],
+    );
+    if (variants.rows.length !== 1) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+    const row = variants.rows[0]!;
+    const prices = await client.query<PriceRow>(
+      `SELECT id::text AS "priceId", version AS "priceVersion",
+              price_status AS "priceStatus", amount_minor AS "amountMinor",
+              currency, effective_at AS "effectiveAt"
+       FROM product_prices
+       WHERE variant_id = $1::uuid
+         AND effective_at <= $2::timestamptz AND superseded_at IS NULL
+       ORDER BY currency, version, id${lockSuffix(input.lock)}`,
+      [variantId, input.now.toISOString()],
+    );
+    if (prices.rows.length === 0) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+    const selectedPrice = prices.rows[0]!;
+    if (
+      !isCanonicalUuid(row.variantId) || !isCanonicalUuid(row.productId) ||
+      !isCanonicalUuid(row.policyGroupId) || !nonblank(row.sku) ||
+      !nonblank(row.variantLabel) || !nonblank(row.productName) ||
+      !nonblank(row.packageForm) || !isCanonicalUuid(selectedPrice.priceId) ||
+      !nonblank(selectedPrice.currency)
+    ) {
+      return { ok: false, reasons: ["variant_catalog_incomplete"] };
+    }
+    cores.set(variantId, Object.freeze({
+      variantId: row.variantId,
+      productId: row.productId,
+      sku: row.sku,
+      variantLabel: row.variantLabel,
+      productName: row.productName,
+      packageForm: row.packageForm,
+      policyGroupId: row.policyGroupId,
+      productActive: row.productStatus === "active",
+      policyGroupActive: row.policyGroupActive,
+      variantActive: row.variantStatus === "active",
+      variantUpdatedAt: toIso(row.variantUpdatedAt),
+      productUpdatedAt: toIso(row.productUpdatedAt),
+      stripeProductId: row.stripeProductId,
+      stripePriceId: row.stripePriceId,
+      price: Object.freeze({
+        id: selectedPrice.priceId,
+        version: safeInteger(selectedPrice.priceVersion),
+        status: selectedPrice.priceStatus,
+        amountMinor: safeInteger(selectedPrice.amountMinor),
+        currency: prices.rows.length === 1 ? selectedPrice.currency : "MIXED",
+        effectiveAt: toIso(selectedPrice.effectiveAt),
+      }),
+      priceSetRevision: canonicalJson(prices.rows.map((price) => ({
+        id: price.priceId,
+        version: safeInteger(price.priceVersion),
+        status: price.priceStatus,
+        amountMinor: safeInteger(price.amountMinor),
+        currency: price.currency,
+        effectiveAt: toIso(price.effectiveAt),
+      }))),
+    }));
+  }
+
+  const destinationCores: ProductCore[] = [...cores.values()].map((core) => ({
+    productId: core.productId,
+    productName: core.productName,
+    packageForm: core.packageForm,
+    policyGroupId: core.policyGroupId,
+    productActive: core.productActive,
+    policyGroupActive: core.policyGroupActive,
+    price: Object.freeze({
+      id: core.price.id,
+      version: core.price.version,
+      amountMinor: core.price.amountMinor,
+      currency: "USD" as const,
+      effectiveAt: core.price.effectiveAt,
+      supersededAt: null,
+    }),
+  }));
+  const destinations = await readDestinations(
+    client,
+    destinationCores,
+    input.request.destination.stateCode,
+    input.now,
+    input.lock,
+  );
+  await input.beforeLots?.();
+
+  const variantIds = input.request.items.map((item) => item.variantId);
+  const lotRows = input.inventoryOverride === undefined
+    ? (await client.query<VariantInventoryRow>(
+        `SELECT id::text AS id, variant_id::text AS "variantId",
+                product_id::text AS "productId", received_quantity AS "receivedQuantity",
+                available_quantity AS "availableQuantity", expires_at AS "expiresAt",
+                updated_at AS "updatedAt"
+         FROM lots
+         WHERE variant_id = ANY($1::uuid[]) AND status = 'released'
+           AND available_quantity > 0
+           AND (expires_at IS NULL OR expires_at > $2::timestamptz)
+         ORDER BY id${lockSuffix(input.lock)}`,
+        [[...variantIds], input.now.toISOString()],
+      )).rows
+    : [...input.inventoryOverride.lots];
+  const promotions = await getAutomaticStorefrontPromotions(
+    client,
+    input.lock,
+    {
+      productIds: [...new Set([...cores.values()].map((core) => core.productId))],
+      policyGroupIds: [
+        ...new Set([...cores.values()].map((core) => core.policyGroupId)),
+      ],
+      variantIds,
+      at: input.now,
+    },
+  );
+  const items = input.request.items.map((requested) => {
+    const core = cores.get(requested.variantId)!;
+    const itemLotRows = lotRows.filter((lot) =>
+      lot.variantId === requested.variantId,
+    );
+    if (itemLotRows.some((lot) => lot.productId !== core.productId)) {
+      throw new Error("Variant inventory product relationship is inconsistent");
+    }
+    const eligibleLots = Object.freeze(itemLotRows.map((lot) => Object.freeze({
+      id: lot.id,
+      status: "released" as const,
+      receivedQuantity: safeInteger(lot.receivedQuantity),
+      availableQuantity: safeInteger(lot.availableQuantity),
+      expiresAt: lot.expiresAt === null ? null : toIso(lot.expiresAt),
+    })));
+    const destination = destinations.get(core.productId)!;
+    return Object.freeze({
+      variantId: core.variantId,
+      productId: core.productId,
+      sku: core.sku,
+      variantLabel: core.variantLabel,
+      productName: core.productName,
+      packageForm: core.packageForm,
+      policyGroupId: core.policyGroupId,
+      productActive: core.productActive,
+      policyGroupActive: core.policyGroupActive,
+      variantActive: core.variantActive,
+      availabilityRevision: canonicalJson({
+        variantUpdatedAt: core.variantUpdatedAt,
+        productUpdatedAt: core.productUpdatedAt,
+        productActive: core.productActive,
+        policyGroupActive: core.policyGroupActive,
+        variantActive: core.variantActive,
+        destination,
+        priceSetRevision: core.priceSetRevision,
+      }),
+      inventoryRevision: input.inventoryOverride?.revisionByVariant.get(
+        requested.variantId,
+      ) ?? canonicalJson(itemLotRows.map((lot) => ({
+          id: lot.id,
+          productId: lot.productId,
+          receivedQuantity: safeInteger(lot.receivedQuantity),
+          availableQuantity: safeInteger(lot.availableQuantity),
+          expiresAt: lot.expiresAt === null ? null : toIso(lot.expiresAt),
+          updatedAt: toIso(lot.updatedAt),
+        }))),
+      price: core.price,
+      stripeProductId: core.stripeProductId,
+      stripePriceId: core.stripePriceId,
+      destination,
+      eligibleLots,
+    });
+  });
+  return {
+    ok: true,
+    value: Object.freeze({
+      buyer,
+      items: Object.freeze(items),
+      automaticPromotions: promotions,
+    }),
+  };
+}
+
+type ProviderCreateVariantFactsInput = Parameters<
+  NonNullable<CheckoutRepository["loadProviderCreateVariantFacts"]>
+>[0];
+
+const providerCreateAuthorityConflict = Object.freeze({
+  ok: false as const,
+  reasons: Object.freeze(["provider_create_authority_conflict"]),
+});
+
+async function loadProviderCreateVariantFactsFromClient(
+  client: CheckoutSqlClient,
+  input: ProviderCreateVariantFactsInput,
+): Promise<VariantFactLoadResult> {
+  type AttemptRow = {
+    attemptId: string;
+    orderId: string;
+    buyerUserId: string;
+    idempotencyKey: string;
+    status: CheckoutAttemptStatus;
+    orderState: OrderState;
+    canonicalPricingRevision: string | null;
+    permitted: boolean;
+    reviewRequired: boolean;
+    reviewAuthorizationMode: string | null;
+    taxReady: boolean;
+    shippingReady: boolean;
+    provider: string | null;
+    providerRequestId: string | null;
+    providerSessionId: string | null;
+    providerRequestHash: string | null;
+    providerRequestSchemaVersion: number | string | null;
+    providerBindingSnapshot: unknown;
+    providerExpiresAt: Date | string | null;
+    providerLivemode: boolean | null;
+    providerScope: string | null;
+  };
+  const attempts = await client.query<AttemptRow>(
+    `SELECT a.id::text AS "attemptId", a.order_id::text AS "orderId",
+            a.buyer_user_id::text AS "buyerUserId", a.idempotency_key AS "idempotencyKey",
+            a.status, o.state AS "orderState",
+            a.canonical_pricing_revision AS "canonicalPricingRevision",
+            a.permitted, a.review_required AS "reviewRequired",
+            a.review_authorization_mode AS "reviewAuthorizationMode",
+            a.tax_ready AS "taxReady", a.shipping_ready AS "shippingReady",
+            a.provider, a.provider_request_id AS "providerRequestId",
+            a.provider_session_id AS "providerSessionId",
+            a.provider_request_hash AS "providerRequestHash",
+            a.provider_request_schema_version AS "providerRequestSchemaVersion",
+            a.provider_binding_snapshot AS "providerBindingSnapshot",
+            a.expires_at AS "providerExpiresAt",
+            a.provider_livemode AS "providerLivemode",
+            a.provider_scope AS "providerScope"
+     FROM checkout_attempts a
+     JOIN orders o ON o.id = a.order_id AND o.buyer_user_id = a.buyer_user_id
+     WHERE a.buyer_user_id = $1::uuid AND a.idempotency_key = $2
+       AND a.order_id = $3::uuid AND a.id = $4::uuid
+     FOR UPDATE OF a, o`,
+    [input.buyerUserId, input.idempotencyKey, input.orderId, input.attemptId],
+  );
+  if (attempts.rows.length !== 1) return providerCreateAuthorityConflict;
+  const attempt = attempts.rows[0]!;
+  const expiresAt = attempt.providerExpiresAt === null
+    ? null
+    : toIso(attempt.providerExpiresAt);
+  const rawBinding = attempt.providerBindingSnapshot;
+  const bindingRecord = typeof rawBinding === "object" && rawBinding !== null &&
+    !Array.isArray(rawBinding)
+      ? rawBinding as Record<string, unknown>
+      : null;
+  const parsedBinding = bindingRecord?.schemaVersion === 2
+    ? createStripeProviderBindingSnapshotV2(bindingRecord.lines)
+    : null;
+  if (
+    attempt.attemptId !== input.attemptId ||
+    attempt.orderId !== input.orderId ||
+    attempt.buyerUserId !== input.buyerUserId ||
+    attempt.idempotencyKey !== input.idempotencyKey ||
+    attempt.canonicalPricingRevision !== input.expectedStoredPricingRevision ||
+    !isSha256(input.expectedStoredPricingRevision) ||
+    (attempt.status !== "created" && attempt.status !== "provider_unknown") ||
+    attempt.orderState !== "checkout_pending" ||
+    !attempt.permitted || attempt.reviewRequired ||
+    attempt.reviewAuthorizationMode !== "none" ||
+    !attempt.taxReady || !attempt.shippingReady ||
+    (attempt.provider !== "stripe" && attempt.provider !== "local_test") ||
+    attempt.providerRequestId !== `checkout_attempt:${input.attemptId}` ||
+    attempt.providerSessionId !== null ||
+    attempt.providerRequestHash === null ||
+    !isSha256(attempt.providerRequestHash) ||
+    safeInteger(attempt.providerRequestSchemaVersion ?? 0) !== 2 ||
+    bindingRecord === null ||
+    Reflect.ownKeys(bindingRecord).length !== 2 ||
+    !Object.hasOwn(bindingRecord, "schemaVersion") ||
+    !Object.hasOwn(bindingRecord, "lines") ||
+    parsedBinding === null || !parsedBinding.ok ||
+    canonicalJson(parsedBinding.value) !== canonicalJson(rawBinding) ||
+    expiresAt === null || new Date(expiresAt).getTime() <= input.now.getTime() ||
+    typeof attempt.providerLivemode !== "boolean" ||
+    !nonblank(attempt.providerScope ?? "")
+  ) return providerCreateAuthorityConflict;
+
+  type ItemRow = {
+    orderItemId: string;
+    orderId: string;
+    productId: string;
+    variantId: string | null;
+    productPriceId: string;
+    quantity: number | string;
+    unitAmountMinor: number | string;
+    totalMinor: number | string;
+    currency: string;
+  };
+  const itemResult = await client.query<ItemRow>(
+    `SELECT id::text AS "orderItemId", order_id::text AS "orderId",
+            product_id::text AS "productId", variant_id::text AS "variantId",
+            product_price_id::text AS "productPriceId", quantity,
+            unit_amount_minor AS "unitAmountMinor", total_minor AS "totalMinor",
+            currency
+     FROM order_items WHERE order_id = $1::uuid ORDER BY id FOR UPDATE`,
+    [input.orderId],
+  );
+  const requestedByVariant = new Map(
+    input.request.items.map((item) => [item.variantId, item] as const),
+  );
+  const bindingByVariant = new Map(
+    parsedBinding.value.lines.map((line) => [line.variantId, line] as const),
+  );
+  const itemById = new Map(itemResult.rows.map((item) =>
+    [item.orderItemId, item] as const));
+  const itemByVariant = new Map(itemResult.rows.map((item) =>
+    [item.variantId, item] as const));
+  if (
+    requestedByVariant.size !== input.request.items.length ||
+    bindingByVariant.size !== parsedBinding.value.lines.length ||
+    itemById.size !== itemResult.rows.length ||
+    itemByVariant.has(null) ||
+    itemByVariant.size !== itemResult.rows.length ||
+    itemResult.rows.length !== input.request.items.length ||
+    bindingByVariant.size !== input.request.items.length
+  ) return providerCreateAuthorityConflict;
+  for (const requested of input.request.items) {
+    const item = itemByVariant.get(requested.variantId);
+    const binding = bindingByVariant.get(requested.variantId);
+    if (
+      item === undefined || binding === undefined ||
+      item.orderId !== input.orderId ||
+      item.productId !== binding.productId ||
+      item.variantId !== binding.variantId ||
+      item.productPriceId !== binding.priceBookId ||
+      safeInteger(item.quantity) !== requested.quantity ||
+      binding.requestedQuantity !== requested.quantity ||
+      safeInteger(item.unitAmountMinor) !== binding.baseUnitMinor ||
+      safeInteger(item.totalMinor) !== binding.netLineMinor ||
+      item.currency !== binding.currency
+    ) return providerCreateAuthorityConflict;
+  }
+
+  type ReservationRow = {
+    reservationId: string;
+    checkoutAttemptId: string;
+    reservationOrderId: string;
+    reservationOrderItemId: string;
+    reservationProductId: string;
+    reservationVariantId: string | null;
+    reservationLotId: string;
+    quantityReserved: number | string;
+    quantityRemaining: number | string;
+    reservationState: string;
+    reservationExpiresAt: Date | string;
+    reservationExpiryMatchesAttempt: boolean | null;
+    reservationUpdatedAt: Date | string;
+    itemOrderId: string | null;
+    itemProductId: string | null;
+    itemVariantId: string | null;
+    itemQuantity: number | string | null;
+    lotProductId: string | null;
+    lotVariantId: string | null;
+    lotStatus: string | null;
+    lotReceivedQuantity: number | string | null;
+    lotExpiresAt: Date | string | null;
+    lotUpdatedAt: Date | string | null;
+  };
+  const reservationResult = await client.query<ReservationRow>(
+    `SELECT r.id::text AS "reservationId",
+            r.checkout_attempt_id::text AS "checkoutAttemptId",
+            r.order_id::text AS "reservationOrderId",
+            r.order_item_id::text AS "reservationOrderItemId",
+            r.product_id::text AS "reservationProductId",
+            r.variant_id::text AS "reservationVariantId",
+            r.lot_id::text AS "reservationLotId",
+            r.quantity_reserved AS "quantityReserved",
+            r.quantity_remaining AS "quantityRemaining",
+            r.state AS "reservationState", r.expires_at AS "reservationExpiresAt",
+            r.expires_at = a.expires_at AS "reservationExpiryMatchesAttempt",
+            r.updated_at AS "reservationUpdatedAt",
+            oi.order_id::text AS "itemOrderId", oi.product_id::text AS "itemProductId",
+            oi.variant_id::text AS "itemVariantId", oi.quantity AS "itemQuantity",
+            l.product_id::text AS "lotProductId", l.variant_id::text AS "lotVariantId",
+            l.status AS "lotStatus", l.received_quantity AS "lotReceivedQuantity",
+            l.expires_at AS "lotExpiresAt", l.updated_at AS "lotUpdatedAt"
+     FROM inventory_reservations r
+     JOIN checkout_attempts a ON a.id = r.checkout_attempt_id
+     LEFT JOIN order_items oi ON oi.id = r.order_item_id
+     LEFT JOIN lots l ON l.id = r.lot_id
+     WHERE r.checkout_attempt_id = $1::uuid
+     ORDER BY r.id`,
+    [input.attemptId],
+  );
+  const seenReservations = new Set<string>();
+  const seenOwnership = new Set<string>();
+  const coverage = new Map<string, number>();
+  const eligibleLots: VariantInventoryRow[] = [];
+  const revisionRows = new Map<string, Array<Record<string, unknown>>>();
+  for (const row of reservationResult.rows) {
+    const item = itemById.get(row.reservationOrderItemId);
+    const variantId = row.reservationVariantId;
+    const requested = variantId === null
+      ? undefined
+      : requestedByVariant.get(variantId);
+    const reservationExpiry = toIso(row.reservationExpiresAt);
+    const ownership = `${row.reservationOrderItemId}:${row.reservationLotId}`;
+    if (
+      seenReservations.has(row.reservationId) || seenOwnership.has(ownership) ||
+      row.checkoutAttemptId !== input.attemptId ||
+      row.reservationOrderId !== input.orderId ||
+      item === undefined || requested === undefined || variantId === null ||
+      item.orderId !== row.itemOrderId || item.orderId !== row.reservationOrderId ||
+      item.productId !== row.itemProductId ||
+      item.productId !== row.reservationProductId ||
+      item.variantId !== row.itemVariantId || item.variantId !== variantId ||
+      safeInteger(item.quantity) !== requested.quantity ||
+      (row.lotProductId !== null && row.lotProductId !== row.reservationProductId) ||
+      (row.lotVariantId !== null && row.lotVariantId !== variantId) ||
+      row.reservationExpiryMatchesAttempt !== true
+    ) return providerCreateAuthorityConflict;
+    seenReservations.add(row.reservationId);
+    seenOwnership.add(ownership);
+    const quantityReserved = safeInteger(row.quantityReserved);
+    const quantityRemaining = safeInteger(row.quantityRemaining);
+    const revision = {
+      reservationId: row.reservationId,
+      orderItemId: row.reservationOrderItemId,
+      lotId: row.reservationLotId,
+      quantityReserved,
+      quantityRemaining,
+      reservationState: row.reservationState,
+      reservationExpiresAt: reservationExpiry,
+      reservationUpdatedAt: toIso(row.reservationUpdatedAt),
+      lotStatus: row.lotStatus,
+      lotExpiresAt: row.lotExpiresAt === null ? null : toIso(row.lotExpiresAt),
+      lotUpdatedAt: row.lotUpdatedAt === null ? null : toIso(row.lotUpdatedAt),
+    };
+    const revisions = revisionRows.get(variantId) ?? [];
+    revisions.push(revision);
+    revisionRows.set(variantId, revisions);
+    if (row.reservationState !== "active") continue;
+    if (quantityReserved <= 0 || quantityRemaining !== quantityReserved) {
+      return providerCreateAuthorityConflict;
+    }
+    const lotExpiry = row.lotExpiresAt === null ? null : toIso(row.lotExpiresAt);
+    if (
+      row.lotStatus !== "released" ||
+      row.lotReceivedQuantity === null || row.lotUpdatedAt === null ||
+      (lotExpiry !== null && new Date(lotExpiry).getTime() <= input.now.getTime())
+    ) continue;
+    const receivedQuantity = safeInteger(row.lotReceivedQuantity);
+    if (receivedQuantity < quantityRemaining) return providerCreateAuthorityConflict;
+    const nextCoverage = (coverage.get(variantId) ?? 0) + quantityRemaining;
+    if (!Number.isSafeInteger(nextCoverage) || nextCoverage > requested.quantity) {
+      return providerCreateAuthorityConflict;
+    }
+    coverage.set(variantId, nextCoverage);
+    eligibleLots.push(Object.freeze({
+      id: row.reservationLotId,
+      variantId,
+      productId: row.reservationProductId,
+      receivedQuantity,
+      availableQuantity: quantityRemaining,
+      expiresAt: lotExpiry,
+      updatedAt: toIso(row.lotUpdatedAt),
+    }));
+  }
+  const revisionByVariant = new Map<string, string>();
+  for (const requested of input.request.items) {
+    revisionByVariant.set(
+      requested.variantId,
+      canonicalJson({
+        attemptId: input.attemptId,
+        providerExpiresAt: expiresAt,
+        reservations: revisionRows.get(requested.variantId) ?? [],
+      }),
+    );
+  }
+  return loadVariantFactsFromClient(client, {
+    buyerUserId: input.buyerUserId,
+    request: input.request,
+    now: input.now,
+    lock: true,
+    inventoryOverride: Object.freeze({
+      lots: Object.freeze(eligibleLots),
+      revisionByVariant,
+    }),
+  });
 }
 
 type ReviewRow = {
@@ -630,9 +1843,18 @@ export async function resolveExactReviewRequest(
     (policy) => policy.destinationPolicyId,
   );
   const expectedCart = {
-    schemaVersion: 1,
-    items: input.items,
-    promotionIds: input.promotionIds,
+    ...(input.automaticPromotions === undefined
+      ? {
+          schemaVersion: 1,
+          items: input.items,
+          promotionIds: input.promotionIds,
+        }
+      : {
+          schemaVersion: 2,
+          kind: "canonical_variant",
+          items: input.items,
+          automaticPromotions: input.automaticPromotions,
+        }),
   };
   if (
     row.buyerStatusSnapshot !== input.buyerStatus ||
@@ -679,11 +1901,15 @@ async function storedAttemptFromClient(
     totalMinor: number | string;
     currency: string;
     hasReservations: boolean;
+    canonicalPricingRevision: string | null;
+    canonicalQuoteSnapshot: unknown;
   };
   const attempt = await client.query<AttemptRow>(
     `SELECT a.order_id::text AS "orderId", a.id::text AS "attemptId",
             a.request_hash AS "requestHash", a.status, a.permitted,
             a.review_required AS "reviewRequired", a.reasons,
+            a.canonical_pricing_revision AS "canonicalPricingRevision",
+            a.canonical_quote_snapshot AS "canonicalQuoteSnapshot",
             o.subtotal_minor AS "subtotalMinor",
             o.discount_minor AS "discountMinor", o.tax_minor AS "taxMinor",
             o.shipping_minor AS "shippingMinor", o.total_minor AS "totalMinor",
@@ -700,6 +1926,7 @@ async function storedAttemptFromClient(
   const row = attempt.rows[0]!;
   type ItemRow = {
     productId: string;
+    variantId: string | null;
     productName: string;
     packageForm: string;
     quantity: number | string;
@@ -710,6 +1937,7 @@ async function storedAttemptFromClient(
   };
   const items = await client.query<ItemRow>(
     `SELECT product_id::text AS "productId",
+            variant_id::text AS "variantId",
             product_name_snapshot AS "productName",
             package_form_snapshot AS "packageForm", quantity,
             unit_amount_minor AS "unitAmountMinor",
@@ -719,8 +1947,27 @@ async function storedAttemptFromClient(
      ORDER BY product_id${lockSuffix(lockItems)}`,
     [row.orderId],
   );
-  const quoteSnapshot: BrowserCheckoutQuote | null =
-    row.currency === "USD" &&
+  const canonicalQuoteSnapshot = parseCanonicalReplaySnapshot(
+    row.canonicalQuoteSnapshot,
+  );
+  const variantCount = items.rows.filter(
+    (item) => item.variantId !== null,
+  ).length;
+  const legacyIdentity = items.rows.length > 0 && variantCount === 0;
+  const canonicalIdentity =
+    items.rows.length > 0 && variantCount === items.rows.length;
+  if (!legacyIdentity && !canonicalIdentity) {
+    throw new Error("Stored canonical checkout replay is invalid");
+  }
+  let quoteSnapshot: BrowserCheckoutQuote | null;
+  if (legacyIdentity) {
+    if (
+      row.canonicalPricingRevision !== null ||
+      row.canonicalQuoteSnapshot !== null
+    ) {
+      throw new Error("Stored canonical checkout replay is invalid");
+    }
+    quoteSnapshot = row.currency === "USD" &&
     items.rows.length > 0 &&
     safeInteger(row.discountMinor) === 0
       ? Object.freeze({
@@ -756,6 +2003,35 @@ async function storedAttemptFromClient(
           ),
         })
       : null;
+  } else {
+    if (
+      row.canonicalPricingRevision === null ||
+      row.canonicalQuoteSnapshot === null ||
+      !/^[0-9a-f]{64}$/u.test(row.canonicalPricingRevision) ||
+      canonicalQuoteSnapshot === null
+    ) {
+      throw new Error("Stored canonical checkout replay is invalid");
+    }
+    const persistedByVariant = new Map(
+      items.rows.map((item) => [item.variantId!, item]),
+    );
+    if (
+      persistedByVariant.size !== items.rows.length ||
+      canonicalQuoteSnapshot.lines.length !== items.rows.length ||
+      canonicalQuoteSnapshot.lines.some((line) => {
+        const item = persistedByVariant.get(line.variantId!);
+        return item === undefined ||
+          line.quantity !== safeInteger(item.quantity) ||
+          line.unitAmountMinor !== safeInteger(item.unitAmountMinor) ||
+          line.subtotalMinor !== safeInteger(item.subtotalMinor) ||
+          line.discountMinor !== safeInteger(item.discountMinor) ||
+          line.totalMinor !== safeInteger(item.totalMinor);
+      })
+    ) {
+      throw new Error("Stored canonical checkout replay is invalid");
+    }
+    quoteSnapshot = canonicalQuoteSnapshot;
+  }
   return Object.freeze({
     orderId: row.orderId,
     attemptId: row.attemptId,
@@ -766,6 +2042,7 @@ async function storedAttemptFromClient(
     reviewRequired: row.reviewRequired,
     hasReservations: row.hasReservations,
     quoteSnapshot,
+    pricingRevision: row.canonicalPricingRevision,
   });
 }
 
@@ -859,9 +2136,10 @@ function authoritativeCancellationState(
 
 function currentDecision(
   plan: AuthoritativeCheckoutPlanData,
-  facts: AuthoritativeCheckoutFacts,
+  facts: AuthoritativeCheckoutFacts | AuthoritativeVariantCheckoutFacts,
   exactReview: ExactReviewDecision | null,
 ) {
+  const canonicalVariant = plan.kind === "canonical_variant";
   return evaluateCheckout({
     authenticated: true,
     buyerStatus: facts.buyer.emailVerified ? facts.buyer.status : null,
@@ -869,7 +2147,8 @@ function currentDecision(
     currentAttestationVersion: facts.buyer.currentAttestationVersionId,
     items: facts.items.map((item) => ({
       productId: item.productId,
-      active: item.productActive && item.policyGroupActive,
+      active: item.productActive && item.policyGroupActive &&
+        (!canonicalVariant || (item as AuthoritativeVariantCheckoutFacts["items"][number]).variantActive),
       catalogComplete: true,
       destination: item.destination,
       inventoryAvailable:
@@ -877,9 +2156,12 @@ function currentDecision(
           (sum, lot) => sum + lot.availableQuantity,
           0,
         ) >=
-        plan.request.items.find(
-          (candidate) => candidate.productId === item.productId,
-        )!.quantity,
+        (canonicalVariant
+          ? plan.request.items.find((candidate) =>
+              candidate.variantId ===
+                (item as AuthoritativeVariantCheckoutFacts["items"][number]).variantId)!
+          : plan.request.items.find((candidate) =>
+              candidate.productId === item.productId)!).quantity,
     })),
     paymentProviderAvailable: !plan.decision.reasons.includes(
       "payment_provider_unavailable",
@@ -975,27 +2257,33 @@ async function writeCommercialSnapshots(
     ]);
   }
 
-  const factByProduct = new Map(
-    plan.facts.items.map((item) => [item.productId, item]),
+  const factByLineId = new Map<string, AuthoritativeCheckoutItemFact | AuthoritativeVariantCheckoutFacts["items"][number]>(
+    plan.kind === "canonical_variant"
+      ? plan.facts.items.map((item) => [item.variantId, item] as const)
+      : plan.facts.items.map((item) => [item.productId, item] as const),
   );
   const itemIds = new Map<string, string>();
   for (const line of totals.lines.toSorted((a, b) => a.productId.localeCompare(b.productId))) {
-    const fact = factByProduct.get(line.productId)!;
+    const fact = factByLineId.get(line.productId)!;
+    const variantId = plan.kind === "canonical_variant"
+      ? (fact as AuthoritativeVariantCheckoutFacts["items"][number]).variantId
+      : null;
     const orderItemId = plan.identity.keyedUuid(`item:${line.productId}`);
     itemIds.set(line.productId, orderItemId);
     await client.query(
       `INSERT INTO order_items
-        (id, order_id, product_id, product_price_id, destination_policy_id,
+        (id, order_id, product_id, variant_id, product_price_id, destination_policy_id,
          product_name_snapshot, package_form_snapshot, currency,
          unit_amount_minor, quantity, subtotal_minor, discount_minor,
          total_minor, created_at)
        VALUES
-        ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
-         $6, $7, 'USD', $8, $9, $10, $11, $12, $13::timestamptz)`,
+        ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid,
+         $7, $8, 'USD', $9, $10, $11, $12, $13, $14::timestamptz)`,
       [
         orderItemId,
         plan.identity.orderId,
-        line.productId,
+        fact.productId,
+        variantId,
         fact.price.id,
         fact.destination.ruleId,
         fact.productName,
@@ -1010,12 +2298,29 @@ async function writeCommercialSnapshots(
     );
   }
 
-  if (
-    plan.facts.promotion !== null &&
-    plan.selectedAcquisitionSource === "promotion"
-  ) {
-    const promotion = plan.facts.promotion;
-    const applicationId = plan.identity.keyedUuid("promotion-application");
+  const appliedPromotions = plan.kind === "canonical_variant"
+    ? plan.selectedAcquisitionSource === "promotion"
+      ? plan.facts.automaticPromotions.filter((promotion) =>
+          plan.effectiveLines.some((line) => line.appliedPromotionIds.includes(promotion.id)))
+      : []
+    : plan.facts.promotion !== null && plan.selectedAcquisitionSource === "promotion"
+      ? [plan.facts.promotion]
+      : [];
+  for (const promotion of appliedPromotions) {
+    const promotionRecordId = "recordId" in promotion ? promotion.recordId : promotion.id;
+    const promotionCode = "recordId" in promotion ? promotion.displayCode! : promotion.code;
+    const promotionName = "recordId" in promotion ? promotion.displayName! : promotion.name;
+    const applicationId = plan.identity.keyedUuid(`promotion-application:${promotionRecordId}`);
+    const allocations = plan.kind === "canonical_variant"
+      ? plan.promotionAllocations.filter((allocation) =>
+          plan.effectiveLines.some((line) =>
+            line.variantId === allocation.variantId &&
+            line.appliedPromotionIds.includes(promotion.id)))
+      : plan.promotionAllocations;
+    const appliedDiscountMinor = allocations.reduce(
+      (sum, allocation) => sum + allocation.discountMinor,
+      0,
+    );
     await client.query(
       `INSERT INTO order_promotion_applications
         (id, order_id, promotion_id, promotion_version, code_snapshot,
@@ -1025,25 +2330,31 @@ async function writeCommercialSnapshots(
       [
         applicationId,
         plan.identity.orderId,
-        promotion.id,
+        promotionRecordId,
         promotion.version,
-        promotion.code,
-        promotion.name,
-        promotion.kind,
-        plan.promotionDiscountMinor,
+        promotionCode,
+        promotionName,
+        "kind" in promotion ? promotion.kind : "discount",
+        appliedDiscountMinor,
         plan.authoritativeAt.toISOString(),
       ],
     );
-    for (const allocation of plan.promotionAllocations) {
+    for (const allocation of allocations) {
       await client.query(
         `INSERT INTO order_promotion_allocations
           (id, application_id, order_id, order_item_id, allocated_discount_minor)
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5)`,
         [
-          plan.identity.keyedUuid(`promotion-allocation:${allocation.productId}`),
+          plan.identity.keyedUuid(
+            `promotion-allocation:${promotionRecordId}:${"variantId" in allocation
+              ? allocation.variantId as string
+              : allocation.productId}`,
+          ),
           applicationId,
           plan.identity.orderId,
-          itemIds.get(allocation.productId),
+          itemIds.get("variantId" in allocation
+            ? allocation.variantId as string
+            : allocation.productId),
           allocation.discountMinor,
         ],
       );
@@ -1070,6 +2381,9 @@ async function writeCommercialSnapshots(
   );
 
   const gates = gateProjection(plan.decision);
+  const persistedCanonicalQuote = canonicalReplaySnapshot(plan);
+  const persistedPricingRevision =
+    plan.kind === "canonical_variant" ? plan.pricingRevision : null;
   const attemptValues = [
     plan.identity.attemptId,
     plan.identity.orderId,
@@ -1097,6 +2411,11 @@ async function writeCommercialSnapshots(
     providerPreparation?.providerRequestSchemaVersion ?? null,
     providerPreparation?.providerLivemode ?? null,
     providerPreparation?.providerScope ?? null,
+    providerPreparation?.providerRequestSchemaVersion === 2
+      ? providerPreparation.providerBindingSnapshot
+      : null,
+    persistedPricingRevision,
+    persistedCanonicalQuote,
     plan.authoritativeAt.toISOString(),
   ] as const;
   if (existing === null) {
@@ -1108,8 +2427,10 @@ async function writeCommercialSnapshots(
          reasons, tax_ready, shipping_ready, tax_quote_reference,
          shipping_quote_reference, shipping_service, provider,
          provider_request_id, provider_request_hash, expires_at,
-         provider_customer_email, provider_origin,
-         provider_request_schema_version, provider_livemode, provider_scope,
+          provider_customer_email, provider_origin,
+          provider_request_schema_version, provider_livemode, provider_scope,
+          provider_binding_snapshot,
+          canonical_pricing_revision, canonical_quote_snapshot,
          created_at)
        VALUES
         ($1::uuid, $2::uuid, $3::uuid, $4, $5, 'created',
@@ -1117,8 +2438,8 @@ async function writeCommercialSnapshots(
          $8::checkout_gate_result, $9::checkout_gate_result,
          $10::checkout_gate_result, $11::checkout_gate_result,
          $12, $13, $14::text[], true, true, $15, $16, $17,
-         $18, $19, $20, $21::timestamptz, $22, $23, $24, $25, $26,
-         $27::timestamptz)`,
+          $18, $19, $20, $21::timestamptz, $22, $23, $24, $25, $26,
+          $27::jsonb, $28, $29::jsonb, $30::timestamptz)`,
       attemptValues,
     );
   } else {
@@ -1137,14 +2458,102 @@ async function writeCommercialSnapshots(
          provider_request_id = $19, provider_session_id = NULL,
          provider_request_hash = $20, expires_at = $21::timestamptz,
          provider_customer_email = $22, provider_origin = $23,
-         provider_request_schema_version = $24, provider_livemode = $25,
-         provider_scope = $26
+          provider_request_schema_version = $24, provider_livemode = $25,
+          provider_scope = $26, provider_binding_snapshot = $27::jsonb,
+          canonical_pricing_revision = $28,
+          canonical_quote_snapshot = $29::jsonb
        WHERE id = $1::uuid AND order_id = $2::uuid AND buyer_user_id = $3::uuid
          AND idempotency_key = $4 AND request_hash = $5`,
-      attemptValues.slice(0, 26),
+      attemptValues.slice(0, 29),
     );
   }
   return itemIds;
+}
+
+async function bindExactApprovedReview(
+  client: CheckoutSqlClient,
+  plan: AuthoritativeCheckoutPlanData,
+  review: ExactReviewDecision,
+): Promise<boolean> {
+  if (
+    review.outcome !== "approved" ||
+    review.reviewSnapshotHash !== plan.reviewSnapshotHash
+  ) {
+    return false;
+  }
+  const inserted = await client.query<{ reviewRequestId: string }>(
+    `INSERT INTO checkout_attempt_review_bindings
+       (checkout_attempt_id, order_id, review_request_id,
+        review_snapshot_hash, bound_at)
+     SELECT $1::uuid, $2::uuid, review.id, review.snapshot_hash,
+            $5::timestamptz
+     FROM review_requests review
+     WHERE review.id = $3::uuid AND review.order_id = $2::uuid
+       AND review.snapshot_hash = $4 AND review.outcome = 'approved'
+       AND review.decided_by_user_id IS NOT NULL
+       AND review.decided_at IS NOT NULL
+       AND review.covers_buyer_review IS NOT NULL
+     ON CONFLICT (checkout_attempt_id) DO NOTHING
+     RETURNING review_request_id::text AS "reviewRequestId"`,
+    [
+      plan.identity.attemptId,
+      plan.identity.orderId,
+      review.reviewRequestId,
+      review.reviewSnapshotHash,
+      plan.authoritativeAt.toISOString(),
+    ],
+  );
+  if (inserted.rows.length === 1) return true;
+  const existing = await client.query<{
+    orderId: string;
+    reviewRequestId: string;
+    reviewSnapshotHash: string;
+  }>(
+    `SELECT order_id::text AS "orderId",
+            review_request_id::text AS "reviewRequestId",
+            review_snapshot_hash AS "reviewSnapshotHash"
+     FROM checkout_attempt_review_bindings
+     WHERE checkout_attempt_id = $1::uuid FOR UPDATE`,
+    [plan.identity.attemptId],
+  );
+  return existing.rows.length === 1 &&
+    existing.rows[0]!.orderId === plan.identity.orderId &&
+    existing.rows[0]!.reviewRequestId === review.reviewRequestId &&
+    existing.rows[0]!.reviewSnapshotHash === review.reviewSnapshotHash;
+}
+
+async function hasNoAttemptReviewBinding(
+  client: CheckoutSqlClient,
+  attemptId: string,
+): Promise<boolean> {
+  const existing = await client.query<{ checkoutAttemptId: string }>(
+    `SELECT checkout_attempt_id::text AS "checkoutAttemptId"
+     FROM checkout_attempt_review_bindings
+     WHERE checkout_attempt_id = $1::uuid FOR UPDATE`,
+    [attemptId],
+  );
+  return existing.rows.length === 0;
+}
+
+async function persistReviewAuthorizationMode(
+  client: CheckoutSqlClient,
+  plan: AuthoritativeCheckoutPlanData,
+  mode: "bound" | "none",
+): Promise<boolean> {
+  const updated = await client.query<{ mode: string }>(
+    `UPDATE checkout_attempts
+     SET review_authorization_mode = $4
+     WHERE id = $1::uuid AND order_id = $2::uuid AND buyer_user_id = $3::uuid
+       AND (review_authorization_mode IS NULL OR review_authorization_mode = $4)
+     RETURNING review_authorization_mode AS mode`,
+    [
+      plan.identity.attemptId,
+      plan.identity.orderId,
+      plan.buyerUserId,
+      mode,
+    ],
+  );
+  return updated.rows.length === 1 && updated.rows[0]!.mode === mode;
 }
 
 async function createOrLoadPendingReview(
@@ -1191,9 +2600,18 @@ async function createOrLoadPendingReview(
       plan.facts.buyer.currentAttestationVersionId,
       plan.request.destination.stateCode,
       JSON.stringify({
-        schemaVersion: 1,
-        items: plan.request.items,
-        promotionIds: plan.request.promotionIds,
+        ...(plan.kind === "canonical_variant"
+          ? {
+              schemaVersion: 2,
+              kind: "canonical_variant",
+              items: plan.request.items,
+              automaticPromotions: plan.activeAutomaticPromotions,
+            }
+          : {
+              schemaVersion: 1,
+              items: plan.request.items,
+              promotionIds: plan.request.promotionIds,
+            }),
       }),
       plan.facts.buyer.status === "review",
       reviewPolicyIds.length > 0,
@@ -1217,11 +2635,27 @@ async function reserveInventory(
   providerPreparation: ProviderPreparation,
   itemIds: ReadonlyMap<string, string>,
 ): Promise<void> {
-  const requestedByProduct = new Map(
-    plan.request.items.map((item) => [item.productId, item.quantity]),
+  const canonicalVariant = plan.kind === "canonical_variant";
+  const requestedByLineId = new Map<string, number>(
+    canonicalVariant
+      ? plan.request.items.map((item) => [item.variantId, item.quantity] as const)
+      : plan.request.items.map((item) => [item.productId, item.quantity] as const),
   );
-  for (const fact of plan.facts.items.toSorted((a, b) => a.productId.localeCompare(b.productId))) {
-    let remaining = requestedByProduct.get(fact.productId)!;
+  const facts = [...plan.facts.items].toSorted((left, right) => {
+    const leftKey = canonicalVariant
+      ? (left as AuthoritativeVariantCheckoutFacts["items"][number]).variantId
+      : left.productId;
+    const rightKey = canonicalVariant
+      ? (right as AuthoritativeVariantCheckoutFacts["items"][number]).variantId
+      : right.productId;
+    return leftKey.localeCompare(rightKey);
+  });
+  for (const fact of facts) {
+    const variantId = canonicalVariant
+      ? (fact as AuthoritativeVariantCheckoutFacts["items"][number]).variantId
+      : null;
+    const lineId = variantId ?? fact.productId;
+    let remaining = requestedByLineId.get(lineId)!;
     const allocationLots = fact.eligibleLots.toSorted((left, right) => {
       if (left.expiresAt === null && right.expiresAt !== null) return 1;
       if (left.expiresAt !== null && right.expiresAt === null) return -1;
@@ -1239,23 +2673,24 @@ async function reserveInventory(
         `UPDATE lots SET available_quantity = available_quantity - $2,
                          updated_at = $3::timestamptz
          WHERE id = $1::uuid AND status = 'released'
+           AND (($4::uuid IS NULL AND variant_id IS NULL) OR variant_id = $4::uuid)
            AND available_quantity >= $2
          RETURNING available_quantity AS "balanceAfter"`,
-        [lot.id, allocation, plan.authoritativeAt.toISOString()],
+        [lot.id, allocation, plan.authoritativeAt.toISOString(), variantId],
       );
       if (updated.rows.length !== 1) throw new Error("Inventory allocation lost");
-      const orderItemId = itemIds.get(fact.productId)!;
+      const orderItemId = itemIds.get(lineId)!;
       const reservationId = plan.identity.keyedUuid(
         `reservation:${orderItemId}:${lot.id}`,
       );
       await client.query(
         `INSERT INTO inventory_reservations
           (id, checkout_attempt_id, idempotency_key, order_id, order_item_id,
-           product_id, lot_id, quantity_reserved, quantity_remaining, state,
+           product_id, variant_id, lot_id, quantity_reserved, quantity_remaining, state,
            expires_at, created_at, updated_at)
          VALUES
-          ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid, $7::uuid,
-           $8, $8, 'active', $9::timestamptz, $10::timestamptz, $10::timestamptz)`,
+          ($1::uuid, $2::uuid, $3, $4::uuid, $5::uuid, $6::uuid, $7::uuid, $8::uuid,
+           $9, $9, 'active', $10::timestamptz, $11::timestamptz, $11::timestamptz)`,
         [
           reservationId,
           plan.identity.attemptId,
@@ -1263,6 +2698,7 @@ async function reserveInventory(
           plan.identity.orderId,
           orderItemId,
           fact.productId,
+          variantId,
           lot.id,
           allocation,
           providerPreparation.providerExpiresAt,
@@ -1292,6 +2728,16 @@ async function reserveInventory(
     }
     if (remaining !== 0) throw new Error("Inventory became insufficient");
   }
+}
+
+function withRecheckedFacts(
+  plan: AuthoritativeCheckoutPlanData,
+  facts: AuthoritativeCheckoutFacts | AuthoritativeVariantCheckoutFacts,
+  decision: AuthoritativeCheckoutPlanData["decision"],
+): AuthoritativeCheckoutPlanData {
+  return plan.kind === "canonical_variant"
+    ? { ...plan, facts: facts as AuthoritativeVariantCheckoutFacts, decision }
+    : { ...plan, facts: facts as AuthoritativeCheckoutFacts, decision };
 }
 
 async function prepareInTransaction(
@@ -1385,32 +2831,51 @@ async function prepareInTransaction(
     );
   }
 
-  const loaded = await loadFactsFromClient(client, {
-    buyerUserId: plan.buyerUserId,
-    request: plan.request,
-    now: plan.authoritativeAt,
-    lock: true,
-    buyer,
-    beforeLots: async () => {
-      if (existing !== null) {
-        await client.query(
-          `SELECT id FROM inventory_reservations
-           WHERE checkout_attempt_id = $1::uuid ORDER BY id FOR UPDATE`,
-          [plan.identity.attemptId],
-        );
-      }
-    },
-  });
+  const beforeLots = async () => {
+    if (existing !== null) {
+      await client.query(
+        `SELECT id FROM inventory_reservations
+         WHERE checkout_attempt_id = $1::uuid ORDER BY id FOR UPDATE`,
+        [plan.identity.attemptId],
+      );
+    }
+  };
+  const loaded = plan.kind === "canonical_variant"
+    ? await loadVariantFactsFromClient(client, {
+        buyerUserId: plan.buyerUserId,
+        request: plan.request,
+        now: plan.authoritativeAt,
+        lock: true,
+        buyer,
+        beforeLots,
+      })
+    : await loadFactsFromClient(client, {
+        buyerUserId: plan.buyerUserId,
+        request: plan.request,
+        now: plan.authoritativeAt,
+        lock: true,
+        buyer,
+        beforeLots,
+      });
   if (!loaded.ok) return { status: "facts_changed_retry" };
   const facts = loaded.value;
   const factsHash = await hashCanonicalEnvelope(
-    {
-      schemaVersion: 1,
-      kind: "authoritative_checkout_facts",
-      authoritativeAt: plan.authoritativeAt.toISOString(),
-      request: plan.request,
-      facts,
-    },
+    plan.kind === "canonical_variant"
+      ? {
+          schemaVersion: 2,
+          kind: "authoritative_variant_checkout_facts",
+          request: plan.request,
+          pricingRevision: plan.pricingRevision,
+          facts,
+          effectiveLines: plan.effectiveLines,
+        }
+      : {
+          schemaVersion: 1,
+          kind: "authoritative_checkout_facts",
+          authoritativeAt: plan.authoritativeAt.toISOString(),
+          request: plan.request,
+          facts,
+        },
     sha256,
   );
   if (factsHash !== plan.factsHash) return { status: "facts_changed_retry" };
@@ -1428,7 +2893,15 @@ async function prepareInTransaction(
           facts.buyer.acceptedAttestationVersionId,
         currentAttestationVersionId: facts.buyer.currentAttestationVersionId,
         items: plan.request.items,
-        promotionIds: plan.request.promotionIds,
+        ...(plan.kind === "canonical_variant"
+          ? {
+              automaticPromotions: canonicalActiveAutomaticPromotionIdentities(
+                facts as AuthoritativeVariantCheckoutFacts,
+                plan.request,
+                plan.authoritativeAt,
+              ),
+            }
+          : { promotionIds: plan.request.promotionIds }),
         destination: plan.request.destination,
         reviewPolicies: facts.items
           .filter((item) => item.destination.status === "review")
@@ -1494,16 +2967,14 @@ async function prepareInTransaction(
     if (providerPreparation !== null) return { status: "facts_changed_retry" };
     const itemIds = await writeCommercialSnapshots(
       client,
-      { ...plan, facts, decision },
+      withRecheckedFacts(plan, facts, decision),
       null,
       "eligibility_review",
       existing,
     );
     if (itemIds === null) return { status: "facts_changed_retry" };
     const reviewRequestId = await createOrLoadPendingReview(client, {
-      ...plan,
-      facts,
-      decision,
+      ...withRecheckedFacts(plan, facts, decision),
     });
     return {
       status: "review_required",
@@ -1539,16 +3010,34 @@ async function prepareInTransaction(
 
   const itemIds = await writeCommercialSnapshots(
     client,
-    { ...plan, facts, decision: finalDecision },
+    withRecheckedFacts(plan, facts, finalDecision),
     providerPreparation,
     "checkout_pending",
     existing,
   );
   if (itemIds === null) return { status: "facts_changed_retry" };
+  if (finalReview !== null) {
+    if (!(await bindExactApprovedReview(client, plan, finalReview))) {
+      throw new ReviewAuthorizationRejected();
+    }
+    if (!(await persistReviewAuthorizationMode(client, plan, "bound"))) {
+      throw new ReviewAuthorizationRejected();
+    }
+  } else {
+    if (!(await hasNoAttemptReviewBinding(client, plan.identity.attemptId))) {
+      throw new ReviewAuthorizationRejected();
+    }
+    if (!(await persistReviewAuthorizationMode(client, plan, "none"))) {
+      throw new ReviewAuthorizationRejected();
+    }
+  }
   if (plan.referralQuote !== null && plan.affiliateQuote !== null) {
     throw new AffiliateBindingConflict();
   }
-  if (plan.referralQuote !== null) {
+  if (
+    plan.selectedAcquisitionSource === "referral" &&
+    plan.referralQuote !== null
+  ) {
     await bindCustomerReferralOrderInTransaction(client, {
       attributionId: plan.identity.keyedUuid("customer-referral-attribution"),
       conversionId: plan.identity.keyedUuid("customer-referral-conversion"),
@@ -1595,7 +3084,12 @@ async function prepareInTransaction(
       throw new RewardReservationRejected();
     }
   }
-  await reserveInventory(client, { ...plan, facts, decision: finalDecision }, providerPreparation, itemIds);
+  await reserveInventory(
+    client,
+    withRecheckedFacts(plan, facts, finalDecision),
+    providerPreparation,
+    itemIds,
+  );
   return {
     status: "prepared",
     orderId: plan.identity.orderId,
@@ -1666,6 +3160,13 @@ class RewardReservationRejected extends Error {
   constructor() {
     super("Authoritative reward reservation was rejected");
     this.name = "RewardReservationRejected";
+  }
+}
+
+class ReviewAuthorizationRejected extends Error {
+  constructor() {
+    super("Checkout review authorization could not be persisted");
+    this.name = "ReviewAuthorizationRejected";
   }
 }
 
@@ -1875,18 +3376,39 @@ export function createPostgresCheckoutRepository(dependencies: Readonly<{
     retryNumber: 1 | 2,
     sqlState: "40001" | "40P01",
   ) => Promise<void>;
-}>): CheckoutRepository {
+}>): CheckoutRepository & CanonicalCommerceFactsRepository {
   const releaseKeyedUuid = dependencies.keyedUuid;
   const retryOptions =
     dependencies.retrySleep === undefined
       ? {}
       : { sleep: dependencies.retrySleep };
   return Object.freeze({
+    getCheckoutVariantFacts(variantId) {
+      return getCheckoutVariantFacts(dependencies.client, variantId);
+    },
+    getAutomaticStorefrontPromotions() {
+      return getAutomaticStorefrontPromotions(dependencies.client);
+    },
     findAttempt(input) {
       return storedAttemptFromClient(dependencies.client, input, false);
     },
     loadFacts(input) {
       return loadFactsFromClient(dependencies.client, { ...input, lock: false });
+    },
+    loadVariantFacts(input) {
+      return loadVariantFactsFromClient(dependencies.client, {
+        ...input,
+        lock: false,
+      });
+    },
+    loadProviderCreateVariantFacts(input) {
+      return runSerializableWithRetry(
+        () => dependencies.runTransaction(
+          (client) => loadProviderCreateVariantFactsFromClient(client, input),
+          { isolationLevel: "serializable" },
+        ),
+        retryOptions,
+      );
     },
     findExactReview(input) {
       return findExactReviewByHash(dependencies.client, input, false);
@@ -1910,6 +3432,7 @@ export function createPostgresCheckoutRepository(dependencies: Readonly<{
       } catch (error) {
         if (
           error instanceof RewardReservationRejected ||
+          error instanceof ReviewAuthorizationRejected ||
           error instanceof ReferralBindingConflict ||
           error instanceof AffiliateBindingConflict
         ) {

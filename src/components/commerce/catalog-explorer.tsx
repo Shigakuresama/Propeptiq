@@ -1,16 +1,18 @@
 "use client";
 
-import { Search, SearchX, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Search, X } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
 
-import type { BrowseCatalogProduct } from "@/catalog/browse-catalog";
+import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
+import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
+import type { CatalogDiscoveryRow } from "@/search/catalog-discovery";
 import {
-  DataLabel,
-  EmptyState,
-  RecordPanel,
-} from "@/components/design-system/archive-primitives";
-import { Button } from "@/components/ui/button";
+  normalizeSearchText,
+  searchEntries,
+  sortStorefrontProducts,
+  type CatalogSort,
+} from "@/search/storefront-search";
 
 type ExactFilters = Readonly<{
   sourceName: string;
@@ -24,116 +26,154 @@ const emptyFilters: ExactFilters = Object.freeze({
   packageUnit: "",
 });
 
-function normalized(value: string): string {
-  return value.trim().toLocaleLowerCase("en-US");
-}
+const sortOptions: readonly Readonly<{ value: CatalogSort; label: string }>[] =
+  Object.freeze([
+    Object.freeze({ value: "popular", label: "Most popular" }),
+    Object.freeze({ value: "price-asc", label: "Price: low to high" }),
+    Object.freeze({ value: "price-desc", label: "Price: high to low" }),
+    Object.freeze({ value: "alphabetical", label: "A to Z" }),
+    Object.freeze({ value: "newest", label: "Newest" }),
+  ]);
 
-function exactSourceNames(product: BrowseCatalogProduct): readonly string[] {
-  return product.variants.map((variant) => variant.sourceName ?? product.sourceName);
+function exactSourceNames(product: PublicStorefrontProduct): readonly string[] {
+  return product.displayConfigurations.map(
+    (configuration) => configuration.sourceName ?? product.sourceName,
+  );
 }
 
 function sortedUnique(values: readonly string[]): readonly string[] {
   return Object.freeze([...new Set(values)].sort((a, b) => a.localeCompare(b, "en-US")));
 }
 
+function invalidDiscovery(): never {
+  throw new TypeError("Invalid catalog discovery data.");
+}
+
 export function CatalogExplorer({
+  discoveryRows,
   products,
+  pricing,
 }: {
-  products: readonly BrowseCatalogProduct[];
+  discoveryRows: readonly CatalogDiscoveryRow[];
+  products: readonly PublicStorefrontProduct[];
+  pricing: PublicStorefrontPricingContext;
 }) {
   const [query, setQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
   const [filters, setFilters] = useState<ExactFilters>(emptyFilters);
-  const exactFiltersActive = Object.values(filters).some(Boolean);
+  const [sortMode, setSortMode] = useState<CatalogSort>("popular");
+  const [, startQueryTransition] = useTransition();
 
   const options = useMemo(
     () => ({
       sourceNames: sortedUnique(products.flatMap(exactSourceNames)),
       sourceCodes: sortedUnique(
-        products.flatMap((product) => product.variants.map((variant) => variant.code)),
+        products.flatMap((product) =>
+          product.displayConfigurations.map((configuration) => configuration.displayCode),
+        ),
       ),
       packageUnits: sortedUnique(
         products.flatMap((product) =>
-          product.variants.map((variant) => variant.packageForm),
+          product.displayConfigurations.map((configuration) => configuration.packageForm),
         ),
       ),
     }),
     [products],
   );
 
-  const visibleEntries = useMemo(() => {
-    const searchTerm = normalized(query);
-    return products.flatMap((product) => {
-      const sourceNames = exactSourceNames(product);
-      const matchesQuery =
-        searchTerm.length === 0 ||
-        [
-          product.name,
-          product.sourceName,
-          ...sourceNames,
-          ...product.variants.flatMap((variant) => [variant.code, variant.packageForm]),
-        ].some((value) => normalized(value).includes(searchTerm));
-      if (!matchesQuery) return [];
-
-      const matchingVariants = exactFiltersActive
-        ? product.variants.filter((variant) => {
-            const sourceName = variant.sourceName ?? product.sourceName;
-            return (
-              (filters.sourceName.length === 0 || sourceName === filters.sourceName) &&
-              (filters.sourceCode.length === 0 || variant.code === filters.sourceCode) &&
-              (filters.packageUnit.length === 0 ||
-                variant.packageForm === filters.packageUnit)
-            );
-          })
-        : product.variants;
-
-      return matchingVariants.length > 0 ? [{ product, variants: matchingVariants }] : [];
-    });
-  }, [exactFiltersActive, filters, products, query]);
-
-  const filtersActive = query.length > 0 || Object.values(filters).some(Boolean);
-  const visibleVariantCount = visibleEntries.reduce(
-    (total, entry) => total + entry.variants.length,
-    0,
+  const productBySlug = useMemo(
+    () => new Map(products.map((product) => [product.slug, product] as const)),
+    [products],
   );
+  const discoveryById = useMemo(
+    () => new Map(discoveryRows.map((row) => [row.sortRow.id, row] as const)),
+    [discoveryRows],
+  );
+  const searchEntriesForProducts = useMemo(
+    () => discoveryRows.map((row) => row.searchEntry),
+    [discoveryRows],
+  );
+
+  const visibleProducts = useMemo(() => {
+    const normalizedQuery = normalizeSearchText(appliedQuery);
+    const queryEligibleIds = normalizedQuery.length === 0
+      ? new Set(discoveryRows.map((row) => row.searchEntry.id))
+      : new Set(
+          searchEntries(searchEntriesForProducts, appliedQuery).map(
+            ({ entry }) => entry.id,
+          ),
+        );
+
+    const survivingSortRows = discoveryRows.flatMap((row) => {
+      if (!queryEligibleIds.has(row.searchEntry.id)) return [];
+      const product = productBySlug.get(row.productSlug) ?? invalidDiscovery();
+      const sourceNames = exactSourceNames(product);
+      const matchesSource =
+        filters.sourceName.length === 0 || sourceNames.includes(filters.sourceName);
+      const matchesCode =
+        filters.sourceCode.length === 0 ||
+        product.displayConfigurations.some(
+          (configuration) => configuration.displayCode === filters.sourceCode,
+        );
+      const matchesUnit =
+        filters.packageUnit.length === 0 ||
+        product.displayConfigurations.some(
+          (configuration) => configuration.packageForm === filters.packageUnit,
+        );
+      return matchesSource && matchesCode && matchesUnit ? [row.sortRow] : [];
+    });
+
+    return sortStorefrontProducts(survivingSortRows, sortMode).map((sortRow) => {
+      const discoveryRow = discoveryById.get(sortRow.id) ?? invalidDiscovery();
+      return productBySlug.get(discoveryRow.productSlug) ?? invalidDiscovery();
+    });
+  }, [
+    appliedQuery,
+    discoveryById,
+    discoveryRows,
+    filters,
+    productBySlug,
+    searchEntriesForProducts,
+    sortMode,
+  ]);
+
+  const queryUpdating = query !== appliedQuery;
+  const exactFiltersActive = Object.values(filters).some(Boolean);
+  const normalizedAppliedQuery = normalizeSearchText(appliedQuery);
+
+  function updateQuery(value: string): void {
+    setQuery(value);
+    startQueryTransition(() => setAppliedQuery(value));
+  }
+
+  function clearSearch(): void {
+    setQuery("");
+    setAppliedQuery("");
+  }
+
+  function resetAllFilters(): void {
+    setQuery("");
+    setAppliedQuery("");
+    setFilters(emptyFilters);
+  }
 
   return (
     <section aria-labelledby="catalog-explorer-heading">
-      <RecordPanel className="mb-10 overflow-hidden p-0 sm:mb-12">
-        <div className="grid gap-5 p-5 sm:p-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-          <div className="max-w-[58ch]">
-            <DataLabel>Index controls</DataLabel>
-            <div className="mt-3 flex items-center gap-3">
-              <Search aria-hidden="true" className="size-5 shrink-0 text-moss" />
-              <h2 id="catalog-explorer-heading" className="font-heading text-3xl text-ink">
-                Find a catalog record
-              </h2>
-            </div>
-            <p className="mt-3 text-base leading-7 text-muted-ink">
-              Search exact owner-supplied names, source codes, and package configurations.
-            </p>
-          </div>
-          <div className="border-l-2 border-moss pl-4">
-            <p aria-live="polite" className="font-semibold tabular-nums text-ink">
-              {visibleEntries.length} of {products.length} families
-            </p>
-            <p className="mt-1 text-sm tabular-nums text-muted-ink">
-              {visibleVariantCount} configuration
-              {visibleVariantCount === 1 ? "" : "s"} represented
-            </p>
-          </div>
+      <div className="record-sheet mb-10 p-5 sm:p-7">
+        <div className="flex items-center gap-3">
+          <Search aria-hidden="true" className="size-5 text-moss" />
+          <h2 id="catalog-explorer-heading" className="font-heading text-2xl text-ink">
+            Find a catalog record
+          </h2>
         </div>
 
-        <form
-          className="record-panel-recessed grid gap-5 rounded-none border-x-0 border-b-0 p-5 sm:p-7 lg:grid-cols-2 xl:grid-cols-4"
-          onSubmit={(event) => event.preventDefault()}
-          role="search"
-        >
+        <div className="mt-6 grid gap-5 lg:grid-cols-2 xl:grid-cols-5">
           <label className="grid gap-2 text-base font-medium text-ink lg:col-span-2 xl:col-span-1">
             Search catalog
             <input
-              className="min-h-12 w-full rounded-xl border border-border bg-canvas px-4 text-base text-ink outline-none transition-colors duration-200 placeholder:text-muted-ink focus-visible:border-moss focus-visible:ring-2 focus-visible:ring-ring"
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              placeholder="Name, code, or package unit"
+              className="min-h-11 w-full rounded-xl border border-border bg-canvas px-3 text-base text-ink outline-none transition-colors duration-200 placeholder:text-muted-ink focus-visible:border-moss focus-visible:ring-2 focus-visible:ring-ring"
+              onChange={(event) => updateQuery(event.currentTarget.value)}
+              placeholder="Name, SKU, alias, or catalog fact"
               type="search"
               value={query}
             />
@@ -156,68 +196,76 @@ export function CatalogExplorer({
             options={options.packageUnits}
             value={filters.packageUnit}
           />
-
-          {filtersActive && visibleEntries.length > 0 ? (
-            <div className="flex min-h-12 items-center lg:col-span-2 xl:col-span-4 xl:justify-end">
-              <Button
-                className="h-11 rounded-full px-4 text-base"
-                onClick={() => {
-                  setQuery("");
-                  setFilters(emptyFilters);
-                }}
-                type="button"
-                variant="ghost"
-              >
-                <X aria-hidden="true" className="size-4" />
-                Clear filters
-              </Button>
-            </div>
-          ) : null}
-        </form>
-      </RecordPanel>
-
-      {visibleEntries.length > 0 ? (
-        <ul aria-label="Catalog results" className="catalog-grid">
-          {visibleEntries.map(({ product, variants }, index) => (
-            <li key={product.slug}>
-              <CatalogListingCard
-                product={product}
-                priority={index < 3}
-                variants={variants}
-              />
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <EmptyState
-          action={
-            <Button
-              className="h-11 rounded-full px-5"
-              onClick={() => {
-                setQuery("");
-                setFilters(emptyFilters);
-              }}
-              type="button"
-              variant="outline"
+          <label className="grid gap-2 text-base font-medium text-ink">
+            Sort catalog
+            <select
+              className="min-h-11 w-full rounded-xl border border-border bg-canvas px-3 text-base text-ink outline-none transition-colors duration-200 focus-visible:border-moss focus-visible:ring-2 focus-visible:ring-ring"
+              onChange={(event) => setSortMode(event.currentTarget.value as CatalogSort)}
+              value={sortMode}
             >
-              Clear filters
-            </Button>
-          }
-          description={
-            <>
-              <p>No catalog records match these filters.</p>
-              <p className="mt-2">
-                Clear the current search and exact-match filters to restore the full
-                owner-supplied index.
-              </p>
-            </>
-          }
-          eyebrow="Index result"
-          icon={SearchX}
-          title="No matching catalog records."
-        />
-      )}
+              {sortOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-5 flex min-h-11 flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+          <p aria-live="polite" className="text-base text-muted-ink">
+            {queryUpdating
+              ? "Updating catalog results"
+              : `${visibleProducts.length} of ${discoveryRows.length} products`}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {query.length > 0 ? (
+              <ClearButton label="Clear search" onClick={clearSearch} />
+            ) : null}
+            {exactFiltersActive ? (
+              <ClearButton label="Reset all filters" onClick={resetAllFilters} />
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div
+        aria-busy={queryUpdating || undefined}
+        aria-label="Catalog results region"
+        role="region"
+      >
+        {visibleProducts.length > 0 ? (
+          <ul aria-label="Catalog results" className="catalog-grid">
+            {visibleProducts.map((product, index) => (
+              <li key={product.slug}>
+                <CatalogListingCard product={product} priority={index < 3} pricing={pricing} />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="record-sheet text-base leading-7 text-muted-ink">
+            {normalizedAppliedQuery.length > 0 && exactFiltersActive
+              ? "No products match your search and filters."
+              : normalizedAppliedQuery.length > 0
+                ? "No products match your search."
+                : "No products match the selected filters."}
+          </p>
+        )}
+      </div>
     </section>
+  );
+}
+
+function ClearButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      className="inline-flex min-h-11 items-center gap-2 rounded-full px-3 text-base font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={onClick}
+      type="button"
+    >
+      <X aria-hidden="true" className="size-4" />
+      {label}
+    </button>
   );
 }
 
@@ -236,7 +284,7 @@ function CatalogSelect({
     <label className="grid gap-2 text-base font-medium text-ink">
       {label}
       <select
-        className="min-h-12 w-full rounded-xl border border-border bg-canvas px-4 text-base text-ink outline-none transition-colors duration-200 focus-visible:border-moss focus-visible:ring-2 focus-visible:ring-ring"
+        className="min-h-11 w-full rounded-xl border border-border bg-canvas px-3 text-base text-ink outline-none transition-colors duration-200 focus-visible:border-moss focus-visible:ring-2 focus-visible:ring-ring"
         onChange={(event) => onChange(event.currentTarget.value)}
         value={value}
       >

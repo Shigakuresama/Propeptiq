@@ -63,7 +63,7 @@ describe("synthetic demo catalog relational fixture", () => {
     expect(records.promotions.every(({ code, version }) => typeof code === "string" && code.length > 0 && Number.isSafeInteger(version) && version > 0)).toBe(true);
   });
 
-  it("passes actual demo product and promotion IDs through the strict checkout parser", () => {
+  it("does not pass legacy demo product and promotion IDs through the variant checkout parser", () => {
     const result = parseCheckoutRequest({
       items: [{ productId: syntheticDemoCatalogRecords.products[0]!.id, quantity: 1 }],
       destination: {
@@ -77,6 +77,9 @@ describe("synthetic demo catalog relational fixture", () => {
       },
       promotionIds: [syntheticDemoCatalogRecords.promotions[0]!.id],
     });
-    expect(result).toMatchObject({ ok: true });
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: "unexpected_field" },
+    });
   });
 });

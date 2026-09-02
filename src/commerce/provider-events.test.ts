@@ -419,3 +419,206 @@ describe("NormalizedProviderEventV1", () => {
     })).toBeNull();
   });
 });
+
+describe("invoice and ACH events are journaled but not yet processable", () => {
+  // Invoicing is enqueued in Stripe by src/commerce/stripe-invoice-provider.ts,
+  // but no order-state semantics exist for an invoiced sale yet. Until they do,
+  // these events must normalize to "ignored": verified and journaled, with zero
+  // business effect. Adding a processable kind without matching repository
+  // transitions would be strictly worse than this safe default.
+  it.each([
+    "cash_balance.funds_available",
+    "customer_cash_balance_transaction.created",
+  ])("normalizes %s to an ignored event with no business payload", (type) => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent(type, {
+        id: "in_synthetic6d",
+        amount_due: 8_700,
+        currency: "usd",
+        status: "paid",
+      }),
+    );
+
+    expect(result).toEqual({
+      status: "normalized",
+      event: {
+        schemaVersion: 1,
+        kind: "ignored",
+        providerEventId: `evt_synthetic_6e_${type.replaceAll(".", "_")}`,
+        eventType: type,
+        providerCreatedAt,
+        livemode: false,
+      },
+    });
+  });
+});
+
+describe("invoice provider events", () => {
+  const invoiceOrderId = "76000000-0000-4000-8000-0000000000c1";
+
+  function invoiceObject(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "in_synthetic6d",
+      metadata: { orderId: invoiceOrderId },
+      amount_due: 8_700,
+      amount_paid: 8_700,
+      currency: "usd",
+      status: "paid",
+      collection_method: "send_invoice",
+      livemode: false,
+      ...overrides,
+    };
+  }
+
+  it("normalizes a paid net-terms invoice with its order binding", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject()),
+    );
+
+    expect(result).toEqual({
+      status: "normalized",
+      event: {
+        schemaVersion: 1,
+        kind: "invoice",
+        providerEventId: "evt_synthetic_6e_invoice_paid",
+        eventType: "invoice.paid",
+        providerCreatedAt,
+        livemode: false,
+        invoiceId: "in_synthetic6d",
+        orderId: invoiceOrderId,
+        amountDueMinor: 8_700,
+        amountPaidMinor: 8_700,
+        currency: "usd",
+        status: "paid",
+        collectionMethod: "send_invoice",
+      },
+    });
+  });
+
+  it("round-trips a normalized invoice event through the stored parser", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject()),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized") return;
+    expect(parseNormalizedProviderEventV1(result.event)).toEqual(result.event);
+  });
+
+  it.each(["invoice.finalized", "invoice.payment_failed"])(
+    "normalizes %s as an invoice event",
+    (type) => {
+      const result = normalizeStripeProviderEventV1(
+        stripeEvent(type, invoiceObject({ status: "open", amount_paid: 0 })),
+      );
+      expect(result.status).toBe("normalized");
+      if (result.status !== "normalized") return;
+      expect(result.event.kind).toBe("invoice");
+    },
+  );
+
+  it("conflicts an invoice event whose order binding is missing", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject({ metadata: {} })),
+    );
+    expect(result.status).toBe("conflict");
+  });
+
+  it("conflicts an invoice event whose livemode contradicts the envelope", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject({ livemode: true })),
+    );
+    expect(result.status).toBe("conflict");
+  });
+
+  it("restricts an unrecognized invoice status rather than trusting it", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("invoice.paid", invoiceObject({ status: "weird" })),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized" || result.event.kind !== "invoice") return;
+    expect(result.event.status).toBe("unknown_restrictive");
+  });
+});
+
+describe("credit note provider events", () => {
+  function creditNoteObject(overrides: Record<string, unknown> = {}) {
+    return {
+      id: "cn_synthetic6d",
+      invoice: "in_synthetic6d",
+      amount: 8_000,
+      total: 8_700,
+      currency: "usd",
+      status: "issued",
+      type: "post_payment",
+      livemode: false,
+      ...overrides,
+    };
+  }
+
+  it("normalizes an issued credit note against its invoice", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject()),
+    );
+
+    expect(result).toEqual({
+      status: "normalized",
+      event: {
+        schemaVersion: 1,
+        kind: "credit_note",
+        providerEventId: "evt_synthetic_6e_credit_note_created",
+        eventType: "credit_note.created",
+        providerCreatedAt,
+        livemode: false,
+        creditNoteId: "cn_synthetic6d",
+        invoiceId: "in_synthetic6d",
+        amountMinor: 8_700,
+        currency: "usd",
+        status: "issued",
+        creditType: "post_payment",
+      },
+    });
+  });
+
+  it("round-trips a normalized credit note through the stored parser", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject()),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized") return;
+    expect(parseNormalizedProviderEventV1(result.event)).toEqual(result.event);
+  });
+
+  it("accepts an expanded invoice object as the binding", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject({
+        invoice: { id: "in_synthetic6d", object: "invoice" },
+      })),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized" || result.event.kind !== "credit_note") return;
+    expect(result.event.invoiceId).toBe("in_synthetic6d");
+  });
+
+  it("conflicts a credit note with no invoice binding", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject({ invoice: null })),
+    );
+    expect(result.status).toBe("conflict");
+  });
+
+  it("conflicts a credit note whose livemode contradicts the envelope", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject({ livemode: true })),
+    );
+    expect(result.status).toBe("conflict");
+  });
+
+  it("restricts an unrecognized credit note status rather than trusting it", () => {
+    const result = normalizeStripeProviderEventV1(
+      stripeEvent("credit_note.created", creditNoteObject({ status: "weird" })),
+    );
+    expect(result.status).toBe("normalized");
+    if (result.status !== "normalized" || result.event.kind !== "credit_note") return;
+    expect(result.event.status).toBe("unknown_restrictive");
+  });
+});

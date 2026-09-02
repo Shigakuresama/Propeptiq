@@ -13,6 +13,7 @@ function identity(overrides: Record<string, unknown> = {}): RequestIdentity {
       APP_ENV: "local",
       APP_ORIGIN: origin,
       CATALOG_DEMO_MODE: "enabled",
+      RECONSTITUTION_CALCULATOR_MODE: "disabled",
       LOCAL_TEST_DRIVER: "enabled",
       LOCAL_TEST_SECRET: secret,
       RATE_LIMIT_SECRET: "local-harness-rate-secret-at-least-32-characters",

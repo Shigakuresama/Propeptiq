@@ -8,7 +8,7 @@ import {
   type BetterAuthDependencies,
 } from "./better-auth-server";
 
-const enabledEnvironment = parseServerEnv({
+const enabledEnvironmentInput = {
   APP_ENV: "preview",
   APP_ORIGIN: "https://preview.propeptiq.example.invalid",
   AUTH_MODE: "test",
@@ -21,7 +21,9 @@ const enabledEnvironment = parseServerEnv({
   EMAIL_MODE: "test",
   RESEND_API_KEY: "re_synthetic_auth_test",
   RESEND_FROM: "accounts@example.test",
-});
+} satisfies Record<string, string | undefined>;
+
+const enabledEnvironment = parseServerEnv(enabledEnvironmentInput);
 
 describe("application-owned Better Auth server configuration", () => {
   const pool = { query: vi.fn() } as unknown as Pool;
@@ -112,7 +114,7 @@ describe("application-owned Better Auth server configuration", () => {
 
   it("rejects a pooled Neon URL because the auth schema needs a persistent search path", () => {
     const pooledEnvironment = parseServerEnv({
-      ...enabledEnvironment,
+      ...enabledEnvironmentInput,
       TEST_DATABASE_URL:
         "postgresql://synthetic_auth:synthetic_password@ep-example-pooler.us-east-1.aws.neon.tech/propeptiq_auth_test",
     });
@@ -130,7 +132,7 @@ describe("application-owned Better Auth server configuration", () => {
 
   it("pins full TLS verification for a direct Neon URL", () => {
     const neonEnvironment = parseServerEnv({
-      ...enabledEnvironment,
+      ...enabledEnvironmentInput,
       TEST_DATABASE_URL:
         "postgresql://synthetic_auth:synthetic_password@ep-example.us-east-1.aws.neon.tech/propeptiq_auth_test?sslmode=require&channel_binding=require",
     });

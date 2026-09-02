@@ -4,11 +4,17 @@ import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hashReviewSnapshot } from "@/commerce/checkout-identity";
-import { createCheckoutService } from "@/commerce/checkout-service";
+import { createCheckoutHttpHandlers } from "@/commerce/checkout-http";
+import {
+  createCheckoutService,
+  type AuthoritativeCheckoutPlan,
+} from "@/commerce/checkout-service";
+import { createStripeProviderBindingSnapshotV2 } from "@/commerce/provider-contracts";
 import {
   createPostgresCheckoutRepository,
   resolveExactReviewRequest,
 } from "@/db/repositories/checkout-repository";
+import { createFulfillmentRepository } from "@/db/repositories/fulfillment-repository";
 
 import { createMigratedPglite } from "./helpers/pglite";
 
@@ -33,6 +39,19 @@ const ids = {
   providerEvent: "30000000-0000-4000-8000-000000000018",
   paymentEvent: "30000000-0000-4000-8000-000000000019",
   previousAttestation: "30000000-0000-4000-8000-000000000020",
+  variantA: "30000000-0000-4000-8000-000000000021",
+  variantPriceA: "30000000-0000-4000-8000-000000000022",
+  variantLotA: "30000000-0000-4000-8000-000000000023",
+  variantPromotion: "30000000-0000-4000-8000-000000000024",
+  variantPromotionTarget: "30000000-0000-4000-8000-000000000025",
+  variantB: "30000000-0000-4000-8000-000000000026",
+  losingVariantPromotion: "30000000-0000-4000-8000-000000000027",
+  groupB: "30000000-0000-4000-8000-000000000028",
+  crossedVariantB: "10000000-0000-4000-8000-000000000029",
+  crossedVariantPriceB: "30000000-0000-4000-8000-000000000030",
+  crossedVariantLotB: "30000000-0000-4000-8000-000000000031",
+  unrelatedVariantPromotion: "30000000-0000-4000-8000-000000000032",
+  unrelatedVariantPromotionTarget: "30000000-0000-4000-8000-000000000033",
 } as const;
 
 const now = new Date("2026-08-25T12:00:00.000Z");
@@ -56,7 +75,7 @@ const request = {
     city: "Testville",
     stateCode: "CA",
     postalCode: "90001",
-    countryCode: "US",
+    countryCode: "US" as const,
   },
   promotionIds: [] as string[],
 };
@@ -130,6 +149,8 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       generator?: (label: string) => string;
       failTransactions?: number;
       transactionSql?: string[];
+      transactionQueries?: Array<{ sql: string; params: readonly unknown[] }>;
+      configuredPromotions?: unknown;
     }> = {},
   ) {
     let transactionAttempts = 0;
@@ -148,6 +169,10 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
           work({
             query: (sql, params = []) => {
               options.transactionSql?.push(sql.replace(/\s+/g, " ").trim());
+              options.transactionQueries?.push({
+                sql: sql.replace(/\s+/g, " ").trim(),
+                params: [...params],
+              });
               return transaction.query(sql, [...params]);
             },
           }),
@@ -185,6 +210,9 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         maximumQuantityPerLine: 25,
         maximumOrderAmountMinor: 1_000_000,
       },
+      ...(options.configuredPromotions === undefined
+        ? {}
+        : { configuredPromotions: options.configuredPromotions }),
     });
     return {
       repository,
@@ -224,6 +252,1618 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     expect(prepared.status).toBe("prepared");
     return { ...setupResult, quoted, prepared };
   }
+
+  const variantRequest = {
+    items: [{ variantId: ids.variantA, quantity: 2 }],
+    destination: request.destination,
+  } as const;
+
+  async function seedCheckoutReadyVariant() {
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status, stripe_product_id, stripe_price_id,
+         updated_at)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'SYNTHETIC-VARIANT-5MG',
+        '5 mg synthetic checkout fixture', 5, 'mg', 1, 'active',
+        'prod_synthetic_variant_a', 'price_synthetic_variant_a',
+        '2026-08-24T00:00:00.000Z');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.variantPriceA}', '${ids.productA}', '${ids.variantA}',
+        1, 'active', 5000, 'USD', '2026-08-01T00:00:00.000Z');
+      INSERT INTO lots
+        (id, product_id, variant_id, supplier_name, supplier_lot_code,
+         received_quantity, available_quantity, status, expires_at,
+         updated_at)
+      VALUES ('${ids.variantLotA}', '${ids.productA}', '${ids.variantA}',
+        'Synthetic supplier', 'SYN-VARIANT-ACTIVE', 5, 5, 'released',
+        '2026-12-01T00:00:00.000Z', '2026-08-24T00:00:00.000Z');
+      INSERT INTO promotions
+        (id, code, version, name, kind, status, basis_points, configuration,
+         starts_at, ends_at, campaign_key, enabled, timezone,
+         application_mode, scope)
+      VALUES ('${ids.variantPromotion}', 'WINTER30', 1, 'Winter Sale',
+        'discount', 'active', 3000, '{}'::jsonb, NULL, NULL, 'winter30',
+        true, 'America/Los_Angeles', 'automatic', 'sitewide');
+    `);
+  }
+
+  function providerPreparationV2(
+    plan: AuthoritativeCheckoutPlan,
+  ) {
+    if (plan.kind !== "canonical_variant" || plan.totals === null) {
+      throw new Error("expected ready canonical variant plan");
+    }
+    const totalByVariant = new Map(
+      plan.totals.lines.map((line) => [line.productId, line] as const),
+    );
+    const factByVariant = new Map(
+      plan.facts.items.map((line) => [line.variantId, line] as const),
+    );
+    const binding = createStripeProviderBindingSnapshotV2(
+      plan.effectiveLines.map((line) => {
+        const total = totalByVariant.get(line.variantId);
+        const fact = factByVariant.get(line.variantId);
+        if (total === undefined || fact === undefined) return null;
+        return {
+          variantId: line.variantId,
+          productId: line.productId,
+          sku: line.sku,
+          productName: fact.productName,
+          variantLabel: line.variantLabel,
+          requestedQuantity: line.quantity,
+          netLineMinor: total.totalMinor,
+          baseUnitMinor: line.baseUnitMinor,
+          currency: "USD" as const,
+          priceBookId: line.priceId,
+          priceVersion: line.priceVersion,
+          stripeProductId: line.stripeProductId,
+          stripePriceId: line.stripePriceId,
+        };
+      }),
+    );
+    if (!binding.ok) throw new Error("expected valid V2 binding snapshot");
+    return {
+      authority: "server_prepared_provider_request" as const,
+      provider: "local_test" as const,
+      providerIdempotencyKey: `checkout_attempt:${plan.identity.attemptId}`,
+      providerRequestHash: "f".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "synthetic.variant.buyer@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 2 as const,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+      providerBindingSnapshot: binding.value,
+    };
+  }
+
+  async function prepareCanonicalVariantV2(
+    key: string,
+    options: Readonly<{
+      buyerUserId?: string;
+      availableQuantity?: number;
+      seed?: boolean;
+    }> = {},
+  ) {
+    if (options.seed !== false) await seedCheckoutReadyVariant();
+    if (options.availableQuantity !== undefined) {
+      await client.query(
+        `UPDATE lots SET received_quantity = $2, available_quantity = $2
+         WHERE id = $1::uuid`,
+        [ids.variantLotA, options.availableQuantity],
+      );
+    }
+    const buyerUserId = options.buyerUserId ?? ids.buyer;
+    const setupResult = setup();
+    const quoted = await setupResult.service.quote({
+      buyerUserId,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical variant quote");
+    }
+    const sessionQuote = await setupResult.service.quoteForSession({
+      buyerUserId,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (sessionQuote.status !== "quoted") {
+      throw new Error("expected acknowledged canonical quote");
+    }
+    const prepared = await setupResult.service.prepare(
+      sessionQuote.plan,
+      providerPreparationV2(sessionQuote.plan),
+    );
+    expect(prepared).toMatchObject({ status: "prepared" });
+    return {
+      ...setupResult,
+      buyerUserId,
+      key,
+      quoted,
+      pricingRevision: quoted.pricingRevision,
+      sessionQuote,
+    };
+  }
+
+  it("returns PRICE_CHANGED before writes when locked canonical variant price facts change", async () => {
+    await seedCheckoutReadyVariant();
+    const { service } = setup();
+    const key = "30000000-0000-4000-8000-000000000121";
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    expect(quoted).toMatchObject({ status: "quoted" });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical variant quote");
+    }
+    await client.exec(`
+      UPDATE product_prices SET amount_minor = 5200
+      WHERE id = '${ids.variantPriceA}';
+    `);
+    const stale = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    expect(stale).toMatchObject({
+      status: "PRICE_CHANGED",
+      cart: { items: [{ variantId: ids.variantA, unitAmountMinor: 3640 }] },
+    });
+    const writes = await client.query<{ orders: number; reservations: number }>(`
+      SELECT (SELECT count(*)::int FROM orders) AS orders,
+             (SELECT count(*)::int FROM inventory_reservations) AS reservations
+    `);
+    expect(writes.rows[0]).toEqual({ orders: 0, reservations: 0 });
+  });
+
+  it("locks, snapshots, and reserves the canonical variant without using legacy null-variant inventory", async () => {
+    await seedCheckoutReadyVariant();
+    const transactionSql: string[] = [];
+    const { service } = setup({ transactionSql });
+    const key = "30000000-0000-4000-8000-000000000122";
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical variant quote");
+    }
+    const sessionQuote = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (sessionQuote.status !== "quoted") throw new Error("expected acknowledged quote");
+    const prepared = await service.prepare(sessionQuote.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${sessionQuote.plan.identity.attemptId}`,
+      providerRequestHash: "f".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "synthetic.variant.buyer@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    });
+    expect(prepared).toMatchObject({ status: "prepared" });
+    const snapshots = await client.query<{
+      variantId: string;
+      productId: string;
+      remainingVariant: number;
+      remainingLegacy: number;
+      reservationVariantId: string | null;
+      promotionId: string;
+      reservationCount: number;
+    }>(`
+      SELECT oi.variant_id::text AS "variantId", oi.product_id::text AS "productId",
+        (SELECT available_quantity FROM lots WHERE id = '${ids.variantLotA}') AS "remainingVariant",
+        (SELECT available_quantity FROM lots WHERE id = '${ids.lotA1}') AS "remainingLegacy",
+        (SELECT promotion_id::text FROM order_promotion_applications
+          WHERE order_id = oi.order_id) AS "promotionId",
+        (SELECT count(*)::int FROM inventory_reservations
+          WHERE order_id = oi.order_id) AS "reservationCount"
+        ,(SELECT variant_id::text FROM inventory_reservations
+          WHERE order_id = oi.order_id) AS "reservationVariantId"
+      FROM order_items oi
+      WHERE oi.order_id = '${sessionQuote.plan.identity.orderId}'
+    `);
+    expect(snapshots.rows[0]).toEqual({
+      variantId: ids.variantA,
+      productId: ids.productA,
+      remainingVariant: 3,
+      remainingLegacy: 1,
+      reservationVariantId: ids.variantA,
+      promotionId: ids.variantPromotion,
+      reservationCount: 1,
+    });
+    expect((await client.query<{ mode: string; bindings: number }>(
+      `SELECT review_authorization_mode AS mode,
+              (SELECT count(*)::int
+               FROM checkout_attempt_review_bindings
+               WHERE checkout_attempt_id = checkout_attempts.id) AS bindings
+       FROM checkout_attempts
+       WHERE id = $1::uuid`,
+      [sessionQuote.plan.identity.attemptId],
+    )).rows).toEqual([{ mode: "none", bindings: 0 }]);
+    expect(transactionSql.some((sql) =>
+      sql.includes("FROM product_variants") && sql.includes("ORDER BY v.id FOR UPDATE"),
+    )).toBe(true);
+    expect(transactionSql.some((sql) =>
+      sql.includes("FROM lots") && sql.includes("variant_id = ANY") && sql.includes("FOR UPDATE"),
+    )).toBe(true);
+  });
+
+  it("revalidates exact-stock V2 checkout from its own active reservation after prepare", async () => {
+    const key = "30000000-0000-4000-8000-000000000129";
+    const { repository, service, pricingRevision, sessionQuote } =
+      await prepareCanonicalVariantV2(key, { availableQuantity: 2 });
+    expect((await client.query<{ available: number; reservations: number }>(`
+      SELECT
+        (SELECT available_quantity FROM lots
+          WHERE id = '${ids.variantLotA}') AS available,
+        (SELECT count(*)::int FROM inventory_reservations
+          WHERE checkout_attempt_id = '${sessionQuote.plan.identity.attemptId}'
+            AND state = 'active') AS reservations
+    `)).rows).toEqual([{ available: 0, reservations: 1 }]);
+    expect(repository.loadProviderCreateVariantFacts).toBeTypeOf("function");
+    await client.exec(`
+      UPDATE lots SET updated_at = '2026-08-25T12:30:00.000Z'
+      WHERE id = '${ids.variantLotA}';
+    `);
+    await expect(repository.loadProviderCreateVariantFacts!({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      orderId: sessionQuote.plan.identity.orderId,
+      attemptId: sessionQuote.plan.identity.attemptId,
+      expectedStoredPricingRevision: pricingRevision,
+      request: variantRequest,
+      now,
+    })).resolves.toMatchObject({
+      ok: true,
+      value: {
+        items: [{
+          variantId: ids.variantA,
+          eligibleLots: [{
+            id: ids.variantLotA,
+            availableQuantity: 2,
+          }],
+        }],
+      },
+    });
+
+    await expect(service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: pricingRevision,
+      request: { ...variantRequest, pricingRevision },
+    })).resolves.toMatchObject({
+      status: "quoted",
+      pricingRevision,
+      quote: { status: "ready" },
+    });
+  });
+
+  it("omits quarantined own reservation coverage before evaluating provider-create overcoverage", async () => {
+    const key = "30000000-0000-4000-8000-000000000133";
+    const prepared = await prepareCanonicalVariantV2(key);
+    const quarantinedLotId = keyedUuid("provider-create-quarantined-extra-lot");
+    await client.exec(`
+      INSERT INTO lots
+        (id, product_id, variant_id, supplier_name, supplier_lot_code,
+         received_quantity, available_quantity, status, expires_at, updated_at)
+      VALUES ('${quarantinedLotId}', '${ids.productA}', '${ids.variantA}',
+        'Synthetic supplier', 'SYN-VARIANT-QUARANTINED', 2, 0, 'quarantined',
+        '2026-12-01T00:00:00.000Z', '2026-08-24T00:00:00.000Z');
+      UPDATE inventory_reservations
+      SET quantity_reserved = 1, quantity_remaining = 1
+      WHERE checkout_attempt_id = '${prepared.sessionQuote.plan.identity.attemptId}';
+      INSERT INTO inventory_reservations
+        (id, checkout_attempt_id, order_id, order_item_id, product_id, variant_id,
+         lot_id, quantity_reserved, quantity_remaining, state, expires_at,
+         idempotency_key, created_at, updated_at)
+      SELECT '${keyedUuid("provider-create-quarantined-extra-reservation")}',
+        checkout_attempt_id, order_id, order_item_id, product_id, variant_id,
+        '${quarantinedLotId}', 2, 2, 'active', expires_at,
+        'provider-create-quarantined-extra-reservation', updated_at, updated_at
+      FROM inventory_reservations
+      WHERE checkout_attempt_id = '${prepared.sessionQuote.plan.identity.attemptId}';
+    `);
+
+    await expect(prepared.repository.loadProviderCreateVariantFacts!({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      orderId: prepared.sessionQuote.plan.identity.orderId,
+      attemptId: prepared.sessionQuote.plan.identity.attemptId,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: variantRequest,
+      now,
+    })).resolves.toMatchObject({
+      ok: true,
+      value: {
+        items: [{
+          variantId: ids.variantA,
+          eligibleLots: [{
+            id: ids.variantLotA,
+            availableQuantity: 1,
+          }],
+        }],
+      },
+    });
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: { ...variantRequest, pricingRevision: prepared.pricingRevision },
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variantA, code: "unavailable" }],
+    });
+  });
+
+  it("rejects a reservation expiry that differs from its attempt by one microsecond", async () => {
+    const key = "30000000-0000-4000-8000-000000000134";
+    const prepared = await prepareCanonicalVariantV2(key);
+    await client.query(
+      `UPDATE inventory_reservations
+       SET expires_at = expires_at + interval '1 microsecond'
+       WHERE checkout_attempt_id = $1::uuid`,
+      [prepared.sessionQuote.plan.identity.attemptId],
+    );
+
+    await expect(prepared.repository.loadProviderCreateVariantFacts!({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      orderId: prepared.sessionQuote.plan.identity.orderId,
+      attemptId: prepared.sessionQuote.plan.identity.attemptId,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: variantRequest,
+      now,
+    })).resolves.toEqual({
+      ok: false,
+      reasons: ["provider_create_authority_conflict"],
+    });
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: { ...variantRequest, pricingRevision: prepared.pricingRevision },
+    })).resolves.toEqual({ status: "internal_conflict" });
+  });
+
+  it.each([
+    [
+      "released own reservation",
+      `UPDATE inventory_reservations
+       SET state = 'released', quantity_remaining = 0
+       WHERE checkout_attempt_id = $1::uuid`,
+    ],
+    [
+      "insufficient own reservation",
+      `UPDATE inventory_reservations
+       SET quantity_reserved = 1, quantity_remaining = 1
+       WHERE checkout_attempt_id = $1::uuid`,
+    ],
+    [
+      "nonreleased reserved lot",
+      `UPDATE lots SET status = 'quarantined'
+       WHERE id = '${ids.variantLotA}'
+         AND EXISTS (SELECT 1 FROM inventory_reservations r
+           WHERE r.checkout_attempt_id = $1::uuid AND r.lot_id = lots.id)`,
+    ],
+    [
+      "expired reserved lot",
+      `UPDATE lots SET expires_at = '2026-08-25T12:00:00.000Z'
+       WHERE id = '${ids.variantLotA}'
+         AND EXISTS (SELECT 1 FROM inventory_reservations r
+           WHERE r.checkout_attempt_id = $1::uuid AND r.lot_id = lots.id)`,
+    ],
+  ])("returns unavailable for %s", async (_label, mutation) => {
+    const key = keyedUuid(`provider-create-unavailable:${_label}`);
+    const prepared = await prepareCanonicalVariantV2(key);
+    await client.query(mutation, [prepared.sessionQuote.plan.identity.attemptId]);
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: {
+        ...variantRequest,
+        pricingRevision: prepared.pricingRevision,
+      },
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variantA, code: "unavailable" }],
+    });
+  });
+
+  it.each([
+    [
+      "mismatched reservation expiry",
+      `UPDATE inventory_reservations
+       SET expires_at = expires_at + interval '1 minute'
+       WHERE checkout_attempt_id = $1::uuid`,
+    ],
+    [
+      "overcovered reservation",
+      `UPDATE inventory_reservations
+       SET quantity_reserved = 3, quantity_remaining = 3
+       WHERE checkout_attempt_id = $1::uuid`,
+    ],
+  ])("fails provider-create authority closed for %s", async (_label, mutation) => {
+    const key = keyedUuid(`provider-create-conflict:${_label}`);
+    const prepared = await prepareCanonicalVariantV2(key);
+    await client.query(mutation, [prepared.sessionQuote.plan.identity.attemptId]);
+
+    await expect(prepared.repository.loadProviderCreateVariantFacts!({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      orderId: prepared.sessionQuote.plan.identity.orderId,
+      attemptId: prepared.sessionQuote.plan.identity.attemptId,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: variantRequest,
+      now,
+    })).resolves.toEqual({
+      ok: false,
+      reasons: ["provider_create_authority_conflict"],
+    });
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: {
+        ...variantRequest,
+        pricingRevision: prepared.pricingRevision,
+      },
+    })).resolves.toEqual({ status: "internal_conflict" });
+  });
+
+  it("keeps the first attempt current when another buyer reserves the same variant", async () => {
+    const first = await prepareCanonicalVariantV2(
+      "30000000-0000-4000-8000-000000000130",
+    );
+    await prepareCanonicalVariantV2(
+      "30000000-0000-4000-8000-000000000131",
+      { buyerUserId: ids.buyer2, seed: false },
+    );
+    expect((await client.query<{ available: number }>(
+      `SELECT available_quantity AS available FROM lots WHERE id = $1::uuid`,
+      [ids.variantLotA],
+    )).rows).toEqual([{ available: 1 }]);
+
+    await expect(first.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: first.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: first.pricingRevision,
+      request: {
+        ...variantRequest,
+        pricingRevision: first.pricingRevision,
+      },
+    })).resolves.toMatchObject({
+      status: "quoted",
+      pricingRevision: first.pricingRevision,
+    });
+  });
+
+  it("detects a commercial price change after reservation without using global inventory", async () => {
+    const prepared = await prepareCanonicalVariantV2(
+      "30000000-0000-4000-8000-000000000132",
+    );
+    await client.exec(`
+      UPDATE product_prices SET amount_minor = 5200
+      WHERE id = '${ids.variantPriceA}';
+    `);
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: prepared.key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: {
+        ...variantRequest,
+        pricingRevision: prepared.pricingRevision,
+      },
+    })).resolves.toMatchObject({
+      status: "PRICE_CHANGED",
+      pricingRevision: expect.not.stringMatching(prepared.pricingRevision),
+    });
+  });
+
+  it("locks globally ordered parents before crossed variant, price, and lot identities", async () => {
+    await seedCheckoutReadyVariant();
+    await client.exec(`
+      INSERT INTO product_policy_groups (id, slug, name, active)
+      VALUES ('${ids.groupB}', 'synthetic-crossed-group-b',
+              'Synthetic crossed group B', true);
+      UPDATE products SET policy_group_id = '${ids.groupB}'
+      WHERE id = '${ids.productB}';
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status, stripe_product_id, stripe_price_id,
+         updated_at)
+      VALUES ('${ids.crossedVariantB}', '${ids.productB}', 'CROSSED-B-5MG',
+        'Crossed B 5 mg fixture', 5, 'mg', 1, 'active',
+        'prod_crossed_b', 'price_crossed_b', '2026-08-24T00:00:00.000Z');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.crossedVariantPriceB}', '${ids.productB}',
+        '${ids.crossedVariantB}', 1, 'active', 4000, 'USD',
+        '2026-08-01T00:00:00.000Z');
+      INSERT INTO lots
+        (id, product_id, variant_id, supplier_name, supplier_lot_code,
+         received_quantity, available_quantity, status, expires_at, updated_at)
+      VALUES ('${ids.crossedVariantLotB}', '${ids.productB}',
+        '${ids.crossedVariantB}', 'Synthetic supplier', 'CROSSED-B-LOT',
+        5, 5, 'released', '2026-12-01T00:00:00.000Z',
+        '2026-08-24T00:00:00.000Z');
+    `);
+    const transactionQueries: Array<{
+      sql: string;
+      params: readonly unknown[];
+    }> = [];
+    const { service } = setup({ transactionQueries });
+    const key = "30000000-0000-4000-8000-000000000133";
+    const crossedRequest = {
+      ...variantRequest,
+      items: [
+        { variantId: ids.variantA, quantity: 1 },
+        { variantId: ids.crossedVariantB, quantity: 1 },
+      ],
+    } as const;
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: crossedRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected crossed quote");
+    }
+    const acknowledged = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...crossedRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (acknowledged.status !== "quoted") throw new Error("expected acknowledged");
+    await expect(service.prepare(acknowledged.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${acknowledged.plan.identity.attemptId}`,
+      providerRequestHash: "6".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "crossed.parents@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    })).resolves.toMatchObject({ status: "prepared" });
+
+    const productLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM products p WHERE p\.id = ANY\([^)]*\) ORDER BY p\.id FOR UPDATE/iu.test(sql),
+    );
+    const groupLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM product_policy_groups g WHERE g\.id = ANY\([^)]*\) ORDER BY g\.id FOR UPDATE/iu.test(sql),
+    );
+    const variantLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM product_variants v WHERE v\.id = ANY\([^)]*\) ORDER BY v\.id FOR UPDATE/iu.test(sql),
+    );
+    const priceLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM product_prices[\s\S]*FOR UPDATE/iu.test(sql),
+    );
+    const lotLockIndex = transactionQueries.findIndex(({ sql }) =>
+      /FROM lots[\s\S]*variant_id = ANY[\s\S]*FOR UPDATE/iu.test(sql),
+    );
+    expect(transactionQueries[productLockIndex]?.params[0]).toEqual([
+      ids.productA,
+      ids.productB,
+    ]);
+    expect(transactionQueries[groupLockIndex]?.params[0]).toEqual([
+      ids.group,
+      ids.groupB,
+    ]);
+    expect(transactionQueries[variantLockIndex]?.params[0]).toEqual([
+      ids.crossedVariantB,
+      ids.variantA,
+    ]);
+    expect(productLockIndex).toBeGreaterThanOrEqual(0);
+    expect(groupLockIndex).toBeGreaterThan(productLockIndex);
+    expect(variantLockIndex).toBeGreaterThan(groupLockIndex);
+    expect(priceLockIndex).toBeGreaterThan(variantLockIndex);
+    expect(lotLockIndex).toBeGreaterThan(priceLockIndex);
+  });
+
+  it("locks only promotion candidates scoped to the cart under the serializable predicate read", async () => {
+    await seedCheckoutReadyVariant();
+    await client.exec(`
+      DELETE FROM promotions WHERE id = '${ids.variantPromotion}';
+      INSERT INTO promotions
+        (id, code, version, name, kind, status, basis_points, configuration,
+         starts_at, ends_at, campaign_key, enabled, timezone,
+         application_mode, scope)
+      VALUES
+        ('${ids.variantPromotion}', 'VARIANT-A-20', 1, 'Variant A offer',
+         'discount', 'active', 2000, '{}'::jsonb, NULL, NULL, 'variant-a-20',
+         true, 'America/Los_Angeles', 'automatic', 'products'),
+        ('${ids.unrelatedVariantPromotion}', 'VARIANT-B-40', 1,
+         'Unrelated variant B offer', 'discount', 'active', 4000,
+         '{}'::jsonb, NULL, NULL, 'variant-b-40', true,
+         'America/Los_Angeles', 'automatic', 'products');
+      INSERT INTO promotion_targets
+        (id, promotion_id, target_kind, product_id)
+      VALUES
+        ('${ids.variantPromotionTarget}', '${ids.variantPromotion}', 'product',
+         '${ids.productA}'),
+        ('${ids.unrelatedVariantPromotionTarget}',
+         '${ids.unrelatedVariantPromotion}', 'product', '${ids.productB}');
+    `);
+    const transactionQueries: Array<{
+      sql: string;
+      params: readonly unknown[];
+    }> = [];
+    const { service } = setup({
+      transactionQueries,
+      configuredPromotions: Object.freeze([]),
+    });
+    const key = "30000000-0000-4000-8000-000000000134";
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected scoped promotion quote");
+    }
+    const acknowledged = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (acknowledged.status !== "quoted") throw new Error("expected acknowledged");
+    await expect(service.prepare(acknowledged.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${acknowledged.plan.identity.attemptId}`,
+      providerRequestHash: "5".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "scoped.promotions@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    })).resolves.toMatchObject({ status: "prepared" });
+
+    const promotionLock = transactionQueries.find(({ sql }) =>
+      /FROM promotions p[\s\S]*FOR UPDATE OF p/iu.test(sql),
+    );
+    expect(promotionLock?.sql).toMatch(/EXISTS[\s\S]*promotion_targets/iu);
+    expect(promotionLock?.params).toEqual([
+      [ids.productA],
+      [ids.group],
+      [ids.variantA],
+      now.toISOString(),
+    ]);
+    expect(transactionQueries.some(({ sql }) =>
+      /FROM promotions[\s\S]*application_mode = 'automatic'[\s\S]*ORDER BY campaign_key, version, id FOR UPDATE$/iu.test(sql),
+    )).toBe(false);
+    if (acknowledged.plan.kind !== "canonical_variant") {
+      throw new Error("expected canonical plan");
+    }
+    expect(acknowledged.plan.activeAutomaticPromotions).toEqual([
+      { id: "variant-a-20", version: 1 },
+    ]);
+  });
+
+  it.each([
+    {
+      label: "another automatic promotion wins",
+      quantity: 2,
+      keepWinter30: true,
+    },
+    {
+      label: "the quantity tier wins",
+      quantity: 10,
+      keepWinter30: false,
+    },
+  ])("retains a losing applicable promotion through locked review recheck when $label", async ({ quantity, keepWinter30 }) => {
+    await seedCheckoutReadyVariant();
+    await client.exec(`
+      UPDATE lots SET received_quantity = 20, available_quantity = 20
+      WHERE id = '${ids.variantLotA}';
+      ${keepWinter30 ? "" : `DELETE FROM promotions WHERE id = '${ids.variantPromotion}';`}
+      INSERT INTO promotions
+        (id, code, version, name, kind, status, basis_points, configuration,
+         starts_at, ends_at, campaign_key, enabled, timezone,
+         application_mode, scope)
+      VALUES ('${ids.losingVariantPromotion}', 'SPRING20', 2,
+        'Synthetic losing spring offer', 'discount', 'active', 2000,
+        '{}'::jsonb, NULL, NULL, 'spring20', true,
+        'America/Los_Angeles', 'automatic', 'sitewide');
+      UPDATE buyer_profiles SET status = 'review'
+      WHERE user_id = '${ids.buyer}';
+    `);
+    const { service } = setup(
+      keepWinter30
+        ? {}
+        : { configuredPromotions: Object.freeze([]) },
+    );
+    const key = keepWinter30
+      ? "30000000-0000-4000-8000-000000000128"
+      : "30000000-0000-4000-8000-000000000129";
+    const quote = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: {
+        ...variantRequest,
+        items: [{ variantId: ids.variantA, quantity }],
+      },
+    });
+    if (quote.status !== "quoted") throw new Error("expected canonical review quote");
+
+    const prepared = await service.prepare(quote.plan, null);
+
+    expect(prepared).toMatchObject({ status: "review_required" });
+    const review = await client.query<{ cartSnapshot: unknown }>(
+      `SELECT cart_snapshot AS "cartSnapshot" FROM review_requests
+       WHERE order_id = $1::uuid`,
+      [quote.plan.identity.orderId],
+    );
+    expect(review.rows[0]?.cartSnapshot).toEqual({
+      schemaVersion: 2,
+      kind: "canonical_variant",
+      items: [{ variantId: ids.variantA, quantity }],
+      automaticPromotions: keepWinter30
+        ? [
+            { id: "spring20", version: 2 },
+            { id: "winter30", version: 1 },
+          ]
+        : [{ id: "spring20", version: 2 }],
+    });
+  });
+
+  it("binds fulfillment to the exact approved canonical review instead of historical review rows", async () => {
+    await seedCheckoutReadyVariant();
+    await client.exec(`
+      INSERT INTO promotions
+        (id, code, version, name, kind, status, basis_points, configuration,
+         starts_at, ends_at, campaign_key, enabled, timezone,
+         application_mode, scope)
+      VALUES ('${ids.losingVariantPromotion}', 'SPRING20', 2,
+        'Synthetic losing spring offer', 'discount', 'active', 2000,
+        '{}'::jsonb, NULL, NULL, 'spring20', true,
+        'America/Los_Angeles', 'automatic', 'sitewide');
+      UPDATE buyer_profiles SET status = 'review'
+      WHERE user_id = '${ids.buyer}';
+      INSERT INTO staff_roles
+        (user_id, capability, granted_by_user_id, grant_correlation_id)
+      VALUES ('${ids.buyer2}', 'fulfillment:release:consume', '${ids.buyer2}',
+              'canonical-review-fulfillment-task5');
+    `);
+    const { service } = setup();
+    const key = "30000000-0000-4000-8000-000000000132";
+    const firstQuoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (
+      firstQuoted.status !== "quoted" ||
+      firstQuoted.pricingRevision === undefined
+    ) {
+      throw new Error("expected first canonical review quote");
+    }
+    const firstReview = await service.prepare(firstQuoted.plan, null);
+    if (
+      firstReview.status !== "review_required" ||
+      firstReview.reviewRequestId === null
+    ) {
+      throw new Error("expected first canonical review request");
+    }
+    const firstReviewIdentity = await client.query<{ snapshotHash: string }>(
+      `SELECT snapshot_hash AS "snapshotHash"
+       FROM review_requests WHERE id = $1::uuid`,
+      [firstReview.reviewRequestId],
+    );
+
+    await client.exec(`
+      UPDATE buyer_profiles SET status = 'active'
+      WHERE user_id = '${ids.buyer}';
+      UPDATE destination_policies SET result = 'review', version = 2
+      WHERE id = '${ids.policyA}';
+    `);
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected later canonical review quote");
+    }
+    const review = await service.prepare(quoted.plan, null);
+    if (review.status !== "review_required" || review.reviewRequestId === null) {
+      throw new Error("expected later canonical review request");
+    }
+    expect(review.reviewRequestId).not.toBe(firstReview.reviewRequestId);
+    const reviewIdentity = await client.query<{ snapshotHash: string }>(
+      `SELECT snapshot_hash AS "snapshotHash"
+       FROM review_requests WHERE id = $1::uuid`,
+      [review.reviewRequestId],
+    );
+    await client.query(
+      `UPDATE review_requests
+       SET outcome = 'approved', decided_by_user_id = $2::uuid,
+           decided_at = $3::timestamptz, covers_buyer_review = false
+       WHERE id = $1::uuid`,
+      [review.reviewRequestId, ids.buyer2, now.toISOString()],
+    );
+    await client.query(
+      `UPDATE review_request_destination_policies SET covered = true
+       WHERE review_request_id = $1::uuid`,
+      [review.reviewRequestId],
+    );
+    const approved = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: {
+        ...variantRequest,
+        pricingRevision: quoted.pricingRevision,
+      },
+    });
+    if (approved.status !== "quoted") throw new Error("expected approved quote");
+    const prepared = await service.prepare(approved.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${approved.plan.identity.attemptId}`,
+      providerRequestHash: "9".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "canonical.fulfillment@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    });
+    if (prepared.status !== "prepared") throw new Error("expected prepared");
+    const reviewBinding = await client.query<{
+      reviewRequestId: string;
+      reviewSnapshotHash: string;
+    }>(
+      `SELECT review_request_id::text AS "reviewRequestId",
+              review_snapshot_hash AS "reviewSnapshotHash"
+       FROM checkout_attempt_review_bindings
+       WHERE checkout_attempt_id = $1::uuid`,
+      [prepared.attemptId],
+    );
+    expect(reviewBinding.rows).toEqual([{
+      reviewRequestId: review.reviewRequestId,
+      reviewSnapshotHash: reviewIdentity.rows[0]!.snapshotHash,
+    }]);
+    expect((await client.query<{ mode: string }>(
+      `SELECT review_authorization_mode AS mode
+       FROM checkout_attempts WHERE id = $1::uuid`,
+      [prepared.attemptId],
+    )).rows).toEqual([{ mode: "bound" }]);
+    const order = await client.query<{ totalMinor: number }>(
+      `SELECT total_minor AS "totalMinor" FROM orders WHERE id = $1::uuid`,
+      [prepared.orderId],
+    );
+    const totalMinor = order.rows[0]!.totalMinor;
+    const providerSessionId = "cs_task5_canonical_review_paid";
+    const normalizedPayload = {
+      schemaVersion: 1,
+      kind: "checkout_session",
+      providerEventId: "evt_task5_canonical_review_paid",
+      eventType: "checkout.session.completed",
+      providerCreatedAt: now.toISOString(),
+      livemode: false,
+      sessionId: providerSessionId,
+      orderId: prepared.orderId,
+      attemptId: prepared.attemptId,
+      paymentIntentId: "pi_task5_canonical_review_paid",
+      amountMinor: totalMinor,
+      currency: "usd",
+      paymentStatus: "paid",
+      sessionStatus: "complete",
+    } as const;
+    await client.query(
+      `UPDATE checkout_attempts
+       SET status = 'completed', provider_session_id = $2
+       WHERE id = $1::uuid`,
+      [prepared.attemptId, providerSessionId],
+    );
+    await client.query(
+      `UPDATE orders SET state = 'paid_pending_fulfillment'
+       WHERE id = $1::uuid`,
+      [prepared.orderId],
+    );
+    await client.query(
+      `INSERT INTO provider_events
+        (id, provider, provider_event_id, payload_hash, status, attempt_count,
+         received_at, processed_at, event_type, schema_version,
+         normalized_payload, provider_created_at, livemode)
+       VALUES ($1::uuid, 'local_test', $2, $3, 'processed', 1,
+               $4::timestamptz, $4::timestamptz,
+               'checkout.session.completed', 1, $5::jsonb,
+               $4::timestamptz, false)`,
+      [
+        ids.providerEvent,
+        normalizedPayload.providerEventId,
+        "8".repeat(64),
+        now.toISOString(),
+        JSON.stringify(normalizedPayload),
+      ],
+    );
+    await client.query(
+      `INSERT INTO payment_events
+        (id, provider_event_id, order_id, event_type, provider_payment_id,
+         idempotency_key, amount_minor, currency, occurred_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'payment_verified', $4, $5,
+               $6, 'USD', $7::timestamptz)`,
+      [
+        ids.paymentEvent,
+        ids.providerEvent,
+        prepared.orderId,
+        normalizedPayload.paymentIntentId,
+        `local_test:payment_intent:${normalizedPayload.paymentIntentId}`,
+        totalMinor,
+        now.toISOString(),
+      ],
+    );
+    await client.query(
+      `INSERT INTO shipments
+        (id, order_id, carrier, tracking_reference, state, updated_at)
+       VALUES ($1::uuid, $2::uuid, 'SYNTHETIC-CARRIER',
+               'SYNTHETIC-TRACKING', 'pending', $3::timestamptz)`,
+      [keyedUuid("canonical-review-shipment"), prepared.orderId, now.toISOString()],
+    );
+    const reviewInputs: unknown[] = [];
+    const fulfillment = createFulfillmentRepository({
+      runSerializableTransaction: (work) =>
+        client.transaction((transaction) =>
+          work({
+            query: (sql, params = []) => transaction.query(sql, [...params]),
+          }),
+        ),
+      sha256,
+      keyedUuid,
+      retrySleep: async () => undefined,
+      resolveExactReviewRequest: async (...args) => {
+        reviewInputs.push(args[1]);
+        return resolveExactReviewRequest(...args);
+      },
+    });
+
+    await expect(client.query(
+      `UPDATE checkout_attempt_review_bindings
+       SET review_snapshot_hash = $2
+       WHERE checkout_attempt_id = $1::uuid`,
+      [prepared.attemptId, "0".repeat(64)],
+    )).rejects.toThrow(/checkout_attempt_review_bindings_review_identity_fk/iu);
+    await client.query(
+      `DELETE FROM checkout_attempt_review_bindings
+       WHERE checkout_attempt_id = $1::uuid`,
+      [prepared.attemptId],
+    );
+    await client.query(
+      `UPDATE destination_policies SET result = 'allowed', version = 3
+       WHERE id = $1::uuid`,
+      [ids.policyA],
+    );
+    await expect(fulfillment.handoff({
+      actorUserId: ids.buyer2,
+      actorClerkUserId: "clerk-synthetic-buyer-b",
+      orderId: prepared.orderId,
+      now,
+      correlationId: "canonical-review-missing-binding-task5",
+    })).resolves.toEqual({ status: "conflict" });
+    await client.query(
+      `INSERT INTO checkout_attempt_review_bindings
+        (checkout_attempt_id, order_id, review_request_id,
+         review_snapshot_hash, bound_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::timestamptz)`,
+      [
+        prepared.attemptId,
+        prepared.orderId,
+        review.reviewRequestId,
+        reviewIdentity.rows[0]!.snapshotHash,
+        now.toISOString(),
+      ],
+    );
+    await client.query(
+      `UPDATE checkout_attempt_review_bindings
+       SET review_request_id = $2::uuid, review_snapshot_hash = $3
+       WHERE checkout_attempt_id = $1::uuid`,
+      [
+        prepared.attemptId,
+        firstReview.reviewRequestId,
+        firstReviewIdentity.rows[0]!.snapshotHash,
+      ],
+    );
+    await expect(fulfillment.handoff({
+      actorUserId: ids.buyer2,
+      actorClerkUserId: "clerk-synthetic-buyer-b",
+      orderId: prepared.orderId,
+      now,
+      correlationId: "canonical-review-wrong-binding-task5",
+    })).resolves.toEqual({ status: "conflict" });
+    await client.query(
+      `UPDATE destination_policies SET result = 'review', version = 2
+       WHERE id = $1::uuid`,
+      [ids.policyA],
+    );
+    await client.query(
+      `UPDATE checkout_attempt_review_bindings
+       SET review_request_id = $2::uuid, review_snapshot_hash = $3
+       WHERE checkout_attempt_id = $1::uuid`,
+      [
+        prepared.attemptId,
+        review.reviewRequestId,
+        reviewIdentity.rows[0]!.snapshotHash,
+      ],
+    );
+
+    await expect(fulfillment.handoff({
+      actorUserId: ids.buyer2,
+      actorClerkUserId: "clerk-synthetic-buyer-b",
+      orderId: prepared.orderId,
+      now,
+      correlationId: "canonical-review-fulfillment-task5",
+    })).resolves.toEqual({ status: "handed_off" });
+    expect(reviewInputs).toContainEqual(expect.objectContaining({
+      items: [{ variantId: ids.variantA, quantity: 2 }],
+      automaticPromotions: [
+        { id: "spring20", version: 2 },
+        { id: "winter30", version: 1 },
+      ],
+    }));
+    expect(reviewInputs).toHaveLength(2);
+  });
+
+  it.each([
+    {
+      label: "discounted",
+      key: "30000000-0000-4000-8000-000000000130",
+      automaticPromotion: true,
+      quantity: 2,
+    },
+    {
+      label: "zero-discount",
+      key: "30000000-0000-4000-8000-000000000131",
+      automaticPromotion: false,
+      quantity: 1,
+    },
+  ])("replays the exact safe canonical $label quote and pricing revision", async ({ key, automaticPromotion, quantity }) => {
+    await seedCheckoutReadyVariant();
+    if (!automaticPromotion) {
+      await client.exec(
+        `DELETE FROM promotions WHERE id = '${ids.variantPromotion}'`,
+      );
+    }
+    const { service } = setup(
+      automaticPromotion
+        ? {}
+        : { configuredPromotions: Object.freeze([]) },
+    );
+    const replayRequest = {
+      ...variantRequest,
+      items: [{ variantId: ids.variantA, quantity }],
+    } as const;
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: replayRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical variant quote");
+    }
+    const sessionQuote = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: {
+        ...replayRequest,
+        pricingRevision: quoted.pricingRevision,
+      },
+    });
+    if (sessionQuote.status !== "quoted") throw new Error("expected session quote");
+    await expect(service.prepare(sessionQuote.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${sessionQuote.plan.identity.attemptId}`,
+      providerRequestHash: "d".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "canonical.replay@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    })).resolves.toMatchObject({ status: "prepared" });
+
+    const durableReplay = await client.query<{
+      pricingRevision: string;
+      quoteSnapshot: unknown;
+    }>(
+      `SELECT canonical_pricing_revision AS "pricingRevision",
+              canonical_quote_snapshot AS "quoteSnapshot"
+       FROM checkout_attempts WHERE id = $1::uuid`,
+      [sessionQuote.plan.identity.attemptId],
+    );
+    expect(durableReplay.rows[0]?.pricingRevision).toBe(quoted.pricingRevision);
+    expect(JSON.stringify(durableReplay.rows[0]?.quoteSnapshot)).not.toMatch(
+      /productId|stripe|priceBook|inventoryRevision/iu,
+    );
+
+    for (const replay of [
+      await service.quote({
+        buyerUserId: ids.buyer,
+        idempotencyKey: key,
+        paymentProviderAvailable: true,
+        request: replayRequest,
+      }),
+      await service.quoteForSession({
+        buyerUserId: ids.buyer,
+        idempotencyKey: key,
+        paymentProviderAvailable: true,
+        request: {
+          ...replayRequest,
+          pricingRevision: quoted.pricingRevision,
+        },
+      }),
+    ]) {
+      expect(replay).toMatchObject({
+        status: "loaded",
+        pricingRevision: quoted.pricingRevision,
+        quoteSnapshot: {
+          lines: [{
+            variantId: ids.variantA,
+            sku: "SYNTHETIC-VARIANT-5MG",
+            variantLabel: "5 mg synthetic checkout fixture",
+          }],
+        },
+      });
+      expect(JSON.stringify(replay)).not.toMatch(
+        /productId|stripe|priceBook|inventoryRevision/iu,
+      );
+    }
+  });
+
+  it("fails closed through repository, service, and HTTP for a pre-replay canonical attempt", async () => {
+    await seedCheckoutReadyVariant();
+    await client.exec(
+      `DELETE FROM promotions WHERE id = '${ids.variantPromotion}'`,
+    );
+    const { repository, service } = setup({
+      configuredPromotions: Object.freeze([]),
+    });
+    const key = "30000000-0000-4000-8000-000000000136";
+    const quoted = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    });
+    if (quoted.status !== "quoted" || quoted.pricingRevision === undefined) {
+      throw new Error("expected canonical quote");
+    }
+    const session = await service.quoteForSession({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: { ...variantRequest, pricingRevision: quoted.pricingRevision },
+    });
+    if (session.status !== "quoted") throw new Error("expected session quote");
+    const prepared = await service.prepare(session.plan, {
+      authority: "server_prepared_provider_request",
+      provider: "local_test",
+      providerIdempotencyKey: `checkout_attempt:${session.plan.identity.attemptId}`,
+      providerRequestHash: "e".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "canonical.pre-replay@example.test",
+      providerOrigin: "http://127.0.0.1:3000",
+      providerRequestSchemaVersion: 1,
+      providerLivemode: false,
+      providerScope: "local_test:synthetic-propeptiq-v1",
+    });
+    if (prepared.status !== "prepared") throw new Error("expected prepared");
+    await client.query(
+      `UPDATE checkout_attempts
+       SET canonical_pricing_revision = NULL, canonical_quote_snapshot = NULL
+       WHERE id = $1::uuid`,
+      [prepared.attemptId],
+    );
+
+    await expect(repository.findAttempt({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+    })).rejects.toThrow(/stored canonical checkout replay is invalid/iu);
+    await expect(service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request: variantRequest,
+    })).rejects.toThrow(/stored canonical checkout replay is invalid/iu);
+
+    let rateCount = 0;
+    const handlers = createCheckoutHttpHandlers({
+      environment: {
+        APP_ENV: "local",
+        APP_ORIGIN: "http://127.0.0.1:3000",
+      },
+      resolveActor: async () => ({ buyerUserId: ids.buyer }),
+      rateLimitSecret: "task5-round2-http-secret-at-least-32-characters",
+      rateLimitStore: { increment: async () => ++rateCount },
+      now: () => new Date(now),
+      quoteCheckout: (input) => service.quote({
+        buyerUserId: input.buyerUserId,
+        idempotencyKey: input.idempotencyKey,
+        paymentProviderAvailable: true,
+        request: input.request,
+      }),
+      startSession: async () => ({ status: "unavailable" }),
+    });
+    const response = await handlers.quote(new Request(
+      "http://127.0.0.1:3000/api/checkout/quote",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": key,
+          origin: "http://127.0.0.1:3000",
+        },
+        body: JSON.stringify(variantRequest),
+      },
+    ));
+    const body = await response.json();
+    expect(response.status).toBe(503);
+    expect(body).toEqual({ status: "quote_unavailable", component: "commerce" });
+    expect(JSON.stringify(body)).not.toMatch(/productId|pricingRevision/iu);
+  });
+
+  it("keeps legacy attempts null-compatible and rejects incoherent canonical replay fields", async () => {
+    const prepared = await quoteAndPrepare(
+      "30000000-0000-4000-8000-000000000135",
+    );
+    if (prepared.prepared.status !== "prepared") throw new Error("expected prepared");
+    const legacy = await client.query<{
+      pricingRevision: string | null;
+      quoteSnapshot: unknown;
+    }>(
+      `SELECT canonical_pricing_revision AS "pricingRevision",
+              canonical_quote_snapshot AS "quoteSnapshot"
+       FROM checkout_attempts WHERE id = $1::uuid`,
+      [prepared.prepared.attemptId],
+    );
+    expect(legacy.rows[0]).toEqual({
+      pricingRevision: null,
+      quoteSnapshot: null,
+    });
+    await expect(prepared.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: "30000000-0000-4000-8000-000000000135",
+      paymentProviderAvailable: true,
+      request,
+    })).resolves.toMatchObject({
+      status: "loaded",
+      pricingRevision: null,
+      quoteSnapshot: {
+        lines: [
+          { productId: ids.productA },
+          { productId: ids.productB },
+        ],
+      },
+    });
+    await expect(client.query(
+      `UPDATE checkout_attempts
+       SET canonical_pricing_revision = $2
+       WHERE id = $1::uuid`,
+      [prepared.prepared.attemptId, "a".repeat(64)],
+    )).rejects.toThrow(/checkout_attempts_canonical_replay_coherent/iu);
+  });
+
+  it("fails closed instead of using legacy replay for mixed variant identity", async () => {
+    const key = "30000000-0000-4000-8000-000000000137";
+    const prepared = await quoteAndPrepare(key);
+    if (prepared.prepared.status !== "prepared") throw new Error("expected prepared");
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'SYNTHETIC-MIXED-5MG',
+        '5 mg mixed replay fixture', 5, 'mg', 1, 'active');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.variantPriceA}', '${ids.productA}', '${ids.variantA}',
+        1, 'active', 5000, 'USD', '2026-08-01T00:00:00.000Z');
+      UPDATE order_items SET variant_id = '${ids.variantA}',
+                             product_price_id = '${ids.variantPriceA}'
+      WHERE order_id = '${prepared.prepared.orderId}'
+        AND product_id = '${ids.productA}';
+    `);
+
+    await expect(prepared.repository.findAttempt({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+    })).rejects.toThrow(/stored canonical checkout replay is invalid/iu);
+    await expect(prepared.service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      request,
+    })).rejects.toThrow(/stored canonical checkout replay is invalid/iu);
+  });
+
+  it("returns only explicitly bound canonical variant checkout facts", async () => {
+    const { repository } = setup();
+    await expect(repository.getCheckoutVariantFacts(ids.productA)).resolves.toBeNull();
+
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status, stripe_product_id, stripe_price_id)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'TEST-FIXTURE-5',
+        '5 mg synthetic unit', 5, 'mg', 1, 'inactive', null, null);
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.variantPriceA}', '${ids.productA}', '${ids.variantA}',
+        1, 'pending', 0, 'USD', '2026-08-01T00:00:00.000Z');
+      INSERT INTO lots
+        (id, product_id, variant_id, supplier_name, supplier_lot_code,
+         received_quantity, available_quantity, status, expires_at)
+      VALUES ('${ids.variantLotA}', '${ids.productA}', '${ids.variantA}',
+        'Synthetic supplier', 'SYN-VARIANT-ZERO', 1, 0, 'draft', null);
+    `);
+
+    expect(await repository.getCheckoutVariantFacts(ids.variantA)).toMatchObject({
+      variantId: ids.variantA,
+      productId: ids.productA,
+      sku: "TEST-FIXTURE-5",
+      priceStatus: "pending",
+      amountMinor: 0,
+      currency: "USD",
+      stripePriceId: null,
+      availableQuantity: 0,
+    });
+  });
+
+  it("keeps explicit pending zero but rejects a null current variant amount", async () => {
+    const { repository } = setup();
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'TEST-NULL-PRICE-5',
+        '5 mg null-price fixture', 5, 'mg', 1, 'inactive');
+      INSERT INTO product_prices
+        (id, product_id, variant_id, version, price_status, amount_minor,
+         currency, effective_at)
+      VALUES ('${ids.variantPriceA}', '${ids.productA}', '${ids.variantA}',
+        1, 'pending', 0, 'USD', '2026-08-01T00:00:00.000Z');
+    `);
+
+    await expect(repository.getCheckoutVariantFacts(ids.variantA)).resolves.toMatchObject({
+      priceStatus: "pending",
+      amountMinor: 0,
+      checkoutReady: false,
+    });
+
+    await client.exec(`
+      ALTER TABLE product_prices
+        DROP CONSTRAINT product_prices_amount_status_coherent;
+      ALTER TABLE product_prices
+        ALTER COLUMN amount_minor DROP NOT NULL;
+      UPDATE product_prices SET amount_minor = NULL
+      WHERE id = '${ids.variantPriceA}';
+    `);
+
+    await expect(repository.getCheckoutVariantFacts(ids.variantA)).resolves.toBeNull();
+  });
+
+  it("projects the exact automatic sitewide WINTER30 fixture from persisted records", async () => {
+    const { repository } = setup();
+    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([]);
+    await client.exec(`
+      INSERT INTO promotions
+        (id, campaign_key, code, name, kind, status, basis_points, configuration,
+         enabled, timezone, application_mode, scope, starts_at, ends_at)
+      VALUES ('${ids.variantPromotion}', 'winter30', 'WINTER30', 'Winter Sale', 'discount', 'active',
+        3000, '{}'::jsonb, true, 'America/Los_Angeles', 'automatic',
+        'sitewide', null, null);
+    `);
+
+    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([{
+        recordId: ids.variantPromotion,
+        campaignKey: "winter30",
+        version: 1,
+        id: "winter30",
+        displayName: "Winter Sale",
+        displayCode: "WINTER30",
+        discountBps: 3000,
+        enabled: true,
+        startAt: null,
+        endAt: null,
+        timezone: "America/Los_Angeles",
+        applicationMode: "automatic",
+        scope: { kind: "sitewide" },
+      }]);
+  });
+
+  it("omits a persisted configured WINTER30 mismatch without synthesizing a replacement", async () => {
+    const { repository } = setup();
+    await client.exec(`
+      ALTER TABLE promotions DROP CONSTRAINT promotions_winter30_exact;
+      INSERT INTO promotions
+        (id, campaign_key, code, name, kind, status, basis_points, configuration,
+         enabled, timezone, application_mode, scope, starts_at, ends_at)
+      VALUES ('${ids.variantPromotion}', 'winter30', 'CHANGED30', 'Winter Sale',
+        'discount', 'active', 3000, '{}'::jsonb, true,
+        'America/Los_Angeles', 'automatic', 'sitewide', null, null);
+    `);
+
+    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([]);
+  });
+
+  it("projects an automatic promotion only to its explicitly persisted variant targets", async () => {
+    const { repository } = setup();
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES ('${ids.variantA}', '${ids.productA}', 'TEST-FIXTURE-5',
+        '5 mg synthetic unit', 5, 'mg', 1, 'inactive');
+      INSERT INTO promotions
+        (id, campaign_key, code, name, kind, status, basis_points,
+         configuration, enabled, timezone, application_mode, scope)
+      VALUES ('${ids.variantPromotion}', 'variant15', 'VARIANT15',
+        'Synthetic variant offer', 'discount', 'active', 1500, '{}'::jsonb,
+        true, 'America/Los_Angeles', 'automatic', 'variants');
+      INSERT INTO promotion_variant_targets
+        (id, promotion_id, variant_id)
+      VALUES ('${ids.variantPromotionTarget}', '${ids.variantPromotion}',
+        '${ids.variantA}');
+    `);
+
+    await expect(repository.getAutomaticStorefrontPromotions()).resolves.toEqual([
+      expect.objectContaining({
+        id: "variant15",
+        discountBps: 1500,
+        scope: { kind: "variants", variantIds: [ids.variantA] },
+      }),
+    ]);
+  });
+
+  it("denies product-keyed checkout when only variant-bound prices exist", async () => {
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${ids.variantA}', '${ids.productA}', 'TEST-FIXTURE-5',
+         '5 mg synthetic unit', 5, 'mg', 1, 'active'),
+        ('${ids.variantB}', '${ids.productB}', 'TEST-FIXTURE-10',
+         '10 mg synthetic unit', 10, 'mg', 1, 'active');
+      UPDATE product_prices
+      SET variant_id = CASE product_id
+        WHEN '${ids.productA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END;
+    `);
+    const { service } = setup();
+    const denied = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: "30000000-0000-4000-8000-000000000401",
+      paymentProviderAvailable: true,
+      request,
+    });
+
+    expect(denied).toEqual({
+      status: "denied",
+      reasons: ["product_catalog_incomplete"],
+    });
+    const writes = await client.query<{
+      orders: number;
+      attempts: number;
+      reservations: number;
+    }>(`SELECT
+      (SELECT count(*)::int FROM orders) AS orders,
+      (SELECT count(*)::int FROM checkout_attempts) AS attempts,
+      (SELECT count(*)::int FROM inventory_reservations) AS reservations`);
+    expect(writes.rows).toEqual([{ orders: 0, attempts: 0, reservations: 0 }]);
+  });
+
+  it("denies product-keyed checkout when the legacy price is not active", async () => {
+    await client.exec(`UPDATE product_prices SET price_status = 'unavailable'`);
+    const { service } = setup();
+    const denied = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: "30000000-0000-4000-8000-000000000403",
+      paymentProviderAvailable: true,
+      request,
+    });
+
+    expect(denied).toEqual({
+      status: "denied",
+      reasons: ["product_catalog_incomplete"],
+    });
+    const writes = await client.query<{
+      orders: number;
+      attempts: number;
+      reservations: number;
+    }>(`SELECT
+      (SELECT count(*)::int FROM orders) AS orders,
+      (SELECT count(*)::int FROM checkout_attempts) AS attempts,
+      (SELECT count(*)::int FROM inventory_reservations) AS reservations`);
+    expect(writes.rows).toEqual([{ orders: 0, attempts: 0, reservations: 0 }]);
+  });
+
+  it("denies product-keyed checkout when only variant-bound inventory exists", async () => {
+    await client.exec(`
+      INSERT INTO product_variants
+        (id, product_id, sku, label, canonical_amount, amount_unit,
+         package_quantity, status)
+      VALUES
+        ('${ids.variantA}', '${ids.productA}', 'TEST-FIXTURE-5',
+         '5 mg synthetic unit', 5, 'mg', 1, 'active'),
+        ('${ids.variantB}', '${ids.productB}', 'TEST-FIXTURE-10',
+         '10 mg synthetic unit', 10, 'mg', 1, 'active');
+      UPDATE lots
+      SET variant_id = CASE product_id
+        WHEN '${ids.productA}'::uuid THEN '${ids.variantA}'::uuid
+        ELSE '${ids.variantB}'::uuid
+      END;
+    `);
+    const { service } = setup();
+    const denied = await service.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: "30000000-0000-4000-8000-000000000402",
+      paymentProviderAvailable: true,
+      request,
+    });
+
+    expect(denied).toEqual({
+      status: "denied",
+      reasons: ["inventory_unavailable"],
+    });
+    const writes = await client.query<{
+      orders: number;
+      attempts: number;
+      reservations: number;
+    }>(`SELECT
+      (SELECT count(*)::int FROM orders) AS orders,
+      (SELECT count(*)::int FROM checkout_attempts) AS attempts,
+      (SELECT count(*)::int FROM inventory_reservations) AS reservations`);
+    expect(writes.rows).toEqual([{ orders: 0, attempts: 0, reservations: 0 }]);
+  });
 
   it("persists authoritative snapshots and allocates earliest-expiry lots atomically with idempotent replay", async () => {
     const key = "30000000-0000-4000-8000-000000000101";
@@ -279,6 +1919,25 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
         expires_at: "2026-08-25T13:00:00.000Z",
       },
     ]);
+    const legacyVariantBindings = await client.query<{
+      itemVariantId: string | null;
+      lotVariantId: string | null;
+    }>(`SELECT
+          oi.variant_id::text AS "itemVariantId",
+          l.variant_id::text AS "lotVariantId"
+        FROM inventory_reservations r
+        JOIN order_items oi ON oi.id = r.order_item_id
+        JOIN lots l ON l.id = r.lot_id
+        WHERE r.order_id = '${prepared.orderId}'
+        ORDER BY r.id`);
+    expect(legacyVariantBindings.rows).toHaveLength(3);
+    expect(legacyVariantBindings.rows).toEqual(
+      expect.arrayContaining([
+        { itemVariantId: null, lotVariantId: null },
+        { itemVariantId: null, lotVariantId: null },
+        { itemVariantId: null, lotVariantId: null },
+      ]),
+    );
     const counts = await client.query<{
       orders: number;
       attempts: number;
@@ -683,6 +2342,26 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
       status: "prepared",
       reviewRequestId: created.reviewRequestId,
     });
+    const legacyBinding = await client.query<{
+      reviewRequestId: string;
+      boundHash: string;
+      reviewHash: string;
+    }>(
+      `SELECT binding.review_request_id::text AS "reviewRequestId",
+              binding.review_snapshot_hash AS "boundHash",
+              review.snapshot_hash AS "reviewHash"
+       FROM checkout_attempt_review_bindings binding
+       JOIN review_requests review ON review.id = binding.review_request_id
+       WHERE binding.checkout_attempt_id = $1::uuid`,
+      [created.attemptId],
+    );
+    expect(legacyBinding.rows).toHaveLength(1);
+    expect(legacyBinding.rows[0]).toMatchObject({
+      reviewRequestId: created.reviewRequestId,
+    });
+    expect(legacyBinding.rows[0]!.boundHash).toBe(
+      legacyBinding.rows[0]!.reviewHash,
+    );
     expect(
       (await client.query<{ count: number }>(
         `SELECT count(*)::int AS count FROM inventory_reservations`,

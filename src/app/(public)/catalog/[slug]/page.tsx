@@ -1,4 +1,4 @@
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -6,12 +6,6 @@ import { notFound } from "next/navigation";
 import { findPublicProduct } from "@/catalog/public-catalog";
 import { getPublicCatalog } from "@/catalog/server";
 import { AddToCartButton } from "@/components/commerce/add-to-cart-button";
-import {
-  DataLabel,
-  Metric,
-  Notice,
-  RecordPanel,
-} from "@/components/design-system/archive-primitives";
 import { EarnPoints } from "@/components/growth/earn-points";
 import { DemoNotice } from "@/components/site/demo-notice";
 import {
@@ -66,30 +60,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
           Back to catalog
         </Link>
 
-        <header
-          className="border-b border-border pb-10 pt-8 sm:pb-12"
-          data-motion-sequence="dossier-intro"
-        >
-          <div data-motion-step="1">
-            <DataLabel>Public catalog dossier</DataLabel>
-          </div>
-          <div data-motion-step="2">
-            <ProductTitleTransition productId={product.id}>
-              <h1 className="mt-4 max-w-[18ch] text-balance font-heading text-page leading-[1.02] text-ink">
-                {product.name}
-              </h1>
-            </ProductTitleTransition>
-          </div>
-          <p
-            className="mt-5 max-w-[62ch] text-lg leading-8 text-muted-ink"
-            data-motion-step="3"
-          >
-            {product.packageForm}
-          </p>
-        </header>
-
-        <div className="mt-10 grid gap-12 lg:grid-cols-[minmax(0,7fr)_minmax(20rem,5fr)] lg:gap-16">
-          <div className="min-w-0">
+        <div className="mt-8 grid gap-12 lg:grid-cols-[7fr_5fr] lg:gap-16">
+          <div>
             {catalog.source === "synthetic-demo" ? (
               <>
                 <p className="demo-label">Synthetic demo record — not a real product</p>
@@ -103,14 +75,28 @@ export default async function ProductPage({ params }: ProductPageProps) {
                 </div>
               </>
             ) : null}
+            <header data-motion-sequence="dossier-intro">
+              <p className="eyebrow" data-motion-step="1">
+                Public catalog dossier
+              </p>
+              <div data-motion-step="2">
+                <ProductTitleTransition productId={product.id}>
+                  <h1 className="mt-8 text-balance font-heading text-page leading-[1.02] text-ink">
+                    {product.name}
+                  </h1>
+                </ProductTitleTransition>
+              </div>
+              <p
+                className="mt-5 max-w-[62ch] text-lg leading-8 text-muted-ink"
+                data-motion-step="3"
+              >
+                {product.packageForm}
+              </p>
+            </header>
 
             {product.claims.length > 0 ? (
-              <section
-                aria-labelledby="supported-claims-heading"
-                className={catalog.source === "synthetic-demo" ? "mt-12" : undefined}
-              >
-                <DataLabel>Evidence-backed copy</DataLabel>
-                <h2 id="supported-claims-heading" className="mt-3 font-heading text-3xl text-ink">
+              <section aria-labelledby="supported-claims-heading" className="mt-12">
+                <h2 id="supported-claims-heading" className="font-heading text-3xl text-ink">
                   Linked analytical statements
                 </h2>
                 <ul className="mt-5 space-y-3">
@@ -121,53 +107,37 @@ export default async function ProductPage({ params }: ProductPageProps) {
                   ))}
                 </ul>
               </section>
-            ) : (
-              <Notice
-                className={catalog.source === "synthetic-demo" ? "mt-12" : ""}
-                icon={FileText}
-                title="Analytical statements"
-              >
-                No linked analytical statements are available for public display on this
-                record. No pending evidence state is inferred.
-              </Notice>
-            )}
+            ) : null}
           </div>
 
-          <aside className="self-start" aria-label="Catalog price and cart action">
-            <RecordPanel className="p-6 sm:p-8">
-              <Metric
-                detail="Server price"
-                label="Current price"
-                value={formatMoney(product.price.amountMinor, product.price.currency)}
-              />
-              <EarnPoints
-                loyaltyPolicy={
-                  growth.status === "active" ? growth.projection.loyalty : null
-                }
-                price={product.price}
-                source={catalog.source}
-              />
-              <div className="record-panel-recessed mt-6 p-4">
-                <DataLabel>Current public projection</DataLabel>
-                <p className="mt-2 font-semibold tabular-nums text-ink">
-                  {product.availableQuantity} unit
-                  {product.availableQuantity === 1 ? "" : "s"}
-                </p>
-                <p className="mt-2 text-sm leading-6 text-muted-ink">
-                  Tax, shipping, and final discounts are calculated later.
-                </p>
-              </div>
-              <AddToCartButton
-                productId={product.id}
-                productName={product.name}
-                className="mt-7 w-full"
-              />
-            </RecordPanel>
+          <aside className="record-sheet self-start p-7 sm:p-9" aria-label="Catalog price and cart action">
+            <p className="eyebrow">Server price</p>
+            <p className="mt-4 text-4xl font-semibold tabular-nums text-ink">
+              {formatMoney(product.price.amountMinor, product.price.currency)}
+            </p>
+            <EarnPoints
+              loyaltyPolicy={
+                growth.status === "active" ? growth.projection.loyalty : null
+              }
+              price={product.price}
+              source={catalog.source}
+            />
+            <p className="mt-3 text-sm leading-6 text-muted-ink">
+              {product.availableQuantity} unit{product.availableQuantity === 1 ? "" : "s"} in the current public projection.
+              Tax, shipping, and final discounts are calculated later.
+            </p>
+            <AddToCartButton
+              canAdd={false}
+              disabledReason="Choose a variant before adding this item."
+              variantId={null}
+              productName={product.name}
+              className="mt-7 w-full"
+            />
           </aside>
         </div>
 
         <section aria-labelledby="evidence-heading" className="site-section">
-          <DataLabel>Evidence relationship</DataLabel>
+          <p className="eyebrow">Evidence relationship</p>
           <h2 id="evidence-heading" className="mt-4 font-heading text-section text-ink">
             Record relationships for this catalog entry.
           </h2>
@@ -178,18 +148,16 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
         {product.merchandising.length > 0 ? (
           <section aria-labelledby="merchandising-heading" className="border-t border-border py-14">
-            <DataLabel>Merchandising records</DataLabel>
+            <p className="eyebrow">Merchandising records</p>
             <h2 id="merchandising-heading" className="mt-4 font-heading text-section text-ink">
               Display options from active server records.
             </h2>
             <ul className="mt-8 grid gap-4 md:grid-cols-2">
               {product.merchandising.map((entry) => (
-                <li key={entry.id}>
-                  <RecordPanel className="h-full p-6">
-                    <DataLabel>{entry.kind.replace("_", " ")}</DataLabel>
-                    <h3 className="mt-3 text-lg font-semibold text-ink">{entry.name}</h3>
-                    <p className="mt-3 text-sm leading-6 text-muted-ink">{entry.summary}</p>
-                  </RecordPanel>
+                <li className="record-card" key={entry.id}>
+                  <p className="eyebrow">{entry.kind.replace("_", " ")}</p>
+                  <h3 className="mt-3 text-lg font-semibold text-ink">{entry.name}</h3>
+                  <p className="mt-3 text-sm leading-6 text-muted-ink">{entry.summary}</p>
                 </li>
               ))}
             </ul>

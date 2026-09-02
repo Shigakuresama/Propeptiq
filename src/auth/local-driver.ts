@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import type {
   AccountRepository,
   AccountTransaction,
@@ -27,6 +29,8 @@ import { createRewardsService } from "@/growth/rewards-service";
 import type { LocalTestDriver } from "./local-driver-types";
 
 const LOCAL_FIXTURE_SENTINEL = "LOCAL_TEST_ONLY_PROPEPTIQ_91C4E7";
+/** Objects written by the local harness writer, keyed by storage key. */
+const localIngestedCoaObjects = new Map<string, string>();
 const fixedNow = "2026-08-25T12:00:00.000Z";
 const localPolicyGroupId = "local-policy-group-a";
 const localProductId = "local-product-a";
@@ -1478,11 +1482,24 @@ const driver: LocalTestDriver = {
   adminRepository,
   storageVerifier: {
     mode: "test",
-    verify: async (storageKey) => ({
-      exists: storageKey === "local-private/coa-a.pdf",
-      sha256:
-        storageKey === "local-private/coa-a.pdf" ? "f".repeat(64) : null,
-    }),
+    verify: async (storageKey) => {
+      const ingested = localIngestedCoaObjects.get(storageKey);
+      if (ingested) return { exists: true, sha256: ingested };
+      return {
+        exists: storageKey === "local-private/coa-a.pdf",
+        sha256:
+          storageKey === "local-private/coa-a.pdf" ? "f".repeat(64) : null,
+      };
+    },
+  },
+  storageWriter: {
+    mode: "test",
+    write: async ({ storageKey, body }) => {
+      localIngestedCoaObjects.set(
+        storageKey,
+        createHash("sha256").update(body).digest("hex"),
+      );
+    },
   },
   loadAccount(userId) {
     const profile = state.profiles.get(userId) ?? null;

@@ -27,11 +27,11 @@ function boundedText(value: unknown, maximum: number): value is string {
 
 function item(value: unknown): CartPreviewItem | null {
   if (!exactRecord(value, [
-    "productId", "quantity", "available", "name", "packageForm",
+    "variantId", "quantity", "available", "name", "packageForm",
     "unitAmountMinor", "lineSubtotalMinor", "currency",
   ])) return null;
   if (
-    !boundedText(value.productId, 128) || !/^[A-Za-z0-9_-]+$/u.test(value.productId) ||
+    !boundedText(value.variantId, 128) || !/^[A-Za-z0-9_-]+$/u.test(value.variantId) ||
     !Number.isSafeInteger(value.quantity) || (value.quantity as number) < 1 || (value.quantity as number) > 25 ||
     typeof value.available !== "boolean" ||
     (value.name !== null && !boundedText(value.name, 240)) ||
@@ -40,7 +40,7 @@ function item(value: unknown): CartPreviewItem | null {
     (value.currency !== null && (typeof value.currency !== "string" || !/^[A-Z]{3}$/u.test(value.currency)))
   ) return null;
   return {
-    productId: value.productId,
+    variantId: value.variantId,
     quantity: value.quantity as number,
     available: value.available,
     name: value.name as string | null,

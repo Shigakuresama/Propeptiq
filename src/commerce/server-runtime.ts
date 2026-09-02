@@ -2,16 +2,35 @@ import "server-only";
 
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
+import Stripe from "stripe";
+import type { QueryResultRow } from "pg";
+
 import type { RequestIdentity } from "@/auth/server";
-import { createCheckoutService, type CheckoutQuoteResult } from "@/commerce/checkout-service";
+import {
+  createCheckoutService,
+  type CheckoutQuoteResult,
+  type CheckoutSessionQuoteResult,
+} from "@/commerce/checkout-service";
+import { parseRewardsCheckoutQuoteRequest } from "@/commerce/checkout-ports";
 import { createProviderCheckoutOrchestrator, type ProviderCheckoutRouteResult } from "@/commerce/provider-checkout-orchestration";
 import { createProviderExecutionContextV1 } from "@/commerce/provider-context";
 import { createProviderEventServiceV1 } from "@/commerce/provider-event-service";
 import { createProviderEventAuthorityV1 } from "@/commerce/stripe-webhook-verifier";
-import { createRuntimeStripePaymentProvider } from "@/commerce/stripe-payment-provider";
+import {
+  STRIPE_API_VERSION,
+  createStripeBindingVerifier,
+  createStripePaymentProvider,
+  createRuntimeStripePaymentProvider,
+  type StripeBindingVerifierSdkClient,
+  type StripeSdkClient,
+} from "@/commerce/stripe-payment-provider";
+import { createStripeShippingQuotePort } from "@/commerce/stripe-shipping-provider";
+import { createStripeTaxQuotePort } from "@/commerce/stripe-tax-provider";
 import { createStaffCommerceCommandRuntimeV1, type StaffCommerceCommandRuntimeV1 } from "@/commerce/staff-commerce-command-runtime";
 import { isSyntheticLocalCommerceEnvironmentConfigured } from "@/config/commerce-capability";
 import { createPostgresAdminRepository, type AdminTransactionRunner } from "@/db/repositories/admin-repository";
+import { createPostgresCheckoutRepository } from "@/db/repositories/checkout-repository";
+import { createProviderSessionRepository } from "@/db/repositories/provider-session-repository";
 import { createFulfillmentRepository } from "@/db/repositories/fulfillment-repository";
 import {
   createProviderEventRepository,
@@ -25,7 +44,13 @@ import { readServerEnv } from "@/env";
 import { createAffiliateCheckoutService } from "@/growth/affiliate-service";
 import { verifyAttributionCookie } from "@/growth/attribution-cookie";
 import { createReferralCheckoutService } from "@/growth/referral-service";
-import { createPostgresRewardsLifecycleService, createRewardsService } from "@/growth/rewards-service";
+import {
+  createPostgresRewardsCheckoutAtomicPort,
+  createPostgresRewardsLifecycleService,
+  createRewardsService,
+} from "@/growth/rewards-service";
+import { createPostgresAffiliateCheckoutService } from "@/growth/affiliate-service";
+import { createPostgresReferralCheckoutService } from "@/growth/referral-service";
 import type { RateLimitStore } from "@/security/rate-limit";
 
 export type CheckoutServerRuntimeV1 = Readonly<{
@@ -42,7 +67,10 @@ export type CheckoutServerRuntimeV1 = Readonly<{
     idempotencyKey: string;
     request: unknown;
     attributionCookie?: string | null;
-  }>) => Promise<ProviderCheckoutRouteResult>;
+  }>) => Promise<ProviderCheckoutRouteResult | Extract<
+    CheckoutSessionQuoteResult,
+    Readonly<{ status: "PRICE_CHANGED" | "CHECKOUT_UNAVAILABLE" }>
+  >>;
 }>;
 
 export type StripeWebhookServerRuntimeV1 = Readonly<{
@@ -111,13 +139,273 @@ async function localProviderContext(request: RequestIdentity, now: Date) {
   });
 }
 
+/**
+ * Configuration evidence for the PostgreSQL buyer path.
+ *
+ * Every adapter the checkout service needs must be configured before any of it
+ * composes: credentials alone never enable checkout, and a partially configured
+ * environment returns null rather than a runtime with a missing quote port.
+ */
+export function isPostgresBuyerCheckoutReady(
+  request: RequestIdentity,
+): boolean {
+  const environment = request.environment;
+  return request.localDriver === null &&
+    request.identity !== null &&
+    request.principal !== null &&
+    request.principal.actorId.length === 36 &&
+    request.principal.clerkUserId === request.identity.clerkUserId &&
+    environment.DATABASE_MODE !== "disabled" &&
+    environment.AUTH_MODE !== "disabled" &&
+    environment.TAX_MODE !== "disabled" &&
+    environment.SHIPPING_MODE !== "disabled" &&
+    (environment.PAYMENTS_MODE === "test" || environment.PAYMENTS_MODE === "live") &&
+    environment.STRIPE_SECRET_KEY !== undefined &&
+    environment.STRIPE_ACCOUNT_ID !== undefined &&
+    environment.STRIPE_SHIPPING_RATE_ID !== undefined &&
+    environment.STRIPE_TAX_CODE !== undefined &&
+    environment.RATE_LIMIT_SECRET !== undefined;
+}
+
+async function createPostgresCheckoutServerRuntime(
+  request: RequestIdentity,
+): Promise<CheckoutServerRuntimeV1 | null> {
+  const environment = request.environment;
+  const livemode = environment.PAYMENTS_MODE === "live";
+
+  let paymentProvider;
+  let stripeSdk;
+  let bindingVerifier;
+  try {
+    stripeSdk = new Stripe(environment.STRIPE_SECRET_KEY!, {
+      apiVersion: STRIPE_API_VERSION,
+      maxNetworkRetries: 0,
+    });
+    const providerContext = Object.freeze({
+      provider: "stripe" as const,
+      livemode,
+      scope: `stripe:${environment.STRIPE_ACCOUNT_ID!}`,
+    });
+    paymentProvider = createStripePaymentProvider({
+      sdk: stripeSdk as unknown as StripeSdkClient,
+      context: providerContext,
+    });
+    bindingVerifier = createStripeBindingVerifier({
+      sdk: stripeSdk as unknown as StripeBindingVerifierSdkClient,
+      context: providerContext,
+    });
+  } catch {
+    return null;
+  }
+
+  // Reads run in their own read-committed transaction; the repositories own
+  // their serializable write paths separately.
+  const client = Object.freeze({
+    query: <Row extends object>(sql: string, params: readonly unknown[] = []) =>
+      withRuntimeTransaction(environment, (session) =>
+        session.query<Row extends QueryResultRow ? Row : never>(sql, params),
+      ) as Promise<Readonly<{ rows: Row[] }>>,
+  });
+  const runTransaction = <Value>(
+    work: (transactional: typeof client) => Promise<Value>,
+    options: Readonly<{ isolationLevel: "serializable" }>,
+  ) =>
+    withRuntimeTransaction(
+      environment,
+      (session) =>
+        work({
+          query: <Row extends object>(sql: string, params: readonly unknown[] = []) =>
+            session.query<Row extends QueryResultRow ? Row : never>(sql, params) as Promise<
+              Readonly<{ rows: Row[] }>
+            >,
+        }),
+      options,
+    );
+
+  // Resolved on first use, not during composition: building the runtime must
+  // stay free of I/O so a request that never reaches checkout costs no query.
+  let contextPromise:
+    | ReturnType<typeof createProviderExecutionContextV1>
+    | null = null;
+  const providerContext = () => {
+    contextPromise ??= createProviderExecutionContextV1({
+      environment,
+      identity: request.identity,
+      now: runtimeNow(),
+      async resolveDatabaseUsersByClerkId(clerkUserId) {
+        const result = await client.query<{ id: string }>(
+          `SELECT id::text AS id FROM users WHERE clerk_id = $1 ORDER BY id`,
+          [clerkUserId],
+        );
+        return result.rows.map((row) => row.id);
+      },
+      adapters: { stripe: paymentProvider, localTest: null },
+    });
+    return contextPromise;
+  };
+
+  const attributionSecret = environment.RATE_LIMIT_SECRET!;
+  // One repository instance. The orchestrator's release path must be the same
+  // repository the checkout service uses, not a second one over the same client.
+  const checkoutRepository = createPostgresCheckoutRepository({
+    client,
+    runTransaction,
+    sha256,
+    keyedUuid: deterministicUuid,
+  });
+  const checkoutService = createCheckoutService({
+    repository: checkoutRepository,
+    shippingQuotePort: createStripeShippingQuotePort({
+      sdk: {
+        shippingRates: {
+          retrieve: (id, params, options) =>
+            stripeSdk.shippingRates.retrieve(
+              id,
+              params as Stripe.ShippingRateRetrieveParams | undefined,
+              options as Stripe.RequestOptions,
+            ),
+        },
+      },
+      livemode,
+      shippingRateId: environment.STRIPE_SHIPPING_RATE_ID!,
+    }),
+    taxQuotePort: createStripeTaxQuotePort({
+      sdk: {
+        tax: {
+          calculations: {
+            create: (params, options) =>
+              stripeSdk.tax.calculations.create(
+                params as Stripe.Tax.CalculationCreateParams,
+                options as Stripe.RequestOptions,
+              ),
+          },
+        },
+      },
+      livemode,
+      taxCode: environment.STRIPE_TAX_CODE!,
+    }),
+    sha256,
+    clock: runtimeNow,
+    keyedUuid: deterministicUuid,
+    moneyPolicy: {
+      allowedCurrencies: ["USD"],
+      maximumLineCount: 50,
+      maximumQuantityPerLine: 25,
+      maximumOrderAmountMinor: 100_000_000,
+    },
+    referralService: createPostgresReferralCheckoutService({
+      client,
+      environment: environment.APP_ENV,
+      secret: attributionSecret,
+    }),
+    affiliateService: createPostgresAffiliateCheckoutService({
+      client,
+      environment: environment.APP_ENV,
+      secret: attributionSecret,
+    }),
+    rewardsService: createRewardsService({
+      atomicPort: createPostgresRewardsCheckoutAtomicPort({
+        client,
+        runSerializableTransaction: (work, options) =>
+          withRuntimeTransaction(environment, work, options),
+        keyedUuid: deterministicUuid,
+      }),
+    }),
+  });
+
+  const orchestrator = createProviderCheckoutOrchestrator({
+    checkoutService,
+    providerSessionRepository: createProviderSessionRepository({
+      client,
+      runTransaction: (work) =>
+        runTransaction(work, { isolationLevel: "serializable" }),
+    }),
+    releaseDefiniteFailure: checkoutRepository.releaseDefiniteFailure,
+    bindingVerifier,
+    sha256,
+  });
+
+  const buyerUserId = request.principal!.actorId;
+  const rateLimitStore: RateLimitStore = {
+    increment: (window) =>
+      withRuntimeTransaction(environment, (session) =>
+        createPostgresRateLimitStore(session).increment(window),
+      ),
+  };
+  return Object.freeze({
+    buyerUserId,
+    rateLimitStore,
+    quoteCheckout(input) {
+      if (input.buyerUserId !== buyerUserId) {
+        return Promise.resolve(Object.freeze({
+          status: "invalid_request" as const,
+          reason: "checkout_input_invalid" as const,
+        }));
+      }
+      return (async () => {
+        const parsedRequest = parseRewardsCheckoutQuoteRequest(input.request);
+        if (!parsedRequest.ok) {
+          return Object.freeze({
+            status: "invalid_request" as const,
+            reason: "checkout_input_invalid" as const,
+          });
+        }
+        const resolved = await providerContext();
+        if (!resolved.ok || resolved.context.buyerUserId !== buyerUserId) {
+          return Object.freeze({
+            status: "invalid_request" as const,
+            reason: "checkout_input_invalid" as const,
+          });
+        }
+        const result = await checkoutService.quoteForSession({
+          buyerUserId,
+          idempotencyKey: input.idempotencyKey,
+          paymentProviderAvailable: resolved.context.checkoutCreationAvailable,
+          request: parsedRequest.value,
+          ...(input.attributionCookie === undefined
+            ? {}
+            : { attributionCookie: input.attributionCookie }),
+        });
+        return result.status === "PRICE_CHANGED"
+          ? Object.freeze({
+              status: "invalid_request" as const,
+              reason: "checkout_input_invalid" as const,
+            })
+          : result;
+      })();
+    },
+    startSession(input) {
+      if (input.buyerUserId !== buyerUserId) {
+        return Promise.resolve(Object.freeze({
+          status: "invalid_request" as const,
+          reason: "checkout_input_invalid" as const,
+        }));
+      }
+      return (async () => {
+        const resolved = await providerContext();
+        if (!resolved.ok || resolved.context.buyerUserId !== buyerUserId) {
+          return Object.freeze({ status: "invalid" as const });
+        }
+        return orchestrator.start({
+          context: resolved.context,
+          idempotencyKey: input.idempotencyKey,
+          request: input.request,
+          ...(input.attributionCookie === undefined
+            ? {}
+            : { attributionCookie: input.attributionCookie }),
+        });
+      })();
+    },
+  }) as CheckoutServerRuntimeV1;
+}
+
 export async function createCheckoutServerRuntime(
   request: RequestIdentity,
 ): Promise<CheckoutServerRuntimeV1 | null> {
   if (!isBuyerCheckoutRuntimeReady(request)) {
-    // PostgreSQL/live composition remains fail closed until every configured
-    // shipping and tax adapter is present. Credentials alone never enable it.
-    return null;
+    return isPostgresBuyerCheckoutReady(request)
+      ? createPostgresCheckoutServerRuntime(request)
+      : null;
   }
   const driver = request.localDriver!;
   const now = runtimeNow();
@@ -147,6 +435,7 @@ export async function createCheckoutServerRuntime(
   });
   const checkoutService = createCheckoutService({
     repository: driver.commerce.checkoutRepository,
+    configuredPromotions: Object.freeze([]),
     shippingQuotePort: driver.commerce.shippingQuotePort,
     taxQuotePort: driver.commerce.taxQuotePort,
     sha256,
@@ -166,23 +455,37 @@ export async function createCheckoutServerRuntime(
     checkoutService,
     providerSessionRepository: driver.commerce.providerSessionRepository,
     releaseDefiniteFailure: driver.commerce.checkoutRepository.releaseDefiniteFailure,
+    bindingVerifier: null,
     sha256,
   });
   const buyerUserId = request.principal!.actorId;
   return Object.freeze({
     buyerUserId,
     rateLimitStore: driver.commerce.rateLimitStore,
-    quoteCheckout(input) {
+    async quoteCheckout(input) {
       if (input.buyerUserId !== buyerUserId) return Promise.resolve(Object.freeze({ status: "invalid_request" as const, reason: "checkout_input_invalid" as const }));
-      return checkoutService.quote({
+      const parsedRequest = parseRewardsCheckoutQuoteRequest(input.request);
+      if (!parsedRequest.ok) {
+        return Object.freeze({
+          status: "invalid_request" as const,
+          reason: "checkout_input_invalid" as const,
+        });
+      }
+      const result = await checkoutService.quoteForSession({
         buyerUserId,
         idempotencyKey: input.idempotencyKey,
         paymentProviderAvailable: contextResult.context.checkoutCreationAvailable,
-        request: input.request,
+        request: parsedRequest.value,
         ...(input.attributionCookie === undefined
           ? {}
           : { attributionCookie: input.attributionCookie }),
       });
+      return result.status === "PRICE_CHANGED"
+        ? Object.freeze({
+            status: "invalid_request" as const,
+            reason: "checkout_input_invalid" as const,
+          })
+        : result;
     },
     startSession(input) {
       if (input.buyerUserId !== buyerUserId) return Promise.resolve(Object.freeze({ status: "invalid" as const }));
@@ -312,6 +615,12 @@ export async function createStripeWebhookServerRuntime(): Promise<StripeWebhookS
       () => connectRuntimeDatabaseSession(environment),
     ),
     keyedUuid: deterministicUuid,
+    ...(environment.INVOICE_SETTLEMENT_WINDOW_DAYS === undefined
+      ? {}
+      : {
+          settlementWindowBusinessDays:
+            environment.INVOICE_SETTLEMENT_WINDOW_DAYS,
+        }),
   });
   const rewardsLifecycle = createRuntimeRewardsLifecycle(environment);
   const service = createProviderEventServiceV1({

@@ -15,10 +15,11 @@ import {
   attestationAcceptances,
   attestationVersions,
   buyerProfiles,
+  checkoutAttemptReviewBindings,
   checkoutAttempts,
-  downstreamEffects,
   coaDocuments,
   destinationPolicies,
+  downstreamEffects,
   fulfillmentReleases,
   growthTermsAcceptances,
   growthTermsVersions,
@@ -30,20 +31,23 @@ import {
   orderItems,
   orderPromotionAllocations,
   orderPromotionApplications,
+  orderInvoices,
   orderShippingAddresses,
   orders,
   paymentEvents,
   productPolicyGroups,
   productPrices,
+  productVariants,
   products,
   promotionTargets,
+  promotionVariantTargets,
   promotions,
+  providerEvents,
   rateLimitWindows,
   referralAttributions,
   referralCodes,
   referralConversions,
   referralPolicies,
-  providerEvents,
   refunds,
   reviewRequestDestinationPolicies,
   reviewRequests,
@@ -68,6 +72,7 @@ const expectedLeanTables = [
   [staffRoles, "staff_roles"],
   [productPolicyGroups, "product_policy_groups"],
   [products, "products"],
+  [productVariants, "product_variants"],
   [productPrices, "product_prices"],
   [lots, "lots"],
   [coaDocuments, "coa_documents"],
@@ -75,11 +80,13 @@ const expectedLeanTables = [
   [destinationPolicies, "destination_policies"],
   [promotions, "promotions"],
   [promotionTargets, "promotion_targets"],
+  [promotionVariantTargets, "promotion_variant_targets"],
   [orders, "orders"],
   [orderItems, "order_items"],
   [checkoutAttempts, "checkout_attempts"],
   [orderPromotionApplications, "order_promotion_applications"],
   [orderPromotionAllocations, "order_promotion_allocations"],
+  [orderInvoices, "order_invoices"],
   [orderShippingAddresses, "order_shipping_addresses"],
   [providerEvents, "provider_events"],
   [paymentEvents, "payment_events"],
@@ -87,12 +94,15 @@ const expectedLeanTables = [
   [inventoryEvents, "inventory_events"],
   [refunds, "refunds"],
   [reviewRequests, "review_requests"],
+  [checkoutAttemptReviewBindings, "checkout_attempt_review_bindings"],
   [reviewRequestDestinationPolicies, "review_request_destination_policies"],
   [fulfillmentReleases, "fulfillment_releases"],
   [shipments, "shipments"],
   [downstreamEffects, "downstream_effects"],
   [adminAudit, "admin_audit"],
   [rateLimitWindows, "rate_limit_windows"],
+  // Growth tables from the rewards/referrals plan. Listed explicitly so this
+  // guard still fails on an unintended table or a renamed one.
   [loyaltyPolicies, "loyalty_policies"],
   [referralPolicies, "referral_policies"],
   [affiliatePolicies, "affiliate_policies"],
@@ -1000,10 +1010,18 @@ describe("lean database migration", () => {
       ORDER BY table_name, column_name
     `);
 
+    // The review snapshot hashes are the only routine ELIGIBILITY hashes.
+    // Everything else here is content-integrity (content_hash, evidence_hash)
+    // or idempotency/replay (request_hash, payload_hash, scope_hash), and none
+    // is read to make an eligibility decision.
     expect(result.rows).toEqual([
       { table_name: "affiliate_payouts", column_name: "paid_request_hash" },
       { table_name: "affiliate_payouts", column_name: "request_hash" },
       { table_name: "attestation_versions", column_name: "content_hash" },
+      {
+        table_name: "checkout_attempt_review_bindings",
+        column_name: "review_snapshot_hash",
+      },
       { table_name: "checkout_attempts", column_name: "provider_request_hash" },
       { table_name: "checkout_attempts", column_name: "request_hash" },
       { table_name: "coa_documents", column_name: "evidence_hash" },
@@ -1013,7 +1031,10 @@ describe("lean database migration", () => {
       { table_name: "rate_limit_windows", column_name: "scope_hash" },
       { table_name: "refunds", column_name: "provider_request_hash" },
       { table_name: "review_requests", column_name: "snapshot_hash" },
-      { table_name: "shared_research_set_mutations", column_name: "payload_hash" },
+      {
+        table_name: "shared_research_set_mutations",
+        column_name: "payload_hash",
+      },
     ]);
   });
 

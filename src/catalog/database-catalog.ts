@@ -6,8 +6,10 @@ import type {
   CatalogProductRecord,
   CatalogPromotionRecord,
   CatalogPromotionTargetRecord,
+  CatalogPromotionVariantTargetRecord,
   CatalogRecordSet,
 } from "./types";
+import { isStrictStorefrontPromotionInstant } from "./storefront-promotion-projection";
 
 export type CatalogQueryPort = Readonly<{
   query: <T extends object>(
@@ -19,12 +21,59 @@ export type CatalogQueryPort = Readonly<{
 type RawProduct = Omit<CatalogProductRecord, "status"> & {
   status: CatalogProductRecord["status"];
 };
+export type DatabaseCatalogVariantRecord = Readonly<{
+  id: string;
+  productId: string;
+  sku: string;
+  label: string;
+  canonicalAmount: number | null;
+  amountUnit: "mg" | "mcg" | "iu" | null;
+  packageQuantity: number;
+  status: "inactive" | "active";
+  stripeProductId: string | null;
+  stripePriceId: string | null;
+}>;
+export type DatabaseCatalogPriceRecord = CatalogPriceRecord &
+  Readonly<{
+    variantId: string | null;
+    priceStatus: "pending" | "active" | "unavailable";
+  }>;
+export type DatabaseCatalogLotRecord = CatalogLotRecord &
+  Readonly<{ variantId: string | null }>;
+export type DatabaseCatalogPromotionRecord = Omit<CatalogPromotionRecord, "campaignKey" | "enabled" | "timezone" | "applicationMode" | "scope"> & Readonly<{
+  campaignKey: string | null;
+  enabled: boolean;
+  timezone: string | null;
+  applicationMode: "automatic" | "code_required" | null;
+  scope: "sitewide" | "products" | "variants" | null;
+}>;
+export type DatabaseCatalogRecordSet = Omit<
+  CatalogRecordSet,
+  "prices" | "lots" | "promotions"
+> &
+  Readonly<{
+    variants: readonly DatabaseCatalogVariantRecord[];
+    prices: readonly DatabaseCatalogPriceRecord[];
+    lots: readonly DatabaseCatalogLotRecord[];
+    promotions: readonly DatabaseCatalogPromotionRecord[];
+    promotionVariantTargets: readonly CatalogPromotionVariantTargetRecord[];
+  }>;
+type RawVariant = Omit<
+  DatabaseCatalogVariantRecord,
+  "canonicalAmount" | "packageQuantity"
+> & {
+  canonicalAmount: string | number | null;
+  packageQuantity: string | number;
+};
 type RawPrice = Omit<CatalogPriceRecord, "amountMinor" | "effectiveAt" | "supersededAt"> & {
-  amountMinor: string | number;
+  variantId: string | null;
+  priceStatus: "pending" | "active" | "unavailable";
+  amountMinor: string | number | null;
   effectiveAt: Date | string;
   supersededAt: Date | string | null;
 };
 type RawLot = Omit<CatalogLotRecord, "manufacturedAt" | "expiresAt"> & {
+  variantId: string | null;
   manufacturedAt: Date | string | null;
   expiresAt: Date | string | null;
 };
@@ -32,7 +81,12 @@ type RawCoa = Omit<CatalogCoaRecord, "issuedAt"> & {
   issuedAt: Date | string | null;
 };
 type RawClaim = CatalogClaimRecord;
-type RawPromotion = Omit<CatalogPromotionRecord, "amountMinor" | "startsAt" | "endsAt"> & {
+type RawPromotion = Omit<DatabaseCatalogPromotionRecord, "amountMinor" | "startsAt" | "endsAt"> & {
+  campaignKey: string | null;
+  enabled: boolean;
+  timezone: string | null;
+  applicationMode: "automatic" | "code_required" | null;
+  scope: "sitewide" | "products" | "variants" | null;
   amountMinor: string | number | null;
   startsAt: Date | string | null;
   endsAt: Date | string | null;
@@ -50,6 +104,14 @@ function toOptionalIso(value: Date | string | null): string | null {
   return value === null ? null : toIso(value);
 }
 
+function toPromotionOptionalIso(value: Date | string | null): string | null {
+  if (value === null) return null;
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : value.toString();
+  }
+  return isStrictStorefrontPromotionInstant(value) ? toIso(value) : value;
+}
+
 function toSafeInteger(value: string | number): number {
   const numberValue = typeof value === "number" ? value : Number(value);
   if (!Number.isSafeInteger(numberValue)) {
@@ -58,9 +120,14 @@ function toSafeInteger(value: string | number): number {
   return numberValue;
 }
 
+function toPromotionIntegerOrInvalid(value: string | number): number {
+  const numberValue = typeof value === "number" ? value : Number(value);
+  return Number.isSafeInteger(numberValue) ? numberValue : Number.NaN;
+}
+
 export async function loadDatabaseCatalogRecords(
   database: CatalogQueryPort,
-): Promise<CatalogRecordSet> {
+): Promise<DatabaseCatalogRecordSet> {
   const products = await database.query<RawProduct>(`
     SELECT id::text AS "id", slug, name, package_form AS "packageForm",
            material_identity AS "materialIdentity",
@@ -68,8 +135,18 @@ export async function loadDatabaseCatalogRecords(
     FROM products
     ORDER BY created_at, id
   `);
+  const variants = await database.query<RawVariant>(`
+    SELECT id::text AS "id", product_id::text AS "productId", sku, label,
+           canonical_amount AS "canonicalAmount", amount_unit AS "amountUnit",
+           package_quantity AS "packageQuantity", status,
+           stripe_product_id AS "stripeProductId",
+           stripe_price_id AS "stripePriceId"
+    FROM product_variants
+    ORDER BY created_at, id
+  `);
   const prices = await database.query<RawPrice>(`
-    SELECT id::text AS "id", product_id::text AS "productId", version,
+    SELECT id::text AS "id", product_id::text AS "productId",
+           variant_id::text AS "variantId", version, price_status AS "priceStatus",
            amount_minor AS "amountMinor", currency,
            effective_at AS "effectiveAt", superseded_at AS "supersededAt"
     FROM product_prices
@@ -77,6 +154,7 @@ export async function loadDatabaseCatalogRecords(
   `);
   const lots = await database.query<RawLot>(`
     SELECT id::text AS "id", product_id::text AS "productId",
+           variant_id::text AS "variantId",
            supplier_name AS "supplierName", supplier_lot_code AS "supplierLotCode",
            available_quantity AS "availableQuantity", status,
            analytical_method AS "analyticalMethod",
@@ -98,7 +176,9 @@ export async function loadDatabaseCatalogRecords(
     ORDER BY created_at, id
   `);
   const promotions = await database.query<RawPromotion>(`
-    SELECT id::text AS "id", code, version, name, kind, status,
+    SELECT id::text AS "id", campaign_key AS "campaignKey", code, version,
+           name, kind, status, enabled, timezone,
+           application_mode AS "applicationMode", scope,
            amount_minor AS "amountMinor", basis_points AS "basisPoints", currency,
            starts_at AS "startsAt", ends_at AS "endsAt", configuration
     FROM promotions
@@ -110,13 +190,27 @@ export async function loadDatabaseCatalogRecords(
     FROM promotion_targets
     ORDER BY promotion_id, target_kind, COALESCE(product_id, policy_group_id)::text
   `);
+  const promotionVariantTargets = await database.query<CatalogPromotionVariantTargetRecord>(`
+    SELECT promotion_id::text AS "promotionId", variant_id::text AS "variantId"
+    FROM promotion_variant_targets
+    ORDER BY promotion_id, variant_id
+  `);
 
   return Object.freeze({
     source: "production",
     products: products.rows,
+    variants: variants.rows.map((variant) => ({
+      ...variant,
+      canonicalAmount:
+        variant.canonicalAmount === null
+          ? null
+          : Number(variant.canonicalAmount),
+      packageQuantity: toSafeInteger(variant.packageQuantity),
+    })),
     prices: prices.rows.map((price) => ({
       ...price,
-      amountMinor: toSafeInteger(price.amountMinor),
+      amountMinor:
+        price.amountMinor === null ? null : toSafeInteger(price.amountMinor),
       effectiveAt: toIso(price.effectiveAt),
       supersededAt: toOptionalIso(price.supersededAt),
     })),
@@ -135,10 +229,11 @@ export async function loadDatabaseCatalogRecords(
       amountMinor:
         promotion.amountMinor === null
           ? null
-          : toSafeInteger(promotion.amountMinor),
-      startsAt: toOptionalIso(promotion.startsAt),
-      endsAt: toOptionalIso(promotion.endsAt),
+          : toPromotionIntegerOrInvalid(promotion.amountMinor),
+      startsAt: toPromotionOptionalIso(promotion.startsAt),
+      endsAt: toPromotionOptionalIso(promotion.endsAt),
     })),
     promotionTargets: promotionTargets.rows,
+    promotionVariantTargets: promotionVariantTargets.rows,
   });
 }

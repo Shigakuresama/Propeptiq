@@ -1,9 +1,23 @@
 import type { PGlite } from "@electric-sql/pglite";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createMigratedPglite } from "./helpers/pglite";
+
+const migrationDirectory = resolve("src/db/migrations");
+
+async function applyMigration(client: PGlite, index: number): Promise<void> {
+  const prefix = `${String(index).padStart(4, "0")}_`;
+  const names = (await readdir(migrationDirectory)).filter(
+    (name) => name.startsWith(prefix) && name.endsWith(".sql"),
+  );
+  expect(names).toHaveLength(1);
+  const migration = await readFile(resolve(migrationDirectory, names[0]!), "utf8");
+  for (const statement of migration.split("--> statement-breakpoint")) {
+    if (statement.trim()) await client.exec(statement);
+  }
+}
 
 describe("Task 5 schema repair", () => {
   let client: PGlite | undefined;
@@ -61,6 +75,144 @@ describe("Task 5 schema repair", () => {
         VALUES ('00000000-0000-4000-8000-000000000112', '00000000-0000-4000-8000-000000000121', '00000000-0000-4000-8000-000000000131', 'Mismatched analytical record', true)
       `),
     ).rejects.toThrow();
+  });
+
+  it("backfills bound mode only from exact bindings and leaves other attempts ambiguous", async () => {
+    client = new (await import("@electric-sql/pglite")).PGlite();
+    for (let migration = 0; migration <= 27; migration += 1) {
+      await applyMigration(client, migration);
+    }
+    await client.exec(`
+      INSERT INTO users (id, clerk_id, email_verified_at)
+      VALUES ('69000000-0000-4000-8000-000000000001',
+              'task5-round2-existing-user', now());
+      INSERT INTO buyer_profiles
+        (user_id, status, age_confirmed_at, research_purpose)
+      VALUES ('69000000-0000-4000-8000-000000000001',
+              'active', now(), 'analytical');
+      INSERT INTO attestation_versions
+        (id, version, content_hash, policy_text, effective_at)
+      VALUES ('69000000-0000-4000-8000-000000000002', 1,
+              '${"9".repeat(64)}', 'Task 5 round 2 policy', now());
+      INSERT INTO attestation_acceptances
+        (id, user_id, attestation_version_id, accepted_at)
+      VALUES ('69000000-0000-4000-8000-000000000003',
+              '69000000-0000-4000-8000-000000000001',
+              '69000000-0000-4000-8000-000000000002', now());
+      INSERT INTO orders
+        (id, buyer_user_id, buyer_status_snapshot, attestation_acceptance_id,
+         destination_state_code, currency, subtotal_minor, discount_minor,
+         tax_minor, shipping_minor, total_minor, state)
+      VALUES ('69000000-0000-4000-8000-000000000004',
+              '69000000-0000-4000-8000-000000000001', 'active',
+              '69000000-0000-4000-8000-000000000003', 'CA', 'USD',
+              0, 0, 0, 0, 0, 'draft');
+      INSERT INTO checkout_attempts
+        (id, order_id, buyer_user_id, idempotency_key, request_hash, status,
+         account_gate, attestation_gate, product_gate, destination_gate,
+         inventory_gate, payment_provider_gate, permitted, review_required,
+         tax_ready, shipping_ready)
+      VALUES ('69000000-0000-4000-8000-000000000005',
+              '69000000-0000-4000-8000-000000000004',
+              '69000000-0000-4000-8000-000000000001',
+              'task5-round2-existing-attempt', '${"8".repeat(64)}', 'created',
+              'pass', 'pass', 'pass', 'pass', 'pass', 'pass', false, false,
+              false, false);
+    `);
+
+    await applyMigration(client, 28);
+
+    const attempt = await client.query<{
+      pricingRevision: string | null;
+      quoteSnapshot: unknown;
+    }>(`
+      SELECT canonical_pricing_revision AS "pricingRevision",
+             canonical_quote_snapshot AS "quoteSnapshot"
+      FROM checkout_attempts
+      WHERE id = '69000000-0000-4000-8000-000000000005'
+    `);
+    const bindings = await client.query<{ count: number }>(
+      `SELECT count(*)::int AS count FROM checkout_attempt_review_bindings`,
+    );
+    expect(attempt.rows).toEqual([{ pricingRevision: null, quoteSnapshot: null }]);
+    expect(bindings.rows).toEqual([{ count: 0 }]);
+
+    await client.exec(`
+      INSERT INTO orders
+        (id, buyer_user_id, buyer_status_snapshot, attestation_acceptance_id,
+         destination_state_code, currency, subtotal_minor, discount_minor,
+         tax_minor, shipping_minor, total_minor, state)
+      VALUES ('69000000-0000-4000-8000-000000000006',
+              '69000000-0000-4000-8000-000000000001', 'review',
+              '69000000-0000-4000-8000-000000000003', 'CA', 'USD',
+              0, 0, 0, 0, 0, 'checkout_pending');
+      INSERT INTO checkout_attempts
+        (id, order_id, buyer_user_id, idempotency_key, request_hash, status,
+         account_gate, attestation_gate, product_gate, destination_gate,
+         inventory_gate, payment_provider_gate, permitted, review_required,
+         tax_ready, shipping_ready)
+      VALUES ('69000000-0000-4000-8000-000000000007',
+              '69000000-0000-4000-8000-000000000006',
+              '69000000-0000-4000-8000-000000000001',
+              'task5-round3-bound-attempt', '${"6".repeat(64)}', 'created',
+              'pass', 'pass', 'pass', 'pass', 'pass', 'pass', false, true,
+              false, false);
+      INSERT INTO review_requests
+        (id, user_id, order_id, snapshot_hash, buyer_status_snapshot,
+         attestation_version_id, destination_state_code, cart_snapshot,
+         buyer_review_required, destination_review_required, outcome,
+         decided_by_user_id, decided_at, covers_buyer_review)
+      VALUES ('69000000-0000-4000-8000-000000000008',
+              '69000000-0000-4000-8000-000000000001',
+              '69000000-0000-4000-8000-000000000006', '${"7".repeat(64)}',
+              'review', '69000000-0000-4000-8000-000000000002', 'CA',
+              '{"schemaVersion":1,"items":[],"promotionIds":[]}'::jsonb,
+              true, false, 'approved',
+              '69000000-0000-4000-8000-000000000001', now(), true);
+      INSERT INTO checkout_attempt_review_bindings
+        (checkout_attempt_id, order_id, review_request_id,
+         review_snapshot_hash, bound_at)
+      VALUES ('69000000-0000-4000-8000-000000000007',
+              '69000000-0000-4000-8000-000000000006',
+              '69000000-0000-4000-8000-000000000008', '${"7".repeat(64)}',
+              now());
+    `);
+
+    await applyMigration(client, 29);
+
+    const modes = await client.query<{
+      id: string;
+      reviewAuthorizationMode: string | null;
+    }>(`
+      SELECT id::text AS id,
+             review_authorization_mode AS "reviewAuthorizationMode"
+      FROM checkout_attempts
+      WHERE id IN ('69000000-0000-4000-8000-000000000005',
+                   '69000000-0000-4000-8000-000000000007')
+      ORDER BY id
+    `);
+    expect(modes.rows).toEqual([
+      {
+        id: "69000000-0000-4000-8000-000000000005",
+        reviewAuthorizationMode: null,
+      },
+      {
+        id: "69000000-0000-4000-8000-000000000007",
+        reviewAuthorizationMode: "bound",
+      },
+    ]);
+    await expect(client.query(`
+      UPDATE checkout_attempts SET review_authorization_mode = 'none'
+      WHERE id = '69000000-0000-4000-8000-000000000007'
+    `)).rejects.toThrow(/review authorization mode is immutable/iu);
+    await client.query(`
+      UPDATE checkout_attempts SET review_authorization_mode = 'none'
+      WHERE id = '69000000-0000-4000-8000-000000000005'
+    `);
+    await expect(client.query(`
+      UPDATE checkout_attempts SET review_authorization_mode = 'bound'
+      WHERE id = '69000000-0000-4000-8000-000000000005'
+    `)).rejects.toThrow(/review authorization mode is immutable/iu);
   });
 
   it("fails a populated-v0 upgrade with an operator-facing reconciliation boundary and no partial mutation", async () => {

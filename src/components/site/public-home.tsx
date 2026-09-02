@@ -2,7 +2,8 @@ import { ArrowRight, Coins, FileCheck2, FlaskConical, LibraryBig, Share2 } from 
 import type { Route } from "next";
 import Link from "next/link";
 
-import type { BrowseCatalogProduct } from "@/catalog/browse-catalog";
+import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
 import {
   DataLabel,
@@ -11,13 +12,21 @@ import {
   SectionShell,
 } from "@/components/design-system/archive-primitives";
 import { ProgramStrip } from "@/components/growth/program-strip";
+import { FaqSection } from "@/components/site/faq-section";
+import { NewsletterForm } from "@/components/site/newsletter-form";
 import { ProofRail } from "@/components/site/proof-rail";
 import { ScienceField } from "@/components/site/science-field";
 import { SectionHeading } from "@/components/site/section-heading";
+import { WhyChoosePropeptIQ } from "@/components/site/why-choose-propeptiq";
 import { Button } from "@/components/ui/button";
+import type { ApprovedHomepageContent } from "@/content/storefront-content";
 import type { LoyaltyPolicy } from "@/domain/rewards";
 import type { ReferralPolicy } from "@/domain/referrals";
-import { researchRestrictions } from "@/lib/site-content";
+import {
+  newsletterConfiguration,
+  researchRestrictions,
+  type ApprovedNewsletterPrivacyHref,
+} from "@/lib/site-content";
 
 const documentationStages = [
   {
@@ -42,19 +51,31 @@ const documentationStages = [
   },
 ] as const;
 
+const emptyHomepageContent: ApprovedHomepageContent = Object.freeze({
+  whyChoose: Object.freeze([]),
+  faqs: Object.freeze([]),
+});
+
 export function PublicHome({
+  homepageContent = emptyHomepageContent,
+  newsletterPrivacyHref = newsletterConfiguration.privacyHref,
   loyaltyPolicy = null,
   referralPolicy = null,
   syntheticLocal = false,
   products,
   variantCount,
+  pricing,
 }: {
+  homepageContent?: ApprovedHomepageContent | undefined;
+  newsletterPrivacyHref?: ApprovedNewsletterPrivacyHref | null | undefined;
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
   syntheticLocal?: boolean;
-  products: readonly BrowseCatalogProduct[];
+  products: readonly PublicStorefrontProduct[];
   variantCount: number;
+  pricing: PublicStorefrontPricingContext;
 }) {
+  const allBrowseOnly = products.every((product) => product.kind === "browse_only");
   const growthPrograms = [
     ...(loyaltyPolicy?.status === "active" ? [{
       title: "Earn points",
@@ -98,8 +119,9 @@ export function PublicHome({
               <span className="block">greater clarity.</span>
             </h1>
             <p className="mt-7 max-w-[62ch] text-pretty text-lg leading-8 text-muted-ink sm:text-xl">
-              Explore the owner-supplied product catalog and package configurations.
-              Purchasing and operational availability remain separate from this browse-only collection.
+              {allBrowseOnly
+                ? "Explore the owner-supplied product catalog and package configurations. Purchasing and operational availability remain separate from this browse-only collection."
+                : "Explore the owner-supplied product catalog and package configurations. Current price and availability snapshots are displayed where configured and revalidated before checkout."}
             </p>
             <div className="mt-9 flex flex-wrap gap-3">
               <Button asChild className="action-primary">
@@ -120,7 +142,7 @@ export function PublicHome({
               <div className="flex items-start justify-between gap-4 p-6 sm:p-8">
                 <DataLabel>Current catalog</DataLabel>
                 <p className="rounded-full border border-border bg-surface-record px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] text-accent-readable">
-                  Browse-only
+                  {allBrowseOnly ? "Browse-only" : "Current snapshot"}
                 </p>
               </div>
               <div className="border-t border-border bg-surface-record p-6 sm:p-8">
@@ -137,8 +159,9 @@ export function PublicHome({
                   />
                 </div>
                 <p className="mt-6 max-w-[38ch] border-t border-border pt-5 text-base leading-7 text-muted-ink">
-                  Product families spanning {variantCount} supplied package configurations.
-                  Prices are intentionally excluded.
+                  Product families spanning {variantCount} supplied package configurations. {allBrowseOnly
+                    ? "Prices are intentionally excluded."
+                    : "Current price and availability snapshots are displayed where configured and revalidated before checkout."}
                 </p>
               </div>
             </div>
@@ -171,41 +194,39 @@ export function PublicHome({
         </SectionShell>
       </section>
 
-      {products.length > 0 ? (
-        <section aria-labelledby="home-highlights-heading" className="py-12 sm:py-16 lg:py-24 xl:py-28">
-          <SectionShell>
-            <div className="grid gap-7 lg:grid-cols-[minmax(0,8fr)_minmax(14rem,4fr)] lg:items-end">
-              <SectionHeading
-                description="A closer view of three product families from the current owner-supplied publication."
-                eyebrow="Catalog highlights"
-                id="home-highlights-heading"
-                title="Selected entries, given room to be read."
-              />
-              <div className="flex items-center gap-3 lg:justify-end">
-                <LibraryBig aria-hidden="true" className="size-5 text-moss" />
-                <Link className="record-link inline-flex min-h-11 items-center" href="/catalog">
-                  View the full catalog
-                </Link>
-              </div>
+      <section aria-labelledby="home-highlights-heading" className="py-12 sm:py-16 lg:py-24 xl:py-28">
+        <SectionShell>
+          <div className="grid gap-7 lg:grid-cols-[minmax(0,8fr)_minmax(14rem,4fr)] lg:items-end">
+            <SectionHeading
+              description="A closer view of entries from the current owner-supplied publication."
+              eyebrow="Catalog highlights"
+              id="home-highlights-heading"
+              title="Selected entries, given room to be read."
+            />
+            <div className="flex items-center gap-3 lg:justify-end">
+              <LibraryBig aria-hidden="true" className="size-5 text-moss" />
+              <Link className="record-link inline-flex min-h-11 items-center" href="/catalog">
+                View the full catalog
+              </Link>
             </div>
-            <ul
-              aria-label="Catalog highlights"
-              className="mt-10 grid list-none gap-6 p-0 md:grid-cols-2 xl:grid-cols-12"
-            >
-              {products.slice(0, 3).map((product, index) => (
-                <li
-                  className={index === 0
-                    ? "md:col-span-2 xl:col-span-6 [&_.catalog-image-frame]:aspect-[16/10] sm:[&_.catalog-image-frame]:aspect-[4/3]"
-                    : "xl:col-span-3 [&_.catalog-image-frame]:hidden [&_.record-panel-recessed]:hidden sm:[&_.catalog-image-frame]:block sm:[&_.record-panel-recessed]:block"}
-                  key={product.slug}
-                >
-                  <CatalogListingCard product={product} priority={index === 0} />
-                </li>
-              ))}
-            </ul>
-          </SectionShell>
-        </section>
-      ) : null}
+          </div>
+          <ul
+            aria-label="Catalog highlights"
+            className="mt-10 grid list-none gap-6 p-0 md:grid-cols-2 xl:grid-cols-12"
+          >
+            {products.slice(0, 3).map((product, index) => (
+              <li
+                className={index === 0
+                  ? "md:col-span-2 xl:col-span-6 [&_.catalog-image-frame]:aspect-[16/10] sm:[&_.catalog-image-frame]:aspect-[4/3]"
+                  : "xl:col-span-3 [&_.catalog-image-frame]:hidden [&_.record-panel-recessed]:hidden sm:[&_.catalog-image-frame]:block sm:[&_.record-panel-recessed]:block"}
+                key={product.slug}
+              >
+                <CatalogListingCard product={product} priority={index === 0} pricing={pricing} />
+              </li>
+            ))}
+          </ul>
+        </SectionShell>
+      </section>
 
       {growthPrograms.length > 0 ? (
         <section
@@ -238,6 +259,10 @@ export function PublicHome({
           </SectionShell>
         </section>
       ) : null}
+
+      <WhyChoosePropeptIQ items={homepageContent.whyChoose} />
+      <FaqSection entries={homepageContent.faqs} />
+      <NewsletterForm privacyHref={newsletterPrivacyHref} />
 
       <section
         aria-labelledby="quality-callout-heading"
@@ -328,11 +353,7 @@ export function PublicHome({
               Review every currently published product family and supplied package configuration.
             </p>
           </div>
-          <Button
-            asChild
-            className="action-inverse"
-            variant="outline"
-          >
+          <Button asChild className="action-inverse" variant="outline">
             <Link href="/catalog">
               Explore the catalog
               <ArrowRight aria-hidden="true" />

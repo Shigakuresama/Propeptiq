@@ -8,6 +8,11 @@
   --canvas: #f4f1e8;
   --ink: #171915;
   --moss: #66715b;
+  /* Small uppercase text (.eyebrow, 12px) sits on the --moss-soft tint band,
+     where --moss measures 4.399:1 and fails WCAG AA. This 3%-darker moss
+     measures 4.598:1 on the tint and 4.765:1 on the canvas. --moss itself is
+     unchanged: design-system/MASTER.md names it as the accent colour. */
+  --moss-ink: #636e58;
   --rule: #c9c5b8;
   --warning: #9a6700;
   --danger: #a33a31;
@@ -18,6 +23,8 @@
   --surface-inverse: #171915;
   --accent-readable: #56604d;
   --rule-strong: #aaa598;
+  --promotion: #075985;
+  --promotion-foreground: #ffffff;
   --muted-ink: rgba(23, 25, 21, 0.72);
   --unknown: rgba(23, 25, 21, 0.62);
   --moss-soft: rgba(102, 113, 91, 0.12);
@@ -53,6 +60,7 @@
   --motion-duration-signal: 680ms;
   --motion-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
   --motion-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --site-search-reserved-height: 4.5rem;
 }
 
 @theme inline {
@@ -74,6 +82,8 @@
   --color-moss-soft: var(--moss-soft);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-promotion: var(--promotion);
+  --color-promotion-foreground: var(--promotion-foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -368,7 +378,7 @@ footer a,
 
 .site-page-intro__field {
   left: auto;
-  width: min(48rem, 64vw);
+  width: min(48rem, 64%);
   opacity: 0.34;
   mask-image: linear-gradient(to left, #000 16%, rgba(0, 0, 0, 0.72) 52%, transparent 94%);
 }
@@ -1280,6 +1290,74 @@ footer a {
   pointer-events: none;
 }
 
+.public-layout {
+  min-width: 0;
+}
+
+.public-layout > footer {
+  padding-bottom: calc(var(--site-search-reserved-height) + env(safe-area-inset-bottom, 0px));
+}
+
+.public-layout > footer nav a {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.site-search-launcher-lane {
+  position: fixed;
+  left: 50%;
+  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  z-index: 30;
+  display: flex;
+  width: min(24rem, calc(100vw - 1rem));
+  max-width: calc(100vw - 1rem);
+  justify-content: center;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.site-search-launcher-lane > [data-slot="sheet-trigger"] {
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 100%;
+  pointer-events: auto;
+}
+
+.site-search-sheet[data-side="bottom"] {
+  inset-inline: 0;
+  bottom: 0;
+  width: min(36rem, calc(100vw - 2rem));
+  max-width: calc(100vw - 2rem);
+  height: min(42rem, calc(100dvh - 2rem));
+  max-height: min(42rem, calc(100dvh - 2rem));
+  margin-inline: auto;
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-bottom: 0;
+  border-radius: 0.875rem 0.875rem 0 0;
+}
+
+.site-search-sheet[data-side="bottom"] > .site-search-results {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.public-layout main section[data-scroll-reveal-state] {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 280ms ease-out, transform 280ms ease-out;
+}
+
+.public-layout main section[data-scroll-reveal-state="pending"] {
+  opacity: 0;
+  transform: translateY(0.625rem);
+  transition: none;
+}
+
 @media (min-width: 48rem) {
   .site-container {
     padding-inline: 1.5rem;
@@ -1301,6 +1379,21 @@ footer a {
 }
 
 @media (max-width: 47.999rem) {
+  .site-search-sheet[data-side="bottom"] {
+    inset-inline: 0;
+    bottom: 0;
+    width: 100%;
+    max-width: 100%;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin-inline: 0;
+    overscroll-behavior: contain;
+    border-inline: 0;
+    border-bottom: 0;
+    border-radius: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
   main .text-sm,
   main .text-xs,
   footer p.text-sm {
@@ -1325,6 +1418,71 @@ footer a {
 
   .catalog-listing-card:hover img {
     transform: none;
+  }
+}
+
+@media (max-width: 22rem) {
+  .public-layout .persistent-chrome .site-container {
+    gap: 0.25rem;
+  }
+
+  .public-layout .persistent-chrome .site-container > a[href="/cart"] > .cart-count {
+    display: none;
+  }
+}
+
+@media (max-width: 17rem) {
+  .public-layout .persistent-chrome .site-container {
+    gap: 0.125rem;
+    padding-inline: 0.375rem;
+  }
+
+  .public-layout .persistent-chrome .site-container > a:first-child > span:last-child {
+    display: none;
+  }
+
+  .public-layout .persistent-chrome .site-container > a[href="/cart"],
+  .public-layout .persistent-chrome .site-container > a[href^="/sign-in"] {
+    min-width: 44px;
+    justify-content: center;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .public-layout .persistent-chrome .site-container > a[href^="/sign-in"] > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .public-layout .catalog-listing-card {
+    padding: 0;
+  }
+
+  .public-layout .catalog-grid > li {
+    min-width: 0;
+  }
+
+  .public-layout .catalog-listing-card h2 {
+    overflow-wrap: anywhere;
+  }
+
+  .public-layout > footer .site-container > * {
+    min-width: 0;
+  }
+
+  .public-layout > footer .site-container a[href="/"][aria-label$=" home"] {
+    width: 100%;
+    max-width: 12rem;
+  }
+
+  .public-layout > footer .site-container a[href="/"][aria-label$=" home"] > span {
+    width: 100%;
+    max-width: 100%;
   }
 }
 
@@ -1512,6 +1670,12 @@ footer a {
     transition-duration: 0s !important;
     animation-duration: 0s !important;
     animation-delay: 0s !important;
+  }
+
+  .public-layout main section[data-scroll-reveal-state] {
+    opacity: 1 !important;
+    transform: none !important;
+    transition-duration: 0s !important;
   }
 
   .catalog-listing-card:hover {

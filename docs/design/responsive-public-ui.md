@@ -23,6 +23,8 @@ A future `/research-use` route may only redirect to `/research-use-policy`. Acco
 
 The growth routes are `/rewards` (public points/referral explanation with a truthful inactive state), `/partners` (public affiliate overview and application entry), `/account/rewards` (authenticated owner-only points and immutable ledger), `/account/referrals` (active buyer referral code, conversions, rewards, and shared research sets), `/account/partner` (verified owner application or approved dashboard), `/research-sets` (active-buyer neutral set builder), `/sets/[code]` (public read-only server-resolved set), `/rewards/terms`, and `/partners/terms`. Partner Program stays in the account menu and footer.
 
+The growth routes are `/rewards` (public points/referral explanation with a truthful inactive state), `/partners` (public affiliate overview and application entry), `/account/rewards` (authenticated owner-only points and immutable ledger), `/account/referrals` (active buyer referral code, conversions, rewards, and shared research sets), `/account/partner` (verified owner application or approved dashboard), `/research-sets` (active-buyer neutral set builder), `/sets/[code]` (public read-only server-resolved set), `/rewards/terms`, and `/partners/terms`. Partner Program stays in the account menu and footer.
+
 ## State ownership
 
 - **Loading:** structural skeletons contain no invented product-like facts.

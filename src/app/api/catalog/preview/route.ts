@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { getRequestIdentity } from "@/auth/server";
 import { buildCartPreview } from "@/cart/preview";
-import { getPublicCatalog } from "@/catalog/server";
+import { isSyntheticLocalCommerceEnvironmentConfigured } from "@/config/commerce-capability";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +30,15 @@ export async function POST(request: Request) {
     typeof previousValue === "string" && /^[a-f0-9]{64}$/.test(previousValue)
       ? previousValue
       : null;
-  const catalog = await getPublicCatalog();
-  const preview = buildCartPreview(items, catalog, previousPreviewToken);
+  const requestIdentity = await getRequestIdentity();
+  const localTestSource =
+    requestIdentity.localDriver !== null &&
+    isSyntheticLocalCommerceEnvironmentConfigured(requestIdentity.environment)
+      ? requestIdentity.localDriver.commerce.cartPreviewSource()
+      : { variants: [] };
+  // Production and Preview remain browse-only until canonical database variant
+  // facts are approved; only the exact local/test guard exposes its fixture.
+  const preview = buildCartPreview(items, localTestSource, previousPreviewToken);
 
   return NextResponse.json(preview, {
     headers: { "Cache-Control": "no-store" },

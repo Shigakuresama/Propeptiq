@@ -91,6 +91,7 @@ type AttemptRow = Readonly<{
   providerRequestSchemaVersion: number | string | null;
   providerLivemode: boolean | null;
   providerScope: string | null;
+  reviewAuthorizationMode: string | null;
 }>;
 
 type PaymentRow = Readonly<{
@@ -162,6 +163,7 @@ type ItemRow = Readonly<{
   id: string;
   orderId: string;
   productId: string;
+  variantId: string | null;
   quantity: number | string;
   productStatus: string;
   policyGroupId: string;
@@ -195,6 +197,7 @@ type ReservationRow = Readonly<{
   orderId: string;
   orderItemId: string;
   productId: string;
+  variantId: string | null;
   lotId: string;
   quantityReserved: number | string;
   quantityRemaining: number | string;
@@ -204,10 +207,25 @@ type ReservationRow = Readonly<{
 type LotRow = Readonly<{
   id: string;
   productId: string;
+  variantId: string | null;
   availableQuantity: number | string;
   status: string;
   expiresAt: Date | string | null;
 }>;
+
+type AttemptReviewBinding = Readonly<{
+  checkoutAttemptId: string;
+  orderId: string;
+  reviewRequestId: string;
+  reviewSnapshotHash: string;
+  cartSnapshot: unknown;
+}>;
+
+type ReviewBindingRead = Readonly<
+  | { status: "none" }
+  | { status: "invalid" }
+  | { status: "bound"; value: AttemptReviewBinding }
+>;
 
 type LockedCatalog = Readonly<{
   items: readonly ItemRow[];
@@ -219,8 +237,10 @@ type LockedCatalog = Readonly<{
 type Discovery = Readonly<{
   order: OrderRow;
   attemptId: string | null;
+  reviewBinding: AttemptReviewBinding | null;
   reviewInput: ReviewSnapshotHashInput | null;
   reviewNeeded: boolean;
+  reviewAuthorizationMode: string | null;
 }>;
 
 type ExactPayment = Readonly<{
@@ -246,6 +266,7 @@ type LockedFacts = Readonly<{
   lots: readonly LotRow[];
   review: ExactReviewDecision | null;
   finalReviewHashMatches: boolean;
+  reviewAuthorizationValid: boolean;
 }>;
 
 const fiveMinutesMs = 5 * 60 * 1000;
@@ -266,6 +287,12 @@ function iso(value: Date | string): string | null {
 
 function providerKind(value: unknown): value is ProviderKind {
   return value === "stripe" || value === "local_test";
+}
+
+function reviewAuthorizationMode(
+  value: unknown,
+): "bound" | "none" | null {
+  return value === "bound" || value === "none" ? value : null;
 }
 
 function boundedText(value: unknown, maximum = 200): value is string {
@@ -328,6 +355,85 @@ async function readAttemptDiscovery(
     : null;
 }
 
+async function readAttemptReviewAuthorizationMode(
+  client: FulfillmentSqlClient,
+  attemptId: string | null,
+): Promise<string | null> {
+  if (attemptId === null) return null;
+  const result = await client.query<{ mode: string | null }>(
+    `SELECT review_authorization_mode AS mode
+     FROM checkout_attempts WHERE id = $1::uuid`,
+    [attemptId],
+  );
+  return result.rows.length === 1 ? result.rows[0]!.mode : null;
+}
+
+async function readAttemptReviewBinding(
+  client: FulfillmentSqlClient,
+  attemptId: string | null,
+  expectedOrderId: string,
+  lock: boolean,
+): Promise<ReviewBindingRead> {
+  if (attemptId === null) return Object.freeze({ status: "none" });
+  const bindings = await client.query<{
+    checkoutAttemptId: string;
+    orderId: string;
+    reviewRequestId: string;
+    reviewSnapshotHash: string;
+  }>(
+    `SELECT checkout_attempt_id::text AS "checkoutAttemptId",
+            order_id::text AS "orderId",
+            review_request_id::text AS "reviewRequestId",
+            review_snapshot_hash AS "reviewSnapshotHash"
+     FROM checkout_attempt_review_bindings
+     WHERE checkout_attempt_id = $1::uuid${lock ? " FOR UPDATE" : ""}`,
+    [attemptId],
+  );
+  if (bindings.rows.length === 0) return Object.freeze({ status: "none" });
+  if (bindings.rows.length !== 1) return Object.freeze({ status: "invalid" });
+  const binding = bindings.rows[0]!;
+  if (
+    binding.checkoutAttemptId !== attemptId ||
+    binding.orderId !== expectedOrderId ||
+    !isCanonicalUuid(binding.checkoutAttemptId) ||
+    !isCanonicalUuid(binding.orderId) ||
+    !isCanonicalUuid(binding.reviewRequestId) ||
+    !isSha256(binding.reviewSnapshotHash)
+  ) {
+    return Object.freeze({ status: "invalid" });
+  }
+  const reviews = await client.query<{
+    reviewRequestId: string;
+    orderId: string;
+    snapshotHash: string;
+    cartSnapshot: unknown;
+  }>(
+    `SELECT id::text AS "reviewRequestId", order_id::text AS "orderId",
+            snapshot_hash AS "snapshotHash", cart_snapshot AS "cartSnapshot"
+     FROM review_requests
+     WHERE id = $1::uuid AND order_id = $2::uuid AND snapshot_hash = $3${
+       lock ? " FOR UPDATE" : ""
+     }`,
+    [binding.reviewRequestId, binding.orderId, binding.reviewSnapshotHash],
+  );
+  if (reviews.rows.length !== 1) return Object.freeze({ status: "invalid" });
+  const review = reviews.rows[0]!;
+  if (
+    review.reviewRequestId !== binding.reviewRequestId ||
+    review.orderId !== binding.orderId ||
+    review.snapshotHash !== binding.reviewSnapshotHash
+  ) {
+    return Object.freeze({ status: "invalid" });
+  }
+  return Object.freeze({
+    status: "bound" as const,
+    value: Object.freeze({
+      ...binding,
+      cartSnapshot: review.cartSnapshot,
+    }),
+  });
+}
+
 async function readCatalog(
   client: FulfillmentSqlClient,
   orderId: string,
@@ -373,7 +479,8 @@ async function readCatalog(
   }
   const itemRows = await client.query<ItemRow>(
     `SELECT oi.id::text AS id, oi.order_id::text AS "orderId",
-            oi.product_id::text AS "productId", oi.quantity,
+            oi.product_id::text AS "productId",
+            oi.variant_id::text AS "variantId", oi.quantity,
             p.status AS "productStatus",
             p.policy_group_id::text AS "policyGroupId",
             pg.active AS "policyGroupActive"
@@ -458,20 +565,173 @@ function destinationForItem(
   });
 }
 
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function canonicalReviewCart(
+  value: unknown,
+  catalogItems: readonly ItemRow[],
+): Readonly<{
+  items: readonly Readonly<{ variantId: string; quantity: number }>[];
+  automaticPromotions: readonly Readonly<{ id: string; version: number }>[];
+}> | null {
+  const cartKeys = new Set([
+    "schemaVersion",
+    "kind",
+    "items",
+    "automaticPromotions",
+  ]);
+  if (
+    !plainRecord(value) ||
+    value.schemaVersion !== 2 ||
+    value.kind !== "canonical_variant" ||
+    !Array.isArray(value.items) ||
+    !Array.isArray(value.automaticPromotions) ||
+    Reflect.ownKeys(value).length !== cartKeys.size ||
+    Reflect.ownKeys(value).some(
+      (key) => typeof key !== "string" || !cartKeys.has(key),
+    )
+  ) {
+    return null;
+  }
+  const expected = new Map(
+    catalogItems.map((item) => [item.variantId, safeInteger(item.quantity)]),
+  );
+  if (
+    expected.size !== catalogItems.length ||
+    [...expected].some(
+      ([variantId, quantity]) =>
+        variantId === null || quantity === null || quantity <= 0,
+    )
+  ) {
+    return null;
+  }
+  const seenItems = new Set<string>();
+  const items: Array<Readonly<{ variantId: string; quantity: number }>> = [];
+  for (const item of value.items) {
+    if (
+      !plainRecord(item) ||
+      Reflect.ownKeys(item).length !== 2 ||
+      !Object.hasOwn(item, "variantId") ||
+      !Object.hasOwn(item, "quantity") ||
+      !isCanonicalUuid(item.variantId) ||
+      !Number.isSafeInteger(item.quantity) ||
+      (item.quantity as number) <= 0 ||
+      seenItems.has(item.variantId) ||
+      expected.get(item.variantId) !== item.quantity
+    ) {
+      return null;
+    }
+    seenItems.add(item.variantId);
+    items.push(Object.freeze({
+      variantId: item.variantId,
+      quantity: item.quantity as number,
+    }));
+  }
+  if (seenItems.size !== expected.size) {
+    return null;
+  }
+  const seenPromotions = new Set<string>();
+  const automaticPromotions: Array<Readonly<{ id: string; version: number }>> = [];
+  for (const promotion of value.automaticPromotions) {
+    if (
+      !plainRecord(promotion) ||
+      Reflect.ownKeys(promotion).length !== 2 ||
+      !Object.hasOwn(promotion, "id") ||
+      !Object.hasOwn(promotion, "version") ||
+      !boundedText(promotion.id) ||
+      !Number.isSafeInteger(promotion.version) ||
+      (promotion.version as number) <= 0 ||
+      seenPromotions.has(promotion.id)
+    ) {
+      return null;
+    }
+    seenPromotions.add(promotion.id);
+    automaticPromotions.push(Object.freeze({
+      id: promotion.id,
+      version: promotion.version as number,
+    }));
+  }
+  return Object.freeze({
+    items: Object.freeze(items),
+    automaticPromotions: Object.freeze(automaticPromotions),
+  });
+}
+
+function legacyReviewCart(
+  value: unknown,
+  catalogItems: readonly ItemRow[],
+  promotionIds: readonly string[],
+): Readonly<{
+  items: readonly Readonly<{ productId: string; quantity: number }>[];
+  promotionIds: readonly string[];
+}> | null {
+  const keys = new Set(["schemaVersion", "items", "promotionIds"]);
+  if (
+    !plainRecord(value) ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.items) ||
+    !Array.isArray(value.promotionIds) ||
+    Reflect.ownKeys(value).length !== keys.size ||
+    Reflect.ownKeys(value).some(
+      (key) => typeof key !== "string" || !keys.has(key),
+    )
+  ) return null;
+  const expected = new Map(
+    catalogItems.map((item) => [item.productId, safeInteger(item.quantity)]),
+  );
+  if (
+    expected.size !== catalogItems.length ||
+    [...expected.values()].some(
+      (quantity) => quantity === null || quantity <= 0,
+    )
+  ) return null;
+  const seen = new Set<string>();
+  const items: Array<Readonly<{ productId: string; quantity: number }>> = [];
+  for (const item of value.items) {
+    if (
+      !plainRecord(item) ||
+      Reflect.ownKeys(item).length !== 2 ||
+      !Object.hasOwn(item, "productId") ||
+      !Object.hasOwn(item, "quantity") ||
+      !isCanonicalUuid(item.productId) ||
+      !Number.isSafeInteger(item.quantity) ||
+      (item.quantity as number) <= 0 ||
+      seen.has(item.productId) ||
+      expected.get(item.productId) !== item.quantity
+    ) return null;
+    seen.add(item.productId);
+    items.push(Object.freeze({
+      productId: item.productId,
+      quantity: item.quantity as number,
+    }));
+  }
+  if (
+    seen.size !== expected.size ||
+    value.promotionIds.some((id) => !isCanonicalUuid(id)) ||
+    new Set(value.promotionIds).size !== value.promotionIds.length ||
+    canonicalJson([...value.promotionIds].toSorted()) !==
+      canonicalJson([...promotionIds].toSorted())
+  ) return null;
+  return Object.freeze({
+    items: Object.freeze(items),
+    promotionIds: Object.freeze([...value.promotionIds]),
+  });
+}
+
 function makeReviewInput(
   order: OrderRow,
   buyerStatus: BuyerStatus,
   historicalVersionId: string,
   catalog: LockedCatalog,
+  binding: AttemptReviewBinding,
 ): ReviewSnapshotHashInput | null {
   if (catalog.items.length === 0 || catalog.address === null) return null;
-  const items = catalog.items.map((item) => {
-    const quantity = safeInteger(item.quantity);
-    return quantity === null || quantity <= 0
-      ? null
-      : Object.freeze({ productId: item.productId, quantity });
-  });
-  if (items.some((item) => item === null)) return null;
   const reviewPolicies = catalog.items
     .map((item) =>
       destinationForItem(item, order.destinationStateCode, catalog.policies),
@@ -484,16 +744,12 @@ function makeReviewInput(
       id: resolution.ruleId!,
       version: resolution.ruleVersion!,
     }));
-  return Object.freeze({
+  const shared = {
     orderId: order.id,
     buyerUserId: order.buyerUserId,
     buyerStatus,
     acceptedAttestationVersionId: historicalVersionId,
     currentAttestationVersionId: historicalVersionId,
-    items: Object.freeze(
-      items as readonly Readonly<{ productId: string; quantity: number }>[],
-    ),
-    promotionIds: catalog.promotionIds,
     destination: Object.freeze({
       recipientName: catalog.address.recipientName,
       line1: catalog.address.addressLine1,
@@ -504,6 +760,30 @@ function makeReviewInput(
       countryCode: catalog.address.country as "US",
     }),
     reviewPolicies: Object.freeze(reviewPolicies),
+  } as const;
+  const variantCount = catalog.items.filter(
+    (item) => item.variantId !== null,
+  ).length;
+  if (variantCount === 0) {
+    const snapshot = legacyReviewCart(
+      binding.cartSnapshot,
+      catalog.items,
+      catalog.promotionIds,
+    );
+    if (snapshot === null) return null;
+    return Object.freeze({
+      ...shared,
+      items: snapshot.items,
+      promotionIds: snapshot.promotionIds,
+    });
+  }
+  if (variantCount !== catalog.items.length) return null;
+  const snapshot = canonicalReviewCart(binding.cartSnapshot, catalog.items);
+  if (snapshot === null) return null;
+  return Object.freeze({
+    ...shared,
+    items: snapshot.items,
+    automaticPromotions: snapshot.automaticPromotions,
   });
 }
 
@@ -535,20 +815,49 @@ async function preflight(
     now,
     false,
   );
-  const reviewInput = makeReviewInput(
-    order,
-    profile.rows[0]!.status,
-    historical.rows[0]!.attestationVersionId,
-    catalog,
+  const attemptId = await readAttemptDiscovery(client, order.id);
+  const authorizationMode = await readAttemptReviewAuthorizationMode(
+    client,
+    attemptId,
   );
-  const reviewNeeded =
+  const bindingRead = await readAttemptReviewBinding(
+    client,
+    attemptId,
+    order.id,
+    false,
+  );
+  if (bindingRead.status === "invalid") return null;
+  const reviewBinding = bindingRead.status === "bound"
+    ? bindingRead.value
+    : null;
+  const reviewInput = reviewBinding === null
+    ? null
+    : makeReviewInput(
+        order,
+        profile.rows[0]!.status,
+        historical.rows[0]!.attestationVersionId,
+        catalog,
+        reviewBinding,
+      );
+  const currentReviewNeeded =
     profile.rows[0]!.status === "review" ||
-    (reviewInput?.reviewPolicies.length ?? 0) > 0;
+    catalog.items.some(
+      (item) =>
+        destinationForItem(
+          item,
+          order.destinationStateCode,
+          catalog.policies,
+        ).status === "review",
+    );
   return Object.freeze({
     order,
-    attemptId: await readAttemptDiscovery(client, order.id),
+    attemptId,
+    reviewBinding,
     reviewInput,
-    reviewNeeded,
+    reviewNeeded:
+      order.state !== "fulfilled" &&
+      (authorizationMode === "bound" || currentReviewNeeded),
+    reviewAuthorizationMode: authorizationMode,
   });
 }
 
@@ -632,7 +941,8 @@ async function lockAttempt(
             provider_request_hash AS "providerRequestHash",
             provider_request_schema_version AS "providerRequestSchemaVersion",
             provider_livemode AS "providerLivemode",
-            provider_scope AS "providerScope"
+            provider_scope AS "providerScope",
+            review_authorization_mode AS "reviewAuthorizationMode"
      FROM checkout_attempts WHERE id = $1::uuid FOR UPDATE`,
     [attemptId],
   );
@@ -740,7 +1050,8 @@ async function lockReservations(
             checkout_attempt_id::text AS "checkoutAttemptId",
             order_id::text AS "orderId",
             order_item_id::text AS "orderItemId",
-            product_id::text AS "productId", lot_id::text AS "lotId",
+            product_id::text AS "productId", variant_id::text AS "variantId",
+            lot_id::text AS "lotId",
             quantity_reserved AS "quantityReserved",
             quantity_remaining AS "quantityRemaining", state
      FROM inventory_reservations WHERE order_id = $1::uuid
@@ -758,6 +1069,7 @@ async function lockLots(
   if (ids.length === 0) return Object.freeze([]);
   const result = await client.query<LotRow>(
     `SELECT id::text AS id, product_id::text AS "productId",
+            variant_id::text AS "variantId",
             available_quantity AS "availableQuantity", status,
             expires_at AS "expiresAt"
      FROM lots WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
@@ -1013,6 +1325,7 @@ function reservationsComplete(facts: LockedFacts): boolean {
         reservation.checkoutAttemptId !== facts.payment.attempt.id ||
         reservation.orderId !== facts.order.id ||
         reservation.productId !== item.productId ||
+        reservation.variantId !== item.variantId ||
         reservation.state !== "active" ||
         reserved === null ||
         reserved <= 0 ||
@@ -1040,6 +1353,7 @@ function lotsAvailable(facts: LockedFacts, now: Date): boolean {
     return (
       lot !== undefined &&
       lot.productId === reservation.productId &&
+      lot.variantId === reservation.variantId &&
       lot.status === "released" &&
       (safeInteger(lot.availableQuantity) ?? -1) >= 0 &&
       (expiry === null || new Date(expiry).getTime() > now.getTime())
@@ -1115,17 +1429,59 @@ async function loadLockedFacts(
   ) {
     return Object.freeze({ status: "conflict" });
   }
+  const lockedBindingRead = await readAttemptReviewBinding(
+    client,
+    discovered.attemptId,
+    order.id,
+    true,
+  );
+  if (lockedBindingRead.status === "invalid") {
+    return Object.freeze({ status: "conflict" });
+  }
+  const lockedBinding = lockedBindingRead.status === "bound"
+    ? lockedBindingRead.value
+    : null;
+  const authorizationMode = attempt === null
+    ? null
+    : reviewAuthorizationMode(attempt.reviewAuthorizationMode);
+  const reviewAuthorizationValid = discovered.attemptId === null || !(
+    authorizationMode === null ||
+    authorizationMode !== reviewAuthorizationMode(discovered.reviewAuthorizationMode) ||
+    (authorizationMode === "bound" && lockedBinding === null) ||
+    (authorizationMode === "none" && lockedBinding !== null)
+  );
+  if (
+    (lockedBinding === null) !== (discovered.reviewBinding === null) ||
+    (lockedBinding !== null && discovered.reviewBinding !== null &&
+      (lockedBinding.checkoutAttemptId !==
+          discovered.reviewBinding.checkoutAttemptId ||
+        lockedBinding.orderId !== discovered.reviewBinding.orderId ||
+        lockedBinding.reviewRequestId !==
+          discovered.reviewBinding.reviewRequestId ||
+        lockedBinding.reviewSnapshotHash !==
+          discovered.reviewBinding.reviewSnapshotHash ||
+        canonicalJson(lockedBinding.cartSnapshot) !==
+          canonicalJson(discovered.reviewBinding.cartSnapshot)))
+  ) {
+    return Object.freeze({ status: "conflict" });
+  }
   let review: ExactReviewDecision | null = null;
+  const resolvedReviewInput = discovered.reviewInput;
   if (discovered.reviewNeeded) {
-    if (discovered.reviewInput === null) {
+    if (resolvedReviewInput === null || lockedBinding === null) {
       return Object.freeze({ status: "conflict" });
     }
-    review = await resolveReview(
-      client,
-      discovered.reviewInput,
-      sha256,
-      { lock: true },
-    );
+    review = await resolveReview(client, resolvedReviewInput, sha256, {
+      lock: true,
+    });
+    if (
+      review === null ||
+      review.outcome !== "approved" ||
+      review.reviewRequestId !== lockedBinding.reviewRequestId ||
+      review.reviewSnapshotHash !== lockedBinding.reviewSnapshotHash
+    ) {
+      return Object.freeze({ status: "conflict" });
+    }
   }
   const payments = await lockPayments(client, order.id);
   const refunds = await lockRefunds(client, order.id);
@@ -1147,21 +1503,27 @@ async function loadLockedFacts(
     payment,
     payments,
   );
-  const finalReviewInput = makeReviewInput(
-    order,
-    buyerStatus,
-    historical.attestationVersionId,
-    catalog,
-  );
+  const finalReviewInput = lockedBinding === null
+    ? null
+    : makeReviewInput(
+        order,
+        buyerStatus,
+        historical.attestationVersionId,
+        catalog,
+        lockedBinding,
+      );
   const finalReviewHash = finalReviewInput === null
     ? null
     : await hashReviewSnapshot(finalReviewInput, sha256);
   const finalReviewHashMatches =
     review === null
       ? !discovered.reviewNeeded
-      : finalReviewHash === review.reviewSnapshotHash &&
-        discovered.reviewInput !== null &&
-        canonicalJson(finalReviewInput) === canonicalJson(discovered.reviewInput);
+      : lockedBinding !== null &&
+        finalReviewHash === lockedBinding.reviewSnapshotHash &&
+        finalReviewHash === review.reviewSnapshotHash &&
+        review.reviewRequestId === lockedBinding.reviewRequestId &&
+        resolvedReviewInput !== null &&
+        canonicalJson(finalReviewInput) === canonicalJson(resolvedReviewInput);
   return Object.freeze({
     status: "ok" as const,
     buyerStatus,
@@ -1179,6 +1541,7 @@ async function loadLockedFacts(
       lots,
       review,
       finalReviewHashMatches,
+      reviewAuthorizationValid,
     }),
   });
 }
@@ -1334,6 +1697,7 @@ async function exactTerminalReplay(
   }
   if (facts.reservations.length === 0) return false;
   const lotById = new Map(facts.lots.map((row) => [row.id, row]));
+  const itemById = new Map(facts.catalog.items.map((row) => [row.id, row]));
   const events = await client.query<{
     id: string;
     idempotencyKey: string;
@@ -1363,10 +1727,14 @@ async function exactTerminalReplay(
       (candidate) => candidate.reservationId === reservation.id,
     );
     const lot = lotById.get(reservation.lotId);
+    const item = itemById.get(reservation.orderItemId);
     const balanceAfter = safeInteger(event?.balanceAfter);
     if (
       reservation.state !== "consumed" ||
       safeInteger(reservation.quantityRemaining) !== 0 ||
+      item === undefined ||
+      item.variantId !== reservation.variantId ||
+      reservation.variantId !== lot?.variantId ||
       quantity === null ||
       event === undefined ||
       event.id !== keyedUuid(`inventory-consume:${reservation.id}`) ||
@@ -1479,6 +1847,9 @@ export function createFulfillmentRepository(input: Readonly<{
       );
       if (loaded.status !== "ok") return loaded;
       const { facts, buyerStatus } = loaded;
+      if (!facts.reviewAuthorizationValid) {
+        return Object.freeze({ status: "conflict" });
+      }
       if (facts.order.state === "paid_pending_fulfillment") {
         return Object.freeze({ status: "already_clear" });
       }
@@ -1534,6 +1905,9 @@ export function createFulfillmentRepository(input: Readonly<{
             ? "already_handed_off"
             : "conflict",
         });
+      }
+      if (!facts.reviewAuthorizationValid) {
+        return Object.freeze({ status: "conflict" });
       }
       if (!paidStates.has(facts.order.state)) {
         return Object.freeze({ status: "ineligible" });
@@ -1787,6 +2161,12 @@ export function createFulfillmentRepository(input: Readonly<{
       );
       if (loaded.status !== "ok") return loaded;
       const { facts } = loaded;
+      if (
+        !facts.reviewAuthorizationValid &&
+        !(await exactTerminalReplay(client, facts, input.keyedUuid))
+      ) {
+        return Object.freeze({ status: "conflict" });
+      }
       if (
         facts.order.state !== "fulfilled" ||
         facts.shipment === null ||

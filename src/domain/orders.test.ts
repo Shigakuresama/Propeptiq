@@ -994,6 +994,101 @@ describe("Task 6A lean order and fulfillment-release contracts", () => {
       } as never),
     ).toEqual(held);
   });
+
+  function paidPendingSettlement(): OrderSnapshot {
+    return expectOrderSuccess(checkoutPending(), {
+      type: "payment_verified",
+      source: "verified_provider_event",
+      paymentEvidenceId,
+      reservationDisposition: "active",
+      settlementRequired: true,
+    });
+  }
+
+  it("holds a settlement-required verified payment out of fulfillment", () => {
+    expect(paidPendingSettlement().state).toBe("paid_pending_settlement");
+  });
+
+  it("leaves an ordinary verified payment on the existing paid path", () => {
+    expect(paidPending().state).toBe("paid_pending_fulfillment");
+  });
+
+  it("treats settlementRequired false exactly as its absence", () => {
+    const snapshot = expectOrderSuccess(checkoutPending(), {
+      type: "payment_verified",
+      source: "verified_provider_event",
+      paymentEvidenceId,
+      reservationDisposition: "active",
+      settlementRequired: false,
+    });
+    expect(snapshot.state).toBe("paid_pending_fulfillment");
+  });
+
+  it("keeps an inventory conflict on hold even when settlement is required", () => {
+    // Cannot use expectOrderSuccess: it asserts no required incidents, and an
+    // authoritatively released reservation must still raise inventory_conflict.
+    const result = transitionOrder(checkoutPending(), {
+      type: "payment_verified",
+      source: "verified_provider_event",
+      paymentEvidenceId,
+      reservationDisposition: "authoritatively_released",
+      settlementRequired: true,
+    } as OrderEvent);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("synthetic transition failed");
+    const value = result.value as unknown as {
+      snapshot: OrderSnapshot;
+      requiredIncidents: readonly string[];
+    };
+    expect(value.snapshot.state).toBe("paid_on_hold");
+    expect(value.requiredIncidents).toEqual(["inventory_conflict"]);
+  });
+
+  it("releases to fulfillment once settlement is confirmed", () => {
+    const snapshot = expectOrderSuccess(paidPendingSettlement(), {
+      type: "settlement_confirmed",
+      source: "verified_provider_event",
+      settlementEvidenceId: "settle_synthetic_1",
+    });
+    expect(snapshot.state).toBe("paid_pending_fulfillment");
+  });
+
+  it("returns reversed funding to payment_failed and clears payment evidence", () => {
+    const snapshot = expectOrderSuccess(paidPendingSettlement(), {
+      type: "payment_funding_reversed",
+      source: "verified_provider_event",
+      providerEvidenceId: "cbtxn_synthetic_1",
+    });
+    expect(snapshot.state).toBe("payment_failed");
+    expect(snapshot.paymentEvidenceId).toBeNull();
+  });
+
+  it("refuses settlement confirmation without evidence", () => {
+    const result = transitionOrder(paidPendingSettlement(), {
+      type: "settlement_confirmed",
+      source: "verified_provider_event",
+      settlementEvidenceId: "  ",
+    } as OrderEvent);
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses settlement confirmation for an order not awaiting settlement", () => {
+    const result = transitionOrder(paidPending(), {
+      type: "settlement_confirmed",
+      source: "verified_provider_event",
+      settlementEvidenceId: "settle_synthetic_1",
+    } as OrderEvent);
+    expect(result.ok).toBe(false);
+  });
+
+  it("refuses a funding reversal for an order not awaiting settlement", () => {
+    const result = transitionOrder(paidPending(), {
+      type: "payment_funding_reversed",
+      source: "verified_provider_event",
+      providerEvidenceId: "cbtxn_synthetic_1",
+    } as OrderEvent);
+    expect(result.ok).toBe(false);
+  });
 });
 
 describe("transitionPayment", () => {

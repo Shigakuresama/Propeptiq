@@ -222,6 +222,45 @@ describe("Task 5 PostgreSQL admin repository", () => {
     };
   }
 
+  it("accepts canonical checkout provider schema 2 for the admin refund read", async () => {
+    await client.query(
+      `UPDATE checkout_attempts
+       SET provider_request_schema_version = 2,
+           provider_binding_snapshot = $1::jsonb
+       WHERE id = $2::uuid`,
+      [
+        JSON.stringify({
+          schemaVersion: 2,
+          lines: [{
+            variantId: "10000000-0000-4000-8000-000000000025",
+            productId: ids.product,
+            sku: "ADMIN-REFUND-SCHEMA-2",
+            productName: "Reference standard A",
+            variantLabel: "5 mg",
+            requestedQuantity: 1,
+            netLineMinor: 5_000,
+            baseUnitMinor: 5_000,
+            currency: "USD",
+            priceBookId: ids.price,
+            priceVersion: 1,
+            stripeProductId: "prod_admin_refund_schema_2",
+            stripePriceId: "price_admin_refund_schema_2",
+          }],
+        }),
+        ids.attempt,
+      ],
+    );
+
+    await expect(
+      requestRefundIntent(repository(), context("repo-refund-schema-2"), {
+        orderId: ids.order,
+        requestedAmountMinor: 1_000,
+        reasonRedacted: null,
+        idempotencyKey: "refund-schema-2",
+      }),
+    ).resolves.toMatchObject({ provider: "local_test", status: "requested" });
+  });
+
   it("rejects stale product and promotion writes while committing each successful mutation with one audit", async () => {
     const repo = repository();
     await activateProduct(repo, context("repo-product"), {
@@ -507,10 +546,10 @@ describe("Task 5 PostgreSQL admin repository", () => {
        WHERE id = '${ids.attempt}'`,
     ],
     [
-      "wrong checkout provider request schema version",
+      "unsupported checkout provider request schema version",
       `ALTER TABLE checkout_attempts
          DROP CONSTRAINT checkout_attempts_provider_coherent;
-       UPDATE checkout_attempts SET provider_request_schema_version = 2
+       UPDATE checkout_attempts SET provider_request_schema_version = 3
        WHERE id = '${ids.attempt}'`,
     ],
   ])("rejects refund intent when durable payment provenance has %s", async (_label, mutation) => {

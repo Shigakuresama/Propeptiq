@@ -1,9 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const webhookCompositionSpies = vi.hoisted(() => ({
+  readServerEnv: vi.fn(),
+  createProviderEventRepository: vi.fn(),
+}));
+
+vi.mock("@/env", () => ({
+  readServerEnv: webhookCompositionSpies.readServerEnv,
+}));
+
+vi.mock("@/db/repositories/provider-event-repository", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("@/db/repositories/provider-event-repository")
+  >();
+  return {
+    ...actual,
+    createProviderEventRepository: (
+      input: Parameters<typeof actual.createProviderEventRepository>[0],
+    ) => {
+      webhookCompositionSpies.createProviderEventRepository(input);
+      return actual.createProviderEventRepository(input);
+    },
+  };
+});
+
 import { getLocalTestDriver } from "local-auth-driver";
 import {
   createCheckoutServerRuntime,
   createStaffCommerceServerRuntime,
+  createStripeWebhookServerRuntime,
   isBuyerCheckoutRuntimeReady,
 } from "@/commerce/server-runtime";
 import { parseServerEnv, type ServerEnv } from "@/config/env-schema";
@@ -20,6 +45,7 @@ const localEnvironment = {
   APP_ENV: "local",
   APP_ORIGIN: origin,
   CATALOG_DEMO_MODE: "enabled",
+  RECONSTITUTION_CALCULATOR_MODE: "disabled",
   LOCAL_TEST_DRIVER: "enabled",
   LOCAL_TEST_SECRET: "server-runtime-test-secret-at-least-32-characters",
   RATE_LIMIT_SECRET: "server-runtime-rate-secret-at-least-32-characters",
@@ -55,6 +81,7 @@ const previewEnvironment = parseServerEnv({
   DATABASE_URL: "",
   DATABASE_MIGRATION_URL: "",
   PAYMENTS_MODE: "test",
+  INVOICE_SETTLEMENT_WINDOW_DAYS: "7",
   STRIPE_ACCOUNT_ID: "acct_SyntheticTask7Preview",
   STRIPE_SECRET_KEY: "sk_test_synthetic_task7_preview",
   STRIPE_WEBHOOK_SECRET: "whsec_synthetic_task7_preview",
@@ -76,7 +103,7 @@ function requestForActor(actorKey: "non_admin" | "admin") {
 }
 
 const checkoutRequest = {
-  items: [{ productId: "61000000-0000-4000-8000-000000000001", quantity: 2 }],
+  items: [{ variantId: "55000000-0000-4000-8000-000000000001", quantity: 2 }],
   destination: {
     recipientName: "Synthetic Research Buyer",
     line1: "100 Test Way",
@@ -86,7 +113,6 @@ const checkoutRequest = {
     postalCode: "90001",
     countryCode: "US",
   },
-  promotionIds: ["66000000-0000-4000-8000-000000000001"],
 } as const;
 const idempotencyKey = "6b000000-0000-4000-8000-000000000001";
 const localAffiliateCode = "aff_LocalRuntimePartner01";
@@ -97,7 +123,11 @@ const localReferralCodeId = "6b000000-0000-4000-8000-000000000031";
 const localReferrerUserId = "6b000000-0000-4000-8000-000000000032";
 
 describe("commerce server composition", () => {
-  beforeEach(() => getLocalTestDriver().commerce.reset());
+  beforeEach(() => {
+    getLocalTestDriver().commerce.reset();
+    webhookCompositionSpies.readServerEnv.mockReset();
+    webhookCompositionSpies.createProviderEventRepository.mockClear();
+  });
   afterEach(() => vi.useRealTimers());
 
   it("reports buyer checkout ready only for the guarded local request and not the exact Preview matrix", async () => {
@@ -113,6 +143,17 @@ describe("commerce server composition", () => {
     await expect(createCheckoutServerRuntime(previewRequest)).resolves.toBeNull();
   });
 
+  it("propagates the configured invoice settlement window into the webhook repository", async () => {
+    webhookCompositionSpies.readServerEnv.mockReturnValue(previewEnvironment);
+
+    await expect(createStripeWebhookServerRuntime()).resolves.not.toBeNull();
+
+    expect(webhookCompositionSpies.createProviderEventRepository).toHaveBeenCalledOnce();
+    expect(
+      webhookCompositionSpies.createProviderEventRepository.mock.calls[0]?.[0],
+    ).toEqual(expect.objectContaining({ settlementWindowBusinessDays: 7 }));
+  });
+
   it("composes the existing checkout service/orchestrator over one local adapter", async () => {
     const request = requestForActor("non_admin");
     const runtime = await createCheckoutServerRuntime(request);
@@ -126,16 +167,18 @@ describe("commerce server composition", () => {
       status: "quoted",
       quote: {
         subtotalMinor: 4_800,
-        discountMinor: 480,
+        discountMinor: 384,
         shippingMinor: 500,
         taxMinor: 321,
-        totalMinor: 5_141,
+        totalMinor: 5_237,
       },
     });
+    expect(quoted.status).toBe("quoted");
+    if (quoted.status !== "quoted") throw new Error("expected canonical runtime quote");
     const opened = await runtime!.startSession({
       buyerUserId: request.principal!.actorId,
       idempotencyKey,
-      request: checkoutRequest,
+      request: { ...checkoutRequest, pricingRevision: quoted.pricingRevision },
     });
     expect(opened).toMatchObject({ status: "open" });
     if (opened.status === "open") {
@@ -144,7 +187,7 @@ describe("commerce server composition", () => {
     await expect(runtime!.startSession({
       buyerUserId: request.principal!.actorId,
       idempotencyKey,
-      request: checkoutRequest,
+      request: { ...checkoutRequest, pricingRevision: quoted.pricingRevision },
     })).resolves.toEqual(opened);
     expect(request.localDriver.commerce.inspect()).toMatchObject({
       orderCount: 1,
@@ -152,6 +195,45 @@ describe("commerce server composition", () => {
       providerSessionCount: 1,
       reservationCount: 1,
     });
+  });
+
+  it("routes a canonical variant quote and session through the same pricing revision", async () => {
+    const request = requestForActor("non_admin");
+    const runtime = await createCheckoutServerRuntime(request);
+    expect(runtime).not.toBeNull();
+
+    const quoted = await runtime!.quoteCheckout({
+      buyerUserId: request.principal!.actorId,
+      idempotencyKey: "6b000000-0000-4000-8000-000000000041",
+      request: checkoutRequest,
+    });
+    expect(quoted).toMatchObject({
+      status: "quoted",
+      quote: {
+        subtotalMinor: 4_800,
+        discountMinor: 384,
+        shippingMinor: 500,
+        taxMinor: 321,
+        totalMinor: 5_237,
+        lines: [{
+          variantId: "55000000-0000-4000-8000-000000000001",
+          productId: "61000000-0000-4000-8000-000000000001",
+          quantity: 2,
+        }],
+      },
+    });
+    expect(quoted.status).toBe("quoted");
+    if (quoted.status !== "quoted") throw new Error("expected canonical runtime quote");
+    expect(quoted.pricingRevision).toMatch(/^[0-9a-f]{64}$/u);
+
+    await expect(runtime!.startSession({
+      buyerUserId: request.principal!.actorId,
+      idempotencyKey: "6b000000-0000-4000-8000-000000000041",
+      request: {
+        ...checkoutRequest,
+        pricingRevision: quoted.pricingRevision,
+      },
+    })).resolves.toMatchObject({ status: "open" });
   });
 
   it("binds a real signed affiliate cookie through the unmodified deterministic driver", async () => {
@@ -218,7 +300,7 @@ describe("commerce server composition", () => {
       buyerUserId: request.principal!.actorId,
       idempotencyKey: "6b000000-0000-4000-8000-000000000002",
       attributionCookie: cookie!.value,
-      request: { ...checkoutRequest, promotionIds: [] },
+      request: checkoutRequest,
     });
 
     expect(quoted.status).toBe("quoted");
@@ -246,7 +328,7 @@ describe("commerce server composition", () => {
       buyerUserId: request.principal!.actorId,
       idempotencyKey: "6b000000-0000-4000-8000-000000000002",
       attributionCookie: cookie!.value,
-      request: { ...checkoutRequest, promotionIds: [] },
+      request: { ...checkoutRequest, pricingRevision: quoted.pricingRevision },
     });
     expect(opened).toMatchObject({ status: "open" });
     expect(request.localDriver.commerce.inspect()).toMatchObject({
@@ -311,6 +393,57 @@ describe("commerce server composition", () => {
     await expect(runtime!.handoffFulfillment(targets.fulfillmentOrderId)).resolves.toEqual({ status: "already_handed_off" });
     await expect(runtime!.markShipmentDelivered(targets.fulfillmentOrderId)).resolves.toEqual({ status: "delivered" });
     await expect(runtime!.markShipmentDelivered(targets.fulfillmentOrderId)).resolves.toEqual({ status: "already_delivered" });
+  });
+
+  const postgresBuyerEnvironment = {
+    ...localEnvironment,
+    APP_ORIGIN: "https://test.example.com",
+    LOCAL_TEST_DRIVER: "disabled",
+    CATALOG_DEMO_MODE: "disabled",
+    AUTH_MODE: "test",
+    ...syntheticBetterAuth,
+    DATABASE_MODE: "test",
+    EMAIL_MODE: "test",
+    TEST_DATABASE_URL: "postgresql://buyer-runtime.invalid/test",
+    PAYMENTS_MODE: "test",
+    STRIPE_SECRET_KEY: "sk_test_buyer_runtime_offline_configuration",
+    STRIPE_WEBHOOK_SECRET: "whsec_buyer_runtime_offline_configuration",
+    STRIPE_ACCOUNT_ID: "acct_BuyerRuntime01",
+    STRIPE_SHIPPING_RATE_ID: "shr_BuyerRuntime01",
+    STRIPE_TAX_CODE: "txcd_99999999",
+  } satisfies ServerEnv;
+
+  function postgresBuyerRequest(overrides: Partial<ServerEnv> = {}) {
+    const request = requestForActor("non_admin");
+    return {
+      ...request,
+      environment: { ...postgresBuyerEnvironment, ...overrides } as ServerEnv,
+      localDriver: null,
+    };
+  }
+
+  it("assembles the typed PostgreSQL/Stripe buyer checkout runtime without performing a provider call", async () => {
+    const runtime = await createCheckoutServerRuntime(postgresBuyerRequest());
+
+    expect(runtime).not.toBeNull();
+    expect(runtime!.buyerUserId).toBe(requestForActor("non_admin").principal!.actorId);
+    expect(typeof runtime!.quoteCheckout).toBe("function");
+    expect(typeof runtime!.startSession).toBe("function");
+  });
+
+  it.each([
+    ["a missing shipping rate", { STRIPE_SHIPPING_RATE_ID: undefined }],
+    ["a missing tax code", { STRIPE_TAX_CODE: undefined }],
+    ["a missing Stripe secret", { STRIPE_SECRET_KEY: undefined }],
+    ["a missing Stripe account", { STRIPE_ACCOUNT_ID: undefined }],
+    ["payments disabled", { PAYMENTS_MODE: "disabled" as const }],
+    ["the database disabled", { DATABASE_MODE: "disabled" as const }],
+    ["tax disabled", { TAX_MODE: "disabled" as const }],
+    ["shipping disabled", { SHIPPING_MODE: "disabled" as const }],
+  ])("fails closed on %s", async (_label, overrides) => {
+    await expect(
+      createCheckoutServerRuntime(postgresBuyerRequest(overrides as Partial<ServerEnv>)),
+    ).resolves.toBeNull();
   });
 
   it("assembles the typed PostgreSQL/Stripe staff runtime without performing a provider call", async () => {

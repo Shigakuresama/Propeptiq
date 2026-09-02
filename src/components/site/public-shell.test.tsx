@@ -39,6 +39,7 @@ describe("public shell growth navigation", () => {
     );
 
     const footer = screen.getByRole("navigation", { name: "Footer" });
+    expect(screen.getAllByRole("navigation", { name: "Footer" })).toHaveLength(1);
     const footerRestriction = screen.getByText(/Catalog names and package configurations come from owner-supplied records/iu);
     expect(footerRestriction).toHaveClass("text-base");
     expect(footerRestriction).not.toHaveClass("text-sm");
@@ -46,5 +47,28 @@ describe("public shell growth navigation", () => {
       "href",
       "/partners",
     );
+    expect(within(footer).getByRole("link", { name: "Cart" })).toHaveAttribute(
+      "href",
+      "/cart",
+    );
+    expect(within(footer).getByRole("link", { name: "Order tracking" })).toHaveAttribute(
+      "href",
+      "/account/orders",
+    );
+    expect(
+      within(footer).getByRole("link", { name: "Research Use Only" }),
+    ).toHaveAttribute("href", "/research-use-policy");
+    expect(within(footer).queryByRole("link", { name: "FAQ" })).toBeNull();
+    expect(
+      within(footer).queryByRole("link", { name: "Terms and Conditions" }),
+    ).toBeNull();
+
+    const social = screen.getByRole("region", { name: "Social media" });
+    for (const label of ["Instagram", "TikTok", "X", "Facebook"]) {
+      expect(within(social).getByRole("link", { name: label })).toHaveAttribute(
+        "href",
+        "/",
+      );
+    }
   });
 });

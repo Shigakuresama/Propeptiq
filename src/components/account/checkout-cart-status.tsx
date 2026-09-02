@@ -57,20 +57,20 @@ export function CheckoutCartStatus() {
       </div>
       {previewError ? (
         <Notice className="mt-5" icon={CircleAlert} tone="danger" title="Server preview unavailable">
-          The authoritative product preview is unavailable. Browser request identifiers below are not verified product facts.
+          The authoritative variant preview is unavailable. Browser request identifiers below are not verified variant facts.
         </Notice>
       ) : null}
       {items.length > 0 ? (
         <ul className="mt-6 grid gap-3 p-0" aria-label="Saved cart lines">
           {items.map((item) => {
             const verified = preview?.items.find(
-              (candidate) => candidate.productId === item.productId,
+              (candidate) => candidate.variantId === item.variantId,
             );
             return (
-              <li key={item.productId} className="flex min-w-0 justify-between gap-4 border-b border-border pb-3">
+              <li key={item.variantId} className="flex min-w-0 justify-between gap-4 border-b border-border pb-3">
                 <span className="min-w-0 break-all font-medium">
-                  {verified?.name ?? item.productId}
-                  {!verified ? (
+                  {verified?.name ?? item.variantId}
+                  {verified?.available !== true ? (
                     <span className="mt-1 block text-sm font-normal text-muted-ink">
                       {preview
                         ? "Unavailable in the current authoritative catalog preview"

@@ -334,4 +334,71 @@ describe("strict quote and provider-preparation contracts", () => {
       ),
     ).toMatchObject({ ok: true });
   });
+
+  it("accepts V2 only with an exact variant-safe provider binding snapshot", () => {
+    const now = new Date("2026-08-25T12:00:00.000Z");
+    const line = {
+      variantId: ids.item,
+      productId: ids.product,
+      sku: "SYNTH-5MG",
+      productName: "Synthetic Product",
+      variantLabel: "5 mg",
+      requestedQuantity: 2,
+      netLineMinor: 3_680,
+      baseUnitMinor: 2_000,
+      currency: "USD",
+      priceBookId: ids.policy,
+      priceVersion: 3,
+      stripeProductId: "prod_synthetic_parent",
+      stripePriceId: "price_synthetic_5mg",
+    } as const;
+    const preparation = {
+      authority: "server_prepared_provider_request",
+      provider: "stripe",
+      providerIdempotencyKey: `checkout_attempt:${ids.attempt}`,
+      providerRequestHash: "d".repeat(64),
+      providerExpiresAt: "2026-08-25T13:00:00.000Z",
+      providerCustomerEmail: "synthetic.buyer@example.test",
+      providerOrigin: "https://checkout.synthetic.example",
+      providerRequestSchemaVersion: 2,
+      providerBindingSnapshot: { schemaVersion: 2, lines: [line] },
+      providerLivemode: false,
+      providerScope: "stripe:acct_synthetic123",
+    } as const;
+
+    expect(parseProviderPreparation(preparation, {
+      attemptId: ids.attempt,
+      now,
+    })).toEqual({ ok: true, value: preparation });
+    for (const invalid of [
+      { ...preparation, providerBindingSnapshot: undefined },
+      {
+        ...preparation,
+        providerBindingSnapshot: {
+          ...preparation.providerBindingSnapshot,
+          unexpected: "caller authority",
+        },
+      },
+      {
+        ...preparation,
+        providerBindingSnapshot: {
+          schemaVersion: 2,
+          lines: [{ ...line, stripePriceId: "not-a-price" }],
+        },
+      },
+      {
+        ...preparation,
+        providerBindingSnapshot: { schemaVersion: 2, lines: [line, line] },
+      },
+      {
+        ...preparation,
+        providerRequestSchemaVersion: 1,
+      },
+    ] as const) {
+      expect(parseProviderPreparation(invalid, {
+        attemptId: ids.attempt,
+        now,
+      })).toMatchObject({ ok: false });
+    }
+  });
 });

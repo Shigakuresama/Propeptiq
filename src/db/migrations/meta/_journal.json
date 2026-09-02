@@ -162,6 +162,69 @@
       "when": 1787987668660,
       "tag": "0022_milky_mole_man",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788053477281,
+      "tag": "0023_stiff_lionheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788056057425,
+      "tag": "0024_flaky_miracleman",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788069727575,
+      "tag": "0025_blushing_pestilence",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788144468643,
+      "tag": "0026_minor_grandmaster",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788153574267,
+      "tag": "0027_task5-canonical-replay",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788157813983,
+      "tag": "0028_task5-exact-review-binding",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1788161355463,
+      "tag": "0029_task5-review-authorization-mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788167018498,
+      "tag": "0030_task6-provider-request-v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1788179594517,
+      "tag": "0031_phase1-reservation-variant-identity",
+      "breakpoints": true
     }
   ]
 }

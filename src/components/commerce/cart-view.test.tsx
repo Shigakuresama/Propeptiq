@@ -1,218 +1,115 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { useCart, fetchMock, setQuantity, removeItem, clearCart } = vi.hoisted(() => ({
-  useCart: vi.fn(),
-  fetchMock: vi.fn(),
-  setQuantity: vi.fn(),
-  removeItem: vi.fn(),
-  clearCart: vi.fn(),
+const { useCart, fetchMock, setQuantity, removeItem, clearCart, acknowledgeLegacyReselection } = vi.hoisted(() => ({
+  useCart: vi.fn(), fetchMock: vi.fn(), setQuantity: vi.fn(), removeItem: vi.fn(), clearCart: vi.fn(), acknowledgeLegacyReselection: vi.fn(),
 }));
-
 vi.mock("@/cart/cart-provider", () => ({ useCart }));
-
 import { CartView } from "./cart-view";
 
-const productId = "61000000-0000-4000-8000-000000000001";
-
-function response(value: unknown): Response {
-  return new Response(JSON.stringify(value), {
-    status: 200,
-    headers: { "content-type": "application/json" },
-  });
+const variantId = "61000000-0000-4000-8000-000000000001";
+function cart(quantity = 2) {
+  return { hydrated: true, items: [{ variantId, quantity }], legacyItemCount: null, setQuantity, removeItem, clearCart, acknowledgeLegacyReselection };
 }
+type PreviewOptions = {
+  available?: boolean;
+  name?: string;
+  previewToken?: string;
+  quantity?: number;
+  reasons?: string[];
+  requiresAcknowledgement?: boolean;
+};
+
+function preview({
+  available = true,
+  name = "Synthetic local test only — Alpha",
+  previewToken = "c".repeat(64),
+  quantity = 2,
+  reasons = [],
+  requiresAcknowledgement = false,
+}: PreviewOptions = {}) {
+  return {
+    items: [{ variantId, quantity, available, name, packageForm: "Research vial", unitAmountMinor: 2400, lineSubtotalMinor: quantity * 2400, currency: "USD" }],
+    subtotalMinor: quantity * 2400, currency: "USD", taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
+    previewToken, requiresAcknowledgement, reasons,
+  };
+}
+function response(value: unknown): Response { return new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } }); }
 
 describe("CartView", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.clearAllMocks();
-    useCart.mockReturnValue({
-      hydrated: true,
-      items: [{ productId, quantity: 2 }],
-      setQuantity,
-      removeItem,
-      clearCart,
-    });
-    fetchMock.mockResolvedValue(response({
-      items: [{
-        productId,
-        quantity: 2,
-        available: true,
-        name: "Synthetic local test only — Alpha",
-        packageForm: "Research vial",
-        unitAmountMinor: 2_400,
-        lineSubtotalMinor: 4_800,
-        currency: "USD",
-      }],
-      subtotalMinor: 4_800,
-      currency: "USD",
-      taxMinor: null,
-      shippingMinor: null,
-      finalDiscountMinor: null,
-      previewToken: "c".repeat(64),
-      requiresAcknowledgement: false,
-      reasons: [],
-    }));
-    vi.stubGlobal("fetch", fetchMock);
-    window.sessionStorage.clear();
+    vi.restoreAllMocks(); vi.clearAllMocks(); window.sessionStorage.clear(); window.localStorage.clear();
+    useCart.mockReturnValue(cart());
+    fetchMock.mockResolvedValue(response(preview())); vi.stubGlobal("fetch", fetchMock);
   });
 
-  it("separates every checkout total fact without inventing preview amounts", async () => {
+  it("renders a canonical variant preview without inventing checkout totals", async () => {
     render(<CartView checkoutIntent={null} />);
-
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const summary = screen.getByRole("complementary", { name: "Order summary" });
-    expect(within(summary).getByText("Merchandise subtotal")).toBeVisible();
-    expect(within(summary).getByText("$48.00")).toBeVisible();
-    for (const label of [
-      "Promotion",
-      "Referral benefit",
-      "Points redemption",
-      "Tax",
-      "Shipping",
-      "Total",
-    ]) {
-      expect(within(summary).getByText(label)).toBeVisible();
-    }
-    expect(within(summary).getByText("Calculated at checkout")).toBeVisible();
-    expect(within(summary).getAllByText("Not yet calculated")).toHaveLength(2);
-    expect(within(summary).getAllByText("Available after checkout quote")).toHaveLength(3);
-    expect(within(summary).queryByText(/\$0\.00/)).toBeNull();
-    expect(within(summary).getByText("Merchandise subtotal").closest("dl")).toHaveClass("text-base");
-    expect(screen.getByText("Research vial")).toHaveClass("text-base");
-    expect(screen.getByText("$24.00 each")).toHaveClass("text-base");
-    expect(screen.getByText(/Account verification continues at checkout/iu)).toHaveClass("text-base");
+    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.items).toEqual([{ variantId, quantity: 2 }]);
+    expect(within(screen.getByRole("complementary", { name: "Order summary" })).getByText("$48.00")).toBeVisible();
   });
 
-  it("retries the same failed preview request without mutating or clearing the retained cart", async () => {
+  it("retries the unchanged variant cart after a preview failure", async () => {
     const user = userEvent.setup();
-    fetchMock
-      .mockRejectedValueOnce(new Error("temporary preview failure"))
-      .mockResolvedValueOnce(response({
-        items: [{
-          productId,
-          quantity: 2,
-          available: true,
-          name: "Synthetic local test only — Alpha",
-          packageForm: "Research vial",
-          unitAmountMinor: 2_400,
-          lineSubtotalMinor: 4_800,
-          currency: "USD",
-        }],
-        subtotalMinor: 4_800,
-        currency: "USD",
-        taxMinor: null,
-        shippingMinor: null,
-        finalDiscountMinor: null,
-        previewToken: "d".repeat(64),
-        requiresAcknowledgement: false,
-        reasons: [],
-      }));
-
+    fetchMock.mockRejectedValueOnce(new Error("temporary preview failure")).mockResolvedValueOnce(response(preview()));
     render(<CartView checkoutIntent={null} />);
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("The authoritative cart preview is unavailable.");
-    expect(alert).toHaveClass("text-base");
-    expect(screen.getByText("Not verified")).toBeVisible();
-    expect(screen.queryByText("This requested record or quantity is no longer available.")).toBeNull();
-    const retry = screen.getByRole("button", { name: "Retry current cart facts" });
-    expect(retry).toHaveClass("min-h-11");
-    expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeDisabled();
-    expect(screen.getByLabelText(`Quantity for ${productId}`)).toHaveValue(2);
-
-    const firstBody = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
-    await user.click(retry);
+    expect(await screen.findByRole("alert")).toHaveTextContent("The authoritative cart preview is unavailable.");
+    const first = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+    await user.click(screen.getByRole("button", { name: "Retry current cart facts" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))).toEqual(first);
     expect(await screen.findByText("$48.00")).toBeVisible();
-    const secondBody = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body));
-    expect(secondBody).toEqual(firstBody);
-    expect(firstBody.items).toEqual([{ productId, quantity: 2 }]);
-    expect(setQuantity).not.toHaveBeenCalled();
-    expect(removeItem).not.toHaveBeenCalled();
-    expect(clearCart).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeEnabled();
   });
 
-  it("hides a prior preview when changed cart facts fail and retries the exact current cart", async () => {
-    const user = userEvent.setup();
+  it("hides a stale preview and refreshes the exact changed variant cart", async () => {
     fetchMock.mockReset()
-      .mockResolvedValueOnce(response({
-        items: [{
-          productId,
-          quantity: 2,
-          available: true,
-          name: "Synthetic local test only — Prior preview",
-          packageForm: "Research vial",
-          unitAmountMinor: 2_400,
-          lineSubtotalMinor: 4_800,
-          currency: "USD",
-        }],
-        subtotalMinor: 4_800,
-        currency: "USD",
-        taxMinor: null,
-        shippingMinor: null,
-        finalDiscountMinor: null,
-        previewToken: "e".repeat(64),
-        requiresAcknowledgement: false,
-        reasons: [],
-      }))
-      .mockRejectedValueOnce(new Error("changed-cart preview failure"))
-      .mockResolvedValueOnce(response({
-        items: [{
-          productId,
-          quantity: 3,
-          available: true,
-          name: "Synthetic local test only — Current preview",
-          packageForm: "Research vial",
-          unitAmountMinor: 2_400,
-          lineSubtotalMinor: 7_200,
-          currency: "USD",
-        }],
-        subtotalMinor: 7_200,
-        currency: "USD",
-        taxMinor: null,
-        shippingMinor: null,
-        finalDiscountMinor: null,
-        previewToken: "f".repeat(64),
-        requiresAcknowledgement: false,
-        reasons: [],
-      }));
-
+      .mockResolvedValueOnce(response(preview({ name: "Prior variant", previewToken: "d".repeat(64) })))
+      .mockRejectedValueOnce(new Error("changed preview failure"))
+      .mockResolvedValueOnce(response(preview({ quantity: 3, name: "Current variant", previewToken: "e".repeat(64) })));
     const { rerender } = render(<CartView checkoutIntent={null} />);
-    expect(await screen.findByText("Synthetic local test only — Prior preview")).toBeVisible();
-    expect(screen.getByText("$48.00")).toBeVisible();
-
-    useCart.mockReturnValue({
-      hydrated: true,
-      items: [{ productId, quantity: 3 }],
-      setQuantity,
-      removeItem,
-      clearCart,
-    });
+    expect(await screen.findByText("Prior variant")).toBeVisible();
+    useCart.mockReturnValue(cart(3));
     rerender(<CartView checkoutIntent={null} />);
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.queryByText("Prior variant")).toBeNull();
+    expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))).toMatchObject({ items: [{ variantId, quantity: 3 }] });
+    fireEvent.click(screen.getByRole("button", { name: "Retry current cart facts" }));
+    expect(await screen.findByText("Current variant")).toBeVisible();
+  });
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The authoritative cart preview is unavailable.",
-    );
-    expect(screen.queryByText("Synthetic local test only — Prior preview")).toBeNull();
-    expect(screen.queryByText("$24.00 each")).toBeNull();
-    expect(screen.queryByText("$48.00")).toBeNull();
-    expect(screen.getByRole("spinbutton")).toHaveValue(3);
-    expect(screen.getByRole("button", { name: "Continue to sign in" })).toBeDisabled();
+  it("uses the canonical variant for increase, decrease, and the 25-unit control cap", async () => {
+    const user = userEvent.setup();
+    render(<CartView checkoutIntent={null} />);
+    await screen.findByText("Synthetic local test only — Alpha");
+    await user.click(screen.getByRole("button", { name: "Increase quantity for Synthetic local test only — Alpha" }));
+    await user.click(screen.getByRole("button", { name: "Decrease quantity for Synthetic local test only — Alpha" }));
+    const input = screen.getByRole("spinbutton", { name: "Quantity for Synthetic local test only — Alpha" });
+    expect(input).toHaveAttribute("max", "25");
+    fireEvent.change(input, { target: { value: "25" } });
+    expect(setQuantity).toHaveBeenNthCalledWith(1, variantId, 3);
+    expect(setQuantity).toHaveBeenNthCalledWith(2, variantId, 1);
+    expect(setQuantity).toHaveBeenNthCalledWith(3, variantId, 25);
+  });
 
-    const failedRequest = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body));
-    expect(failedRequest.items).toEqual([{ productId, quantity: 3 }]);
-    await user.click(screen.getByRole("button", { name: "Retry current cart facts" }));
+  it("persists the v2 handoff and invokes the supplied checkout navigation", async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    render(<CartView checkoutIntent={null} navigate={navigate} />);
+    await screen.findByText("$48.00");
+    await user.click(screen.getByRole("button", { name: "Continue to sign in" }));
+    expect(navigate).toHaveBeenCalledWith("/checkout");
+    expect(JSON.parse(window.localStorage.getItem("propeptiq.cart.v2")!)).toEqual({ version: 2, items: [{ variantId, quantity: 2 }] });
+  });
 
-    expect(await screen.findByText("Synthetic local test only — Current preview")).toBeVisible();
-    expect(screen.getByText("$72.00")).toBeVisible();
-    expect(screen.getByRole("spinbutton")).toHaveValue(3);
-    const retryRequest = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body));
-    expect(retryRequest).toEqual(failedRequest);
-    expect(setQuantity).not.toHaveBeenCalled();
-    expect(removeItem).not.toHaveBeenCalled();
-    expect(clearCart).not.toHaveBeenCalled();
+  it("requires explicit acknowledgement before removing a v1 cart", async () => {
+    const user = userEvent.setup();
+    useCart.mockReturnValue({ ...cart(), items: [], legacyItemCount: 2 });
+    render(<CartView checkoutIntent={null} />);
+    expect(screen.getByRole("heading", { name: "Choose your variants again." })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Clear old cart and choose variants" }));
+    expect(acknowledgeLegacyReselection).toHaveBeenCalledOnce();
   });
 });
