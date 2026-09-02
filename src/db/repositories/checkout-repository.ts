@@ -1593,6 +1593,7 @@ async function loadProviderCreateVariantFactsFromClient(
     quantityRemaining: number | string;
     reservationState: string;
     reservationExpiresAt: Date | string;
+    reservationExpiryMatchesAttempt: boolean | null;
     reservationUpdatedAt: Date | string;
     itemOrderId: string | null;
     itemProductId: string | null;
@@ -1616,6 +1617,7 @@ async function loadProviderCreateVariantFactsFromClient(
             r.quantity_reserved AS "quantityReserved",
             r.quantity_remaining AS "quantityRemaining",
             r.state AS "reservationState", r.expires_at AS "reservationExpiresAt",
+            r.expires_at = a.expires_at AS "reservationExpiryMatchesAttempt",
             r.updated_at AS "reservationUpdatedAt",
             oi.order_id::text AS "itemOrderId", oi.product_id::text AS "itemProductId",
             oi.variant_id::text AS "itemVariantId", oi.quantity AS "itemQuantity",
@@ -1623,6 +1625,7 @@ async function loadProviderCreateVariantFactsFromClient(
             l.status AS "lotStatus", l.received_quantity AS "lotReceivedQuantity",
             l.expires_at AS "lotExpiresAt", l.updated_at AS "lotUpdatedAt"
      FROM inventory_reservations r
+     JOIN checkout_attempts a ON a.id = r.checkout_attempt_id
      LEFT JOIN order_items oi ON oi.id = r.order_item_id
      LEFT JOIN lots l ON l.id = r.lot_id
      WHERE r.checkout_attempt_id = $1::uuid
@@ -1652,9 +1655,9 @@ async function loadProviderCreateVariantFactsFromClient(
       item.productId !== row.reservationProductId ||
       item.variantId !== row.itemVariantId || item.variantId !== variantId ||
       safeInteger(item.quantity) !== requested.quantity ||
-      row.lotProductId !== row.reservationProductId ||
-      row.lotVariantId !== variantId ||
-      reservationExpiry !== expiresAt
+      (row.lotProductId !== null && row.lotProductId !== row.reservationProductId) ||
+      (row.lotVariantId !== null && row.lotVariantId !== variantId) ||
+      row.reservationExpiryMatchesAttempt !== true
     ) return providerCreateAuthorityConflict;
     seenReservations.add(row.reservationId);
     seenOwnership.add(ownership);
@@ -1680,11 +1683,6 @@ async function loadProviderCreateVariantFactsFromClient(
     if (quantityReserved <= 0 || quantityRemaining !== quantityReserved) {
       return providerCreateAuthorityConflict;
     }
-    const nextCoverage = (coverage.get(variantId) ?? 0) + quantityRemaining;
-    if (!Number.isSafeInteger(nextCoverage) || nextCoverage > requested.quantity) {
-      return providerCreateAuthorityConflict;
-    }
-    coverage.set(variantId, nextCoverage);
     const lotExpiry = row.lotExpiresAt === null ? null : toIso(row.lotExpiresAt);
     if (
       row.lotStatus !== "released" ||
@@ -1693,6 +1691,11 @@ async function loadProviderCreateVariantFactsFromClient(
     ) continue;
     const receivedQuantity = safeInteger(row.lotReceivedQuantity);
     if (receivedQuantity < quantityRemaining) return providerCreateAuthorityConflict;
+    const nextCoverage = (coverage.get(variantId) ?? 0) + quantityRemaining;
+    if (!Number.isSafeInteger(nextCoverage) || nextCoverage > requested.quantity) {
+      return providerCreateAuthorityConflict;
+    }
+    coverage.set(variantId, nextCoverage);
     eligibleLots.push(Object.freeze({
       id: row.reservationLotId,
       variantId,

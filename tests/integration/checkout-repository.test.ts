@@ -558,6 +558,97 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     });
   });
 
+  it("omits quarantined own reservation coverage before evaluating provider-create overcoverage", async () => {
+    const key = "30000000-0000-4000-8000-000000000133";
+    const prepared = await prepareCanonicalVariantV2(key);
+    const quarantinedLotId = keyedUuid("provider-create-quarantined-extra-lot");
+    await client.exec(`
+      INSERT INTO lots
+        (id, product_id, variant_id, supplier_name, supplier_lot_code,
+         received_quantity, available_quantity, status, expires_at, updated_at)
+      VALUES ('${quarantinedLotId}', '${ids.productA}', '${ids.variantA}',
+        'Synthetic supplier', 'SYN-VARIANT-QUARANTINED', 2, 0, 'quarantined',
+        '2026-12-01T00:00:00.000Z', '2026-08-24T00:00:00.000Z');
+      UPDATE inventory_reservations
+      SET quantity_reserved = 1, quantity_remaining = 1
+      WHERE checkout_attempt_id = '${prepared.sessionQuote.plan.identity.attemptId}';
+      INSERT INTO inventory_reservations
+        (id, checkout_attempt_id, order_id, order_item_id, product_id, variant_id,
+         lot_id, quantity_reserved, quantity_remaining, state, expires_at,
+         idempotency_key, created_at, updated_at)
+      SELECT '${keyedUuid("provider-create-quarantined-extra-reservation")}',
+        checkout_attempt_id, order_id, order_item_id, product_id, variant_id,
+        '${quarantinedLotId}', 2, 2, 'active', expires_at,
+        'provider-create-quarantined-extra-reservation', updated_at, updated_at
+      FROM inventory_reservations
+      WHERE checkout_attempt_id = '${prepared.sessionQuote.plan.identity.attemptId}';
+    `);
+
+    await expect(prepared.repository.loadProviderCreateVariantFacts!({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      orderId: prepared.sessionQuote.plan.identity.orderId,
+      attemptId: prepared.sessionQuote.plan.identity.attemptId,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: variantRequest,
+      now,
+    })).resolves.toMatchObject({
+      ok: true,
+      value: {
+        items: [{
+          variantId: ids.variantA,
+          eligibleLots: [{
+            id: ids.variantLotA,
+            availableQuantity: 1,
+          }],
+        }],
+      },
+    });
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: { ...variantRequest, pricingRevision: prepared.pricingRevision },
+    })).resolves.toEqual({
+      status: "CHECKOUT_UNAVAILABLE",
+      reasons: [{ variantId: ids.variantA, code: "unavailable" }],
+    });
+  });
+
+  it("rejects a reservation expiry that differs from its attempt by one microsecond", async () => {
+    const key = "30000000-0000-4000-8000-000000000134";
+    const prepared = await prepareCanonicalVariantV2(key);
+    await client.query(
+      `UPDATE inventory_reservations
+       SET expires_at = expires_at + interval '1 microsecond'
+       WHERE checkout_attempt_id = $1::uuid`,
+      [prepared.sessionQuote.plan.identity.attemptId],
+    );
+
+    await expect(prepared.repository.loadProviderCreateVariantFacts!({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      orderId: prepared.sessionQuote.plan.identity.orderId,
+      attemptId: prepared.sessionQuote.plan.identity.attemptId,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: variantRequest,
+      now,
+    })).resolves.toEqual({
+      ok: false,
+      reasons: ["provider_create_authority_conflict"],
+    });
+
+    await expect(prepared.service.revalidateCanonicalForProviderCreate({
+      buyerUserId: ids.buyer,
+      idempotencyKey: key,
+      paymentProviderAvailable: true,
+      expectedStoredPricingRevision: prepared.pricingRevision,
+      request: { ...variantRequest, pricingRevision: prepared.pricingRevision },
+    })).resolves.toEqual({ status: "internal_conflict" });
+  });
+
   it.each([
     [
       "released own reservation",
