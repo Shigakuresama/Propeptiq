@@ -603,6 +603,8 @@ function canonicalSetup(
   provider: PaymentProvider,
   verifyStatus: "verified" | "unavailable" = "verified",
   shippingAmountMinor = 700,
+  availableQuantity = 10,
+  variantSelection: "both" | "a" = "both",
 ) {
   const trace: string[] = [];
   let durable: Record<string, unknown> | null = null;
@@ -618,9 +620,7 @@ function canonicalSetup(
     quoteSnapshot: BrowserCheckoutQuote;
     pricingRevision: string;
   }> = null;
-  const canonicalFacts = Object.freeze({
-    buyer: facts.buyer,
-    items: Object.freeze([
+  const canonicalItems = [
       Object.freeze({
         variantId: ids.variantB,
         productId: ids.product,
@@ -645,7 +645,7 @@ function canonicalSetup(
         stripeProductId: "prod_synthetic_parent",
         stripePriceId: "price_synthetic_b",
         destination: facts.items[0]!.destination,
-        eligibleLots: Object.freeze([{ ...facts.items[0]!.eligibleLots[0]!, id: ids.lotB }]),
+        eligibleLots: Object.freeze([{ ...facts.items[0]!.eligibleLots[0]!, id: ids.lotB, receivedQuantity: availableQuantity, availableQuantity }]),
       }),
       Object.freeze({
         variantId: ids.variantA,
@@ -671,9 +671,12 @@ function canonicalSetup(
         stripeProductId: "prod_synthetic_parent",
         stripePriceId: "price_synthetic_a",
         destination: facts.items[0]!.destination,
-        eligibleLots: facts.items[0]!.eligibleLots,
+        eligibleLots: Object.freeze([{ ...facts.items[0]!.eligibleLots[0]!, receivedQuantity: availableQuantity, availableQuantity }]),
       }),
-    ]),
+    ] as const;
+  const canonicalFacts = Object.freeze({
+    buyer: facts.buyer,
+    items: Object.freeze(variantSelection === "a" ? [canonicalItems[1]!] : canonicalItems),
     automaticPromotions: Object.freeze([]),
   });
   const checkoutRepository = {
@@ -808,6 +811,87 @@ function canonicalSetup(
 }
 
 describe("canonical variant provider state machine", () => {
+  it.each([
+    [1, 0, 2_000, 2_000],
+    [2, 8, 1_840, 3_680],
+    [3, 10, 1_800, 5_400],
+    [4, 10, 1_800, 7_200],
+    [9, 10, 1_800, 16_200],
+    [10, 30, 1_400, 14_000],
+    [11, 30, 1_400, 15_400],
+  ])("keeps quantity %i in the authoritative quote and inline provider line (%i%% tier)", async (
+    quantity,
+    _discountPct,
+    expectedUnitMinor,
+    expectedLineTotalMinor,
+  ) => {
+    let providerRequest: Parameters<PaymentProvider["createCheckoutSession"]>[0] | null = null;
+    const provider = stripeProviderWith((exactRequest) => {
+      providerRequest = exactRequest;
+      return {
+        status: "open",
+        session: {
+          ...normalizedSession(exactRequest),
+          provider: "stripe",
+          hostedUrl: "https://checkout.stripe.com/c/pay/cs_test_quantity_tier",
+        },
+      };
+    });
+    const fixture = canonicalSetup(provider, "verified", 700, 25, "a");
+    const context = await stripeContext(provider);
+    const quote = await fixture.checkoutService.quote({
+      buyerUserId: ids.buyer,
+      idempotencyKey: keyedUuid(`tier:${quantity}`),
+      paymentProviderAvailable: true,
+      request: {
+        items: [{ variantId: ids.variantA, quantity }],
+        destination: fixture.quoteRequest.destination,
+      },
+    });
+    if (quote.status !== "quoted") throw new Error(`unexpected quote ${quote.status}`);
+    const line = quote.quote.lines[0];
+    expect(line).toMatchObject({
+      quantity,
+      unitAmountMinor: 2_000,
+      subtotalMinor: quantity * 2_000,
+      discountMinor: quantity * 2_000 - expectedLineTotalMinor,
+      totalMinor: expectedLineTotalMinor,
+    });
+    expect(line!.totalMinor / quantity).toBe(expectedUnitMinor);
+
+    await expect(fixture.orchestrator.start({
+      context,
+      idempotencyKey: keyedUuid(`tier:${quantity}`),
+      request: {
+        items: [{ variantId: ids.variantA, quantity }],
+        destination: fixture.quoteRequest.destination,
+        pricingRevision: quote.pricingRevision,
+      },
+    })).resolves.toMatchObject({ status: "open" });
+
+    expect(providerRequest).toMatchObject({
+      allow_promotion_codes: false,
+      line_items: [
+        { quantity: 1, price_data: { product: "prod_synthetic_parent", unit_amount: expectedLineTotalMinor } },
+        { quantity: 1, price_data: { product_data: { name: "Shipping" }, unit_amount: 700 } },
+        { quantity: 1, price_data: { product_data: { name: "Sales tax" }, unit_amount: 325 } },
+      ],
+    });
+    expect(providerRequest).not.toBeNull();
+    const exactProviderRequest = providerRequest as unknown as Parameters<PaymentProvider["createCheckoutSession"]>[0];
+    expect(exactProviderRequest.line_items).toHaveLength(3);
+    const serializedProviderRequest = JSON.stringify(exactProviderRequest);
+    for (const forbiddenProperty of [
+      "price", "price_id", "stripePriceId", "stripe_price_id", "baseUnitMinor",
+      "base_unit_minor", "discount", "discountPct", "discount_percentage",
+      "promotionIds", "promotionCode", "promotion_code",
+    ]) {
+      expect(serializedProviderRequest).not.toMatch(new RegExp(`\\"${forbiddenProperty}\\":`));
+    }
+    expect(serializedProviderRequest).not.toContain("price_synthetic_a");
+    expect(serializedProviderRequest).not.toContain("WINTER30");
+  });
+
   it("fails unavailable before preparation, reservation, durable creation, or Session creation", async () => {
     const provider = stripeProviderWith((exactRequest) => ({
       status: "open",
