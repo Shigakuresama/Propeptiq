@@ -40,7 +40,8 @@ describe("CatalogItemDetail", () => {
     expect(screen.getByRole("img", { name: product.image.alt })).toBeVisible();
     expect(screen.getByText("Source label: Pinealon10mg")).toBeVisible();
     expect(screen.getByText("PN5")).toBeVisible();
-    expect(screen.getByText("5mg × 10 vials")).toBeVisible();
+    expect(screen.getByText("5mg")).toBeVisible();
+    expect(screen.queryByText("5mg × 10 vials")).not.toBeInTheDocument();
     expect(screen.getByText("Illustrative product presentation")).toBeVisible();
     expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
     expect(document.body).not.toHaveTextContent(/\$|usd/i);

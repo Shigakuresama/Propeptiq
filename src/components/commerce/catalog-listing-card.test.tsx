@@ -85,7 +85,8 @@ describe("CatalogListingCard", () => {
     expect(image.parentElement).toHaveClass("catalog-image-frame");
     expect(within(article).getByRole("heading", { name: product.name })).toBeVisible();
     expect(within(article).getByText("TR5")).toBeVisible();
-    expect(within(article).getByText("5mg × 10 vials")).toBeVisible();
+    expect(within(article).getByText("5mg")).toBeVisible();
+    expect(within(article).queryByText("5mg × 10 vials")).not.toBeInTheDocument();
     expect(within(article).getByText("Illustrative product presentation")).toBeVisible();
     expect(within(article).getByText("Pricing coming soon")).toBeVisible();
     expect(

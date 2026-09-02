@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import type { ControlledContentRecord } from "@/content/storefront-content";
 
 import { browseCatalogPublicationId } from "./browse-catalog-publication";
+import { browseCatalogProducts } from "./browse-catalog";
+import { storefrontCatalogDecisionManifest } from "./storefront-catalog-manifest";
 import { parseStorefrontBindings } from "./storefront-bindings";
 import type { StorefrontCatalogData } from "./storefront-catalog-data";
 import type { StorefrontProduct } from "./storefront-types";
@@ -242,14 +244,34 @@ describe("public storefront projection", () => {
     if (product?.kind !== "canonical") throw new Error("expected canonical fixture");
     expect(product.displayConfigurations).toHaveLength(9);
     expect(product.displayConfigurations.slice(0, 2)).toEqual([
-      { displayCode: "TR5", packageForm: "5mg × 10 vials" },
-      { displayCode: "TR10", packageForm: "10mg × 10 vials" },
+      { displayCode: "TR5", packageForm: "5mg" },
+      { displayCode: "TR10", packageForm: "10mg" },
     ]);
     expect(product.variants.map((variant) => variant.id)).toEqual([
       firstVariantId,
       defaultVariantId,
     ]);
     expect(product.variants[0]?.label).toBe("Deliberately not a browse display label");
+  });
+
+  it("projects every browse row with its reviewed one-vial label without mutating provenance", () => {
+    const catalog = buildFixtureCatalog({
+      catalogData: { products: [], bindings: parseStorefrontBindings({ products: [], variants: [] }) },
+      runtimeVariantFacts: [],
+      controlledContent: [],
+    });
+    const sourceRows = browseCatalogProducts.flatMap((product) => product.variants);
+    const projectedRows = catalog.products.flatMap((product) => product.displayConfigurations);
+    expect(projectedRows).toHaveLength(103);
+    expect(projectedRows.every((row) => !row.packageForm.includes("× 10 vials"))).toBe(true);
+    expect(projectedRows.map((row) => row.packageForm)).toEqual(
+      storefrontCatalogDecisionManifest.variants.map((decision) => decision.publicLabel),
+    );
+    expect(sourceRows.some((row) => row.packageForm.includes("× 10 vials"))).toBe(true);
+    expect(sourceRows[0]?.packageForm).toBe("5mg × 10 vials");
+    expect(catalog.products.every((product) => product.kind === "browse_only" && product.variants.length === 0)).toBe(true);
+    expect(JSON.stringify(catalog)).not.toContain("candidate");
+    expect(JSON.stringify(catalog)).not.toContain("stripePriceId");
   });
 
   it("publishes referenced approved content in product-configured order", () => {

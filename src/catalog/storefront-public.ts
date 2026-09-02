@@ -7,6 +7,7 @@ import {
   type PublishedBrowseCatalog,
 } from "./browse-catalog-publication";
 import { parseStorefrontBindings } from "./storefront-bindings";
+import { getStorefrontCatalogDecision } from "./storefront-catalog-manifest";
 import type { StorefrontCatalogData } from "./storefront-catalog-data";
 import type { DatabaseCatalogRecordSet } from "./database-catalog";
 import type {
@@ -468,7 +469,7 @@ function displayConfigurations(
     product.variants.map((variant) =>
       Object.freeze({
         displayCode: variant.code,
-        packageForm: variant.packageForm,
+        packageForm: getStorefrontCatalogDecision(product.slug, variant.code).publicLabel,
         ...(variant.sourceName === undefined ? {} : { sourceName: variant.sourceName }),
         ...(variant.sourcePage === undefined ? {} : { sourcePage: variant.sourcePage }),
       }),
