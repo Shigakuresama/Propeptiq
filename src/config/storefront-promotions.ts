@@ -1,3 +1,11 @@
+import {
+  isStrictStorefrontPromotionInstant,
+  storefrontPromotionDateEpochNanoseconds,
+  storefrontPromotionInstantEpochNanoseconds,
+} from "@/domain/storefront-promotion-time";
+
+export { isStrictStorefrontPromotionInstant } from "@/domain/storefront-promotion-time";
+
 export type StorefrontPromotionConfigurationScope = Readonly<
   | { kind: "sitewide" }
   | { kind: "products"; productIds: readonly string[] }
@@ -36,7 +44,6 @@ export const STOREFRONT_PROMOTIONS: readonly StorefrontPromotionConfiguration[] 
   Object.freeze([WINTER30_STOREFRONT_PROMOTION]);
 
 const campaignKey = /^[a-z0-9]+(?:[_-][a-z0-9]+)*$/u;
-const strictInstant = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-](\d{2}):(\d{2}))$/u;
 const configurationKeys = Object.freeze([
   "id",
   "displayName",
@@ -53,45 +60,6 @@ const MAX_CONFIGURED_PROMOTIONS = 100;
 /** Caps one server-owned promotion snapshot before any reconciliation work. */
 const MAX_AUTHORITATIVE_PROMOTIONS = 1_000;
 const MAX_SCOPE_TARGETS = 1_000;
-const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
-
-function daysInMonth(year: number, month: number): number {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-export function isStrictStorefrontPromotionInstant(
-  value: unknown,
-): value is string {
-  if (typeof value !== "string") return false;
-  const match = strictInstant.exec(value);
-  if (!match) return false;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4]);
-  const minute = Number(match[5]);
-  const second = Number(match[6]);
-  const offsetHour = match[9] === undefined ? 0 : Number(match[9]);
-  const offsetMinute = match[10] === undefined ? 0 : Number(match[10]);
-  return (
-    month >= 1 &&
-    month <= 12 &&
-    day >= 1 &&
-    day <= daysInMonth(year, month) &&
-    hour >= 0 &&
-    hour <= 23 &&
-    minute >= 0 &&
-    minute <= 59 &&
-    second >= 0 &&
-    second <= 59 &&
-    offsetHour >= 0 &&
-    offsetHour <= 23 &&
-    offsetMinute >= 0 &&
-    offsetMinute <= 59 &&
-    Number.isFinite(Date.parse(value))
-  );
-}
-
 export function isValidStorefrontPromotionTimezone(
   value: unknown,
 ): value is string {
@@ -253,8 +221,8 @@ function normalizeConfiguration(
     return null;
   }
   if (entry.startAt !== null && entry.endAt !== null) {
-    const startInstant = strictInstantEpochNanoseconds(entry.startAt);
-    const endInstant = strictInstantEpochNanoseconds(entry.endAt);
+    const startInstant = storefrontPromotionInstantEpochNanoseconds(entry.startAt);
+    const endInstant = storefrontPromotionInstantEpochNanoseconds(entry.endAt);
     if (
       startInstant === null ||
       endInstant === null ||
@@ -293,18 +261,19 @@ export function resolveActiveConfiguredAutomaticPromotions(
       ids.add(promotion.id);
       normalized.push(promotion);
     }
-    const nowInstant = BigInt(now.getTime()) * NANOSECONDS_PER_MILLISECOND;
+    const nowInstant = storefrontPromotionDateEpochNanoseconds(now);
+    if (nowInstant === null) return null;
     const active = normalized
       .filter((promotion) => {
         if (!promotion.enabled || promotion.applicationMode !== "automatic") {
           return false;
         }
         if (promotion.startAt !== null) {
-          const startInstant = strictInstantEpochNanoseconds(promotion.startAt);
+          const startInstant = storefrontPromotionInstantEpochNanoseconds(promotion.startAt);
           if (startInstant === null || nowInstant < startInstant) return false;
         }
         if (promotion.endAt !== null) {
-          const endInstant = strictInstantEpochNanoseconds(promotion.endAt);
+          const endInstant = storefrontPromotionInstantEpochNanoseconds(promotion.endAt);
           if (endInstant === null || nowInstant >= endInstant) return false;
         }
         return true;
@@ -334,29 +303,15 @@ function scopesMatch(
   return false;
 }
 
-function strictInstantEpochNanoseconds(value: unknown): bigint | null {
-  if (!isStrictStorefrontPromotionInstant(value)) return null;
-  const match = strictInstant.exec(value);
-  if (match === null) return null;
-  const fraction = (match[7] ?? "").padEnd(9, "0");
-  const millisecondsWithinSecond = BigInt(fraction.slice(0, 3));
-  const epochMilliseconds = BigInt(Date.parse(value));
-  return (
-    (epochMilliseconds - millisecondsWithinSecond) *
-      NANOSECONDS_PER_MILLISECOND +
-    BigInt(fraction)
-  );
-}
-
 function isPersistenceCompatibleOwnerInstant(value: unknown): boolean {
-  const instant = strictInstantEpochNanoseconds(value);
-  return instant !== null && instant % NANOSECONDS_PER_MILLISECOND === 0n;
+  const instant = storefrontPromotionInstantEpochNanoseconds(value);
+  return instant !== null && instant % 1_000_000n === 0n;
 }
 
 function instantsMatch(candidate: unknown, configured: string | null): boolean {
   if (candidate === null || configured === null) return candidate === configured;
-  const candidateInstant = strictInstantEpochNanoseconds(candidate);
-  const configuredInstant = strictInstantEpochNanoseconds(configured);
+  const candidateInstant = storefrontPromotionInstantEpochNanoseconds(candidate);
+  const configuredInstant = storefrontPromotionInstantEpochNanoseconds(configured);
   return (
     candidateInstant !== null &&
     configuredInstant !== null &&

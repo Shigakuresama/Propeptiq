@@ -1,4 +1,8 @@
 import type { PriceStatus, StorefrontVariant } from "@/catalog/storefront-types";
+import {
+  storefrontPromotionDateEpochNanoseconds,
+  storefrontPromotionInstantEpochNanoseconds,
+} from "./storefront-promotion-time";
 
 const BASIS_POINT_DENOMINATOR = 10_000n;
 const MAX_QUANTITY = 25;
@@ -118,11 +122,6 @@ type PromotionInterval = Readonly<{
   endAt: string | null;
 }>;
 
-function instant(value: string): number | null {
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 export function isStorefrontPromotionActive(
   promotion: PromotionInterval,
   now: Date,
@@ -139,13 +138,15 @@ export function isStorefrontPromotionActive(
   }
   if (!promotion.enabled) return false;
 
-  const start = promotion.startAt === null ? null : instant(promotion.startAt);
-  const end = promotion.endAt === null ? null : instant(promotion.endAt);
+  const start = promotion.startAt === null ? null : storefrontPromotionInstantEpochNanoseconds(promotion.startAt);
+  const end = promotion.endAt === null ? null : storefrontPromotionInstantEpochNanoseconds(promotion.endAt);
   if ((promotion.startAt !== null && start === null) || (promotion.endAt !== null && end === null)) {
     return false;
   }
-  const nowMs = now.valueOf();
-  return (start === null || nowMs >= start) && (end === null || nowMs < end);
+  const nowInstant = storefrontPromotionDateEpochNanoseconds(now);
+  return nowInstant !== null &&
+    (start === null || nowInstant >= start) &&
+    (end === null || nowInstant < end);
 }
 
 export function promotionApplies(

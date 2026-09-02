@@ -168,6 +168,16 @@ const activePromotion = (overrides: Partial<StorefrontPromotion> = {}): Storefro
 });
 
 describe("promotion intervals", () => {
+  it.each([
+    ["startAt", "2026-09-01T12:00:00.001000001Z", false],
+    ["startAt", "2026-09-01T12:00:00.000999999Z", true],
+    ["endAt", "2026-09-01T12:00:00.001000001Z", true],
+    ["endAt", "2026-09-01T12:00:00.001000000Z", false],
+  ])("compares nanosecond %s boundaries exactly", (boundary, instant, expected) => {
+    const promotion = activePromotion({ [boundary]: instant });
+    expect(isStorefrontPromotionActive(promotion, new Date("2026-09-01T12:00:00.001Z"))).toBe(expected);
+  });
+
   it("keeps an enabled promotion with no time bounds active", () => {
     expect(isStorefrontPromotionActive(activePromotion(), new Date("2026-08-30T08:00:00.000Z"))).toBe(true);
   });
