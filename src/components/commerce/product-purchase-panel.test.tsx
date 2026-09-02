@@ -97,6 +97,39 @@ describe("ProductPurchasePanel", () => {
     expect(summary()).toHaveTextContent("$18.40");
   });
 
+  it.each(["9", "1"])("rejects typed quantity %s while the 10+ minimum is active", (draft) => {
+    const resolver = vi.spyOn(pricingPresentation, "resolvePublicVariantPrice");
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext()} /></CartProvider>);
+    const input = screen.getByRole("spinbutton", { name: "Exact quantity" });
+    fireEvent.click(screen.getByRole("button", { name: "10 or more bottles" }));
+    resolver.mockClear();
+    fireEvent.change(input, { target: { value: draft } });
+    expect(input).toHaveAttribute("min", "10");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByText("Enter a whole number from 10 to 25.")).toBeVisible();
+    const summary = screen.getByRole("status", { name: "Purchase summary" });
+    expect(summary).toHaveTextContent("Invalid quantity");
+    expect(summary).toHaveTextContent("Enter a whole number from 10 to 25.");
+    expect(summary).not.toHaveTextContent("Enter a whole number from 1 to 25.");
+    expect(screen.getByRole("button", { name: /unavailable/i })).toBeDisabled();
+    expect(resolver).not.toHaveBeenCalled();
+    if (draft === "9") {
+      fireEvent.click(screen.getByRole("button", { name: "Decrease quantity" }));
+      expect(input).toHaveValue(9);
+      expect(input).toHaveAttribute("min", "1");
+      expect(input).not.toHaveAttribute("aria-invalid", "true");
+      expect(screen.queryByText("Enter a whole number from 10 to 25.")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "10 or more bottles" })).toHaveAttribute("aria-pressed", "false");
+      expect(summary).toHaveTextContent("10%");
+      expect(summary).toHaveTextContent("$81.00");
+      expect(screen.getByRole("button", { name: /add synthetic product alpha to cart/i })).toBeEnabled();
+      fireEvent.change(input, { target: { value: "10" } });
+      expect(input).toHaveAttribute("min", "10");
+      expect(screen.getByRole("button", { name: "10 or more bottles" })).toHaveAttribute("aria-pressed", "true");
+    }
+    resolver.mockRestore();
+  });
+
   it.each([
     ["mapping missing", testPublicVariant({ checkoutReady: false }), "Checkout unavailable", true],
     ["unavailable", testPublicVariant({ availability: "unavailable", checkoutReady: false }), "Unavailable", false],
