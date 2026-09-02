@@ -31,7 +31,9 @@ vi.mock("@/search/storefront-index", () => ({
   buildStorefrontSearchIndex: defaultBuildIndex,
 }));
 
-import { GET, createStorefrontSearchHandler } from "./route";
+import * as route from "./route";
+import { GET } from "./route";
+import { createStorefrontSearchHandler } from "@/search/storefront-search-handler";
 
 const emptyIndex: StorefrontSearchIndex = Object.freeze({
   version: 1,
@@ -136,6 +138,10 @@ beforeEach(() => {
 });
 
 describe("GET /api/storefront-search", () => {
+  it("exports only the supported GET route handler", () => {
+    expect(Object.keys(route)).toEqual(["GET"]);
+  });
+
   it("uses the pre-import storefront and content-view accessors and builder exactly once", async () => {
     const response = await GET(request());
 
@@ -617,9 +623,7 @@ describe("GET /api/storefront-search", () => {
     );
 
     expect(importSpecifiers.sort()).toEqual([
-      "@/catalog/storefront-public-server",
-      "@/content/storefront-public-content-server",
-      "@/search/storefront-index",
+      "@/search/storefront-search-handler",
       "server-only",
     ]);
     expect(
