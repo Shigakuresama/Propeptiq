@@ -1,4 +1,5 @@
 import { isStorefrontPromotionActive } from "@/domain/storefront-pricing";
+import { storefrontPromotionInstantEpochNanoseconds } from "@/domain/storefront-promotion-time";
 import {
   isStrictStorefrontPromotionInstant,
   isValidStorefrontPromotionTimezone,
@@ -195,12 +196,22 @@ export function projectAutomaticStorefrontPromotions(input: Readonly<{
       addDiagnostic(diagnostics, "invalid_campaign", row);
       continue;
     }
+    const startsAtEpochNanoseconds =
+      row.startsAt === null
+        ? null
+        : storefrontPromotionInstantEpochNanoseconds(row.startsAt);
+    const endsAtEpochNanoseconds =
+      row.endsAt === null
+        ? null
+        : storefrontPromotionInstantEpochNanoseconds(row.endsAt);
     if (
       !validInstant(row.startsAt) ||
       !validInstant(row.endsAt) ||
       (row.startsAt !== null &&
         row.endsAt !== null &&
-        Date.parse(row.endsAt) <= Date.parse(row.startsAt))
+        (startsAtEpochNanoseconds === null ||
+          endsAtEpochNanoseconds === null ||
+          endsAtEpochNanoseconds <= startsAtEpochNanoseconds))
     ) {
       addDiagnostic(diagnostics, "invalid_interval", row);
       continue;

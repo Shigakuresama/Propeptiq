@@ -121,6 +121,8 @@ describe("automatic storefront promotion projection", () => {
     ["impossible timestamp", promotion({ startsAt: "2026-02-31T12:00:00.000Z" }), "invalid_interval"],
     ["inverted interval", promotion({ startsAt: "2026-09-01T00:00:00.000Z", endsAt: "2026-08-31T00:00:00.000Z" }), "invalid_interval"],
     ["empty interval", promotion({ startsAt: "2026-08-31T12:00:00.000Z", endsAt: "2026-08-31T12:00:00.000Z" }), "invalid_interval"],
+    ["reversed sub-millisecond interval", promotion({ startsAt: "2026-08-30T00:00:00.000000002Z", endsAt: "2026-08-30T00:00:00.000000001Z" }), "invalid_interval"],
+    ["equal sub-millisecond interval", promotion({ startsAt: "2026-08-30T00:00:00.000000001Z", endsAt: "2026-08-30T00:00:00.000000001Z" }), "invalid_interval"],
     ["invalid timezone", promotion({ timezone: "Mars/Olympus" }), "invalid_campaign"],
     ["blank campaign", promotion({ campaignKey: " " }), "invalid_campaign"],
     ["blank display name", promotion({ name: " " }), "invalid_campaign"],
@@ -131,6 +133,18 @@ describe("automatic storefront promotion projection", () => {
     expect(result.promotions).toEqual([]);
     expect(result.diagnostics).toEqual([{ code, campaignKey: row.campaignKey?.trim() ? row.campaignKey : null }]);
     expect(JSON.stringify(result.diagnostics)).not.toContain(row.id);
+  });
+
+  it("accepts a valid sub-millisecond interval instead of comparing truncated milliseconds", () => {
+    const row = promotion({
+      startsAt: "1969-12-31T18:59:59.000000001-05:00",
+      endsAt: "1969-12-31T18:59:59.000000002-05:00",
+    });
+
+    expect(projectAutomaticStorefrontPromotions({ records: records([row]), now })).toEqual({
+      promotions: [],
+      diagnostics: [],
+    });
   });
 
   it("projects coherent product and variant scopes", () => {
