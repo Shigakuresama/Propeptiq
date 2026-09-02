@@ -309,7 +309,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("owner-configured WINTER30 promotion remains visible without purchasable canonical lines", async ({
+test("owner-configured WINTER30 promotion remains visible with preview-only canonical lines", async ({
   page,
 }) => {
   await page.goto("/");
@@ -326,10 +326,6 @@ test("owner-configured WINTER30 promotion remains visible without purchasable ca
   await expect(
     banner.getByRole("button", { name: "Copy promotion code WINTER30" }),
   ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /add .* to cart/iu }),
-  ).toHaveCount(0);
-  await expect(page.getByText(/\$\d+[.,]\d{2}/u)).toHaveCount(0);
 });
 
 test("site search ultra-narrow public header keeps every keyboard focus target inside the viewport without clipping overflow", async ({
@@ -1301,16 +1297,16 @@ test("unknown product slugs fail closed", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("owner-supplied catalog is complete, price-free, and serves every illustration", async ({
+test("owner-supplied catalog is complete, priced where reviewed, and serves every illustration", async ({
   page,
   request,
 }) => {
   await page.goto("/catalog");
   await expect(page.locator("article.catalog-listing-card")).toHaveCount(56);
   await expect(page.getByText("103 supplied package configurations")).toBeVisible();
-  await expect(page.getByRole("button", { name: /add .* to cart/i })).toHaveCount(0);
-  await expect(page.locator("main")).not.toContainText("$");
-
+  await expect(page.getByRole("button", { name: /add .* to cart/i })).toHaveCount(56);
+  await expect(page.locator("main")).toContainText("$41.99");
+  await expect(page.locator("main")).toContainText("-30%");
   const imagePaths = await page.locator("article.catalog-listing-card img").evaluateAll(
     (images) =>
       images.map((image) => {
@@ -1331,8 +1327,9 @@ test("owner-supplied catalog is complete, price-free, and serves every illustrat
   await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide$/u);
   await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
   await expect(page.getByText("TR5", { exact: true })).toBeVisible();
-  await expect(page.locator("main")).not.toContainText("$");
-  await expect(page.getByRole("button", { name: /add .* to cart/i })).toHaveCount(0);
+  await expect(page.getByRole("radio")).toHaveCount(9);
+  await expect(page.locator("main")).toContainText("$41.99");
+  await expect(page.locator("main")).toContainText("Preview only");
 
   const imageLoaded = await page.getByRole("img", {
     name: /illustrative research-catalog still life for Tirzepatide/i,
@@ -1346,7 +1343,7 @@ test("owner-supplied catalog is complete, price-free, and serves every illustrat
   expect(unknown?.status()).toBe(404);
 });
 
-test("retained browse-only item has no gated calculator, related carousel, overflow, or eager related media", async ({ page }) => {
+test("preview item has no gated calculator, related carousel, overflow, or eager related media", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/catalog/items/tirzepatide");
