@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
+import { parseStorefrontBindings } from "@/catalog/storefront-bindings";
 import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
 import {
   buildPublicStorefrontCatalog,
@@ -81,7 +82,18 @@ describe("CatalogItemDetail", () => {
   });
 
   it("keeps a synthetic browse-only item entirely purchase-free with all configurations", () => {
-    const base = findPublicStorefrontProduct(catalog, "pinealon")!;
+    const browseOnlyCatalog = buildPublicStorefrontCatalog({
+      configuredPublicationId: browseCatalogPublicationId,
+      catalogData: {
+        products: [],
+        bindings: parseStorefrontBindings({ products: [], variants: [] }),
+      },
+      runtimeVariantFacts: [],
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+    });
+    const base = findPublicStorefrontProduct(browseOnlyCatalog, "pinealon")!;
+    expect(base.kind).toBe("browse_only");
     const browse = { ...base, displayConfigurations: [{ displayCode: "A", packageForm: "one" }, { displayCode: "B", packageForm: "two" }, { displayCode: "C", packageForm: "three" }] };
     render(<CatalogItemDetail product={browse} pricing={testPricingContext()} relatedProducts={[]} calculator={calculator} />);
     expect(screen.getByText("A")).toBeVisible(); expect(screen.getByText("B")).toBeVisible(); expect(screen.getByText("C")).toBeVisible(); expect(screen.queryByRole("radio")).toBeNull(); expect(screen.queryByRole("spinbutton")).toBeNull(); expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull(); expect(screen.queryByRole("status", { name: "Purchase summary" })).toBeNull(); expect(screen.queryByText(/approved information/i)).toBeNull(); expect(document.body).not.toHaveTextContent(/\$|usd/i);
