@@ -60,9 +60,14 @@ type PublicRoute =
 
 const screenshotDirectory = path.resolve(
   process.cwd(),
-  ".superpowers/sdd/2026-08-24-propeptiq-lightweight-commerce/screenshots",
+  ".superpowers/sdd/2026-09-02-propeptiq-visible-storefront-correction/screenshots",
 );
 const localTestVariantId = "55000000-0000-4000-8000-000000000001";
+const tirzepatideVariantIds = {
+  tr5: "64922357-4f10-5d9d-be72-ba5f492cfa13",
+  tr30: "5ff78cc3-c541-5bf4-9f3b-12be2222cc75",
+  tr60: "d6b26e70-2a1b-599c-93f0-c85cd014ffd5",
+} as const;
 const fictionalSearchIndex = {
   version: 1,
   entries: [
@@ -312,6 +317,12 @@ test.beforeEach(async ({ page }) => {
 test("owner-configured WINTER30 promotion remains visible with preview-only canonical lines", async ({
   page,
 }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async () => undefined },
+    });
+  });
   await page.goto("/");
 
   const banner = page.getByRole("complementary", { name: "Promotion" });
@@ -326,6 +337,8 @@ test("owner-configured WINTER30 promotion remains visible with preview-only cano
   await expect(
     banner.getByRole("button", { name: "Copy promotion code WINTER30" }),
   ).toBeVisible();
+  await banner.getByRole("button", { name: "Copy promotion code WINTER30" }).click();
+  await expect(banner.getByRole("status")).toHaveText("WINTER30 copied");
 });
 
 test("site search ultra-narrow public header keeps every keyboard focus target inside the viewport without clipping overflow", async ({
@@ -567,6 +580,27 @@ test("site search launcher stays centered, operable, and clear of the footer acr
   }
 
   expect(requests).toHaveLength(0);
+});
+
+test("canonical catalog and detail stay within the viewport at every required width", async ({
+  page,
+}) => {
+  const widths = [320, 375, 768, 1024, 1440, 1920] as const;
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: width <= 375 ? 812 : 900 });
+    for (const route of ["/catalog", "/catalog/items/tirzepatide"] as const) {
+      await page.goto(route);
+      await expect(page.getByRole("button", { name: "Search PropeptIQ" })).toBeVisible();
+      const layout = await horizontalLayout(page);
+      expect(
+        layout.scrollWidth - layout.clientWidth,
+        `${route} at ${width}px horizontal overflow: ${JSON.stringify(layout.offenders)}`,
+      ).toBeLessThanOrEqual(1);
+      const launcher = await clientRect(page.getByRole("button", { name: "Search PropeptIQ" }));
+      expect(launcher.left, `${route} at ${width}px launcher left`).toBeGreaterThanOrEqual(0);
+      expect(launcher.right, `${route} at ${width}px launcher right`).toBeLessThanOrEqual(width);
+    }
+  }
 });
 
 test("site search Sheet switches from full-height phone geometry at 767px to capped desktop geometry at 768px", async ({
@@ -1372,26 +1406,57 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await page.goto("/catalog/items/tirzepatide");
   const radios = page.locator('input[type="radio"]');
   await expect(radios).toHaveCount(9);
-  await expect(radios.nth(4)).toBeChecked();
+  await expect(page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`)).toBeVisible();
+  await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`).check();
   const pricing = page.locator("main dl");
+  const tr5Pricing = await pricing.evaluate((element) => {
+    const values = new Map<string, string>();
+    const terms = [...element.querySelectorAll("dt")];
+    for (const term of terms) {
+      const value = term.nextElementSibling;
+      if (value) values.set(term.textContent?.trim() ?? "", value.textContent?.trim() ?? "");
+    }
+    return Object.fromEntries(values);
+  });
+  expect(tr5Pricing).toMatchObject({
+    "Standard unit price": "$0.00",
+    "Effective unit price": "$0.00",
+    Discount: "30%",
+    Savings: "$0.00",
+    Subtotal: "$0.00",
+  });
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("Preview only");
+  await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
+  await expect(page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`)).toBeChecked();
   await expect(pricing).toContainText("$59.99");
   await expect(pricing).toContainText("$41.99");
   await expect(pricing).toContainText("30%");
   await expect(pricing).toContainText("$18.00");
   await expect(pricing).toContainText("Subtotal");
-  await page.getByRole("button", { name: "2 bottles" }).click();
-  await expect(pricing).toContainText("$83.98");
-  await page.getByRole("button", { name: "3 bottles" }).click();
-  await expect(pricing).toContainText("$125.97");
-  await page.getByRole("button", { name: "10 or more bottles" }).click();
+  const quantityPresets = new Map([[1, "1 bottle"], [2, "2 bottles"], [3, "3 bottles"], [10, "10 or more bottles"]]);
+  const expectedSubtotals = new Map([[1, "$41.99"], [2, "$83.98"], [3, "$125.97"], [4, "$167.96"], [9, "$377.91"], [10, "$419.90"], [11, "$461.89"]]);
+  for (const quantity of [1, 2, 3, 4, 9, 10, 11]) {
+    const preset = quantityPresets.get(quantity);
+    if (preset) await page.getByRole("button", { name: preset }).click();
+    else await page.getByRole("spinbutton", { name: "Exact quantity" }).fill(String(quantity));
+    await expect(pricing).toContainText("30%");
+    await expect(pricing).not.toContainText(/(?:38|40)%/u);
+    await expect(pricing).toContainText(expectedSubtotals.get(quantity)!);
+  }
   await expect(page.getByRole("spinbutton", { name: "Exact quantity" })).toHaveAttribute("min", "10");
-  await page.getByRole("spinbutton", { name: "Exact quantity" }).fill("11");
-  await expect(pricing).toContainText("$461.89");
+
+  await page.getByRole("button", { name: "3 bottles" }).click();
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("3 bottles");
+  await page.getByRole("button", { name: "Increase quantity" }).click();
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("4 bottles");
+  await page.getByRole("button", { name: "Decrease quantity" }).click();
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("3 bottles");
 
   await page.getByRole("button", { name: "1 bottle" }).click();
+  await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
   await page.getByRole("button", { name: /add tirzepatide to cart/i }).click();
   await page.getByRole("button", { name: /add tirzepatide to cart/i }).click();
-  await radios.nth(7).click();
+  await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr60}"]`).check();
   await expect(pricing).toContainText("$109.99");
   await expect(pricing).toContainText("$76.99");
   await expect(pricing).toContainText("$33.00");
@@ -1400,7 +1465,21 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   const persisted = await page.evaluate(() => JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"));
   expect(persisted.items).toHaveLength(2);
   expect(persisted.items.map((item: { quantity: number }) => item.quantity).sort()).toEqual([1, 2]);
-  expect(new Set(persisted.items.map((item: { variantId: string }) => item.variantId)).size).toBe(2);
+  expect(persisted.items).toEqual(expect.arrayContaining([
+    expect.objectContaining({ variantId: tirzepatideVariantIds.tr30, quantity: 2 }),
+    expect.objectContaining({ variantId: tirzepatideVariantIds.tr60, quantity: 1 }),
+  ]));
+
+  const blockedRequests: string[] = [];
+  await page.route(/\/api\/(?:checkout|stripe|provider)(?:\/|$)/u, async (route) => {
+    blockedRequests.push(new URL(route.request().url()).pathname);
+    await route.abort();
+  });
+  await page.goto("/cart");
+  const continueButton = page.getByRole("button", { name: "Continue to sign in" });
+  await expect(continueButton).toBeDisabled();
+  await expect(page.getByText(/unavailable|not currently available|review the server facts/iu).first()).toBeVisible();
+  expect(blockedRequests).toEqual([]);
 });
 
 test("home and browse catalog hydrate without application console errors", async ({ page }) => {
