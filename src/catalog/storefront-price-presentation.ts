@@ -54,10 +54,8 @@ export function canAddPublicVariant(
   mode: PricePresentationMode,
 ): boolean {
   if (variant.priceStatus === "active") {
-    return (variant.availability === "available" || variant.availability === "preview_only") &&
-      variant.baseUnitMinor !== null && Number.isSafeInteger(variant.baseUnitMinor) &&
-      variant.baseUnitMinor > 0 && variant.currency === "USD" &&
-      (variant.checkoutReady === true || (variant.availability === "preview_only" && mode !== "production"));
+    if (variant.availability === "available") return variant.checkoutReady === true && variant.baseUnitMinor !== null && Number.isSafeInteger(variant.baseUnitMinor) && variant.baseUnitMinor > 0 && variant.currency === "USD";
+    return variant.availability === "preview_only" && variant.checkoutReady === false && mode !== "production" && variant.baseUnitMinor !== null && Number.isSafeInteger(variant.baseUnitMinor) && variant.baseUnitMinor > 0 && variant.currency === "USD";
   }
   if (variant.priceStatus === "pending") {
     return mode !== "production" && variant.availability === "preview_only" &&
@@ -81,7 +79,7 @@ export function publicVariantPurchaseState(
       : "pricing_pending";
   }
   if (variant.priceStatus !== "active" || (variant.availability !== "available" && variant.availability !== "preview_only") || variant.baseUnitMinor === null || !Number.isSafeInteger(variant.baseUnitMinor) || variant.baseUnitMinor <= 0 || variant.currency !== "USD") return "pricing_pending";
-  if (variant.availability === "preview_only") return mode === "production" ? "checkout_unavailable" : "local_preview";
+  if (variant.availability === "preview_only") return variant.checkoutReady === false ? (mode === "production" ? "checkout_unavailable" : "local_preview") : "pricing_pending";
   return variant.checkoutReady === true ? "ready" : "checkout_unavailable";
 }
 
@@ -110,7 +108,8 @@ export function resolvePublicVariantPrice(input: Readonly<{
     variant.baseUnitMinor !== null &&
     Number.isSafeInteger(variant.baseUnitMinor) &&
     variant.baseUnitMinor > 0 &&
-    variant.currency === "USD";
+    variant.currency === "USD" &&
+    (variant.availability !== "preview_only" || variant.checkoutReady === false);
   const previewZero =
     variant.priceStatus === "pending" &&
     variant.availability === "preview_only" &&

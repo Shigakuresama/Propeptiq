@@ -292,6 +292,15 @@ describe("public storefront server acquisition", () => {
     expect(product?.kind).toBe("canonical");
   });
 
+  it("fails closed for malformed configured promotions in the static lane", async () => {
+    const view = await loadPublicStorefrontView(environment(), {
+      configuredPromotions: [{}], controlledContent: [], verifiedImageMetadata: storefrontImageMetadata,
+      now: () => new Date("2026-08-31T12:00:00.000Z"),
+    });
+    expect(view.pricing.automaticPromotions).toEqual([]);
+    expect(view.catalog.products.flatMap((product) => product.kind === "canonical" ? product.variants : []).some((variant) => variant.priceStatus === "active")).toBe(false);
+  });
+
   it.each([
     ["database disabled", environment(), boundCatalogData],
     [

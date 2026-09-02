@@ -195,11 +195,18 @@ describe("resolvePublicVariantPrice", () => {
 
   it("shows reviewed preview prices without making them checkout-ready", () => {
     expect(resolvePublicVariantPrice({
-      variant: variant({ availability: "preview_only" }), productId: "product-alpha", quantity: 1,
+      variant: variant({ availability: "preview_only", checkoutReady: false }), productId: "product-alpha", quantity: 1,
       pricing: pricing("production", [winter30]),
     })).toMatchObject({ state: "priced", purchaseState: "checkout_unavailable" });
     expect(canAddPublicVariant(variant({ availability: "preview_only", checkoutReady: false }), "production")).toBe(false);
     expect(canAddPublicVariant(variant({ availability: "preview_only", checkoutReady: false }), "local")).toBe(true);
+  });
+
+  it("rejects an impossible checkout-ready preview claim", () => {
+    const malformed = variant({ availability: "preview_only", checkoutReady: true });
+    expect(canAddPublicVariant(malformed, "local")).toBe(false);
+    expect(publicVariantPurchaseState(malformed, "local")).toBe("pricing_pending");
+    expect(resolvePublicVariantPrice({ variant: malformed, productId: "product-alpha", quantity: 1, pricing: pricing("local", [winter30]) }).state).toBe("pending");
   });
 
   it("treats unavailable inventory as unavailable before money arithmetic", () => {

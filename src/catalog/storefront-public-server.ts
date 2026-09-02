@@ -180,8 +180,9 @@ export async function loadPublicStorefrontView(
   automaticPromotions = Object.freeze(scopedPromotions);
   const configuredById = activeConfigured;
   runtimeVariantFacts = Object.freeze(runtimeVariantFacts.filter((fact) => {
-    if (fact.priceStatus !== "active" || survivingStaticIds.has(fact.variantId)) return true;
+    if (fact.priceStatus !== "active") return true;
     if (configuredById === null) return false;
+    if (survivingStaticIds.has(fact.variantId)) return true;
     return configuredById.every((configuration) => {
       if (!configuration.enabled || configuration.applicationMode !== "automatic") return true;
       if (!promotionApplies(configuration, { id: fact.variantId, productId: fact.productId, variantId: fact.variantId })) return true;
