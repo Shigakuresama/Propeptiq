@@ -1361,6 +1361,48 @@ test("preview item has no gated calculator, related carousel, overflow, or eager
   expect(images.filter((image) => image.loading !== "lazy" || image.fetchPriority === "high")).toHaveLength(1);
 });
 
+test("canonical product pricing, variant switching, tiers, and local cart identity stay exact", async ({ page }) => {
+  await page.goto("/catalog");
+  const card = page.locator("article.catalog-listing-card").filter({ hasText: "Tirzepatide" }).first();
+  await expect(card.locator("del")).toContainText("$59.99");
+  await expect(card.locator("strong")).toContainText("$41.99");
+  await expect(card).toContainText("-30%");
+  await expect(card).toContainText("Options available");
+
+  await page.goto("/catalog/items/tirzepatide");
+  const radios = page.locator('input[type="radio"]');
+  await expect(radios).toHaveCount(9);
+  await expect(radios.nth(4)).toBeChecked();
+  const pricing = page.locator("main dl");
+  await expect(pricing).toContainText("$59.99");
+  await expect(pricing).toContainText("$41.99");
+  await expect(pricing).toContainText("30%");
+  await expect(pricing).toContainText("$18.00");
+  await expect(pricing).toContainText("Subtotal");
+  await page.getByRole("button", { name: "2 bottles" }).click();
+  await expect(pricing).toContainText("$83.98");
+  await page.getByRole("button", { name: "3 bottles" }).click();
+  await expect(pricing).toContainText("$125.97");
+  await page.getByRole("button", { name: "10 or more bottles" }).click();
+  await expect(page.getByRole("spinbutton", { name: "Exact quantity" })).toHaveAttribute("min", "10");
+  await page.getByRole("spinbutton", { name: "Exact quantity" }).fill("11");
+  await expect(pricing).toContainText("$461.89");
+
+  await page.getByRole("button", { name: "1 bottle" }).click();
+  await page.getByRole("button", { name: /add tirzepatide to cart/i }).click();
+  await page.getByRole("button", { name: /add tirzepatide to cart/i }).click();
+  await radios.nth(7).click();
+  await expect(pricing).toContainText("$109.99");
+  await expect(pricing).toContainText("$76.99");
+  await expect(pricing).toContainText("$33.00");
+  await page.getByRole("button", { name: /add tirzepatide to cart/i }).click();
+  await page.getByRole("link", { name: /Cart, \d+ requested units/iu }).click();
+  const persisted = await page.evaluate(() => JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"));
+  expect(persisted.items).toHaveLength(2);
+  expect(persisted.items.map((item: { quantity: number }) => item.quantity).sort()).toEqual([1, 2]);
+  expect(new Set(persisted.items.map((item: { variantId: string }) => item.variantId)).size).toBe(2);
+});
+
 test("home and browse catalog hydrate without application console errors", async ({ page }) => {
   const errors: string[] = [];
   page.on("console", (message) => {
