@@ -102,8 +102,9 @@ test("publishes the deterministic local rewards projection and can fail closed",
   await page.goto("/catalog");
   await expect(page.locator("article.catalog-listing-card")).toHaveCount(56);
   const browseText = await page.locator("main#main-content").innerText();
-  expect(browseText).not.toMatch(/\$\s?\d|\bUSD\s?\d|Earn\s+\d+\s+points/iu);
-  await expect(page.getByRole("button", { name: /add to cart/iu })).toHaveCount(0);
+  expect(browseText).not.toMatch(/Earn\s+\d+\s+points/iu);
+  expect(browseText).toContain("$41.99");
+  await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(56);
   await expect(page.getByRole("link", { name: /checkout/iu })).toHaveCount(0);
 });
 
