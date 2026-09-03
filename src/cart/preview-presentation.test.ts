@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { createCartPreviewToken } from "./preview-token";
+import type { CartPreviewItem } from "./preview-types";
 import {
   loadPreviewPresentation,
   parsePreviewPresentation,
@@ -7,7 +9,11 @@ import {
   savePreviewPresentation,
 } from "./preview-presentation";
 
-const preview = {
+function withToken<T extends { items: readonly CartPreviewItem[] }>(value: T) {
+  return { ...value, previewToken: createCartPreviewToken(value.items) };
+}
+
+const preview = withToken({
   schemaVersion: 2,
   items: [{
     variantId: "61000000-0000-4000-8000-000000000001",
@@ -31,12 +37,49 @@ const preview = {
   taxMinor: null,
   shippingMinor: null,
   finalDiscountMinor: null,
-  previewToken: "a".repeat(64),
   requiresAcknowledgement: false,
   reasons: [],
-} as const;
+} as const);
 
 describe("same-tab cart preview presentation", () => {
+  it.each([
+    ["identity", { name: "Synthetic renamed item" }, {}],
+    ["amount", { baseUnitMinor: 2500, unitAmountMinor: 2300, lineSubtotalMinor: 4600, lineSavingsMinor: 400 }, { subtotalMinor: 4600 }],
+    ["state", { available: false, purchaseState: "checkout_unavailable" }, { requiresAcknowledgement: true, reasons: ["checkout_unavailable"] }],
+  ])("rejects changed %s facts with the original valid token", (_label, changedItem, changedRoot) => {
+    const original = preview;
+    expect(parsePreviewPresentation(original)).not.toBeNull();
+    expect(parsePreviewPresentation({ ...original, ...changedRoot, items: [{ ...original.items[0], ...changedItem }] })).toBeNull();
+  });
+
+  it.each([
+    { id: "winter30", label: "Changed public label" },
+    { id: "different-promotion", label: "WINTER30" },
+  ])("rejects changed promotion metadata %j with the original valid token", (changedPromotion) => {
+    const items = [{ ...preview.items[0], unitAmountMinor: 1680, lineSubtotalMinor: 3360, lineSavingsMinor: 1440, effectiveDiscountBps: 3000, appliedPromotions: [{ id: "winter30", label: "WINTER30" }] }];
+    const original = withToken({ ...preview, items, subtotalMinor: 3360 });
+    expect(parsePreviewPresentation(original)).not.toBeNull();
+    expect(parsePreviewPresentation({ ...original, items: [{ ...items[0], appliedPromotions: [changedPromotion] }] })).toBeNull();
+  });
+
+  it("accepts equivalent reordered JSON keys and binds storage to the item facts", () => {
+    const original = withToken({ ...preview,
+      items: [{ ...preview.items[0], unitAmountMinor: 1680, lineSubtotalMinor: 3360, lineSavingsMinor: 1440,
+        effectiveDiscountBps: 3000, appliedPromotions: [{ id: "winter30", label: "WINTER30" }],
+      }], subtotalMinor: 3360,
+    });
+    const reorderedItem = Object.fromEntries(Object.entries(original.items[0]!).reverse());
+    reorderedItem.appliedPromotions = [{ label: "WINTER30", id: "winter30" }];
+    const reordered = Object.fromEntries(Object.entries({ ...original, items: [reorderedItem] }).reverse());
+    expect(parsePreviewPresentation(JSON.parse(JSON.stringify(reordered)))).toEqual(original);
+
+    const changed = { ...preview, items: [{ ...preview.items[0], name: "Changed without a matching token" }] };
+    const storage = new Map<string, string>();
+    savePreviewPresentation({ setItem: (key, value) => storage.set(key, value) }, changed);
+    expect(storage.size).toBe(0);
+    expect(loadPreviewPresentation({ getItem: () => JSON.stringify({ schemaVersion: 2, preview: changed }) })).toBeNull();
+  });
+
   it("stores and restores only the bounded display snapshot and token", () => {
     const storage = new Map<string, string>();
     const port = {
@@ -72,14 +115,14 @@ describe("same-tab cart preview presentation", () => {
   it("accepts every coherent display state and never adds checkout-safe authority", () => {
     expect(parsePreviewPresentation(preview)).toEqual(preview);
     for (const purchaseState of ["local_preview", "checkout_unavailable", "insufficient_quantity"] as const) {
-      const input = { ...preview, items: [{ ...preview.items[0], available: false, purchaseState }], requiresAcknowledgement: true, reasons: [purchaseState === "insufficient_quantity" ? "insufficient_quantity" : "checkout_unavailable"] };
+      const input = withToken({ ...preview, items: [{ ...preview.items[0], available: false, purchaseState }], requiresAcknowledgement: true, reasons: [purchaseState === "insufficient_quantity" ? "insufficient_quantity" : "checkout_unavailable"] });
       expect(parsePreviewPresentation(input)).toEqual(input);
     }
     for (const purchaseState of ["pricing_pending", "unavailable", "unknown_variant"] as const) {
-      const input = { ...preview, items: [{ ...preview.items[0], available: false, purchaseState,
+      const input = withToken({ ...preview, items: [{ ...preview.items[0], available: false, purchaseState,
         ...(purchaseState === "unknown_variant" ? { name: null, variantLabel: null, sku: null, packageForm: null } : {}),
         baseUnitMinor: null, unitAmountMinor: null, lineSubtotalMinor: null, lineSavingsMinor: null, effectiveDiscountBps: null, currency: null,
-      }], subtotalMinor: 0, currency: null, requiresAcknowledgement: true, reasons: [purchaseState === "unavailable" ? "product_unavailable" : purchaseState] };
+      }], subtotalMinor: 0, currency: null, requiresAcknowledgement: true, reasons: [purchaseState === "unavailable" ? "product_unavailable" : purchaseState] });
       expect(parsePreviewPresentation(input)).toEqual(input);
     }
   });
@@ -96,7 +139,11 @@ describe("same-tab cart preview presentation", () => {
       { available: false }, { purchaseState: "checkout_unavailable" }, { purchaseState: "invented" },
       { priceId: "private" },
     ];
-    for (const change of changes) expect(parsePreviewPresentation({ ...preview, items: [{ ...preview.items[0], ...change }] })).toBeNull();
+    for (const change of changes) {
+      // A matching hash cannot bypass the independent arithmetic/state/shape validation.
+      const items = [{ ...preview.items[0], ...change }] as readonly CartPreviewItem[];
+      expect(parsePreviewPresentation(withToken({ ...preview, items }))).toBeNull();
+    }
     for (const change of [
       { subtotalMinor: 1 }, { currency: null }, { taxMinor: 0 }, { previewToken: "bad-token" },
       { requiresAcknowledgement: true }, { reasons: ["checkout_unavailable"] },
@@ -120,9 +167,9 @@ describe("same-tab cart preview presentation", () => {
   });
 
   it("checks zero-layout arithmetic and one highest promotion without changing the input", () => {
-    const input = { ...preview, items: [{ ...preview.items[0], available: false, purchaseState: "local_preview", baseUnitMinor: 0, unitAmountMinor: 0, lineSubtotalMinor: 0, lineSavingsMinor: 0,
+    const input = withToken({ ...preview, items: [{ ...preview.items[0], available: false, purchaseState: "local_preview", baseUnitMinor: 0, unitAmountMinor: 0, lineSubtotalMinor: 0, lineSavingsMinor: 0,
       effectiveDiscountBps: 3000, appliedPromotions: [{ id: "winter30", label: "WINTER30" }],
-    }], subtotalMinor: 0, reasons: ["checkout_unavailable"], requiresAcknowledgement: true };
+    }], subtotalMinor: 0, reasons: ["checkout_unavailable"], requiresAcknowledgement: true });
     const before = JSON.stringify(input);
     const result = parsePreviewPresentation(input);
     expect(result).toEqual(input);

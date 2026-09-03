@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createCartPreviewToken } from "@/cart/preview-token";
+import type { CartPreviewItem } from "@/cart/preview-types";
 
 const { useCart, fetchMock, setQuantity, removeItem, clearCart, acknowledgeLegacyReselection } = vi.hoisted(() => ({
   useCart: vi.fn(), fetchMock: vi.fn(), setQuantity: vi.fn(), removeItem: vi.fn(), clearCart: vi.fn(), acknowledgeLegacyReselection: vi.fn(),
@@ -15,7 +17,6 @@ function cart(quantity = 2) {
 type PreviewOptions = {
   available?: boolean;
   name?: string;
-  previewToken?: string;
   quantity?: number;
   reasons?: string[];
   requiresAcknowledgement?: boolean;
@@ -24,17 +25,17 @@ type PreviewOptions = {
 function preview({
   available = true,
   name = "Synthetic local test only — Alpha",
-  previewToken = "c".repeat(64),
   quantity = 2,
   reasons = [],
   requiresAcknowledgement = false,
 }: PreviewOptions = {}) {
   const unitAmountMinor = quantity === 2 ? 2_208 : 2_160;
+  const items: CartPreviewItem[] = [{ variantId, quantity, available, purchaseState: available ? "ready" : "unavailable", name, variantLabel: "Synthetic 5 mg", sku: "SYNTHETIC-5MG", packageForm: "Research vial", baseUnitMinor: 2400, unitAmountMinor, lineSubtotalMinor: quantity * unitAmountMinor, lineSavingsMinor: quantity * (2400 - unitAmountMinor), effectiveDiscountBps: quantity === 2 ? 800 : 1000, appliedPromotions: [], currency: "USD" }];
   return {
     schemaVersion: 2,
-    items: [{ variantId, quantity, available, purchaseState: available ? "ready" : "unavailable", name, variantLabel: "Synthetic 5 mg", sku: "SYNTHETIC-5MG", packageForm: "Research vial", baseUnitMinor: 2400, unitAmountMinor, lineSubtotalMinor: quantity * unitAmountMinor, lineSavingsMinor: quantity * (2400 - unitAmountMinor), effectiveDiscountBps: quantity === 2 ? 800 : 1000, appliedPromotions: [], currency: "USD" }],
+    items,
     subtotalMinor: quantity * unitAmountMinor, currency: "USD", taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
-    previewToken, requiresAcknowledgement, reasons,
+    previewToken: createCartPreviewToken(items), requiresAcknowledgement, reasons,
   };
 }
 function response(value: unknown): Response { return new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } }); }
@@ -68,9 +69,9 @@ describe("CartView", () => {
 
   it("hides a stale preview and refreshes the exact changed variant cart", async () => {
     fetchMock.mockReset()
-      .mockResolvedValueOnce(response(preview({ name: "Prior variant", previewToken: "d".repeat(64) })))
+      .mockResolvedValueOnce(response(preview({ name: "Prior variant" })))
       .mockRejectedValueOnce(new Error("changed preview failure"))
-      .mockResolvedValueOnce(response(preview({ quantity: 3, name: "Current variant", previewToken: "e".repeat(64) })));
+      .mockResolvedValueOnce(response(preview({ quantity: 3, name: "Current variant" })));
     const { rerender } = render(<CartView checkoutIntent={null} />);
     expect(await screen.findByText("Prior variant")).toBeVisible();
     useCart.mockReturnValue(cart(3));

@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
-
 import { resolveVariantPricePresentation, type PricePresentationMode } from "@/catalog/storefront-price-presentation";
 
 import { normalizeCart } from "./cart-storage";
+import { createCartPreviewToken } from "./preview-token";
 import { cartPreviewReasons } from "./preview-types";
 import { CartPreviewProjectionError, composeCartPreviewSources } from "./storefront-preview-source";
 import type {
@@ -41,10 +40,6 @@ export type CartPreviewVariantSource = Readonly<{
 }>;
 
 export type CartPreviewSource = CartPreviewVariantSource & Readonly<{ mode: PricePresentationMode }>;
-
-function createPreviewToken(items: readonly CartPreviewItem[]): string {
-  return createHash("sha256").update(JSON.stringify(items)).digest("hex");
-}
 
 export function buildCartPreview(
   requested: unknown,
@@ -102,7 +97,7 @@ export function buildCartPreview(
       currency: variant.currency,
     });
   });
-  const previewToken = createPreviewToken(items);
+  const previewToken = createCartPreviewToken(items);
   const factsChanged = previousPreviewToken !== null && previousPreviewToken !== previewToken;
   const reasons = cartPreviewReasons(items, factsChanged);
   const subtotalMinor = items.reduce((total, item) => total + (item.lineSubtotalMinor ?? 0), 0);

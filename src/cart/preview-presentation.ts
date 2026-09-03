@@ -1,4 +1,5 @@
 import { calculateVariantLinePrice, quantityDiscountBps } from "@/domain/storefront-pricing";
+import { createCartPreviewToken } from "./preview-token";
 import { cartPreviewReasons, type CartPreview, type CartPreviewItem, type CartPreviewPurchaseState } from "./preview-types";
 
 export const PREVIEW_PRESENTATION_STORAGE_KEY = "propeptiq.cart-preview.presentation.v2";
@@ -105,6 +106,7 @@ export function parsePreviewPresentation(value: unknown): CartPreview | null {
     if (!money(subtotalMinor) || subtotalMinor !== value.subtotalMinor || currency !== value.currency ||
       reasons.length !== providedReasons.length || reasons.some((reason, index) => reason !== providedReasons[index]) ||
       value.requiresAcknowledgement !== (reasons.length > 0)) return null;
+    if (createCartPreviewToken(items) !== value.previewToken) return null;
     return Object.freeze({
       schemaVersion: 2, items: Object.freeze(items), subtotalMinor, currency, taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
       previewToken: value.previewToken, requiresAcknowledgement: value.requiresAcknowledgement, reasons,
