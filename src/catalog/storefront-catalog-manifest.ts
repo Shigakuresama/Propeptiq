@@ -5,6 +5,7 @@ import type { BrowseCatalogProduct } from "./browse-catalog";
 
 const DNS_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
 export const STOREFRONT_CATALOG_AUDIT_TIMESTAMP = "2026-09-02T02:04:54.0166213-07:00";
+export const STOREFRONT_CATALOG_SNAP_AUDIT_TIMESTAMP = "2026-09-02T19:03:51.9477748-07:00";
 const EVIDENCE_SOURCE = "Amino Club" as const;
 const EVIDENCE_BASIS = "ordinary_one_vial_list_price" as const;
 
@@ -45,8 +46,8 @@ export type StorefrontCatalogDecisionManifest = Readonly<{
   variants: readonly StorefrontCatalogVariantDecision[];
 }>;
 
-const decision = (browseSlug: string, browseCode: string, baseUnitMinor: number, url: string): StorefrontCatalogPriceDecision => ({
-  browseSlug, browseCode, baseUnitMinor, currency: "USD", url, observedAt: STOREFRONT_CATALOG_AUDIT_TIMESTAMP,
+const decision = (browseSlug: string, browseCode: string, baseUnitMinor: number, url: string, observedAt = STOREFRONT_CATALOG_AUDIT_TIMESTAMP): StorefrontCatalogPriceDecision => ({
+  browseSlug, browseCode, baseUnitMinor, currency: "USD", url, observedAt,
 });
 
 const amino = (slug: string) => `https://www.aminoclub.com/us/products/${slug}`;
@@ -66,6 +67,7 @@ export const approvedStorefrontCatalogPriceDecisions: readonly StorefrontCatalog
   decision("igf-1-lr3", "IG1", 6999, amino("igf-1-lr3")), decision("ara-290", "RA10", 4999, amino("ara-290")), decision("semaglutide", "SM10", 4999, amino("glp-1")),
   decision("kpv", "KPV10", 3999, amino("kpv")), decision("epithalon", "ET10", 2999, amino("epithalon")), decision("vip", "VP10", 4999, amino("vip")),
   decision("cartalax", "Car20", 6999, amino("cartalax")),
+  decision("snap", "SNP10", 2999, amino("snap-8"), STOREFRONT_CATALOG_SNAP_AUDIT_TIMESTAMP),
 ]);
 
 function uuidBytes(uuid: string): Buffer {
@@ -98,14 +100,14 @@ function validDecision(candidate: StorefrontCatalogPriceDecision): void {
   if (!candidate || typeof candidate !== "object" || candidate.currency !== "USD" || !Number.isSafeInteger(candidate.baseUnitMinor) || candidate.baseUnitMinor <= 0) fail("Invalid storefront catalog price decision");
   if (Object.keys(candidate).sort().join(",") !== "baseUnitMinor,browseCode,browseSlug,currency,observedAt,url") fail("Invalid storefront catalog price decision shape");
   if (!/^https:\/\/www\.aminoclub\.com\/us\/products\/[a-z0-9-]+$/u.test(candidate.url)) fail("Invalid storefront catalog evidence URL");
-  if (candidate.observedAt !== STOREFRONT_CATALOG_AUDIT_TIMESTAMP) fail("Invalid storefront catalog observation timestamp");
+  if (![STOREFRONT_CATALOG_AUDIT_TIMESTAMP, STOREFRONT_CATALOG_SNAP_AUDIT_TIMESTAMP].includes(candidate.observedAt)) fail("Invalid storefront catalog observation timestamp");
 }
 
 export function buildStorefrontCatalogDecisionManifest(
   products: readonly BrowseCatalogProduct[],
   decisions: readonly StorefrontCatalogPriceDecision[],
 ): StorefrontCatalogDecisionManifest {
-  if (!Array.isArray(products) || !Array.isArray(decisions) || products.length !== 56 || decisions.length !== 39) fail("Invalid storefront catalog coverage");
+  if (!Array.isArray(products) || !Array.isArray(decisions) || products.length !== 56 || decisions.length !== 40) fail("Invalid storefront catalog coverage");
   const rows = new Map<string, { product: BrowseCatalogProduct; variant: BrowseCatalogProduct["variants"][number] }>();
   const productIds = new Set<string>();
   for (const product of products) {
@@ -139,7 +141,7 @@ export function buildStorefrontCatalogDecisionManifest(
     if (approved.has(scoped) || !rows.has(scoped)) fail("Invalid storefront catalog price decision coverage");
     approved.set(scoped, item);
   }
-  if (approved.size !== 39) fail("Invalid storefront catalog approved decision count");
+  if (approved.size !== 40) fail("Invalid storefront catalog approved decision count");
   for (const [index, item] of decisions.entries()) {
     const canonical = approvedStorefrontCatalogPriceDecisions[index];
     if (!canonical || item.browseSlug !== canonical.browseSlug || item.browseCode !== canonical.browseCode || item.baseUnitMinor !== canonical.baseUnitMinor || item.currency !== canonical.currency || item.url !== canonical.url || item.observedAt !== canonical.observedAt) fail("Storefront catalog price decisions are not canonical");

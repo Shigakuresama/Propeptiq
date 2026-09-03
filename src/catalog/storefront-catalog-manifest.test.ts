@@ -11,6 +11,7 @@ import {
 const key = (slug: string, code: string) => `${slug}:${code}`;
 
 const expectedPositive = new Map([
+  [key("snap", "SNP10"), 2999],
   [key("tirzepatide", "TR30"), 5999], [key("tirzepatide", "TR60"), 10999],
   [key("retatrutide", "RT10"), 6999], [key("retatrutide", "RT20"), 13499], [key("retatrutide", "RT30"), 19999],
   [key("nad-plus", "NJ500"), 6999], [key("ghk-cu", "CU50"), 2999], [key("ghk-cu", "CU100"), 5799],
@@ -28,6 +29,7 @@ const expectedPositive = new Map([
 ]);
 
 const expectedEvidence = new Map([
+  [key("snap", "SNP10"), { baseUnitMinor: 2999, url: "https://www.aminoclub.com/us/products/snap-8", observedAt: "2026-09-02T19:03:51.9477748-07:00" }],
   [key("tirzepatide", "TR30"), { baseUnitMinor: 5999, url: "https://www.aminoclub.com/us/products/glp-2", observedAt: "2026-09-02T02:04:54.0166213-07:00" }],
   [key("tirzepatide", "TR60"), { baseUnitMinor: 10999, url: "https://www.aminoclub.com/us/products/glp-2", observedAt: "2026-09-02T02:04:54.0166213-07:00" }],
   [key("retatrutide", "RT10"), { baseUnitMinor: 6999, url: "https://www.aminoclub.com/us/products/glp-3", observedAt: "2026-09-02T02:04:54.0166213-07:00" }],
@@ -80,14 +82,14 @@ describe("storefront catalog decision manifest", () => {
     expect(storefrontCatalogDecisionManifest.products.flatMap((p) => p.variantIds)).toHaveLength(103);
   });
 
-  it("locks the 39 approved cents and leaves 64 rows pending", () => {
-    expect(approvedStorefrontCatalogPriceDecisions).toHaveLength(39);
-    expect(new Set(approvedStorefrontCatalogPriceDecisions.map((d) => key(d.browseSlug, d.browseCode))).size).toBe(39);
+  it("locks the 40 approved cents and leaves 63 rows pending", () => {
+    expect(approvedStorefrontCatalogPriceDecisions).toHaveLength(40);
+    expect(new Set(approvedStorefrontCatalogPriceDecisions.map((d) => key(d.browseSlug, d.browseCode))).size).toBe(40);
     expect(new Map(storefrontCatalogDecisionManifest.variants.map((v) => [key(v.browseSlug, v.browseCode), v.baseUnitMinor]))).toEqual(
       new Map<string, number>([...expectedPositive.entries(), ...storefrontCatalogDecisionManifest.variants.filter((v) => !expectedPositive.has(key(v.browseSlug, v.browseCode))).map((v) => [key(v.browseSlug, v.browseCode), 0] as const)]),
     );
-    expect(storefrontCatalogDecisionManifest.variants.filter((v) => v.decisionStatus === "approved_candidate")).toHaveLength(39);
-    expect(storefrontCatalogDecisionManifest.variants.filter((v) => v.decisionStatus === "pending")).toHaveLength(64);
+    expect(storefrontCatalogDecisionManifest.variants.filter((v) => v.decisionStatus === "approved_candidate")).toHaveLength(40);
+    expect(storefrontCatalogDecisionManifest.variants.filter((v) => v.decisionStatus === "pending")).toHaveLength(63);
   });
 
   it("uses stable UUIDv5/SKU identity and preserves one-vial labels", () => {
@@ -115,7 +117,7 @@ describe("storefront catalog decision manifest", () => {
         expect(variant.evidence).toEqual({
           source: "Amino Club",
           url: expect.stringMatching(/^https:\/\/www\.aminoclub\.com\/us\/products\/[a-z0-9-]+$/u),
-          observedAt: "2026-09-02T02:04:54.0166213-07:00",
+          observedAt: expected.observedAt,
           basis: "ordinary_one_vial_list_price",
         });
         expect(Object.keys(variant.evidence ?? {}).sort()).toEqual(["basis", "observedAt", "source", "url"]);

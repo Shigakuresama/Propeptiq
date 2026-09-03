@@ -23,6 +23,15 @@ describe("canonical storefront catalog data", () => {
     const variants = storefrontCatalogData.bindings.variants.filter((v) => v.productId === tirzepatide?.id);
     expect(variants.find((v) => v.browseCode === "TR30")).toMatchObject({ baseUnitMinor: 5999, priceStatus: "pending", availability: "preview_only", stripePriceId: null });
     expect(variants.find((v) => v.browseCode === "TR5")).toMatchObject({ baseUnitMinor: 0, priceStatus: "pending" });
+    const snap = storefrontCatalogData.products.find((p) => p.slug === "snap");
+    expect(snap?.variantIds).toHaveLength(1);
+    expect(storefrontCatalogData.bindings.variants.find((v) => v.browseCode === "SNP10")).toMatchObject({
+      baseUnitMinor: 2999,
+      priceStatus: "pending",
+      availability: "preview_only",
+      stripeProductId: null,
+      stripePriceId: null,
+    });
   });
 
   it("only projects deliberately pending preview bindings", () => {
