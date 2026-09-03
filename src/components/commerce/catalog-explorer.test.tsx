@@ -264,6 +264,7 @@ describe("CatalogExplorer", () => {
     const expensiveDefault = testPublicVariant({
       id: "synthetic-expensive-default",
       label: "10 mg synthetic default",
+      amount: { value: 10, unit: "mg" },
       baseUnitMinor: 10_000,
     });
     const cheaperDisplayed = testPublicVariant({
@@ -301,9 +302,13 @@ describe("CatalogExplorer", () => {
       testPricingContext("production", [testWinter30]),
     );
 
+    const search = screen.getByRole("searchbox", { name: "Search catalog" });
+    fireEvent.change(search, { target: { value: "Product" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Sort catalog" }), {
       target: { value: "price-desc" },
     });
+
+    expect(search).toHaveValue("Product");
 
     expect(resultHeadings()).toEqual([
       "Selector Product",
@@ -312,8 +317,9 @@ describe("CatalogExplorer", () => {
       "Unavailable Product",
     ]);
     const selectorCard = screen.getByRole("article", { name: "Selector Product" });
-    expect(within(selectorCard).getByText("$50.00").tagName).toBe("DEL");
-    expect(within(selectorCard).getByText("$35.00").tagName).toBe("STRONG");
+    expect(within(selectorCard).getByText("10 mg · 1 bottle")).toBeVisible();
+    expect(within(selectorCard).getByText("$100.00").tagName).toBe("DEL");
+    expect(within(selectorCard).getByText("$70.00").tagName).toBe("STRONG");
     const checkoutCard = screen.getByRole("article", { name: "Checkout-unavailable Product" });
     expect(within(checkoutCard).getByText("$17.50")).toBeVisible();
     expect(within(checkoutCard).getAllByText("Checkout unavailable").length).toBeGreaterThan(0);

@@ -123,7 +123,7 @@ describe("buildCatalogDiscoveryRows", () => {
     expect(rows.every(({ sortRow }) => Object.isFrozen(sortRow))).toBe(true);
   });
 
-  it("uses the exact card selector and quantity-one effective price", () => {
+  it("uses the explicit higher-priced card default and quantity-one effective price", () => {
     const expensiveDefault = testPublicVariant({
       id: "synthetic-expensive-default",
       sku: "SYN-EXPENSIVE",
@@ -152,7 +152,7 @@ describe("buildCatalogDiscoveryRows", () => {
       ]),
     });
 
-    expect(row?.sortRow.price).toEqual({ state: "active", effectiveMinor: 3_500 });
+    expect(row?.sortRow.price).toEqual({ state: "active", effectiveMinor: 7_000 });
   });
 
   it.each([

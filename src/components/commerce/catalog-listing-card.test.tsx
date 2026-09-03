@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
 import { parseStorefrontBindings } from "@/catalog/storefront-bindings";
+import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
 import {
   buildPublicStorefrontCatalog,
+  buildConfiguredDisplayVariantFacts,
   storefrontImageMetadata,
 } from "@/catalog/storefront-public";
 import { CartProvider } from "@/cart/cart-provider";
@@ -105,7 +107,7 @@ describe("CatalogListingCard", () => {
     );
 
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
-    expect(within(article).getByText("5 mg")).toBeVisible();
+    expect(within(article).getByText("5 mg · 1 bottle")).toBeVisible();
     expect(within(article).getByText("$10.00").tagName).toBe("DEL");
     expect(within(article).getByText("$7.00").tagName).toBe("STRONG");
     expect(within(article).getAllByText("-30%")).toHaveLength(2);
@@ -180,87 +182,78 @@ describe("CatalogListingCard", () => {
     ).toBeEnabled();
   });
 
-  it.each([
-    {
-      label: "Options available",
-      variants: [
-        testPublicVariant({
-          id: "variant-10mg",
-          label: "10 mg",
-          amount: { value: 10, unit: "mg" },
-        }),
-        testPublicVariant({
-          id: "variant-5mg",
-          label: "5 mg",
-          amount: { value: 5, unit: "mg" },
-        }),
-      ],
-      summary: "From 5 mg",
-    },
-    {
-      label: "Checkout unavailable",
-      variants: [
-        testPublicVariant({ id: "variant-a", label: "Option A", amount: null, checkoutReady: false }),
-        testPublicVariant({ id: "variant-b", label: "Option B", amount: null, checkoutReady: false }),
-      ],
-      summary: "Multiple options",
-    },
-    {
-      label: "Pricing coming soon",
-      variants: [
-        testPublicVariant({
-          id: "variant-a",
-          priceStatus: "pending",
-          availability: "preview_only",
-          baseUnitMinor: 0,
-          checkoutReady: false,
-        }),
-        testPublicVariant({
-          id: "variant-b",
-          priceStatus: "pending",
-          availability: "preview_only",
-          baseUnitMinor: null,
-          currency: null,
-          checkoutReady: false,
-        }),
-      ],
-      summary: "From 5 mg",
-    },
-    {
-      label: "Unavailable",
-      variants: [
-        testPublicVariant({
-          id: "variant-a",
-          priceStatus: "unavailable",
-          availability: "unavailable",
-          baseUnitMinor: null,
-          currency: null,
-          checkoutReady: false,
-        }),
-        testPublicVariant({
-          id: "variant-b",
-          priceStatus: "unavailable",
-          availability: "unavailable",
-          baseUnitMinor: null,
-          currency: null,
-          checkoutReady: false,
-        }),
-      ],
-      summary: "From 5 mg",
-    },
-  ])("renders the $label multi-variant aggregate state", ({ label, variants, summary }) => {
+  it("uses the selected higher-priced default for caption, price, and availability while ADD still opens the chooser", async () => {
+    const user = userEvent.setup();
+    const selectedDefault = testPublicVariant({
+      id: "variant-default",
+      label: "30 mg",
+      amount: { value: 30, unit: "mg" },
+      packageQuantity: 2,
+      baseUnitMinor: 5_999,
+      checkoutReady: false,
+    });
+    const readyOtherOption = testPublicVariant({
+      id: "variant-ready-other",
+      label: "5 mg",
+      amount: { value: 5, unit: "mg" },
+      baseUnitMinor: 2_999,
+      checkoutReady: true,
+    });
     renderCanonical(
-      testCanonicalProduct(variants, { defaultVariantId: variants[0]!.id }),
-      testPricingContext("production"),
+      testCanonicalProduct([selectedDefault, readyOtherOption], { defaultVariantId: selectedDefault.id }),
+      testPricingContext("production", [testWinter30]),
     );
 
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
-    expect(within(article).getByText(summary)).toBeVisible();
-    expect(within(article).getByText(label)).toBeVisible();
-    expect(
-      within(article).getByRole("button", {
-        name: /add synthetic product alpha to cart/iu,
-      }),
-    ).toBeEnabled();
+    expect(within(article).getByText("30 mg · 2 bottles")).toBeVisible();
+    expect(within(article).getByText("$59.99").tagName).toBe("DEL");
+    expect(within(article).getByText("$41.99").tagName).toBe("STRONG");
+    expect(within(article).getByText("Checkout unavailable")).toBeVisible();
+    expect(within(article).queryByText("Available")).toBeNull();
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("");
+    await user.click(within(article).getByRole("button", { name: /add synthetic product alpha to cart/iu }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("");
+  });
+
+  it("renders the selected actual catalog label, one-bottle caption, base price, sale price, and badge", () => {
+    const catalog = buildPublicStorefrontCatalog({
+      configuredPublicationId: browseCatalogPublicationId,
+      catalogData: storefrontCatalogData,
+      runtimeVariantFacts: buildConfiguredDisplayVariantFacts(storefrontCatalogData),
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+    });
+
+    for (const expected of [
+      ["tirzepatide", "30 mg · 1 bottle", "$59.99", "$41.99"],
+      ["retatrutide", "10 mg · 1 bottle", "$69.99", "$48.99"],
+      ["nad-plus", "500 mg · 1 bottle", "$69.99", "$48.99"],
+    ] as const) {
+      const [slug, caption, basePrice, salePrice] = expected;
+      const product = catalog.products.find((candidate) => candidate.slug === slug);
+      if (!product || product.kind !== "canonical") {
+        throw new Error(`Expected canonical configured catalog product: ${slug}`);
+      }
+      const { unmount } = renderCanonical(product, testPricingContext("test", [testWinter30]));
+      const article = screen.getByRole("article", { name: product.name });
+      expect(within(article).getByText(caption)).toBeVisible();
+      expect(within(article).getByText(basePrice).tagName).toBe("DEL");
+      expect(within(article).getByText(salePrice).tagName).toBe("STRONG");
+      expect(within(article).getAllByText("-30%")).toHaveLength(2);
+      unmount();
+    }
+  });
+
+  it("preserves a composite selected label and pluralizes a single bottle caption", () => {
+    const composite = testPublicVariant({
+      id: "variant-composite",
+      label: "5 mg + 5 mg blend",
+      amount: null,
+      packageQuantity: 1,
+    });
+    renderCanonical(testCanonicalProduct([composite]));
+
+    expect(screen.getByText("5 mg + 5 mg blend · 1 bottle")).toBeVisible();
   });
 });

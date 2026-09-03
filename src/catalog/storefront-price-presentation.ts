@@ -169,6 +169,10 @@ export function selectCardVariant(input: Readonly<{ product: { kind: "canonical"
       ? [{ variant, amount: presentation.price.effectiveUnitMinor }]
       : [];
   });
+  const explicitDefault = candidates.find(
+    (candidate) => candidate.variant.id === input.product.defaultVariantId,
+  );
+  if (explicitDefault) return explicitDefault.variant;
   return [...candidates].sort((a, b) => a.amount - b.amount || a.variant.label.localeCompare(b.variant.label, "en-US") || a.variant.id.localeCompare(b.variant.id))[0]?.variant ?? input.product.variants.find((variant) => variant.id === input.product.defaultVariantId) ?? null;
 }
 
