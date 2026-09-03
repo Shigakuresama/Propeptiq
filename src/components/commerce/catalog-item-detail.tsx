@@ -65,7 +65,8 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
           <p className="catalog-image-disclosure">Illustrative product presentation</p>
         </div>
 
-        <div className="catalog-detail-content pt-16 lg:col-start-2 lg:row-start-2 lg:pt-0">
+        <div className="catalog-detail-content lg:col-start-2 lg:row-start-2 lg:pt-0">
+          {canonical ? <ProductPurchasePanel product={product} pricing={pricing} /> : null}
           <section aria-labelledby="catalog-variants-heading" className="mt-10">
             <h2 id="catalog-variants-heading" className="font-heading text-3xl text-ink">
               Supplied configurations
@@ -93,7 +94,6 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
           </section>
 
           {!canonical ? <p className="info-record mt-8 text-sm">This browse-only entry reproduces the supplied product name, code, and package configuration. Availability, quality records, and purchasing are not represented.</p> : null}
-          {canonical ? <ProductPurchasePanel product={product} pricing={pricing} /> : null}
           {canonical && product.content.some((record) => record.status === "approved" && (record.kind === "product_information" || record.kind === "legal_notice")) ? <section className="mt-10 space-y-5" aria-label="Approved information">{product.content.filter((record) => record.status === "approved" && (record.kind === "product_information" || record.kind === "legal_notice")).map((record) => <article key={record.id}><h2 className="font-heading text-2xl text-ink">{record.title}</h2><p className="mt-2 whitespace-pre-wrap text-muted-ink">{record.body}</p></article>)}</section> : null}
         </div>
       </div>

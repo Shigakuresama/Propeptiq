@@ -20,7 +20,7 @@ const calculator = Object.freeze({
 });
 
 const { capturedPricing } = vi.hoisted(() => ({ capturedPricing: [] as unknown[] }));
-vi.mock("./product-purchase-panel", () => ({ ProductPurchasePanel: ({ pricing }: { pricing: unknown }) => { capturedPricing.push(pricing); return <div data-testid="purchase-panel" />; } }));
+vi.mock("./product-purchase-panel", () => ({ ProductPurchasePanel: ({ pricing }: { pricing: unknown }) => { capturedPricing.push(pricing); return <section aria-labelledby="purchase-heading"><h2 id="purchase-heading">Purchase</h2><div data-testid="purchase-panel" /></section>; } }));
 const { capturedRelated } = vi.hoisted(() => ({ capturedRelated: [] as Array<{ products: unknown; pricing: unknown }> }));
 vi.mock("./related-products-carousel", () => ({ RelatedProductsCarousel: (props: { products: unknown; pricing: unknown }) => { capturedRelated.push(props); return <section aria-label="Frequently Researched Together"><h2>Frequently Researched Together</h2><ul>{(props.products as Array<{ name: string }>).map((product) => <li key={product.name}>{product.name}</li>)}</ul></section>; } }));
 
@@ -59,8 +59,10 @@ describe("CatalogItemDetail", () => {
       "lg:row-start-1",
       "lg:row-span-2",
     );
-    expect(suppliedConfigurations.closest(".catalog-detail-content")).toHaveClass(
+    expect(suppliedConfigurations.closest(".catalog-detail-content")).not.toHaveClass(
       "pt-16",
+    );
+    expect(suppliedConfigurations.closest(".catalog-detail-content")).toHaveClass(
       "lg:col-start-2",
       "lg:row-start-2",
       "lg:pt-0",
@@ -72,6 +74,46 @@ describe("CatalogItemDetail", () => {
     expect(screen.getByText("Illustrative product presentation")).toBeVisible();
     expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
     expect(document.body).not.toHaveTextContent(/\$|usd/i);
+  });
+
+  it("puts canonical purchase before supplied configurations and approved information", () => {
+    const product = testCanonicalProduct([], {
+      content: [{
+        id: "approved-info",
+        kind: "product_information",
+        status: "approved",
+        title: "Approved product information",
+        body: "Approved product body.",
+        sourceReferences: [],
+        approvalNote: null,
+        reviewedAt: null,
+        effectiveAt: null,
+      }],
+    });
+    render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
+
+    const purchase = screen.getByRole("heading", { name: "Purchase" });
+    const configurations = screen.getByRole("heading", { name: "Supplied configurations" });
+    const information = screen.getByRole("heading", { name: "Approved product information" });
+    expect(purchase.compareDocumentPosition(configurations) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(configurations.compareDocumentPosition(information) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps browse-only configurations before its notice without purchase controls", () => {
+    const browseOnlyCatalog = buildPublicStorefrontCatalog({
+      configuredPublicationId: browseCatalogPublicationId,
+      catalogData: { products: [], bindings: parseStorefrontBindings({ products: [], variants: [] }) },
+      runtimeVariantFacts: [],
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+    });
+    const product = findPublicStorefrontProduct(browseOnlyCatalog, "pinealon")!;
+    render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
+
+    const configurations = screen.getByRole("heading", { name: "Supplied configurations" });
+    const notice = screen.getByText(/not represented\./u);
+    expect(configurations.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Purchase" })).toBeNull();
   });
 
   it.each([

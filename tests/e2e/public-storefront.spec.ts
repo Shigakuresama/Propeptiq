@@ -629,7 +629,11 @@ test("fixed mobile search stays compact and clear of product identity and purcha
 
   for (const { width, height } of [
     { width: 320, height: 812 },
+    { width: 320, height: 760 },
+    { width: 320, height: 761 },
     { width: 375, height: 812 },
+    { width: 375, height: 760 },
+    { width: 375, height: 761 },
     { width: 390, height: 812 },
     { width: 320, height: 520 },
     { width: 375, height: 720 },
@@ -736,6 +740,43 @@ test("fixed mobile search stays compact and clear of product identity and purcha
     ),
     "375x720 search/add-to-cart collision after bringing the control into view",
   ).toBe(false);
+});
+
+test("catalog product hierarchy keeps purchase first and cards content-sized", async ({ page }) => {
+  for (const width of [375, 768, 1024, 1440] as const) {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
+    await page.goto("/catalog/items/tirzepatide");
+    const detailContent = page.locator(".catalog-detail-content");
+    const purchaseHeading = detailContent.getByRole("heading", { name: "Purchase" });
+    const configurationsHeading = detailContent.getByRole("heading", { name: "Supplied configurations" });
+    expect(await purchaseHeading.evaluate((element) => Boolean(element.compareDocumentPosition(document.querySelector("#catalog-variants-heading")!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+    const purchaseBounds = await clientRect(purchaseHeading);
+    const configurationsBounds = await clientRect(configurationsHeading);
+    expect(purchaseBounds.top, `${width}px purchase geometry`).toBeLessThan(configurationsBounds.top);
+    const detailLayout = await horizontalLayout(page);
+    expect(detailLayout.scrollWidth - detailLayout.clientWidth, `${width}px detail horizontal overflow`).toBeLessThanOrEqual(1);
+
+    await page.goto("/catalog");
+    expect(await page.locator(".catalog-grid").evaluate((element) => getComputedStyle(element).alignItems)).toBe("start");
+    const layout = await horizontalLayout(page);
+    expect(layout.scrollWidth - layout.clientWidth, `${width}px horizontal overflow`).toBeLessThanOrEqual(1);
+  }
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/catalog");
+  const cardHeights = await page.locator(".catalog-grid > li").evaluateAll((cards) => cards.map((card) => Math.round(card.getBoundingClientRect().height)));
+  expect(new Set(cardHeights).size).toBeGreaterThan(1);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/catalog");
+  await expect(page.locator(".catalog-grid > li").nth(1)).toBeVisible();
+  const firstRowHeights = await page.locator(".catalog-grid > li").evaluateAll((cards) => {
+    const boxes = cards.map((card) => card.getBoundingClientRect());
+    const firstRowTop = Math.min(...boxes.map((box) => box.top));
+    return boxes.filter((box) => Math.abs(box.top - firstRowTop) <= 4).map((box) => Math.round(box.height));
+  });
+  expect(firstRowHeights.length).toBeGreaterThan(1);
+  expect(new Set(firstRowHeights).size).toBeGreaterThan(1);
 });
 
 test("site search Sheet switches from full-height phone geometry at 767px to capped desktop geometry at 768px", async ({
