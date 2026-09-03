@@ -116,7 +116,7 @@ export function CartView({
       if (!controller.signal.aborted) {
         setLoading(true);
         setError(false);
-        setPreviewState((current) => current?.cartKey === cartKey ? current : null);
+        setPreviewState(null);
       }
     });
     void fetch("/api/catalog/preview", {
@@ -148,6 +148,7 @@ export function CartView({
       .catch((caught: unknown) => {
         if (controller.signal.aborted ||
           (caught instanceof DOMException && caught.name === "AbortError")) return;
+        setPreviewState((current) => current?.cartKey === cartKey ? null : current);
         setError(true);
       })
       .finally(() => {

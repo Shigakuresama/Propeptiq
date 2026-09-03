@@ -345,6 +345,7 @@ export function CheckoutForm({
   const keyRef = useRef<Readonly<{ fingerprint: string; key: string }> | null>(null);
   const retainedPreviewRef = useRef<CartPreview | null>(null);
   const presentationLoadedRef = useRef(false);
+  const previewRequestGenerationRef = useRef(0);
 
   const checkoutItems = useMemo(
     () => items.map((item) => ({ variantId: item.variantId, quantity: item.quantity })),
@@ -382,8 +383,12 @@ export function CheckoutForm({
     }
     const retained = retainedPreviewRef.current;
     const controller = new AbortController();
+    const requestGeneration = previewRequestGenerationRef.current + 1;
+    previewRequestGenerationRef.current = requestGeneration;
+    const requestIsCurrent = () => !controller.signal.aborted &&
+      previewRequestGenerationRef.current === requestGeneration;
     queueMicrotask(() => {
-      if (!controller.signal.aborted) {
+      if (requestIsCurrent()) {
         setPreviewState({ key: cartKey, preview: null, loading: true, error: false, changes: [], retained: retained !== null });
       }
     });
@@ -408,6 +413,7 @@ export function CheckoutForm({
         return parsed;
       })
       .then((preview) => {
+        if (!requestIsCurrent()) return;
         const priorById = new Map(retained?.items.map((line) => [line.variantId, line]));
         const currentIds = new Set(preview.items.map((line) => line.variantId));
         const changes = [
@@ -431,9 +437,9 @@ export function CheckoutForm({
         setPreviewState({ key: cartKey, preview, loading: false, error: false, changes, retained: retained !== null });
       })
       .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          setPreviewState({ key: cartKey, preview: null, loading: false, error: true, changes: [], retained: retained !== null });
-        }
+        if (!requestIsCurrent() ||
+          (error instanceof DOMException && error.name === "AbortError")) return;
+        setPreviewState({ key: cartKey, preview: null, loading: false, error: true, changes: [], retained: retained !== null });
       });
     return () => controller.abort();
   }, [cartKey, checkoutItems, hydrated, items.length, previewReload]);

@@ -1,8 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createCartPreviewToken } from "@/cart/preview-token";
-import { savePreviewPresentation } from "@/cart/preview-presentation";
+import {
+  PREVIEW_PRESENTATION_STORAGE_KEY,
+  savePreviewPresentation,
+} from "@/cart/preview-presentation";
 import type {
   CartPreview,
   CartPreviewItem,
@@ -18,7 +21,7 @@ type PreviewOptions = {
   available?: boolean;
   name?: string;
   quantity?: number;
-  reasons?: string[];
+  reasons?: CartPreview["reasons"];
   requiresAcknowledgement?: boolean;
 };
 
@@ -28,7 +31,7 @@ function preview({
   quantity = 2,
   reasons = [],
   requiresAcknowledgement = false,
-}: PreviewOptions = {}) {
+}: PreviewOptions = {}): CartPreview {
   const unitAmountMinor = quantity === 2 ? 2_208 : 2_160;
   const items: CartPreviewItem[] = [{ variantId, quantity, available, purchaseState: available ? "ready" : "unavailable", name, variantLabel: "Synthetic 5 mg", sku: "SYNTHETIC-5MG", packageForm: "Research vial", baseUnitMinor: 2400, unitAmountMinor, lineSubtotalMinor: quantity * unitAmountMinor, lineSavingsMinor: quantity * (2400 - unitAmountMinor), effectiveDiscountBps: quantity === 2 ? 800 : 1000, appliedPromotions: [], currency: "USD" }];
   return {
@@ -169,6 +172,80 @@ describe("CheckoutForm", () => {
     await user.click(screen.getByRole("button", { name: "Try server preview again" }));
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeRetry));
     expect(JSON.parse(String((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body))).toEqual(first);
+  });
+
+  it("ignores an aborted obsolete preview that resolves after the newer retained facts", async () => {
+    const user = userEvent.setup();
+    const obsolete = preview();
+    const current = preview({
+      quantity: 3,
+      requiresAcknowledgement: true,
+      reasons: ["server_facts_changed"],
+    });
+    const following = preview({
+      quantity: 4,
+      requiresAcknowledgement: true,
+      reasons: ["server_facts_changed"],
+    });
+    savePreviewPresentation(window.sessionStorage, obsolete);
+    let resolveObsolete: ((value: Response) => void) | undefined;
+    let obsoleteSignal: AbortSignal | undefined;
+    fetchMock.mockReset()
+      .mockImplementationOnce((_url: string, init: RequestInit) => {
+        obsoleteSignal = init.signal as AbortSignal;
+        return new Promise<Response>((resolve) => {
+          resolveObsolete = resolve;
+        });
+      })
+      .mockResolvedValueOnce(response(current))
+      .mockResolvedValueOnce(response(following));
+
+    const { rerender } = render(<CheckoutForm promotions={[]} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity: 3 }] });
+    rerender(<CheckoutForm promotions={[]} />);
+
+    expect(await screen.findByRole("heading", {
+      name: "Server preview changed or became unavailable.",
+    })).toBeVisible();
+    expect(obsoleteSignal?.aborted).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Acknowledge current server facts" }));
+    expect(screen.getByText("Current server facts acknowledged.", { exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Calculate authoritative total" })).toBeEnabled();
+    expect(JSON.parse(
+      window.sessionStorage.getItem(PREVIEW_PRESENTATION_STORAGE_KEY)!,
+    ).preview.previewToken).toBe(current.previewToken);
+
+    await act(async () => {
+      resolveObsolete?.(response(obsolete));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const acknowledgementSurvived = screen.queryByText(
+      "Current server facts acknowledged.",
+      { exact: true },
+    ) !== null;
+    const continuationStayedEnabled = screen.getByRole("button", {
+      name: "Calculate authoritative total",
+    }).hasAttribute("disabled") === false;
+    const storedAfterLateResponse = JSON.parse(
+      window.sessionStorage.getItem(PREVIEW_PRESENTATION_STORAGE_KEY)!,
+    ).preview.previewToken;
+
+    useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity: 4 }] });
+    rerender(<CheckoutForm promotions={[]} />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const followingRequest = JSON.parse(String(
+      (fetchMock.mock.calls[2]?.[1] as RequestInit).body,
+    ));
+
+    expect(acknowledgementSurvived).toBe(true);
+    expect(continuationStayedEnabled).toBe(true);
+    expect(storedAfterLateResponse).toBe(current.previewToken);
+    expect(followingRequest).toEqual({
+      items: [{ variantId, quantity: 4 }],
+      previousPreviewToken: current.previewToken,
+    });
   });
 
   it.each([

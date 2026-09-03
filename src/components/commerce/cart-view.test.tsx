@@ -404,6 +404,62 @@ describe("CartView", () => {
     expect(await screen.findAllByText("$44.16", { exact: true })).toHaveLength(2);
   });
 
+  it("clears successful same-cart facts when revalidation and its retry fail", async () => {
+    const user = userEvent.setup();
+    let rejectRevalidation: ((reason?: unknown) => void) | undefined;
+    let rejectRetry: ((reason?: unknown) => void) | undefined;
+    fetchMock.mockReset()
+      .mockResolvedValueOnce(response(preview()))
+      .mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => {
+        rejectRevalidation = reject;
+      }))
+      .mockImplementationOnce(() => new Promise<Response>((_resolve, reject) => {
+        rejectRetry = reject;
+      }));
+    const { rerender } = render(<CartView checkoutIntent="resume" />);
+    expect(await screen.findByText("Synthetic local test only — Alpha", { exact: true })).toBeVisible();
+
+    useCart.mockReturnValue(cart([{ variantId, quantity: 2 }]));
+    rerender(<CartView checkoutIntent="resume" />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await act(async () => rejectRevalidation?.(new Error("same-cart revalidation failed")));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The authoritative cart preview is unavailable.",
+    );
+    const showedVerifiedFactsUnderError = screen.queryByText(
+      "Synthetic local test only — Alpha",
+      { exact: true },
+    ) !== null;
+
+    await user.click(screen.getByRole("button", { name: "Retry current cart facts" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    const showedVerifiedFactsDuringRetry = screen.queryByText(
+      "Synthetic local test only — Alpha",
+      { exact: true },
+    ) !== null;
+    const showedFallbackDuringRetry = screen.queryByText(
+      new RegExp(`Unverified saved variant:.*${variantId}`, "u"),
+    ) !== null;
+
+    await act(async () => rejectRetry?.(new Error("same-cart retry failed")));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The authoritative cart preview is unavailable.",
+    );
+    expect(showedVerifiedFactsUnderError).toBe(false);
+    expect(showedVerifiedFactsDuringRetry).toBe(false);
+    expect(showedFallbackDuringRetry).toBe(true);
+    expect(screen.queryByText("Synthetic local test only — Alpha", { exact: true })).toBeNull();
+    expect(screen.getByText(
+      new RegExp(`Unverified saved variant:.*${variantId}`, "u"),
+    )).toBeVisible();
+    expect(screen.queryByText(
+      "Your saved request is ready to continue at checkout.",
+      { exact: true },
+    )).toBeNull();
+    expect(screen.getByRole("button", { name: "Checkout unavailable" })).toBeDisabled();
+  });
+
   it("hides stale facts immediately while refreshing an exact changed quantity", async () => {
     fetchMock
       .mockResolvedValueOnce(response(preview()))
