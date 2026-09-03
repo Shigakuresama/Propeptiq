@@ -52,6 +52,7 @@ function importSpecifiers(contents: string): readonly string[] {
 
 function genericClientAuthorityViolation(specifier: string): boolean {
   return specifier === "server-only" ||
+    /storefront-public-server|storefront-preview-source/iu.test(specifier) ||
     /^@\/env(?:\/|$)/u.test(specifier) ||
     /^@\/config(?:\/|$)/u.test(specifier) ||
     /^@\/db(?:\/|$)/u.test(specifier) ||
@@ -266,6 +267,10 @@ describe("storefront client boundary", () => {
       expect(contents, `${path} server-only`).not.toMatch(/["']server-only["']/u);
       expect(contents, `${path} process environment`).not.toMatch(/\bprocess\.env\b/u);
       for (const specifier of importSpecifiers(contents)) {
+        expect(
+          genericClientAuthorityViolation(specifier),
+          `${path} forbidden client-safe graph authority ${specifier}`,
+        ).toBe(false);
         expect(specifier, `${path} environment`).not.toMatch(/^@\/env(?:\/|$)/u);
         expect(specifier, `${path} database`).not.toMatch(/^@\/db(?:\/|$)/u);
         expect(specifier, `${path} checkout/provider`).not.toMatch(

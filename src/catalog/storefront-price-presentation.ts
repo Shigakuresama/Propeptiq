@@ -56,7 +56,7 @@ export function canAddPublicVariant(
 ): boolean {
   if (variant.priceStatus === "active") {
     if (variant.availability === "available") return variant.checkoutReady === true && variant.baseUnitMinor !== null && Number.isSafeInteger(variant.baseUnitMinor) && variant.baseUnitMinor > 0 && variant.currency === "USD";
-    return variant.availability === "preview_only" && variant.checkoutReady === false && mode !== "production" && variant.baseUnitMinor !== null && Number.isSafeInteger(variant.baseUnitMinor) && variant.baseUnitMinor > 0 && variant.currency === "USD";
+    return variant.availability === "preview_only" && variant.checkoutReady === false && variant.baseUnitMinor !== null && Number.isSafeInteger(variant.baseUnitMinor) && variant.baseUnitMinor > 0 && variant.currency === "USD";
   }
   if (variant.priceStatus === "pending") {
     return mode !== "production" && variant.availability === "preview_only" &&

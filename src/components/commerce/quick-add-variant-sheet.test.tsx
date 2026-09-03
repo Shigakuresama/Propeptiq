@@ -256,4 +256,28 @@ describe("QuickAddVariantSheet", () => {
       }),
     ).toBeDisabled();
   });
+
+  it("adds the exact positive preview-only Production variant while pending stays disabled", async () => {
+    const user = userEvent.setup();
+    const previewOnly = testPublicVariant({
+      id: "production-preview-variant", label: "30 mg", availability: "preview_only", checkoutReady: false,
+    });
+    const pending = testPublicVariant({
+      id: "production-pending-variant", label: "Pending", availability: "preview_only",
+      priceStatus: "pending", baseUnitMinor: 0, checkoutReady: false,
+    });
+    renderTrigger(
+      testCanonicalProduct([previewOnly, pending], { defaultVariantId: previewOnly.id }),
+      testPricingContext("production", [testWinter30]),
+    );
+    await user.click(screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("radio", { name: /30 mg/iu })).toBeEnabled();
+    expect(within(dialog).getByRole("radio", { name: /Pending/iu })).toBeDisabled();
+    expect(within(dialog).getByText("Checkout unavailable")).toBeVisible();
+    await user.click(within(dialog).getByRole("button", { name: "Add Synthetic Product Alpha to cart" }));
+    expect(addVariantMock).toHaveBeenCalledExactlyOnceWith("production-preview-variant", 1, {
+      productName: "Synthetic Product Alpha", variantLabel: "30 mg",
+    });
+  });
 });
