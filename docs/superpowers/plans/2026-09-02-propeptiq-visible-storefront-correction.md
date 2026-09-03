@@ -10,7 +10,7 @@
 
 - Integration branch and local `main` start at `3734477f7b0d320cc1e4bb6a93e4976c3f6fbda1`; `origin/main` remains at `440be99e7ebe3b2900f3cba55faa406d5317e808`.
 - The correct local build already renders the WINTER30 banner, but `storefrontCatalogData` is empty, so 56 products and 103 configurations render as browse-only records with no canonical selectors or prices.
-- The reviewed decision manifest has 39 exact positive one-vial Amino Club price candidates and 64 pending zero-dollar rows. No Stripe IDs or inventory facts exist.
+- The reviewed decision manifest has 40 exact positive one-vial Amino Club price candidates and 63 pending zero-dollar rows. No Stripe IDs or inventory facts exist. The fortieth verified row is SNAP-8 10mg (`SNP10`) at $29.99, with its own evidence timestamp.
 - The ordinary working folder is a dirty sibling checkout on another branch. Do not switch, clean, reset, or edit it.
 
 ## Non-negotiable boundaries
