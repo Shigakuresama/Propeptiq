@@ -6,7 +6,12 @@ const mocks = vi.hoisted(() => ({
   getPublicCatalog: vi.fn(),
   getPublicCatalogRead: vi.fn(),
   withRuntimeTransaction: vi.fn(),
-  createPostgresSharedSetReadPort: vi.fn(() => "read-port"),
+  createPostgresSharedSetReadPort: vi.fn(
+    (_options: { loadCurrentPublicProducts?: () => Promise<unknown> }) => {
+      void _options;
+      return undefined as unknown;
+    },
+  ),
   resolvePublicSet: vi.fn(),
   listOwnerSets: vi.fn(),
   createSharedSetService: vi.fn(),
