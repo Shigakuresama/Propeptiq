@@ -1,7 +1,7 @@
 import "server-only";
 
 import { getRequestIdentity } from "@/auth/server";
-import { getPublicCatalog } from "@/catalog/server";
+import { getPublicCatalogRead } from "@/catalog/server";
 import type { ServerEnv } from "@/config/env-schema";
 import { authorizeOperation } from "@/domain/authorization";
 import { withRuntimeTransaction } from "@/db/runtime";
@@ -15,7 +15,11 @@ import {
 
 async function loadCurrentPublicProducts(productIds: readonly string[]) {
   const requested = new Set(productIds);
-  const catalog = await getPublicCatalog();
+  const result = await getPublicCatalogRead();
+  if (result.status !== "available") {
+    throw new Error("PUBLIC_CATALOG_UNAVAILABLE");
+  }
+  const catalog = result.catalog;
   if (catalog.source !== "production") return Object.freeze([]);
   return Object.freeze(
     catalog.products
@@ -106,15 +110,15 @@ export async function loadOwnerSharedSetWorkspace() {
         limit: 50,
         offset: 0,
       }),
-      getPublicCatalog(),
+      getPublicCatalogRead(),
     ]);
-    if (catalog.source !== "production") {
+    if (catalog.status !== "available" || catalog.catalog.source !== "production") {
       return Object.freeze({ status: "unavailable" as const });
     }
     return Object.freeze({
       status: "available" as const,
       products: Object.freeze(
-        catalog.products.map(({ id, name, packageForm }) =>
+        catalog.catalog.products.map(({ id, name, packageForm }) =>
           Object.freeze({ id, name, packageForm }),
         ),
       ),

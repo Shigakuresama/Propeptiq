@@ -20,7 +20,7 @@ vi.mock("./public-catalog", () => ({ buildPublicCatalog: mocks.buildPublicCatalo
 
 import { EMPTY_CATALOG_RECORD_SET } from "./catalog-source";
 import type { CatalogRecordSet, PublicCatalog } from "./types";
-import { getPublicCatalog } from "./server";
+import { getPublicCatalog, getPublicCatalogRead } from "./server";
 
 const environment = parseServerEnv({
   APP_ENV: "local",
@@ -80,6 +80,25 @@ describe("legacy catalog server boundary", () => {
     expect(Object.isFrozen(EMPTY_CATALOG_RECORD_SET)).toBe(true);
     expect(warning).toHaveBeenCalledWith("STOREFRONT_CATALOG_DATABASE_UNAVAILABLE");
     expect(JSON.stringify(warning.mock.calls)).not.toContain("product_variants schema detail");
+  });
+
+  it("preserves schema degradation in the status-bearing catalog read", async () => {
+    mocks.loadDatabaseCatalogRecords.mockRejectedValue(
+      sqlStateError("42P01", "private product_variants schema detail"),
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(getPublicCatalogRead()).resolves.toEqual({
+      status: "schema_unavailable",
+      catalog: emptyPublicCatalog,
+    });
+  });
+
+  it("keeps an authoritative empty catalog available", async () => {
+    await expect(getPublicCatalogRead()).resolves.toEqual({
+      status: "available",
+      catalog: emptyPublicCatalog,
+    });
   });
 
   it("contains synchronous and asynchronous diagnostic failures without leaking raw errors", async () => {

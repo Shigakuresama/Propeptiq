@@ -17,6 +17,11 @@ import { loadDatabaseCatalogRecords } from "./database-catalog";
 import { buildPublicCatalog } from "./public-catalog";
 import type { PublicCatalog } from "./types";
 
+export type PublicCatalogReadResult = Readonly<
+  | { status: "available"; catalog: PublicCatalog }
+  | { status: "schema_unavailable"; catalog: PublicCatalog }
+>;
+
 async function reportMissingCatalogSchema(): Promise<void> {
   try {
     await Promise.resolve().then(() =>
@@ -27,9 +32,10 @@ async function reportMissingCatalogSchema(): Promise<void> {
   }
 }
 
-export async function getPublicCatalog(): Promise<PublicCatalog> {
+export async function getPublicCatalogRead(): Promise<PublicCatalogReadResult> {
   await connection();
   const environment = readServerEnv();
+  let schemaUnavailable = false;
   const records = await loadCatalogRecordSet(
     environment,
     undefined,
@@ -39,10 +45,18 @@ export async function getPublicCatalog(): Promise<PublicCatalog> {
           return await loadDatabaseCatalogRecords(client);
         } catch (error: unknown) {
           if (!isMissingCatalogSchemaError(error)) throw error;
+          schemaUnavailable = true;
           await reportMissingCatalogSchema();
           return EMPTY_CATALOG_RECORD_SET;
         }
       }),
   );
-  return buildPublicCatalog(records);
+  return Object.freeze({
+    status: schemaUnavailable ? "schema_unavailable" : "available",
+    catalog: buildPublicCatalog(records),
+  });
+}
+
+export async function getPublicCatalog(): Promise<PublicCatalog> {
+  return (await getPublicCatalogRead()).catalog;
 }
