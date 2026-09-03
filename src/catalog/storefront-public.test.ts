@@ -8,6 +8,7 @@ import type { ControlledContentRecord } from "@/content/storefront-content";
 import { browseCatalogPublicationId } from "./browse-catalog-publication";
 import { browseCatalogProducts } from "./browse-catalog";
 import { storefrontCatalogDecisionManifest } from "./storefront-catalog-manifest";
+import { storefrontCatalogData } from "./storefront-catalog-data";
 import { parseStorefrontBindings } from "./storefront-bindings";
 import type { StorefrontCatalogData } from "./storefront-catalog-data";
 import type { StorefrontProduct } from "./storefront-types";
@@ -191,6 +192,23 @@ function recursivelyCollectKeys(value: unknown, keys = new Set<string>()): Set<s
 }
 
 describe("public storefront projection", () => {
+  it("round-trips explicit unknown merchandising metadata through the full catalog projection", () => {
+    const catalog = buildPublicStorefrontCatalog({
+      configuredPublicationId: browseCatalogPublicationId,
+      catalogData: storefrontCatalogData,
+      runtimeVariantFacts: [],
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+    });
+
+    expect(catalog.products).toHaveLength(56);
+    const canonicalProducts = catalog.products.filter((product) => product.kind === "canonical");
+    expect(canonicalProducts).toHaveLength(56);
+    expect(canonicalProducts.every((product) => (
+      product.popularityRank === null && product.releasedAt === null
+    ))).toBe(true);
+  });
+
   it("resolves configured related products in order and filters unsafe targets", () => {
     const current = buildFixtureCatalog().products.find((entry) => entry.kind === "canonical") as CanonicalPublicStorefrontProduct;
     const target = { ...current, id: "10000000-0000-4000-8000-000000000002", slug: "zulu", popularityRank: 99, relatedProductIds: [] };

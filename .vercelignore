@@ -1,0 +1,9 @@
+.superpowers
+.worktrees
+.codex-evidence
+.neon
+blob-report
+playwright-report
+test-results
+.env*
+!.env.example

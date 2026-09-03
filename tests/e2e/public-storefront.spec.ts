@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createElement, type ReactNode } from "react";
@@ -1395,13 +1395,151 @@ test("preview item has no gated calculator, related carousel, overflow, or eager
   expect(images.filter((image) => image.loading !== "lazy" || image.fetchPriority === "high")).toHaveLength(1);
 });
 
+test("configured catalog cards keep selected one-bottle prices, layout, chooser, and null-metadata sorting truthful", async ({
+  page,
+}) => {
+  const expectedCards = [
+    { amount: "30 mg · 1 bottle", base: "$59.99", imagePath: "/catalog/tirzepatide.webp", name: "Tirzepatide", sale: "$41.99" },
+    { amount: "10 mg · 1 bottle", base: "$69.99", imagePath: "/catalog/retatrutide.webp", name: "Retatrutide", sale: "$48.99" },
+    { amount: "500 mg · 1 bottle", base: "$69.99", imagePath: "/catalog/nad-plus.webp", name: "NAD+", sale: "$48.99" },
+  ] as const;
+  const targetImagePaths = new Set<string>(expectedCards.map((card) => card.imagePath));
+  const nextImageRequest = /\/_next\/image(?:\?.*)?$/u;
+
+  for (const width of [375, 1440]) {
+    const heldImagePaths = new Set<string>();
+    let releaseActualImages: () => void = () => {};
+    const actualImagesReleased = new Promise<void>((resolve) => {
+      releaseActualImages = resolve;
+    });
+    const holdActualCatalogImages = async (route: Route) => {
+      const imagePath = new URL(route.request().url()).searchParams.get("url");
+      if (imagePath === null || !targetImagePaths.has(imagePath)) {
+        await route.continue();
+        return;
+      }
+      heldImagePaths.add(imagePath);
+      await actualImagesReleased;
+      await route.continue();
+    };
+
+    await page.route(nextImageRequest, holdActualCatalogImages);
+    try {
+      await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
+      await page.goto("/catalog", { waitUntil: "domcontentloaded" });
+      const measuredFrames: Array<{
+        before: Awaited<ReturnType<typeof clientRect>>;
+        image: Locator;
+      }> = [];
+
+      for (const expectedCard of expectedCards) {
+        const card = page.getByRole("article", { name: expectedCard.name, exact: true });
+        const imageFrame = card.locator(".catalog-image-frame");
+        const image = imageFrame.locator("img");
+
+        await expect(card.getByText(expectedCard.amount, { exact: true })).toBeVisible();
+        await expect(card.locator("del")).toHaveText(expectedCard.base);
+        await expect(card.locator("strong")).toHaveText(expectedCard.sale);
+        await imageFrame.scrollIntoViewIfNeeded();
+        const beforeImageCompletion = await clientRect(imageFrame);
+        expect(beforeImageCompletion.width / beforeImageCompletion.height).toBeCloseTo(4 / 3, 2);
+        await expect(image).toHaveJSProperty("complete", false);
+        expect(await image.evaluate((element) => {
+          const entry = element as HTMLImageElement;
+          return { naturalHeight: entry.naturalHeight, naturalWidth: entry.naturalWidth };
+        })).toEqual({ naturalHeight: 0, naturalWidth: 0 });
+        measuredFrames.push({ before: beforeImageCompletion, image });
+      }
+
+      await expect.poll(() => heldImagePaths.size).toBe(expectedCards.length);
+      releaseActualImages();
+
+      for (const { before, image } of measuredFrames) {
+        await expect
+          .poll(() => image.evaluate((element) => {
+            const entry = element as HTMLImageElement;
+            return entry.complete && entry.naturalWidth > 0 && entry.naturalHeight > 0;
+          }))
+          .toBe(true);
+        const decodedState = await image.evaluate(async (element) => {
+          const entry = element as HTMLImageElement;
+          await entry.decode();
+          return {
+            complete: entry.complete,
+            naturalHeight: entry.naturalHeight,
+            naturalWidth: entry.naturalWidth,
+          };
+        });
+        expect(decodedState.complete).toBe(true);
+        expect(decodedState.naturalHeight).toBeGreaterThan(0);
+        expect(decodedState.naturalWidth).toBeGreaterThan(0);
+        const afterImageCompletion = await clientRect(image.locator("xpath=.."));
+        expect(Math.abs(afterImageCompletion.width - before.width)).toBeLessThanOrEqual(1);
+        expect(Math.abs(afterImageCompletion.height - before.height)).toBeLessThanOrEqual(1);
+      }
+
+      const layout = await horizontalLayout(page);
+      expect(layout.scrollWidth - layout.clientWidth, `${width}px catalog overflow`).toBeLessThanOrEqual(1);
+      expect(layout.offenders, `${width}px catalog overflow offenders`).toEqual([]);
+    } finally {
+      releaseActualImages();
+      await page.unroute(nextImageRequest, holdActualCatalogImages);
+    }
+  }
+
+  const tirzepatideCard = page.getByRole("article", { name: "Tirzepatide", exact: true });
+  const chooserTrigger = tirzepatideCard.getByRole("button", { name: "Add Tirzepatide to cart" });
+  const cartBeforeChooser = await page.evaluate(() => window.localStorage.getItem("propeptiq.cart.v2"));
+  await chooserTrigger.focus();
+  await page.keyboard.press("Enter");
+  const chooser = page.getByRole("dialog", { name: "Choose a variant for Tirzepatide" });
+  await expect(chooser).toBeVisible();
+  const pendingVariant = chooser
+    .locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`)
+    .locator("xpath=ancestor::label[1]");
+  await expect(pendingVariant).toBeVisible();
+  await expect(pendingVariant).toContainText("$0.00");
+  await expect(pendingVariant).toContainText("Local cart preview");
+  await expect(pendingVariant.locator('input[type="radio"]')).not.toBeDisabled();
+  const enabledRadios = chooser.locator('input[type="radio"]:not(:disabled)');
+  await enabledRadios.first().focus();
+  await expect(enabledRadios.first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(enabledRadios.nth(1)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(chooser).toBeHidden();
+  await expect(chooserTrigger).toBeFocused();
+  expect(await page.evaluate(() => window.localStorage.getItem("propeptiq.cart.v2"))).toBe(cartBeforeChooser);
+
+  const sort = page.getByRole("combobox", { name: "Sort catalog" });
+  const catalogResults = page.getByRole("region", { name: "Catalog results region" });
+  const titles = async () => catalogResults.getByRole("article").evaluateAll((articles) =>
+    articles.map((article) => article.querySelector("h2")?.textContent?.trim() ?? ""),
+  );
+  await sort.selectOption("alphabetical");
+  const alphabeticalTitles = await titles();
+  expect(alphabeticalTitles).toHaveLength(56);
+  await sort.selectOption("popular");
+  expect(await titles()).toEqual(alphabeticalTitles);
+  await sort.selectOption("newest");
+  expect(await titles()).toEqual(alphabeticalTitles);
+
+  const search = page.getByRole("searchbox", { name: "Search catalog" });
+  await search.fill("NAD+");
+  await expect(page.getByText("1 of 56 products", { exact: true })).toBeVisible();
+  await expect(catalogResults.getByRole("article", { name: "NAD+", exact: true })).toHaveCount(1);
+  await sort.selectOption("price-desc");
+  await expect(search).toHaveValue("NAD+");
+  await expect(page.getByText("1 of 56 products", { exact: true })).toBeVisible();
+});
+
 test("canonical product pricing, variant switching, tiers, and local cart identity stay exact", async ({ page }) => {
   await page.goto("/catalog");
   const card = page.locator("article.catalog-listing-card").filter({ hasText: "Tirzepatide" }).first();
   await expect(card.locator("del")).toContainText("$59.99");
   await expect(card.locator("strong")).toContainText("$41.99");
   await expect(card).toContainText("-30%");
-  await expect(card).toContainText("Options available");
+  await expect(card.getByText("Local cart preview", { exact: true })).toBeVisible();
 
   await page.goto("/catalog/items/tirzepatide");
   const radios = page.locator('input[type="radio"]');

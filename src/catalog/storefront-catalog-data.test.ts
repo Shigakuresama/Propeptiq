@@ -34,6 +34,29 @@ describe("canonical storefront catalog data", () => {
     });
   });
 
+  it("uses the decision-manifest amount directly and leaves merchandising metadata unknown", () => {
+    const byCode = new Map(
+      storefrontCatalogData.bindings.variants.map((variant) => [
+        `${variant.productId}:${variant.browseCode}`,
+        variant,
+      ]),
+    );
+    const tirzepatide = storefrontCatalogData.products.find((product) => product.slug === "tirzepatide")!;
+    const nadPlus = storefrontCatalogData.products.find((product) => product.slug === "nad-plus")!;
+    const hcg = storefrontCatalogData.products.find((product) => product.slug === "hcg")!;
+    const glow = storefrontCatalogData.products.find((product) => product.slug === "glow")!;
+    const liPoC = storefrontCatalogData.products.find((product) => product.slug === "li-po-c")!;
+
+    expect(byCode.get(`${tirzepatide.id}:TR30`)?.amount).toEqual({ value: 30, unit: "mg" });
+    expect(byCode.get(`${nadPlus.id}:NJ500`)?.amount).toEqual({ value: 500, unit: "mg" });
+    expect(byCode.get(`${hcg.id}:G5K`)?.amount).toEqual({ value: 5000, unit: "iu" });
+    expect(byCode.get(`${glow.id}:BBG70`)?.amount).toBeNull();
+    expect(byCode.get(`${liPoC.id}:LPC`)?.amount).toBeNull();
+    expect(storefrontCatalogData.products.every((product) => (
+      product.popularityRank === null && product.releasedAt === null
+    ))).toBe(true);
+  });
+
   it("only projects deliberately pending preview bindings", () => {
     expect(buildConfiguredDisplayVariantFacts(storefrontCatalogData)).toHaveLength(103);
     const altered = {

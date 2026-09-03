@@ -5,7 +5,6 @@ import Image from "next/image";
 import Link from "next/link";
 
 import type {
-  CanonicalPublicStorefrontProduct,
   PublicStorefrontProduct,
 } from "@/catalog/storefront-public";
 import {
@@ -29,43 +28,6 @@ function presentationStatus(presentation: PricePresentation): string {
   if (presentation.purchaseState === "ready") return "Available";
   if (presentation.purchaseState === "local_preview") return "Local cart preview";
   return "Checkout unavailable";
-}
-
-function aggregateVariantStatus(
-  product: CanonicalPublicStorefrontProduct,
-  pricing: PublicStorefrontPricingContext,
-): string {
-  const presentations = product.variants.map((variant) =>
-    resolvePublicVariantPrice({
-      variant,
-      productId: product.id,
-      quantity: 1,
-      pricing,
-    }),
-  );
-  if (
-    presentations.some(
-      (presentation) =>
-        presentation.state === "priced" &&
-        (presentation.purchaseState === "ready" ||
-          presentation.purchaseState === "local_preview"),
-    )
-  ) {
-    return "Options available";
-  }
-  if (
-    presentations.some(
-      (presentation) =>
-        presentation.state === "priced" &&
-        presentation.purchaseState === "checkout_unavailable",
-    )
-  ) {
-    return "Checkout unavailable";
-  }
-  if (presentations.some((presentation) => presentation.state === "pending")) {
-    return "Pricing coming soon";
-  }
-  return "Unavailable";
 }
 
 export function CatalogListingCard({
@@ -150,7 +112,7 @@ export function CatalogListingCard({
         {product.kind === "canonical" && selectedVariant && selectedPresentation ? (
           <div className="mt-5">
             <p className="text-sm text-muted-ink">
-              {summarizePublicStorefrontVariants(product.variants)}
+              {`${summarizePublicStorefrontVariants([selectedVariant])} · ${selectedVariant.packageQuantity} bottle${selectedVariant.packageQuantity === 1 ? "" : "s"}`}
             </p>
             <ProductPrice
               productId={product.id}
@@ -159,9 +121,7 @@ export function CatalogListingCard({
               showPurchaseStatus={false}
             />
             <p className="mt-2 text-sm text-muted-ink">
-              {product.variants.length > 1
-                ? aggregateVariantStatus(product, pricing)
-                : presentationStatus(selectedPresentation)}
+              {presentationStatus(selectedPresentation)}
             </p>
           </div>
         ) : (

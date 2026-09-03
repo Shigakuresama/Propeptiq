@@ -13,8 +13,8 @@ const bindingProductSchema = z
   .object({
     id: uuidSchema,
     browseSlug: nonblankStringSchema,
-    popularityRank: z.number().int().positive(),
-    releasedAt: z.iso.datetime({ offset: true }),
+    popularityRank: z.number().int().positive().nullable(),
+    releasedAt: z.iso.datetime({ offset: true }).nullable(),
     defaultVariantId: uuidSchema,
     relatedProductIds: z.array(uuidSchema),
     contentIds: z.array(uuidSchema),

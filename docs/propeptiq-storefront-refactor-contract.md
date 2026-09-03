@@ -86,7 +86,7 @@ These sources justify a controlled-content and launch-gate design. They are not 
 
 ## Canonical catalog contract
 
-The implementation will introduce a normalized projection without parsing identity, mg amount, price, or Stripe mapping from display labels:
+The normalized projection uses explicit catalog decisions without parsing identity, mg amount, price, or Stripe mapping from display labels:
 
 ```ts
 export type PriceStatus = "pending" | "active" | "unavailable";
@@ -115,8 +115,8 @@ export type StorefrontProduct = Readonly<{
   description: string | null;
   image: Readonly<{ src: string; alt: string; width: number; height: number }>;
   aliases: readonly string[];
-  popularityRank: number;
-  releasedAt: string;
+  popularityRank: number | null;
+  releasedAt: string | null;
   defaultVariantId: string;
   variantIds: readonly string[];
   relatedProductIds: readonly string[];
@@ -124,7 +124,7 @@ export type StorefrontProduct = Readonly<{
 }>;
 ```
 
-`packageQuantity` makes the cart unit explicit and prevents a label such as `5mg × 10 vials` from silently deciding whether quantity one means one vial or one ten-vial package. Real IDs, SKUs, amounts, dates, ranks, default variants, relationships, availability, and payment mappings must come from owner-approved data. Test fixtures may use clearly labelled fictional values; production configuration may not.
+`packageQuantity` makes the cart unit explicit and prevents a label such as `5mg × 10 vials` from silently deciding whether quantity one means one vial or one ten-vial package. The Phase 1 decision manifest keys every amount by exact `(browseSlug, browseCode)` and preserves `null` for composite and mL-only records; it does not parse display text. Every current product has `popularityRank: null` and `releasedAt: null` because those merchandising facts are unknown, not because of a default rank or release date. Real IDs, SKUs, amounts, dates, ranks, default variants, relationships, availability, and payment mappings must come from owner-approved data. Test fixtures may use clearly labelled fictional values; production configuration may not.
 
 During migration, the existing browse catalog is an input, not a second long-term authority. The approved names, categories, images, source references, and display labels move into the canonical storefront data record once the missing owner facts are supplied. `browse-catalog.ts` may temporarily export a compatibility projection, but its independent `ownerSuppliedProducts` definitions must be removed after all callers migrate. Versioned base prices, variant availability/inventory, and promotions remain in the existing server catalog/database authority; the public projection reads them rather than copying them into components.
 
@@ -213,7 +213,7 @@ Normalization lowercases, applies Unicode normalization, strips diacritics for m
 5. Category/tag/approved description
 6. Conservative bounded fuzzy match for queries of four or more characters
 
-Tie-breaking is score, configured popularity rank where relevant, alphabetical title, then stable ID. Catalog price sorting uses the lowest active effective price among available variants unless `defaultVariantId` is explicitly selected for display; pending and unavailable products sort after active-price products in both directions.
+Tie-breaking is score, configured popularity rank where relevant, alphabetical title, then stable ID. With current null ranks and release dates, “Most popular” and “Newest” use the deterministic alphabetical/ID fallback. Card display and catalog price sorting share one selection authority: a valid explicit default (non-unavailable, priced, and positive-base) wins first; otherwise the lowest displayed effective positive-base candidate wins with label/ID ties; if no such candidate exists, only the explicit default may supply pending, unavailable, or local-zero presentation. Pending and unavailable products sort after active-price products in both directions.
 
 The bottom search is a public-layout Radix Sheet with Product and Pages or Information groups, normal links, arrow-key navigation, Enter selection, Escape close, focus trap/restore, mobile full-screen treatment, safe-area spacing, and a live result count. It gives navigation recommendations only and never medical, dosage, administration, or product-use guidance.
 
