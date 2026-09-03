@@ -212,7 +212,7 @@ export function SiteSearchSheet({
             type="button"
           >
             <SearchIcon aria-hidden="true" className="size-4" />
-            <span>SEARCH</span>
+            <span className="sr-only md:not-sr-only">SEARCH</span>
           </button>
         </SheetTrigger>
       </div>

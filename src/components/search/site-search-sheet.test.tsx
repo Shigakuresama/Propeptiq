@@ -489,6 +489,20 @@ describe("SiteSearchLauncher accessible Sheet behavior", () => {
     expect(trigger.get("min-height")).toBe("44px");
     expect(trigger.get("max-width")).toBe("100%");
     expect(trigger.get("pointer-events")).toBe("auto");
+
+    const phoneMedia = globalsCss.indexOf("@media (max-width: 47.999rem)");
+    expect(phoneMedia).toBeGreaterThanOrEqual(0);
+    const phoneTrigger = cssDeclarations(cssRuleBody(
+      globalsCss,
+      '.site-search-launcher-lane > [data-slot="sheet-trigger"]',
+      phoneMedia,
+    ));
+    expect(phoneTrigger.get("width")).toBe("44px");
+    expect(phoneTrigger.get("height")).toBe("44px");
+    expect(phoneTrigger.get("min-width")).toBe("44px");
+    expect(phoneTrigger.get("min-height")).toBe("44px");
+    expect(phoneTrigger.get("gap")).toBe("0");
+    expect(phoneTrigger.get("padding-inline")).toBe("0");
   });
 
   it("gives the bottom search Sheet capped desktop geometry and one results scroller", () => {
@@ -557,6 +571,8 @@ describe("SiteSearchLauncher accessible Sheet behavior", () => {
 
     expect(trigger.parentElement).toHaveClass("site-search-launcher-lane");
     expect(trigger).toHaveClass("min-h-11");
+    const visibleLabel = within(trigger).getByText("SEARCH");
+    expect(visibleLabel).toHaveClass("sr-only", "md:not-sr-only");
     expect(dialog).toHaveClass("site-search-sheet");
     expect(dialog).toHaveAttribute("data-side", "bottom");
     const searchbox = within(dialog).getByRole("searchbox", {

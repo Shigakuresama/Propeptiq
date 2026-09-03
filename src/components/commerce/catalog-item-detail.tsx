@@ -16,7 +16,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
     product.name.replace(/\s+/gu, "").toLocaleLowerCase("en-US");
 
   return (
-    <article className="site-container pb-20 pt-10 sm:pt-14 lg:pt-16">
+    <article className="site-container pb-20 pt-2 md:pt-14 lg:pt-16">
       <Link
         className="record-link inline-flex min-h-11 items-center gap-2"
         href="/catalog"
@@ -26,8 +26,34 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
         Back to catalog
       </Link>
 
-      <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(20rem,5fr)] lg:items-start lg:gap-16">
-        <div className="catalog-detail-image" data-category={product.category}>
+      <div className="mt-2 grid gap-10 md:mt-8 lg:grid-cols-[minmax(0,7fr)_minmax(20rem,5fr)] lg:items-start lg:gap-x-16 lg:gap-y-0">
+        <header
+          className="lg:col-start-2 lg:row-start-1"
+          data-motion-sequence="dossier-intro"
+        >
+          <p className="eyebrow" data-motion-step="1">
+            {canonical ? "Product" : "Browse-only catalog item"}
+          </p>
+          <h1
+            className="mt-5 text-balance font-heading text-page leading-[1.02] text-ink"
+            data-motion-step="2"
+          >
+            {product.name}
+          </h1>
+          {sourceLabelIsDistinct ? (
+            <p
+              className="mt-4 text-sm leading-6 text-muted-ink"
+              data-motion-step="3"
+            >
+              Source label: {product.sourceName}
+            </p>
+          ) : null}
+        </header>
+
+        <div
+          className="catalog-detail-image lg:col-start-1 lg:row-span-2 lg:row-start-1"
+          data-category={product.category}
+        >
           <Image
             alt={product.image.alt}
             className="object-cover"
@@ -39,27 +65,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
           <p className="catalog-image-disclosure">Illustrative product presentation</p>
         </div>
 
-        <div>
-          <header data-motion-sequence="dossier-intro">
-            <p className="eyebrow" data-motion-step="1">
-              {canonical ? "Product" : "Browse-only catalog item"}
-            </p>
-            <h1
-              className="mt-5 text-balance font-heading text-page leading-[1.02] text-ink"
-              data-motion-step="2"
-            >
-              {product.name}
-            </h1>
-            {sourceLabelIsDistinct ? (
-              <p
-                className="mt-4 text-sm leading-6 text-muted-ink"
-                data-motion-step="3"
-              >
-                Source label: {product.sourceName}
-              </p>
-            ) : null}
-          </header>
-
+        <div className="catalog-detail-content pt-16 lg:col-start-2 lg:row-start-2 lg:pt-0">
           <section aria-labelledby="catalog-variants-heading" className="mt-10">
             <h2 id="catalog-variants-heading" className="font-heading text-3xl text-ink">
               Supplied configurations
