@@ -139,6 +139,54 @@ describe("storefront catalog decision manifest", () => {
     expect(() => getStorefrontCatalogDecision("missing", "NOPE")).toThrow("Storefront catalog decision is missing");
   });
 
+  it("projects the reviewed literal amount for single-unit rows and preserves null for composite or volume-only rows", () => {
+    expect(getStorefrontCatalogDecision("tirzepatide", "TR30").amount).toEqual({
+      value: 30,
+      unit: "mg",
+    });
+    expect(getStorefrontCatalogDecision("nad-plus", "NJ500").amount).toEqual({
+      value: 500,
+      unit: "mg",
+    });
+    expect(getStorefrontCatalogDecision("hcg", "G5K").amount).toEqual({
+      value: 5000,
+      unit: "iu",
+    });
+    expect(getStorefrontCatalogDecision("glow", "BBG70").amount).toBeNull();
+    expect(getStorefrontCatalogDecision("li-po-c", "LPC").amount).toBeNull();
+  });
+
+  it("fails closed when explicit amount coverage is incomplete, duplicated, or unknown", () => {
+    const amounts = storefrontCatalogDecisionManifest.variants.map((variant) => ({
+      browseSlug: variant.browseSlug,
+      browseCode: variant.browseCode,
+      amount: variant.amount,
+    }));
+
+    expect(() => buildStorefrontCatalogDecisionManifest(
+      browseCatalogProducts,
+      approvedStorefrontCatalogPriceDecisions,
+      amounts.slice(1),
+    )).toThrow();
+    expect(() => buildStorefrontCatalogDecisionManifest(
+      browseCatalogProducts,
+      approvedStorefrontCatalogPriceDecisions,
+      [...amounts, amounts[0]!],
+    )).toThrow();
+    expect(() => buildStorefrontCatalogDecisionManifest(
+      browseCatalogProducts,
+      approvedStorefrontCatalogPriceDecisions,
+      [...amounts.slice(1), { ...amounts[0]!, browseCode: "UNKNOWN" }],
+    )).toThrow();
+    expect(() => buildStorefrontCatalogDecisionManifest(
+      browseCatalogProducts,
+      approvedStorefrontCatalogPriceDecisions,
+      amounts.map((entry, index) => index === 0
+        ? { ...entry, amount: { value: 0, unit: "mg" } }
+        : entry),
+    )).toThrow();
+  });
+
   it("rejects malformed or incomplete decisions and browse data", () => {
     const clone = structuredClone(approvedStorefrontCatalogPriceDecisions);
     const browseClone = structuredClone(browseCatalogProducts);

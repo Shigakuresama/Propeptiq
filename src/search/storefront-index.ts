@@ -163,7 +163,10 @@ function productEntry(candidate: unknown): SearchEntry {
       };
     });
     const configuredRank = product.popularityRank;
-    if (typeof configuredRank !== "number" || !Number.isFinite(configuredRank)) {
+    if (
+      configuredRank !== null &&
+      (typeof configuredRank !== "number" || !Number.isFinite(configuredRank))
+    ) {
       invalidInput();
     }
     popularityRank = configuredRank;

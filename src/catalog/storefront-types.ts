@@ -24,8 +24,8 @@ export type StorefrontProduct = Readonly<{
   description: string | null;
   image: Readonly<{ src: string; alt: string; width: number; height: number }>;
   aliases: readonly string[];
-  popularityRank: number;
-  releasedAt: string;
+  popularityRank: number | null;
+  releasedAt: string | null;
   defaultVariantId: string;
   variantIds: readonly string[];
   relatedProductIds: readonly string[];
@@ -35,8 +35,8 @@ export type StorefrontProduct = Readonly<{
 export type StorefrontBindingProduct = Readonly<{
   id: string;
   browseSlug: string;
-  popularityRank: number;
-  releasedAt: string;
+  popularityRank: number | null;
+  releasedAt: string | null;
   defaultVariantId: string;
   relatedProductIds: readonly string[];
   contentIds: readonly string[];

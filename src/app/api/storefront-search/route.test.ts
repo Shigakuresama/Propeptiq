@@ -4,6 +4,12 @@ import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
+import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
+import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
+import {
+  buildPublicStorefrontCatalog,
+  storefrontImageMetadata,
+} from "@/catalog/storefront-public";
 import type { ApprovedPublicInformation } from "@/content/public-information";
 import type {
   StorefrontSearchIndex,
@@ -228,6 +234,31 @@ describe("GET /api/storefront-search", () => {
       products: [],
       information: [],
     });
+  });
+
+  it("returns 200 for the full production-shaped catalog with explicit unknown merchandising metadata", async () => {
+    const actualIndex = await vi.importActual<
+      typeof import("@/search/storefront-index")
+    >("@/search/storefront-index");
+    const catalog = buildPublicStorefrontCatalog({
+      configuredPublicationId: browseCatalogPublicationId,
+      catalogData: storefrontCatalogData,
+      runtimeVariantFacts: [],
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+    });
+    const handler = createStorefrontSearchHandler({
+      loadView: async () => ({ catalog }),
+      loadInformation: () => [],
+      buildIndex: actualIndex.buildStorefrontSearchIndex,
+    });
+
+    const response = await handler(request());
+    const body = await response.json() as StorefrontSearchIndex;
+
+    expect(response.status).toBe(200);
+    expect(body.entries).toHaveLength(56);
+    expect(body.entries.every((entry) => entry.popularityRank === null)).toBe(true);
   });
 
   it.each(["?q=synthetic-secret-query", "?q=", "?unsupported"])(

@@ -62,8 +62,8 @@ export type CanonicalPublicStorefrontProduct = PublicStorefrontCommon &
     id: string;
     description: string | null;
     aliases: readonly string[];
-    popularityRank: number;
-    releasedAt: string;
+    popularityRank: number | null;
+    releasedAt: string | null;
     defaultVariantId: string;
     variants: readonly PublicStorefrontVariant[];
     relatedProductIds: readonly string[];

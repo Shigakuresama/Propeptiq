@@ -203,6 +203,20 @@ function recursivelyCollectKeysAndValues(
 }
 
 describe("buildStorefrontSearchIndex", () => {
+  it("accepts canonical products with explicit unknown popularity metadata", () => {
+    const index = buildStorefrontSearchIndex({
+      products: [canonicalProduct({ popularityRank: null, releasedAt: null })],
+      information: [],
+    });
+
+    expect(index.entries).toEqual([
+      expect.objectContaining({
+        id: "product:synthetic-alpha",
+        popularityRank: null,
+      }),
+    ]);
+  });
+
   it("maps canonical, unavailable, and browse-only products in configured order", () => {
     const unavailable = canonicalProduct({
       slug: "synthetic-unavailable",

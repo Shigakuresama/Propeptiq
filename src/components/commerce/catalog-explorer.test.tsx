@@ -86,6 +86,19 @@ function resultHeadings(): string[] {
 }
 
 describe("CatalogExplorer", () => {
+  it("renders all real catalog products with explicitly unknown merchandising metadata", () => {
+    expect(products).toHaveLength(56);
+    expect(products.every((product) => (
+      product.kind === "browse_only" || (
+        product.popularityRank === null && product.releasedAt === null
+      )
+    ))).toBe(true);
+
+    renderExplorer();
+
+    expect(screen.getAllByRole("article")).toHaveLength(56);
+  });
+
   it("provides the three retained exact facets and all five labeled sort modes", () => {
     renderExplorer();
 

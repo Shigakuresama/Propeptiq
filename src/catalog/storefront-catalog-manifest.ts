@@ -25,6 +25,17 @@ export type StorefrontCatalogEvidence = Readonly<{
   basis: "ordinary_one_vial_list_price";
 }>;
 
+export type StorefrontCatalogAmount = Readonly<{
+  value: number;
+  unit: "mg" | "mcg" | "iu";
+}>;
+
+export type StorefrontCatalogAmountDecision = Readonly<{
+  browseSlug: string;
+  browseCode: string;
+  amount: StorefrontCatalogAmount | null;
+}>;
+
 export type StorefrontCatalogVariantDecision = Readonly<{
   browseSlug: string;
   browseCode: string;
@@ -32,6 +43,7 @@ export type StorefrontCatalogVariantDecision = Readonly<{
   id: string;
   sku: string;
   publicLabel: string;
+  amount: StorefrontCatalogAmount | null;
   packageQuantity: 1;
   currency: "USD";
   decisionStatus: "approved_candidate" | "pending";
@@ -51,6 +63,15 @@ const decision = (browseSlug: string, browseCode: string, baseUnitMinor: number,
 });
 
 const amino = (slug: string) => `https://www.aminoclub.com/us/products/${slug}`;
+const amount = (
+  browseSlug: string,
+  browseCode: string,
+  configuredAmount: StorefrontCatalogAmount | null,
+): StorefrontCatalogAmountDecision => ({
+  browseSlug,
+  browseCode,
+  amount: configuredAmount,
+});
 
 export const approvedStorefrontCatalogPriceDecisions: readonly StorefrontCatalogPriceDecision[] = deepFreeze([
   decision("tirzepatide", "TR30", 5999, amino("glp-2")), decision("tirzepatide", "TR60", 10999, amino("glp-2")),
@@ -68,6 +89,112 @@ export const approvedStorefrontCatalogPriceDecisions: readonly StorefrontCatalog
   decision("kpv", "KPV10", 3999, amino("kpv")), decision("epithalon", "ET10", 2999, amino("epithalon")), decision("vip", "VP10", 4999, amino("vip")),
   decision("cartalax", "Car20", 6999, amino("cartalax")),
   decision("snap", "SNP10", 2999, amino("snap-8"), STOREFRONT_CATALOG_SNAP_AUDIT_TIMESTAMP),
+]);
+
+export const approvedStorefrontCatalogAmountDecisions: readonly StorefrontCatalogAmountDecision[] = deepFreeze([
+  amount("tirzepatide", "TR5", { value: 5, unit: "mg" }),
+  amount("tirzepatide", "TR10", { value: 10, unit: "mg" }),
+  amount("tirzepatide", "TR15", { value: 15, unit: "mg" }),
+  amount("tirzepatide", "TR20", { value: 20, unit: "mg" }),
+  amount("tirzepatide", "TR30", { value: 30, unit: "mg" }),
+  amount("tirzepatide", "TR40", { value: 40, unit: "mg" }),
+  amount("tirzepatide", "TR50", { value: 50, unit: "mg" }),
+  amount("tirzepatide", "TR60", { value: 60, unit: "mg" }),
+  amount("tirzepatide", "TR100", { value: 100, unit: "mg" }),
+  amount("retatrutide", "RT5", { value: 5, unit: "mg" }),
+  amount("retatrutide", "RT10", { value: 10, unit: "mg" }),
+  amount("retatrutide", "RT15", { value: 15, unit: "mg" }),
+  amount("retatrutide", "RT20", { value: 20, unit: "mg" }),
+  amount("retatrutide", "RT30", { value: 30, unit: "mg" }),
+  amount("retatrutide", "RT40", { value: 40, unit: "mg" }),
+  amount("retatrutide", "RT50", { value: 50, unit: "mg" }),
+  amount("retatrutide", "RT60", { value: 60, unit: "mg" }),
+  amount("nad-plus", "NJ100", { value: 100, unit: "mg" }),
+  amount("nad-plus", "NJ500", { value: 500, unit: "mg" }),
+  amount("nad-plus", "NJ1000", { value: 1000, unit: "mg" }),
+  amount("hgh", "H10", { value: 10, unit: "iu" }),
+  amount("hgh", "H15", { value: 15, unit: "iu" }),
+  amount("hgh", "H24", { value: 24, unit: "iu" }),
+  amount("ghk-cu", "CU50", { value: 50, unit: "mg" }),
+  amount("ghk-cu", "CU100", { value: 100, unit: "mg" }),
+  amount("tesmorelin", "TESA5", { value: 5, unit: "mg" }),
+  amount("tesmorelin", "TESA10", { value: 10, unit: "mg" }),
+  amount("tesmorelin", "TESA20", { value: 20, unit: "mg" }),
+  amount("tesmorelin-ipa", "TI13", null),
+  amount("bpc-157", "BPC5", { value: 5, unit: "mg" }),
+  amount("bpc-157", "BPC10", { value: 10, unit: "mg" }),
+  amount("bpc-157", "BPC20", { value: 20, unit: "mg" }),
+  amount("tb500", "TB5", { value: 5, unit: "mg" }),
+  amount("tb500", "TB10", { value: 10, unit: "mg" }),
+  amount("bpc-tb-blend", "BB10", { value: 10, unit: "mg" }),
+  amount("bpc-tb-blend-bb20", "BB20", { value: 20, unit: "mg" }),
+  amount("bpc-tb-blend-bb40", "BB40", { value: 40, unit: "mg" }),
+  amount("aod-9604", "AOD5", { value: 5, unit: "mg" }),
+  amount("aod-9604", "AOD10", { value: 10, unit: "mg" }),
+  amount("mots-c", "MS10", { value: 10, unit: "mg" }),
+  amount("mots-c", "MS20", { value: 20, unit: "mg" }),
+  amount("mots-c", "MS40", { value: 40, unit: "mg" }),
+  amount("selank", "SK10", { value: 10, unit: "mg" }),
+  amount("semax", "XA10", { value: 10, unit: "mg" }),
+  amount("semax-selank", "20SS", { value: 20, unit: "mg" }),
+  amount("thymosin-alpha-1", "TA5", { value: 5, unit: "mg" }),
+  amount("thymosin-alpha-1", "TA10", { value: 10, unit: "mg" }),
+  amount("dsip", "DS5", { value: 5, unit: "mg" }),
+  amount("dsip", "DS10", { value: 10, unit: "mg" }),
+  amount("cjc-1295-no-dac-ipa", "CP10", { value: 10, unit: "mg" }),
+  amount("cjc-1295-no-dac-ipa-cp20", "CP20", { value: 20, unit: "mg" }),
+  amount("ipamorelin", "IP5", { value: 5, unit: "mg" }),
+  amount("ipamorelin", "IP10", { value: 10, unit: "mg" }),
+  amount("hcg", "G5K", { value: 5000, unit: "iu" }),
+  amount("cargrilintide", "CGL5", { value: 5, unit: "mg" }),
+  amount("cargrilintide", "CGL10", { value: 10, unit: "mg" }),
+  amount("sermorelin-acetate", "SMO5", { value: 5, unit: "mg" }),
+  amount("sermorelin-acetate", "SMO10", { value: 10, unit: "mg" }),
+  amount("pt-141", "PT141", { value: 10, unit: "mg" }),
+  amount("glow", "BBG50", null),
+  amount("glow", "BBG70", null),
+  amount("oxytocin-acetate", "OT10", { value: 10, unit: "mg" }),
+  amount("ll37", "LL375", { value: 5, unit: "mg" }),
+  amount("glutathione", "GT600", { value: 600, unit: "mg" }),
+  amount("glutathione", "GT1500", { value: 1500, unit: "mg" }),
+  amount("snap", "SNP10", { value: 10, unit: "mg" }),
+  amount("li-po-c", "LPC", null),
+  amount("li-po-c-without-b12", "LPC", null),
+  amount("lemon-bottle", "LB", null),
+  amount("mt1", "MT1", null),
+  amount("mt2", "MT210", { value: 10, unit: "mg" }),
+  amount("ss-31", "2S10", { value: 10, unit: "mg" }),
+  amount("ss-31", "2S50", { value: 50, unit: "mg" }),
+  amount("klow", "BBGK", null),
+  amount("5-amino-1mq", "5A5", { value: 5, unit: "mg" }),
+  amount("5-amino-1mq", "5A10", { value: 10, unit: "mg" }),
+  amount("5-amino-1mq", "5A20", { value: 20, unit: "mg" }),
+  amount("5-amino-1mq", "5A50", { value: 50, unit: "mg" }),
+  amount("kisspeptin", "KS5", { value: 5, unit: "mg" }),
+  amount("kisspeptin", "KS10", { value: 10, unit: "mg" }),
+  amount("pinealon", "PN5", { value: 5, unit: "mg" }),
+  amount("pe-22-28", "PE10", { value: 10, unit: "mg" }),
+  amount("igf-1-lr3", "IG1", { value: 1, unit: "mg" }),
+  amount("ara-290", "RA10", { value: 10, unit: "mg" }),
+  amount("acetic-acid", "AA", null),
+  amount("semaglutide", "SM5", { value: 5, unit: "mg" }),
+  amount("semaglutide", "SM10", { value: 10, unit: "mg" }),
+  amount("semaglutide", "SM15", { value: 15, unit: "mg" }),
+  amount("semaglutide", "SM20", { value: 20, unit: "mg" }),
+  amount("semaglutide", "SM30", { value: 30, unit: "mg" }),
+  amount("kpv", "KPV10", { value: 10, unit: "mg" }),
+  amount("epithalon", "ET10", { value: 10, unit: "mg" }),
+  amount("epithalon", "ET50", { value: 50, unit: "mg" }),
+  amount("cjc-1295-with-dac", "CD5", { value: 5, unit: "mg" }),
+  amount("cjc-1295-no-dac", "CND5", { value: 5, unit: "mg" }),
+  amount("cjc-1295-no-dac", "CND10", { value: 10, unit: "mg" }),
+  amount("grp-2", "GRP-2", { value: 10, unit: "mg" }),
+  amount("vip", "VP10", { value: 10, unit: "mg" }),
+  amount("survodutide", "SUR10", { value: 10, unit: "mg" }),
+  amount("admax", "Admax", { value: 10, unit: "mg" }),
+  amount("cartalax", "Car20", { value: 20, unit: "mg" }),
+  amount("bac-water", "BA3", null),
+  amount("bac-water", "BA10", null),
 ]);
 
 function uuidBytes(uuid: string): Buffer {
@@ -103,11 +230,30 @@ function validDecision(candidate: StorefrontCatalogPriceDecision): void {
   if (![STOREFRONT_CATALOG_AUDIT_TIMESTAMP, STOREFRONT_CATALOG_SNAP_AUDIT_TIMESTAMP].includes(candidate.observedAt)) fail("Invalid storefront catalog observation timestamp");
 }
 
+function validAmountDecision(candidate: StorefrontCatalogAmountDecision): void {
+  if (!candidate || typeof candidate !== "object") fail("Invalid storefront catalog amount decision");
+  if (Object.keys(candidate).sort().join(",") !== "amount,browseCode,browseSlug") {
+    fail("Invalid storefront catalog amount decision shape");
+  }
+  if (candidate.amount === null) return;
+  if (
+    !candidate.amount ||
+    typeof candidate.amount !== "object" ||
+    Object.keys(candidate.amount).sort().join(",") !== "unit,value" ||
+    !Number.isFinite(candidate.amount.value) ||
+    candidate.amount.value <= 0 ||
+    !["mg", "mcg", "iu"].includes(candidate.amount.unit)
+  ) {
+    fail("Invalid storefront catalog amount decision");
+  }
+}
+
 export function buildStorefrontCatalogDecisionManifest(
   products: readonly BrowseCatalogProduct[],
   decisions: readonly StorefrontCatalogPriceDecision[],
+  amountDecisions: readonly StorefrontCatalogAmountDecision[] = approvedStorefrontCatalogAmountDecisions,
 ): StorefrontCatalogDecisionManifest {
-  if (!Array.isArray(products) || !Array.isArray(decisions) || products.length !== 56 || decisions.length !== 40) fail("Invalid storefront catalog coverage");
+  if (!Array.isArray(products) || !Array.isArray(decisions) || !Array.isArray(amountDecisions) || products.length !== 56 || decisions.length !== 40 || amountDecisions.length !== 103) fail("Invalid storefront catalog coverage");
   const rows = new Map<string, { product: BrowseCatalogProduct; variant: BrowseCatalogProduct["variants"][number] }>();
   const productIds = new Set<string>();
   for (const product of products) {
@@ -146,6 +292,18 @@ export function buildStorefrontCatalogDecisionManifest(
     const canonical = approvedStorefrontCatalogPriceDecisions[index];
     if (!canonical || item.browseSlug !== canonical.browseSlug || item.browseCode !== canonical.browseCode || item.baseUnitMinor !== canonical.baseUnitMinor || item.currency !== canonical.currency || item.url !== canonical.url || item.observedAt !== canonical.observedAt) fail("Storefront catalog price decisions are not canonical");
   }
+  const configuredAmounts = new Map<string, StorefrontCatalogAmountDecision>();
+  for (const item of amountDecisions) {
+    validAmountDecision(item);
+    const scoped = `${item.browseSlug}:${item.browseCode}`;
+    if (configuredAmounts.has(scoped) || !rows.has(scoped)) {
+      fail("Invalid storefront catalog amount decision coverage");
+    }
+    configuredAmounts.set(scoped, item);
+  }
+  if (configuredAmounts.size !== rows.size) {
+    fail("Invalid storefront catalog amount decision coverage");
+  }
   const ids = new Set<string>();
   const skus = new Set<string>();
   const variants: StorefrontCatalogVariantDecision[] = [];
@@ -161,10 +319,12 @@ export function buildStorefrontCatalogDecisionManifest(
       if (ids.has(variantId) || skus.has(sku)) fail("Storefront catalog identity collision");
       ids.add(variantId); skus.add(sku); variantIds.push(variantId);
       const approvedDecision = approved.get(scoped);
+      const configuredAmount = configuredAmounts.get(scoped)!;
       const publicLabel = sourceVariant.packageForm.slice(0, -" × 10 vials".length);
       if (!publicLabel.trim()) fail("Invalid storefront catalog public label");
       variants.push({
         browseSlug: product.slug, browseCode: sourceVariant.code, productId, id: variantId, sku, publicLabel,
+        amount: configuredAmount.amount === null ? null : { ...configuredAmount.amount },
         packageQuantity: 1, currency: "USD", decisionStatus: approvedDecision ? "approved_candidate" : "pending",
         baseUnitMinor: approvedDecision?.baseUnitMinor ?? 0,
         evidence: approvedDecision ? { source: EVIDENCE_SOURCE, url: approvedDecision.url, observedAt: approvedDecision.observedAt, basis: EVIDENCE_BASIS } : null,
@@ -179,6 +339,7 @@ export function buildStorefrontCatalogDecisionManifest(
 export const storefrontCatalogDecisionManifest = buildStorefrontCatalogDecisionManifest(
   browseCatalogProducts,
   approvedStorefrontCatalogPriceDecisions,
+  approvedStorefrontCatalogAmountDecisions,
 );
 
 export function getStorefrontCatalogDecision(browseSlug: string, browseCode: string): StorefrontCatalogVariantDecision {

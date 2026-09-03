@@ -34,6 +34,22 @@ describe("parseStorefrontBindings", () => {
     expect(parseStorefrontBindings(approved).variants[0]?.sku).toBe("TEST-FIXTURE-5");
   });
 
+  it("accepts explicit unknown merchandising metadata but still requires valid non-null values", () => {
+    expect(parseStorefrontBindings({
+      ...approved,
+      products: [{ ...approved.products[0], popularityRank: null, releasedAt: null }],
+    }).products[0]).toMatchObject({ popularityRank: null, releasedAt: null });
+
+    expect(() => parseStorefrontBindings({
+      ...approved,
+      products: [{ ...approved.products[0], popularityRank: 0 }],
+    })).toThrow();
+    expect(() => parseStorefrontBindings({
+      ...approved,
+      products: [{ ...approved.products[0], releasedAt: "not-an-offset-timestamp" }],
+    })).toThrow();
+  });
+
   it("rejects duplicate variant IDs and SKUs", () => {
     expect(() => parseStorefrontBindings({
       ...approved,
