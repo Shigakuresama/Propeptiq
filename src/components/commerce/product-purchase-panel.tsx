@@ -32,7 +32,7 @@ export function ProductPurchasePanel({ product, pricing }: ProductPurchasePanelP
   const status = selected === null ? "Choose a variant" : !quantityIsValid ? "Invalid quantity" : presentation?.state === "unavailable" ? "Unavailable" : presentation?.state === "pending" ? "Pricing coming soon" : presentation?.purchaseState === "checkout_unavailable" ? "Checkout unavailable" : presentation?.purchaseState === "local_preview" ? "Preview only" : "Ready to purchase";
   const price = presentation?.state === "priced" ? presentation.price : null;
   return <section className="mt-10 space-y-8" aria-labelledby="purchase-heading">
-    <h2 id="purchase-heading" className="font-heading text-3xl text-ink">Purchase</h2>
+    <h2 id="purchase-heading" className="w-fit font-heading text-3xl text-ink">Purchase</h2>
     <VariantSelector productId={product.id} productName={product.name} variants={product.variants} selectedVariantId={selectedVariantId} quantity={lastValidQuantity} pricing={pricing} onSelectedVariantIdChange={setSelectedVariantId} />
     <div><h3 className="mb-3 font-heading text-2xl text-ink">Quantity</h3><QuantityTierSelector quantity={lastValidQuantity} quantityDraft={quantityDraft} errorId="quantity-error" errorMessage={errorMessage} onQuantityDraftChange={(draft) => { setQuantityDraft(draft); const parsed = parseQuantityDraft(draft, minimumQuantity); if (parsed !== null) setLastValidQuantity(parsed); }} onQuantitySelect={chooseQuantity} /></div>
     <div role="status" aria-label="Purchase summary" aria-live="polite" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-canvas p-4">

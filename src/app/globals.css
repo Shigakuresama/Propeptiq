@@ -514,6 +514,7 @@ footer a,
 }
 
 .catalog-grid {
+  align-items: start;
   display: grid;
   gap: 1.5rem;
   list-style: none;
