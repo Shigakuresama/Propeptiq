@@ -40,6 +40,9 @@ import type { PricePresentationMode, PublicStorefrontAutomaticPromotion, PublicS
 
 export type PublicStorefrontView = Readonly<{ catalog: PublicStorefrontCatalog; pricing: PublicStorefrontPricingContext }>;
 
+export const STOREFRONT_CATALOG_DATABASE_UNAVAILABLE =
+  "STOREFRONT_CATALOG_DATABASE_UNAVAILABLE" as const;
+
 export function resolvePricePresentationMode(
   environment: Pick<ServerEnv, "APP_ENV" | "VERCEL_ENV" | "VERCEL_TARGET_ENV">,
   runtime: Readonly<{ nodeEnv: string | undefined }>,
@@ -61,6 +64,9 @@ export type StorefrontPublicServerDependencies = Readonly<{
   now?: () => Date;
   nodeEnv?: string;
   reportPromotionDiagnostic?: (diagnostic: PromotionProjectionDiagnostic) => void;
+  reportCatalogDatabaseUnavailable?: (
+    diagnostic: typeof STOREFRONT_CATALOG_DATABASE_UNAVAILABLE,
+  ) => void;
   configuredPromotions?: unknown;
 }>;
 
@@ -77,6 +83,21 @@ function defaultPromotionDiagnosticReporter(
     code: diagnostic.code,
     campaignKey: diagnostic.campaignKey,
   });
+}
+
+function defaultCatalogDatabaseUnavailableReporter(
+  diagnostic: typeof STOREFRONT_CATALOG_DATABASE_UNAVAILABLE,
+): void {
+  console.warn(diagnostic);
+}
+
+function ownStringCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(error, "code");
+  return descriptor !== undefined && "value" in descriptor &&
+    typeof descriptor.value === "string"
+    ? descriptor.value
+    : undefined;
 }
 
 export async function loadPublicStorefrontCatalog(
@@ -113,24 +134,52 @@ export async function loadPublicStorefrontView(
   ) as PublicStorefrontPricingContext["automaticPromotions"];
   let databaseOwnedVariantIds = new Set<string>();
   if (shouldLoadDatabase) {
-    const records = await (
-      dependencies.loadDatabaseRecords ?? defaultDatabaseLoader
-    )(environment);
-    if (records.source !== "production") {
-      throw new Error("Storefront database loader returned a non-production source");
+    let projected: Readonly<{
+      databaseOwnedVariantIds: Set<string>;
+      runtimeVariantFacts: ReturnType<typeof buildRuntimeVariantPresentationFacts>;
+      automaticPromotions: PublicStorefrontPricingContext["automaticPromotions"];
+      diagnostics: readonly PromotionProjectionDiagnostic[];
+    }> | undefined;
+    try {
+      const records = await (
+        dependencies.loadDatabaseRecords ?? defaultDatabaseLoader
+      )(environment);
+      if (records.source !== "production") {
+        throw new Error("Storefront database loader returned a non-production source");
+      }
+      const stagedDatabaseOwnedVariantIds = new Set(records.variants.map((variant) => variant.id));
+      const stagedRuntimeVariantFacts = buildRuntimeVariantPresentationFacts({
+        records,
+        bindings,
+        now,
+      });
+      const promotionProjection = projectAutomaticStorefrontPromotions({ records, now });
+      projected = Object.freeze({
+        databaseOwnedVariantIds: stagedDatabaseOwnedVariantIds,
+        runtimeVariantFacts: stagedRuntimeVariantFacts,
+        automaticPromotions: promotionProjection.promotions,
+        diagnostics: promotionProjection.diagnostics,
+      });
+    } catch (error: unknown) {
+      if (ownStringCode(error) !== "42P01") throw error;
+      try {
+        (dependencies.reportCatalogDatabaseUnavailable ??
+          defaultCatalogDatabaseUnavailableReporter)(
+          STOREFRONT_CATALOG_DATABASE_UNAVAILABLE,
+        );
+      } catch {
+        // A diagnostic failure must not take the public storefront down.
+      }
     }
-    databaseOwnedVariantIds = new Set(records.variants.map((variant) => variant.id));
-    runtimeVariantFacts = buildRuntimeVariantPresentationFacts({
-      records,
-      bindings,
-      now,
-    });
-    const promotionProjection = projectAutomaticStorefrontPromotions({ records, now });
-    automaticPromotions = promotionProjection.promotions;
-    const reportPromotionDiagnostic =
-      dependencies.reportPromotionDiagnostic ?? defaultPromotionDiagnosticReporter;
-    for (const diagnostic of promotionProjection.diagnostics) {
-      reportPromotionDiagnostic(diagnostic);
+    if (projected !== undefined) {
+      databaseOwnedVariantIds = projected.databaseOwnedVariantIds;
+      runtimeVariantFacts = projected.runtimeVariantFacts;
+      automaticPromotions = projected.automaticPromotions;
+      const reportPromotionDiagnostic =
+        dependencies.reportPromotionDiagnostic ?? defaultPromotionDiagnosticReporter;
+      for (const diagnostic of projected.diagnostics) {
+        reportPromotionDiagnostic(diagnostic);
+      }
     }
   }
   const configuredDisplayFacts = buildConfiguredDisplayVariantFacts({ ...catalogData, bindings });

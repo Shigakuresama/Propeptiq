@@ -14,6 +14,7 @@ import {
   loadPublicStorefrontCatalog,
   loadPublicStorefrontView,
   resolvePricePresentationMode,
+  STOREFRONT_CATALOG_DATABASE_UNAVAILABLE,
 } from "./storefront-public-server";
 
 const productId = "10000000-0000-4000-8000-000000000001";
@@ -278,7 +279,120 @@ function environment(overrides: Record<string, string | undefined> = {}) {
   });
 }
 
+function databaseEnvironment() {
+  return environment({
+    DATABASE_MODE: "test",
+    TEST_DATABASE_URL: "postgresql://fixture:fixture@127.0.0.1:5432/fixture",
+    TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+  });
+}
+
+function sqlStateError(code: string, message = "private database detail") {
+  const error = new Error(message);
+  Object.defineProperty(error, "code", {
+    configurable: true,
+    enumerable: true,
+    value: code,
+    writable: true,
+  });
+  return error;
+}
+
 describe("public storefront server acquisition", () => {
+  it("falls back to reviewed display facts when the optional catalog schema is absent", async () => {
+    const reporter = vi.fn();
+    const view = await loadPublicStorefrontView(databaseEnvironment(), {
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+      loadDatabaseRecords: vi.fn(async () => {
+        throw sqlStateError("42P01", "private product_variants schema detail");
+      }),
+      reportCatalogDatabaseUnavailable: reporter,
+      now: () => new Date("2026-08-31T12:00:00.000Z"),
+    });
+
+    expect(view.catalog.products).toHaveLength(56);
+    expect(view.catalog.products.flatMap((product) =>
+      product.kind === "canonical" ? product.variants : [],
+    )).toHaveLength(103);
+    expect(view.pricing.automaticPromotions).toEqual([
+      expect.objectContaining({ id: "winter30", displayCode: "WINTER30", discountBps: 3_000 }),
+    ]);
+    expect(view.catalog.products.flatMap((product) =>
+      product.kind === "canonical" ? product.variants : [],
+    ).some((variant) => variant.checkoutReady)).toBe(false);
+    expect(reporter).toHaveBeenCalledWith(STOREFRONT_CATALOG_DATABASE_UNAVAILABLE);
+  });
+
+  it("reports one fixed token and survives reporter failure without exposing the database error", async () => {
+    const secret = "private product_variants schema detail";
+    const reporter = vi.fn(() => {
+      throw new Error("reporter failure");
+    });
+    const view = await loadPublicStorefrontView(databaseEnvironment(), {
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+      loadDatabaseRecords: vi.fn(async () => {
+        throw sqlStateError("42P01", secret);
+      }),
+      reportCatalogDatabaseUnavailable: reporter,
+      now: () => new Date("2026-08-31T12:00:00.000Z"),
+    });
+
+    expect(reporter).toHaveBeenCalledOnce();
+    expect(reporter).toHaveBeenCalledWith(STOREFRONT_CATALOG_DATABASE_UNAVAILABLE);
+    expect(JSON.stringify(view)).not.toContain(secret);
+  });
+
+  it("does not retain partially projected database facts after an absent-schema failure", async () => {
+    const partialVariants = {
+      map() {
+        throw sqlStateError("42P01", "private projection detail");
+      },
+    };
+    const recordsWithPartialProjection = { ...records, variants: partialVariants };
+    const view = await loadPublicStorefrontView(databaseEnvironment(), {
+      catalogData: boundCatalogData,
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+      loadDatabaseRecords: vi.fn(async () => recordsWithPartialProjection as unknown as DatabaseCatalogRecordSet),
+      reportCatalogDatabaseUnavailable: vi.fn(),
+      now: () => new Date("2026-08-31T12:00:00.000Z"),
+      configuredPromotions: Object.freeze([]),
+    });
+
+    const product = view.catalog.products.find((entry) => entry.kind === "canonical");
+    expect(product).toMatchObject({ variants: [{ id: variantId, checkoutReady: false, priceStatus: "pending" }] });
+  });
+
+  it.each([
+    ["unrelated SQLSTATE", sqlStateError("23505", "private unique violation")],
+    ["generic error", new Error("private database failure")],
+  ] as const)("rethrows %s", async (_label, error) => {
+    await expect(loadPublicStorefrontView(databaseEnvironment(), {
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+      loadDatabaseRecords: vi.fn(async () => { throw error; }),
+      now: () => new Date("2026-08-31T12:00:00.000Z"),
+    })).rejects.toBe(error);
+  });
+
+  it("does not invoke a throwing code accessor while inspecting a database error", async () => {
+    const error = Object.defineProperty(new Error("private database failure"), "code", {
+      configurable: true,
+      get() {
+        throw new Error("code getter invoked");
+      },
+    });
+
+    await expect(loadPublicStorefrontView(databaseEnvironment(), {
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+      loadDatabaseRecords: vi.fn(async () => { throw error; }),
+      now: () => new Date("2026-08-31T12:00:00.000Z"),
+    })).rejects.toBe(error);
+  });
+
   it("applies configured WINTER30 to static display facts when database is disabled", async () => {
     const view = await loadPublicStorefrontView(environment(), {
       controlledContent: [],
