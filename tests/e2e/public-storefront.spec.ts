@@ -1395,6 +1395,94 @@ test("preview item has no gated calculator, related carousel, overflow, or eager
   expect(images.filter((image) => image.loading !== "lazy" || image.fetchPriority === "high")).toHaveLength(1);
 });
 
+test("configured catalog cards keep selected one-bottle prices, layout, chooser, and null-metadata sorting truthful", async ({
+  page,
+}) => {
+  const expectedCards = [
+    { amount: "30 mg · 1 bottle", base: "$59.99", name: "Tirzepatide", sale: "$41.99" },
+    { amount: "10 mg · 1 bottle", base: "$69.99", name: "Retatrutide", sale: "$48.99" },
+    { amount: "500 mg · 1 bottle", base: "$69.99", name: "NAD+", sale: "$48.99" },
+  ] as const;
+
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
+    await page.goto("/catalog");
+
+    for (const expectedCard of expectedCards) {
+      const card = page.getByRole("article", { name: expectedCard.name, exact: true });
+      const imageFrame = card.locator(".catalog-image-frame");
+      const beforeImageCompletion = await clientRect(imageFrame);
+
+      await expect(card.getByText(expectedCard.amount, { exact: true })).toBeVisible();
+      await expect(card.locator("del")).toHaveText(expectedCard.base);
+      await expect(card.locator("strong")).toHaveText(expectedCard.sale);
+      await expect(imageFrame).toBeVisible();
+      expect(beforeImageCompletion.width / beforeImageCompletion.height).toBeCloseTo(4 / 3, 2);
+
+      const image = imageFrame.locator("img");
+      await imageFrame.scrollIntoViewIfNeeded();
+      await expect
+        .poll(() => image.evaluate((element) => {
+          const entry = element as HTMLImageElement;
+          return entry.complete && entry.naturalWidth > 0 && entry.naturalHeight > 0;
+        }))
+        .toBe(true);
+      const afterImageCompletion = await clientRect(imageFrame);
+      expect(Math.abs(afterImageCompletion.width - beforeImageCompletion.width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(afterImageCompletion.height - beforeImageCompletion.height)).toBeLessThanOrEqual(1);
+    }
+
+    const layout = await horizontalLayout(page);
+    expect(layout.scrollWidth - layout.clientWidth, `${width}px catalog overflow`).toBeLessThanOrEqual(1);
+    expect(layout.offenders, `${width}px catalog overflow offenders`).toEqual([]);
+  }
+
+  const tirzepatideCard = page.getByRole("article", { name: "Tirzepatide", exact: true });
+  const chooserTrigger = tirzepatideCard.getByRole("button", { name: "Add Tirzepatide to cart" });
+  const cartBeforeChooser = await page.evaluate(() => window.localStorage.getItem("propeptiq.cart.v2"));
+  await chooserTrigger.focus();
+  await page.keyboard.press("Enter");
+  const chooser = page.getByRole("dialog", { name: "Choose a variant for Tirzepatide" });
+  await expect(chooser).toBeVisible();
+  const pendingVariant = chooser
+    .locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`)
+    .locator("xpath=ancestor::label[1]");
+  await expect(pendingVariant).toBeVisible();
+  await expect(pendingVariant).toContainText("$0.00");
+  await expect(pendingVariant).toContainText("Local cart preview");
+  await expect(pendingVariant.locator('input[type="radio"]')).not.toBeDisabled();
+  const enabledRadios = chooser.locator('input[type="radio"]:not(:disabled)');
+  await enabledRadios.first().focus();
+  await expect(enabledRadios.first()).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(enabledRadios.nth(1)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(chooser).toBeHidden();
+  await expect(chooserTrigger).toBeFocused();
+  expect(await page.evaluate(() => window.localStorage.getItem("propeptiq.cart.v2"))).toBe(cartBeforeChooser);
+
+  const sort = page.getByRole("combobox", { name: "Sort catalog" });
+  const catalogResults = page.getByRole("region", { name: "Catalog results region" });
+  const titles = async () => catalogResults.getByRole("article").evaluateAll((articles) =>
+    articles.map((article) => article.querySelector("h2")?.textContent?.trim() ?? ""),
+  );
+  await sort.selectOption("alphabetical");
+  const alphabeticalTitles = await titles();
+  expect(alphabeticalTitles).toHaveLength(56);
+  await sort.selectOption("popular");
+  expect(await titles()).toEqual(alphabeticalTitles);
+  await sort.selectOption("newest");
+  expect(await titles()).toEqual(alphabeticalTitles);
+
+  const search = page.getByRole("searchbox", { name: "Search catalog" });
+  await search.fill("NAD+");
+  await expect(page.getByText("1 of 56 products", { exact: true })).toBeVisible();
+  await expect(catalogResults.getByRole("article", { name: "NAD+", exact: true })).toHaveCount(1);
+  await sort.selectOption("price-desc");
+  await expect(search).toHaveValue("NAD+");
+  await expect(page.getByText("1 of 56 products", { exact: true })).toBeVisible();
+});
+
 test("canonical product pricing, variant switching, tiers, and local cart identity stay exact", async ({ page }) => {
   await page.goto("/catalog");
   const card = page.locator("article.catalog-listing-card").filter({ hasText: "Tirzepatide" }).first();

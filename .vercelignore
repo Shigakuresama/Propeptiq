@@ -1,0 +1,6 @@
+.superpowers
+.worktrees
+.codex-evidence
+.neon
+.env*
+!.env.example
