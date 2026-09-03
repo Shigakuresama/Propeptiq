@@ -67,18 +67,22 @@ expect(catalog.products.every(p => p.popularityRank === null && p.releasedAt ===
 - [ ] Run focused price/card/discovery/explorer tests, lint, typecheck, workspace boundary, diff check, and full unit before commit.
 - [ ] Commit `fix(storefront): align card labels with selected variant prices`; write report; await controller review before dependent work.
 
-### Task 3: Browser proof and owner guidance
+### Task 3: Browser proof, owner guidance, and deployment exclusions
 
 **Files:**
 
 - Modify: `tests/e2e/public-storefront.spec.ts`
 - Modify: `docs/runbooks/storefront-configuration.md`
 - Modify: `docs/propeptiq-storefront-refactor-contract.md` (only the amount/nullable-metadata/card-selection contract)
+- Create: `.vercelignore` (local execution artifacts only)
 
 **Implementation contract:** Use the existing local browser harness with no production/provider calls or extra fixture routes. Verify the actual configured reference-price catalog in its existing publication context. If the existing harness cannot expose this context, report the exact dependency rather than adding an unreviewed production seam. Preserve unique test source locations required by the repository's browser runner.
 
+**Discovered release dependency:** A read-only Vercel CLI58.7.1 `deploy --dry --json --project propeptiq --scope sergiosteam` inspection included72 local `.superpowers` execution files despite Git ignoring the directory (1290 files / 87,662,353 bytes at inspection). Add narrow exclusions for `.superpowers`, `.worktrees`, `.codex-evidence`, `.neon`, and real `.env*` files while retaining `.env.example`. Do not exclude application source, package/lock/config files, or public assets. A fresh dry-run must prove zero local/private inputs and retention of required app inputs; no upload/deployment is authorized within this task. This is release packaging, not a change to product or payment configuration.
+
 - [ ] Add focused browser assertions for Tirzepatide 30 mg / $59.99 / $41.99, Retatrutide 10 mg / $69.99 / $48.99, and NAD+ 500 mg / $69.99 / $48.99 on 375 and 1440 CSS pixel viewports. Include one-bottle text, no overflow, reserved image geometry, keyboard chooser/focus, and pending-price behavior.
 - [ ] Update only relevant owner-guide statements: explicit amount edit point, nullable unknown rank/release fields, explicit-default-first card rule, 40/63 coverage, one-bottle reference-price versus live checkout distinction. Do not claim newsletter, content, stock, or Stripe readiness.
+- [ ] Capture dry-run inclusion failure before creating `.vercelignore`, then prove zero excluded-private paths and preserved application/package/config/public assets after the change. Record sanitized file counts and path checks only, not file contents/hashes or credentials.
 - [ ] Run focused Chromium checks with the existing Playwright configuration, full unit, lint/typecheck/workspace boundary and diff check. Record exact results; do not claim native/browser behavior from jsdom.
 - [ ] Commit `test(storefront): verify catalog price labels and document metadata`; write report.
 
