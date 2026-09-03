@@ -1539,7 +1539,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(card.locator("del")).toContainText("$59.99");
   await expect(card.locator("strong")).toContainText("$41.99");
   await expect(card).toContainText("-30%");
-  await expect(card).toContainText("Options available");
+  await expect(card.getByText("Local cart preview", { exact: true })).toBeVisible();
 
   await page.goto("/catalog/items/tirzepatide");
   const radios = page.locator('input[type="radio"]');
