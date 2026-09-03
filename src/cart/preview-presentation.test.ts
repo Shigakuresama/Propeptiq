@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { createCartPreviewToken } from "./preview-token";
-import type { CartPreviewItem } from "./preview-types";
+import {
+  MAX_CART_PREVIEW_IDENTIFIER_LENGTH,
+  MAX_CART_PREVIEW_TEXT_LENGTH,
+  type CartPreviewItem,
+} from "./preview-types";
 import {
   loadPreviewPresentation,
   parsePreviewPresentation,
@@ -42,6 +46,96 @@ const preview = withToken({
 } as const);
 
 describe("same-tab cart preview presentation", () => {
+  it("accepts exact preview display bounds and rejects one character beyond them", () => {
+    expect(MAX_CART_PREVIEW_TEXT_LENGTH).toBe(240);
+    expect(MAX_CART_PREVIEW_IDENTIFIER_LENGTH).toBe(128);
+    const textAtLimit = "x".repeat(240);
+    const identifierAtLimit = "a".repeat(128);
+    const atLimit = withToken({
+      ...preview,
+      items: [{
+        ...preview.items[0],
+        variantId: identifierAtLimit,
+        name: textAtLimit,
+        variantLabel: textAtLimit,
+        sku: identifierAtLimit,
+        packageForm: textAtLimit,
+      }],
+    });
+
+    expect(parsePreviewPresentation(atLimit)).toEqual(atLimit);
+    for (const item of [
+      { ...atLimit.items[0]!, name: "x".repeat(241) },
+      { ...atLimit.items[0]!, variantId: "a".repeat(129) },
+    ]) {
+      expect(parsePreviewPresentation(withToken({ ...atLimit, items: [item] }))).toBeNull();
+    }
+  });
+
+  it("accepts the maximum cart item quantity and rejects one above it", () => {
+    const item = {
+      ...preview.items[0],
+      quantity: 25,
+      available: false,
+      purchaseState: "unknown_variant" as const,
+      name: null,
+      variantLabel: null,
+      sku: null,
+      packageForm: null,
+      baseUnitMinor: null,
+      unitAmountMinor: null,
+      lineSubtotalMinor: null,
+      lineSavingsMinor: null,
+      effectiveDiscountBps: null,
+      currency: null,
+    };
+    const atLimit = withToken({
+      ...preview,
+      items: [item],
+      subtotalMinor: 0,
+      currency: null,
+      requiresAcknowledgement: true,
+      reasons: ["unknown_variant"] as const,
+    });
+
+    expect(parsePreviewPresentation(atLimit)).toEqual(atLimit);
+    expect(parsePreviewPresentation(withToken({
+      ...atLimit,
+      items: [{ ...item, quantity: 26 }],
+    }))).toBeNull();
+  });
+
+  it("accepts the maximum distinct cart items and rejects one above it", () => {
+    const items = Array.from({ length: 51 }, (_, index): CartPreviewItem => ({
+      variantId: `variant-${index}`,
+      quantity: 1,
+      available: false,
+      purchaseState: "unknown_variant",
+      name: null,
+      variantLabel: null,
+      sku: null,
+      packageForm: null,
+      baseUnitMinor: null,
+      unitAmountMinor: null,
+      lineSubtotalMinor: null,
+      lineSavingsMinor: null,
+      effectiveDiscountBps: null,
+      appliedPromotions: [],
+      currency: null,
+    }));
+    const atLimit = withToken({
+      ...preview,
+      items: items.slice(0, 50),
+      subtotalMinor: 0,
+      currency: null,
+      requiresAcknowledgement: true,
+      reasons: ["unknown_variant"] as const,
+    });
+
+    expect(parsePreviewPresentation(atLimit)).toEqual(atLimit);
+    expect(parsePreviewPresentation(withToken({ ...atLimit, items }))).toBeNull();
+  });
+
   it.each([
     ["identity", { name: "Synthetic renamed item" }, {}],
     ["amount", { baseUnitMinor: 2500, unitAmountMinor: 2300, lineSubtotalMinor: 4600, lineSavingsMinor: 400 }, { subtotalMinor: 4600 }],

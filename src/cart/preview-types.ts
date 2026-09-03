@@ -1,3 +1,6 @@
+export const MAX_CART_PREVIEW_TEXT_LENGTH = 240;
+export const MAX_CART_PREVIEW_IDENTIFIER_LENGTH = 128;
+
 export type CartPreviewPurchaseState = "ready" | "checkout_unavailable" | "local_preview" | "pricing_pending" | "unavailable" | "insufficient_quantity" | "unknown_variant";
 
 export type CartPreviewItem = Readonly<{

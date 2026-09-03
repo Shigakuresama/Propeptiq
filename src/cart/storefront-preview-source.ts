@@ -13,6 +13,10 @@ import type {
   PublicStorefrontAutomaticPromotion,
 } from "@/catalog/storefront-price-presentation";
 import type { CartPreviewSource, CartPreviewVariant, CartPreviewVariantSource } from "./preview";
+import {
+  MAX_CART_PREVIEW_IDENTIFIER_LENGTH,
+  MAX_CART_PREVIEW_TEXT_LENGTH,
+} from "./preview-types";
 
 const MAX_PUBLIC_AUTOMATIC_PROMOTIONS = 1_000;
 const MAX_PROMOTION_SCOPE_TARGETS = 1_000;
@@ -40,13 +44,13 @@ function requireFact(valid: boolean): asserts valid {
   if (!valid) throw new CartPreviewProjectionError("invalid_source");
 }
 
-function text(value: unknown, maximum = 240): value is string {
+function text(value: unknown, maximum = MAX_CART_PREVIEW_TEXT_LENGTH): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maximum &&
     value.trim() === value && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
 function identifier(value: unknown): value is string {
-  return text(value, 128) && /^[A-Za-z0-9_-]+$/u.test(value);
+  return text(value, MAX_CART_PREVIEW_IDENTIFIER_LENGTH) && /^[A-Za-z0-9_-]+$/u.test(value);
 }
 
 function nonnegative(value: unknown): value is number {
@@ -153,7 +157,7 @@ function activePromotionSnapshot(
     const id = promotion.id;
     requireFact(text(promotion.displayName));
     const displayName = promotion.displayName;
-    requireFact(promotion.displayCode === null || text(promotion.displayCode, 128));
+    requireFact(promotion.displayCode === null || text(promotion.displayCode, MAX_CART_PREVIEW_IDENTIFIER_LENGTH));
     const displayCode = promotion.displayCode;
     requireFact(typeof promotion.discountBps === "number" &&
       Number.isSafeInteger(promotion.discountBps) && promotion.discountBps >= 1 &&
@@ -169,7 +173,7 @@ function activePromotionSnapshot(
     const endAtValue = promotion.endAt;
     const scope = promotionScope(promotion.scope);
     requireFact(scope !== null);
-    requireFact(text(promotion.timezone, 128) &&
+    requireFact(text(promotion.timezone, MAX_CART_PREVIEW_IDENTIFIER_LENGTH) &&
       isValidStorefrontPromotionTimezone(promotion.timezone));
     const timezone = promotion.timezone;
     const startAt = startAtValue !== null
@@ -202,7 +206,7 @@ function activePromotionSnapshot(
 
 function freezeVariant(row: CartPreviewVariant): CartPreviewVariant {
   requireFact(!!row && identifier(row.variantId) && identifier(row.productId) && text(row.name) &&
-    text(row.variantLabel) && text(row.sku, 128) && text(row.packageForm) &&
+    text(row.variantLabel) && text(row.sku, MAX_CART_PREVIEW_IDENTIFIER_LENGTH) && text(row.packageForm) &&
     (row.baseUnitMinor === null || nonnegative(row.baseUnitMinor)) &&
     (row.currency === null || row.currency === "USD") &&
     ["pending", "active", "unavailable"].includes(row.priceStatus) &&

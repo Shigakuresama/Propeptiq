@@ -6,6 +6,10 @@ import { buildConfiguredDisplayVariantFacts, buildPublicStorefrontCatalog, store
 import type { PublicStorefrontView } from "@/catalog/storefront-public-server";
 import type { PublicStorefrontAutomaticPromotion } from "@/catalog/storefront-price-presentation";
 import { buildCartPreview } from "./preview";
+import {
+  MAX_CART_PREVIEW_IDENTIFIER_LENGTH,
+  MAX_CART_PREVIEW_TEXT_LENGTH,
+} from "./preview-types";
 import { CartPreviewProjectionError, composeCartPreviewSources, projectPublicStorefrontPreviewSource } from "./storefront-preview-source";
 
 const catalog = buildPublicStorefrontCatalog({
@@ -44,6 +48,36 @@ function runtimeView(
 }
 
 describe("public storefront cart source", () => {
+  it("accepts exact preview display bounds and rejects one character beyond them", () => {
+    const base = projectPublicStorefrontPreviewSource(view([canonical])).variants[0]!;
+    const textAtLimit = "x".repeat(MAX_CART_PREVIEW_TEXT_LENGTH);
+    const identifierAtLimit = "a".repeat(MAX_CART_PREVIEW_IDENTIFIER_LENGTH);
+    const atLimit = {
+      ...base,
+      variantId: identifierAtLimit,
+      productId: identifierAtLimit,
+      name: textAtLimit,
+      variantLabel: textAtLimit,
+      sku: identifierAtLimit,
+      packageForm: textAtLimit,
+      eligiblePromotions: [{
+        id: identifierAtLimit,
+        discountBps: 3_000,
+        displayLabel: textAtLimit,
+      }],
+    };
+
+    expect(composeCartPreviewSources({ mode: "production", variants: [atLimit] }).variants[0])
+      .toEqual(atLimit);
+    for (const row of [
+      { ...atLimit, name: `${textAtLimit}x` },
+      { ...atLimit, variantId: `${identifierAtLimit}a` },
+    ]) {
+      expect(() => composeCartPreviewSources({ mode: "production", variants: [row] }))
+        .toThrowError(new CartPreviewProjectionError("invalid_source"));
+    }
+  });
+
   it("projects all 103 canonical variants once with 40 reviewed positive and 63 pending prices", () => {
     const source = projectPublicStorefrontPreviewSource(view());
     expect(source.mode).toBe("production");

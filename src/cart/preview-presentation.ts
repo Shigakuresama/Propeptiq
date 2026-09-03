@@ -1,6 +1,14 @@
 import { calculateVariantLinePrice, quantityDiscountBps } from "@/domain/storefront-pricing";
+import { MAX_CART_DISTINCT_ITEMS, MAX_CART_ITEM_QUANTITY } from "./cart-storage";
 import { createCartPreviewToken } from "./preview-token";
-import { cartPreviewReasons, type CartPreview, type CartPreviewItem, type CartPreviewPurchaseState } from "./preview-types";
+import {
+  cartPreviewReasons,
+  MAX_CART_PREVIEW_IDENTIFIER_LENGTH,
+  MAX_CART_PREVIEW_TEXT_LENGTH,
+  type CartPreview,
+  type CartPreviewItem,
+  type CartPreviewPurchaseState,
+} from "./preview-types";
 
 export const PREVIEW_PRESENTATION_STORAGE_KEY = "propeptiq.cart-preview.presentation.v2";
 
@@ -36,14 +44,14 @@ function boundedText(value: unknown, maximum: number): value is string {
 }
 
 function identifier(value: unknown): value is string {
-  return boundedText(value, 128) && /^[A-Za-z0-9_-]+$/u.test(value);
+  return boundedText(value, MAX_CART_PREVIEW_IDENTIFIER_LENGTH) && /^[A-Za-z0-9_-]+$/u.test(value);
 }
 
 function item(value: unknown): CartPreviewItem | null {
   if (!exactRecord(value, [
     "variantId", "quantity", "available", "purchaseState", "name", "variantLabel", "sku", "packageForm",
     "baseUnitMinor", "unitAmountMinor", "lineSubtotalMinor", "lineSavingsMinor", "effectiveDiscountBps", "appliedPromotions", "currency",
-  ]) || !identifier(value.variantId) || !Number.isSafeInteger(value.quantity) || (value.quantity as number) < 1 || (value.quantity as number) > 25 ||
+  ]) || !identifier(value.variantId) || !Number.isSafeInteger(value.quantity) || (value.quantity as number) < 1 || (value.quantity as number) > MAX_CART_ITEM_QUANTITY ||
     typeof value.available !== "boolean" || typeof value.purchaseState !== "string" ||
     !["ready", "checkout_unavailable", "local_preview", "pricing_pending", "unavailable", "insufficient_quantity", "unknown_variant"].includes(value.purchaseState) ||
     value.available !== (value.purchaseState === "ready") || !denseArray(value.appliedPromotions, 1)) return null;
@@ -51,11 +59,13 @@ function item(value: unknown): CartPreviewItem | null {
   const purchaseState = value.purchaseState as CartPreviewPurchaseState;
   const identity = [value.name, value.variantLabel, value.sku, value.packageForm];
   if (purchaseState === "unknown_variant" ? identity.some((field) => field !== null)
-    : !boundedText(value.name, 240) || !boundedText(value.variantLabel, 240) || !boundedText(value.sku, 128) || !boundedText(value.packageForm, 240)) return null;
+    : !boundedText(value.name, MAX_CART_PREVIEW_TEXT_LENGTH) || !boundedText(value.variantLabel, MAX_CART_PREVIEW_TEXT_LENGTH) ||
+      !boundedText(value.sku, MAX_CART_PREVIEW_IDENTIFIER_LENGTH) || !boundedText(value.packageForm, MAX_CART_PREVIEW_TEXT_LENGTH)) return null;
 
   const appliedPromotions: Array<Readonly<{ id: string; label: string }>> = [];
   for (const promotion of value.appliedPromotions) {
-    if (!exactRecord(promotion, ["id", "label"]) || !identifier(promotion.id) || !boundedText(promotion.label, 240)) return null;
+    if (!exactRecord(promotion, ["id", "label"]) || !identifier(promotion.id) ||
+      !boundedText(promotion.label, MAX_CART_PREVIEW_TEXT_LENGTH)) return null;
     appliedPromotions.push(Object.freeze({ id: promotion.id, label: promotion.label }));
   }
   const priced = ["ready", "checkout_unavailable", "local_preview", "insufficient_quantity"].includes(purchaseState);
@@ -88,7 +98,7 @@ export function parsePreviewPresentation(value: unknown): CartPreview | null {
   try {
     if (!exactRecord(value, [
       "schemaVersion", "items", "subtotalMinor", "currency", "taxMinor", "shippingMinor", "finalDiscountMinor", "previewToken", "requiresAcknowledgement", "reasons",
-    ]) || value.schemaVersion !== 2 || !denseArray(value.items, 50) || !money(value.subtotalMinor) ||
+    ]) || value.schemaVersion !== 2 || !denseArray(value.items, MAX_CART_DISTINCT_ITEMS) || !money(value.subtotalMinor) ||
       (value.currency !== null && value.currency !== "USD") || value.taxMinor !== null || value.shippingMinor !== null || value.finalDiscountMinor !== null ||
       typeof value.previewToken !== "string" || !/^[a-f0-9]{64}$/u.test(value.previewToken) || typeof value.requiresAcknowledgement !== "boolean" || !denseArray(value.reasons, 6)) return null;
     const items: CartPreviewItem[] = [];
