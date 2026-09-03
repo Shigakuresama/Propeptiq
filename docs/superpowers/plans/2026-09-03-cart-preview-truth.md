@@ -33,6 +33,10 @@
 - Modify: `src/cart/preview-types.ts`
 - Modify: `src/cart/cart.test.ts`
 - Modify if required by the source type only: `src/auth/local-driver-types.ts`, `src/auth/local-commerce-driver.ts`, `src/auth/local-commerce-driver.test.ts`
+- Compatibility amendment: `src/app/api/catalog/preview/route.ts` and `.test.ts` only wrap the existing empty/local source in the required presentation mode; public hydration remains Task 2.
+- Coherent DTO-boundary amendment: `src/cart/preview-presentation.ts` and `.test.ts` implement strict version-2 parsing/storage in Task 1, so the intermediate commit remains type-safe.
+- Compatibility amendment: `src/components/commerce/cart-view.tsx` fallback DTO only; `cart-view.test.tsx` and `checkout-form.test.tsx` display-preview fixtures only. No UI redesign or checkout-safe fixture changes.
+- Review repair: create `src/cart/preview-token.ts` and `.test.ts`; share canonical browser-safe SHA-256 between builder and parser and reject token mismatches.
 
 **Implementation contract:** Extract or expose one narrow pure line-presentation primitive used by `resolvePublicVariantPrice` and cart preview. Add source presentation mode, nullable base amount, nullable available quantity, and checkout-readiness facts without exposing provider mappings. The public adapter filters active public promotions by product/variant scope and attaches only safe display metadata; it sets available quantity to null and treats all public rows as non-transactional. Canonical `variantLabel` is the exact variant label; `packageForm` is derived only from `packageQuantity` as `1 bottle` / `N bottles`, never from display-configuration position or label parsing. Build explicit purchase states and complete line price fields. Skip arithmetic for Production pending rows and every null pending amount. Tokenize all visible/status facts. Add `schemaVersion: 2` only to the display `CartPreview`; preserve `buildSafeCartPreview`, `SafeCartPreview`, and checkout-owned DTO behavior exactly.
 
@@ -62,8 +66,6 @@
 
 **Files:**
 
-- Modify: `src/cart/preview-presentation.ts`
-- Modify: `src/cart/preview-presentation.test.ts`
 - Modify: `src/components/commerce/cart-view.tsx`
 - Modify: `src/components/commerce/cart-view.test.tsx`
 - Modify: `src/components/account/checkout-cart-status.tsx`
@@ -73,9 +75,9 @@
 - Modify: `docs/runbooks/storefront-configuration.md`
 - Modify: `docs/propeptiq-storefront-refactor-contract.md`
 
-**Implementation contract:** Strictly validate the complete version-2 server display preview with dense arrays, bounded exact records, coherent totals/currency/discount/savings/promotion labels, unique variants, and state/availability consistency. Bump storage envelope to version 2 rather than accepting ambiguous v1 snapshots. Both `CartView` and `CheckoutCartStatus` must parse the shared response before rendering; they may not cast untrusted JSON. `CheckoutForm` may consume the parsed display DTO for status only, while its safe `PRICE_CHANGED` validator and quote/session request remain separate. Render product/variant/package/SKU, standard/sale price, savings/discount, promotion, subtotal, and precise status copy. Keep Continue disabled for all display-only lines and retain retry/facts-changed behavior.
+**Implementation contract:** Consume the strict version-2 parser/storage completed and reviewed in Task 1. Both `CartView` and `CheckoutCartStatus` must parse the shared response before rendering; they may not cast untrusted JSON. `CheckoutForm` may consume the parsed display DTO for status only, while its safe `PRICE_CHANGED` validator and quote/session request remain separate. Render product/variant/package/SKU, standard/sale price, savings/discount, promotion, subtotal, and precise status copy. Keep Continue disabled for all display-only lines and retain retry/facts-changed behavior. A parser defect discovered here must be reported for a narrowly authorized fix rather than silently broadening UI ownership.
 
-- [ ] Add RED parser/storage tests for exact schema version/keys, bounds, holes/overridden iterators, duplicate variants/promotions, arithmetic inconsistency, state mismatch, token/reason mismatch, stale schema, and no partial acceptance. Assert the checkout-safe DTO shape is unchanged and rejects display-only extensions where exact validation applies.
+- [ ] Re-run accepted parser/storage regressions for exact schema version/keys, bounds, holes/overridden iterators, duplicate variants/promotions, arithmetic inconsistency, state mismatch, token/reason mismatch, stale schema, and no partial acceptance. Add consumer-level failures for malformed responses; assert the checkout-safe DTO shape is unchanged and rejects display-only extensions where exact validation applies.
 - [ ] Add RED component tests for priced preview-only, pending, unknown, unavailable, insufficient quantity, same/different variant lines, quantity refresh, loading/retry/stale preview, applied WINTER30, no misleading sold-out/checkout-calculation copy, live status, and disabled continuation.
 - [ ] Add Playwright regressions at 320,375,768,1440 pixels. Use the existing real local catalog harness; prove TR30 quantity2 and TR60 quantity1 exact identities, 30% prices/savings/subtotals, disabled continuation/no checkout-provider request, keyboard quantity controls, safe focus, and no overflow. Preserve unique static test locations for the repository runner.
 - [ ] Update the owner guide and refactor contract only for the public-cart display boundary, ADD policy, preview storage schema, and remaining checkout gates. Do not claim live inventory/payment readiness.
