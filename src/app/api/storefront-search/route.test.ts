@@ -253,6 +253,8 @@ describe("GET /api/storefront-search", () => {
       buildIndex: actualIndex.buildStorefrontSearchIndex,
     });
 
+    expect(catalog.products).toHaveLength(56);
+    expect(catalog.products.every((product) => product.kind === "canonical")).toBe(true);
     const response = await handler(request());
     const body = await response.json() as StorefrontSearchIndex;
 

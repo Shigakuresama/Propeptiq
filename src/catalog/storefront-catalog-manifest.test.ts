@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { browseCatalogProducts } from "./browse-catalog";
+import { storefrontCatalogData } from "./storefront-catalog-data";
 import {
   approvedStorefrontCatalogPriceDecisions,
   buildStorefrontCatalogDecisionManifest,
@@ -9,6 +12,8 @@ import {
 } from "./storefront-catalog-manifest";
 
 const key = (slug: string, code: string) => `${slug}:${code}`;
+// Captured from the 5bdc52f4 pre-refactor owner rows and legacy mapping.
+const BASE_CATALOG_DIGEST = "f4ee84248ccafb701a7c7420fd584889a3d1e8eec4e7085ee335a886e6d8aaf8";
 
 const expectedPositive = new Map([
   [key("snap", "SNP10"), 2999],
@@ -71,7 +76,78 @@ const expectedEvidence = new Map([
   [key("cartalax", "Car20"), { baseUnitMinor: 6999, url: "https://www.aminoclub.com/us/products/cartalax", observedAt: "2026-09-02T02:04:54.0166213-07:00" }],
 ]);
 
+function uuidV5(name: string): string {
+  const namespace = Buffer.from("6ba7b8109dad11d180b400c04fd430c8", "hex");
+  const digest = createHash("sha1")
+    .update(Buffer.concat([namespace, Buffer.from(name)]))
+    .digest();
+  digest[6] = (digest[6]! & 0x0f) | 0x50;
+  digest[8] = (digest[8]! & 0x3f) | 0x80;
+  const hex = digest.subarray(0, 16).toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function legacyAmountFromPackageForm(packageForm: string): { value: number; unit: "mg" | "mcg" | "iu" } | null {
+  const label = packageForm.slice(0, -" × 10 vials".length);
+  if (label.includes("+")) return null;
+  const match = /^(\d+(?:\.\d+)?)(mg|mcg|iu)$/iu.exec(label);
+  return match === null
+    ? null
+    : { value: Number(match[1]), unit: match[2]!.toLowerCase() as "mg" | "mcg" | "iu" };
+}
+
+function baselineDigest(value: unknown): string {
+  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function expectedBaseCatalog() {
+  const products = browseCatalogProducts.map((product) => {
+    const id = uuidV5(`propeptiq.com/storefront/product/${product.slug}`);
+    const variants = product.variants.map((variant) => ({
+      browseSlug: product.slug,
+      browseCode: variant.code,
+      id: uuidV5(`propeptiq.com/storefront/variant/${product.slug}/${variant.code}`),
+      sku: `PPQ-${product.slug.toUpperCase().replace(/[^A-Z0-9]+/gu, "-")}-${variant.code.toUpperCase().replace(/[^A-Z0-9]+/gu, "-")}`,
+      amount: legacyAmountFromPackageForm(variant.packageForm),
+    }));
+    const defaultVariant = variants.find((variant) => (
+      expectedPositive.has(key(variant.browseSlug, variant.browseCode))
+    )) ?? variants[0]!;
+    return { slug: product.slug, id, defaultVariantId: defaultVariant.id, variants };
+  });
+
+  return {
+    products: products.map(({ slug, id, defaultVariantId }) => ({ slug, id, defaultVariantId })),
+    variants: products.flatMap(({ variants }) => variants),
+  };
+}
+
+function actualCatalog() {
+  const productById = new Map(
+    storefrontCatalogData.products.map((product) => [product.id, product] as const),
+  );
+  return {
+    products: storefrontCatalogData.products.map((product) => ({
+      slug: product.slug,
+      id: product.id,
+      defaultVariantId: product.defaultVariantId,
+    })),
+    variants: storefrontCatalogData.bindings.variants.map((variant) => ({
+      browseSlug: productById.get(variant.productId)?.slug,
+      browseCode: variant.browseCode,
+      id: variant.id,
+      sku: variant.sku,
+      amount: variant.amount,
+    })),
+  };
+}
+
 describe("storefront catalog decision manifest", () => {
+  it("preserves the complete fixed pre-refactor identity, default, SKU, and amount baseline", () => {
+    expect(baselineDigest(expectedBaseCatalog())).toBe(BASE_CATALOG_DIGEST);
+    expect(baselineDigest(actualCatalog())).toBe(BASE_CATALOG_DIGEST);
+  });
+
   it("covers the exact browse order and reverse scoped coverage", () => {
     expect(storefrontCatalogDecisionManifest.products.map((p) => p.browseSlug)).toEqual(
       browseCatalogProducts.map((p) => p.slug),

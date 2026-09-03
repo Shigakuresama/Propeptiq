@@ -202,10 +202,10 @@ describe("public storefront projection", () => {
     });
 
     expect(catalog.products).toHaveLength(56);
-    expect(catalog.products.every((product) => (
-      product.kind === "browse_only" || (
-        product.popularityRank === null && product.releasedAt === null
-      )
+    const canonicalProducts = catalog.products.filter((product) => product.kind === "canonical");
+    expect(canonicalProducts).toHaveLength(56);
+    expect(canonicalProducts.every((product) => (
+      product.popularityRank === null && product.releasedAt === null
     ))).toBe(true);
   });
 
