@@ -7,6 +7,7 @@ import type {
 import {
   canAddPublicVariant,
   resolvePublicVariantPrice,
+  resolveVariantPricePresentation,
   selectCardVariant,
   summarizePublicStorefrontVariants,
   type PricePresentationMode,
@@ -124,6 +125,15 @@ describe("public variant state equivalence", () => {
 });
 
 describe("resolvePublicVariantPrice", () => {
+  it("shares the narrow price-facts primitive without requiring catalog identity metadata", () => {
+    expect(resolveVariantPricePresentation({
+      variant: { id: "synthetic-line", baseUnitMinor: 1_005, currency: "USD", priceStatus: "active", availability: "preview_only", checkoutReady: false },
+      quantity: 2, mode: "production", eligiblePromotions: [{ id: "winter30", discountBps: 3_000 }],
+    })).toEqual({ state: "priced", purchaseState: "checkout_unavailable", price: {
+      variantId: "synthetic-line", quantity: 2, baseUnitMinor: 1_005, effectiveDiscountBps: 3_000,
+      effectiveUnitMinor: 704, lineSubtotalMinor: 1_408, lineSavingsMinor: 602, appliedPromotionIds: ["winter30"],
+    } });
+  });
   it("renders a valid active price once with a ready purchase state", () => {
     expect(resolvePublicVariantPrice({
       variant: variant(), productId: "product-alpha", quantity: 1, pricing: pricing("production"),

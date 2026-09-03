@@ -29,9 +29,11 @@ function preview({
   reasons = [],
   requiresAcknowledgement = false,
 }: PreviewOptions = {}) {
+  const unitAmountMinor = quantity === 2 ? 2_208 : 2_160;
   return {
-    items: [{ variantId, quantity, available, name, packageForm: "Research vial", unitAmountMinor: 2400, lineSubtotalMinor: quantity * 2400, currency: "USD" }],
-    subtotalMinor: quantity * 2400, currency: "USD", taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
+    schemaVersion: 2,
+    items: [{ variantId, quantity, available, purchaseState: available ? "ready" : "unavailable", name, variantLabel: "Synthetic 5 mg", sku: "SYNTHETIC-5MG", packageForm: "Research vial", baseUnitMinor: 2400, unitAmountMinor, lineSubtotalMinor: quantity * unitAmountMinor, lineSavingsMinor: quantity * (2400 - unitAmountMinor), effectiveDiscountBps: quantity === 2 ? 800 : 1000, appliedPromotions: [], currency: "USD" }],
+    subtotalMinor: quantity * unitAmountMinor, currency: "USD", taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
     previewToken, requiresAcknowledgement, reasons,
   };
 }
@@ -49,7 +51,7 @@ describe("CartView", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
     expect(body.items).toEqual([{ variantId, quantity: 2 }]);
-    expect(within(screen.getByRole("complementary", { name: "Order summary" })).getByText("$48.00")).toBeVisible();
+    expect(within(screen.getByRole("complementary", { name: "Order summary" })).getByText("$44.16")).toBeVisible();
   });
 
   it("retries the unchanged variant cart after a preview failure", async () => {
@@ -61,7 +63,7 @@ describe("CartView", () => {
     await user.click(screen.getByRole("button", { name: "Retry current cart facts" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))).toEqual(first);
-    expect(await screen.findByText("$48.00")).toBeVisible();
+    expect(await screen.findByText("$44.16")).toBeVisible();
   });
 
   it("hides a stale preview and refreshes the exact changed variant cart", async () => {
@@ -98,7 +100,7 @@ describe("CartView", () => {
     const user = userEvent.setup();
     const navigate = vi.fn();
     render(<CartView checkoutIntent={null} navigate={navigate} />);
-    await screen.findByText("$48.00");
+    await screen.findByText("$44.16");
     await user.click(screen.getByRole("button", { name: "Continue to sign in" }));
     expect(navigate).toHaveBeenCalledWith("/checkout");
     expect(JSON.parse(window.localStorage.getItem("propeptiq.cart.v2")!)).toEqual({ version: 2, items: [{ variantId, quantity: 2 }] });

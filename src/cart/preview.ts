@@ -1,13 +1,10 @@
 import { createHash } from "node:crypto";
 
-import {
-  calculateVariantLinePrice,
-  quantityDiscountBps,
-  resolveEffectiveDiscount,
-  type EligiblePromotion,
-} from "@/domain/storefront-pricing";
+import { resolveVariantPricePresentation, type PricePresentationMode } from "@/catalog/storefront-price-presentation";
 
 import { normalizeCart } from "./cart-storage";
+import { cartPreviewReasons } from "./preview-types";
+import { CartPreviewProjectionError, composeCartPreviewSources } from "./storefront-preview-source";
 import type {
   CartPreview,
   CartPreviewItem,
@@ -28,29 +25,25 @@ export type CartPreviewVariant = Readonly<{
   productId: string;
   name: string;
   packageForm: string;
-  variantLabel?: string;
-  sku?: string;
-  baseUnitMinor: number;
-  currency: "USD";
+  variantLabel: string;
+  sku: string;
+  baseUnitMinor: number | null;
+  currency: "USD" | null;
   priceStatus: "pending" | "active" | "unavailable";
   availability: "preview_only" | "available" | "unavailable";
-  availableQuantity: number;
-  eligiblePromotions: readonly EligiblePromotion[];
+  checkoutReady: boolean;
+  availableQuantity: number | null;
+  eligiblePromotions: readonly Readonly<{ id: string; discountBps: number; displayLabel: string }>[];
 }>;
 
-export type CartPreviewSource = Readonly<{
+export type CartPreviewVariantSource = Readonly<{
   variants: readonly CartPreviewVariant[];
 }>;
 
+export type CartPreviewSource = CartPreviewVariantSource & Readonly<{ mode: PricePresentationMode }>;
+
 function createPreviewToken(items: readonly CartPreviewItem[]): string {
-  const facts = items.map((item) => ({
-    variantId: item.variantId,
-    name: item.name,
-    packageForm: item.packageForm,
-    unitAmountMinor: item.unitAmountMinor,
-    currency: item.currency,
-  }));
-  return createHash("sha256").update(JSON.stringify(facts)).digest("hex");
+  return createHash("sha256").update(JSON.stringify(items)).digest("hex");
 }
 
 export function buildCartPreview(
@@ -58,65 +51,75 @@ export function buildCartPreview(
   source: CartPreviewSource,
   previousPreviewToken: string | null = null,
 ): CartPreview {
-  const variantsById = new Map(source.variants.map((variant) => [variant.variantId, variant] as const));
+  const validated = composeCartPreviewSources(source);
+  const variantsById = new Map(validated.variants.map((variant) => [variant.variantId, variant] as const));
   const items = normalizeCart(requested).map<CartPreviewItem>((line) => {
     const variant = variantsById.get(line.variantId);
-    if (!variant) {
-      return {
-        variantId: line.variantId,
-        quantity: line.quantity,
-        available: false,
-        name: null,
-        packageForm: null,
-        unitAmountMinor: null,
-        lineSubtotalMinor: null,
-        currency: null,
-      };
-    }
-    const effectiveDiscount = resolveEffectiveDiscount({
-      quantityDiscountBps: quantityDiscountBps(line.quantity),
-      eligiblePromotions: variant.eligiblePromotions,
-    });
-    const price = calculateVariantLinePrice({
-      variantId: variant.variantId,
-      baseUnitMinor: variant.baseUnitMinor,
-      quantity: line.quantity,
-      priceStatus: variant.priceStatus,
-      effectiveDiscount,
-    });
-    return {
+    const unpriced: CartPreviewItem = {
       variantId: line.variantId,
       quantity: line.quantity,
-      available:
-        variant.availability === "available" &&
-        line.quantity <= variant.availableQuantity &&
-        price.checkoutReady,
-      name: variant.name,
-      packageForm: variant.packageForm,
+      available: false,
+      purchaseState: "unknown_variant",
+      name: variant?.name ?? null,
+      variantLabel: variant?.variantLabel ?? null,
+      sku: variant?.sku ?? null,
+      packageForm: variant?.packageForm ?? null,
+      baseUnitMinor: null,
+      unitAmountMinor: null,
+      lineSubtotalMinor: null,
+      lineSavingsMinor: null,
+      effectiveDiscountBps: null,
+      appliedPromotions: Object.freeze([]),
+      currency: null,
+    };
+    if (!variant) return Object.freeze(unpriced);
+    if (variant.availability === "unavailable" || variant.priceStatus === "unavailable") {
+      return Object.freeze({ ...unpriced, purchaseState: "unavailable" });
+    }
+    const presentation = resolveVariantPricePresentation({
+      variant: { ...variant, id: variant.variantId },
+      quantity: line.quantity,
+      mode: validated.mode,
+      eligiblePromotions: variant.eligiblePromotions,
+    });
+    if (presentation.state !== "priced") return Object.freeze({ ...unpriced, purchaseState: presentation.purchaseState });
+    const price = presentation.price;
+    const purchaseState = presentation.purchaseState !== "ready" ? presentation.purchaseState
+      : variant.availableQuantity === null ? "checkout_unavailable"
+        : variant.availableQuantity < line.quantity ? "insufficient_quantity" : "ready";
+    return Object.freeze({
+      ...unpriced,
+      purchaseState,
+      available: purchaseState === "ready",
+      baseUnitMinor: price.baseUnitMinor,
       unitAmountMinor: price.effectiveUnitMinor,
       lineSubtotalMinor: price.lineSubtotalMinor,
+      lineSavingsMinor: price.lineSavingsMinor,
+      effectiveDiscountBps: price.effectiveDiscountBps,
+      appliedPromotions: Object.freeze(price.appliedPromotionIds.map((id) => Object.freeze({
+        id, label: variant.eligiblePromotions.find((promotion) => promotion.id === id)!.displayLabel,
+      }))),
       currency: variant.currency,
-    };
+    });
   });
   const previewToken = createPreviewToken(items);
-  const unavailable = items.some((item) => !item.available);
   const factsChanged = previousPreviewToken !== null && previousPreviewToken !== previewToken;
-  const reasons: CartPreview["reasons"] = [
-    ...(factsChanged ? (["server_facts_changed"] as const) : []),
-    ...(unavailable ? (["product_unavailable"] as const) : []),
-  ];
+  const reasons = cartPreviewReasons(items, factsChanged);
+  const subtotalMinor = items.reduce((total, item) => total + (item.lineSubtotalMinor ?? 0), 0);
+  if (!Number.isSafeInteger(subtotalMinor)) throw new CartPreviewProjectionError("invalid_source");
 
-  return {
-    items,
-    subtotalMinor: items.reduce((total, item) => total + (item.lineSubtotalMinor ?? 0), 0),
+  return Object.freeze({
+    schemaVersion: 2,
+    items: Object.freeze(items),
+    subtotalMinor,
     currency: items.find((item) => item.currency !== null)?.currency ?? null,
     taxMinor: null,
     shippingMinor: null,
     finalDiscountMinor: null,
     previewToken,
-    requiresAcknowledgement: factsChanged || unavailable,
+    requiresAcknowledgement: reasons.length > 0,
     reasons,
-  };
+  });
 }
 
 export function buildSafeCartPreview(

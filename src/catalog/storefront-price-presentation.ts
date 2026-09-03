@@ -5,6 +5,7 @@ import {
   quantityDiscountBps,
   resolveEffectiveDiscount,
   type EffectiveLinePrice,
+  type EligiblePromotion,
 } from "@/domain/storefront-pricing";
 
 export type PricePresentationMode = "local" | "test" | "preview" | "production";
@@ -93,7 +94,24 @@ export function resolvePublicVariantPrice(input: Readonly<{
   quantity: number;
   pricing: PublicStorefrontPricingContext;
 }>): PricePresentation {
-  const { variant, pricing } = input;
+  return resolveVariantPricePresentation({
+    variant: input.variant,
+    quantity: input.quantity,
+    mode: input.pricing.mode,
+    eligiblePromotions: input.pricing.automaticPromotions
+      .filter((promotion) => promotionApplies(promotion, { id: input.variant.id, productId: input.productId }))
+      .map((promotion) => ({ id: promotion.id, discountBps: promotion.discountBps })),
+  });
+}
+
+/** Shared display calculation. Eligibility is resolved by the owning source. */
+export function resolveVariantPricePresentation(input: Readonly<{
+  variant: Pick<PublicStorefrontVariant, "id" | "availability" | "priceStatus" | "baseUnitMinor" | "currency" | "checkoutReady">;
+  quantity: number;
+  mode: PricePresentationMode;
+  eligiblePromotions: readonly EligiblePromotion[];
+}>): PricePresentation {
+  const { variant, mode } = input;
   if (variant.availability === "unavailable") {
     return {
       state: "unavailable",
@@ -116,7 +134,7 @@ export function resolvePublicVariantPrice(input: Readonly<{
     variant.baseUnitMinor === 0 &&
     variant.currency === "USD" &&
     variant.checkoutReady === false &&
-    pricing.mode !== "production";
+    mode !== "production";
 
   if (!activePrice && !previewZero) {
     return {
@@ -126,12 +144,9 @@ export function resolvePublicVariantPrice(input: Readonly<{
     };
   }
 
-  const eligiblePromotions = pricing.automaticPromotions
-    .filter((promotion) => promotionApplies(promotion, { id: variant.id, productId: input.productId }))
-    .map((promotion) => ({ id: promotion.id, discountBps: promotion.discountBps }));
   const effectiveDiscount = resolveEffectiveDiscount({
     quantityDiscountBps: quantityDiscountBps(input.quantity),
-    eligiblePromotions,
+    eligiblePromotions: input.eligiblePromotions,
   });
   const calculated = calculateVariantLinePrice({
     variantId: variant.id,
@@ -155,7 +170,7 @@ export function resolvePublicVariantPrice(input: Readonly<{
     purchaseState: previewZero
       ? "local_preview"
       : variant.availability === "preview_only"
-        ? (pricing.mode === "production" ? "checkout_unavailable" : "local_preview")
+        ? (mode === "production" ? "checkout_unavailable" : "local_preview")
         : variant.checkoutReady === true ? "ready" : "checkout_unavailable",
     price: publicPrice,
   };

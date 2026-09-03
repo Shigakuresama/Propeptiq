@@ -24,9 +24,11 @@ function preview({
   reasons = [],
   requiresAcknowledgement = false,
 }: PreviewOptions = {}) {
+  const unitAmountMinor = quantity === 2 ? 2_208 : 2_160;
   return {
-    items: [{ variantId, quantity, available, name, packageForm: "Research vial", unitAmountMinor: 2400, lineSubtotalMinor: quantity * 2400, currency: "USD" }],
-    subtotalMinor: quantity * 2400, currency: "USD", taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
+    schemaVersion: 2,
+    items: [{ variantId, quantity, available, purchaseState: available ? "ready" : "unavailable", name, variantLabel: "Synthetic 5 mg", sku: "SYNTHETIC-5MG", packageForm: "Research vial", baseUnitMinor: 2400, unitAmountMinor, lineSubtotalMinor: quantity * unitAmountMinor, lineSavingsMinor: quantity * (2400 - unitAmountMinor), effectiveDiscountBps: quantity === 2 ? 800 : 1000, appliedPromotions: [], currency: "USD" }],
+    subtotalMinor: quantity * unitAmountMinor, currency: "USD", taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
     previewToken, requiresAcknowledgement, reasons,
   };
 }

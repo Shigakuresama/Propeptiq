@@ -15,6 +15,7 @@ const { getRequestIdentity, cartPreviewSource } = vi.hoisted(() => ({
       priceStatus: "active",
       availability: "available",
       availableQuantity: 12,
+      checkoutReady: true,
       eligiblePromotions: [],
     }],
   })),
@@ -72,9 +73,11 @@ describe("POST /api/catalog/preview local/test canonical source guard", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
+      schemaVersion: 2,
       items: [{
         variantId: "55000000-0000-4000-8000-000000000001",
         available: true,
+        purchaseState: "ready",
         unitAmountMinor: 2_208,
         lineSubtotalMinor: 4_416,
       }],

@@ -116,10 +116,17 @@ export function CartView({
       quantity: item.quantity,
       variantId: item.variantId,
       available: false,
+      purchaseState: "unknown_variant",
       name: null,
+      variantLabel: null,
+      sku: null,
       packageForm: null,
+      baseUnitMinor: null,
       unitAmountMinor: null,
       lineSubtotalMinor: null,
+      lineSavingsMinor: null,
+      effectiveDiscountBps: null,
+      appliedPromotions: [],
       currency: null,
     }));
 

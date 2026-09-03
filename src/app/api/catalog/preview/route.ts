@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getRequestIdentity } from "@/auth/server";
 import { buildCartPreview } from "@/cart/preview";
+import { resolvePricePresentationMode } from "@/catalog/storefront-public-server";
 import { isSyntheticLocalCommerceEnvironmentConfigured } from "@/config/commerce-capability";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +39,10 @@ export async function POST(request: Request) {
       : { variants: [] };
   // Production and Preview remain browse-only until canonical database variant
   // facts are approved; only the exact local/test guard exposes its fixture.
-  const preview = buildCartPreview(items, localTestSource, previousPreviewToken);
+  const preview = buildCartPreview(items, {
+    mode: resolvePricePresentationMode(requestIdentity.environment, { nodeEnv: process.env.NODE_ENV }),
+    variants: localTestSource.variants,
+  }, previousPreviewToken);
 
   return NextResponse.json(preview, {
     headers: { "Cache-Control": "no-store" },
