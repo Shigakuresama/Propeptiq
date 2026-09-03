@@ -1,3 +1,7 @@
+import "server-only";
+
+import { types as nodeTypes } from "node:util";
+
 /** PostgreSQL's undefined-table state, restricted to the optional catalog schema. */
 export const MISSING_CATALOG_SCHEMA_SQLSTATE = "42P01" as const;
 
@@ -15,6 +19,7 @@ export function hasOwnStringSqlState(
 ): boolean {
   if (typeof error !== "object" || error === null) return false;
   try {
+    if (nodeTypes.isProxy(error)) return false;
     const descriptor = Object.getOwnPropertyDescriptor(error, "code");
     return descriptor !== undefined && "value" in descriptor &&
       typeof descriptor.value === "string" && descriptor.value === sqlState;

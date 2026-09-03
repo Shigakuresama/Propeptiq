@@ -19,9 +19,9 @@ import type { PublicCatalog } from "./types";
 
 async function reportMissingCatalogSchema(): Promise<void> {
   try {
-    await Promise.resolve().then(() => {
-      console.warn(CATALOG_SCHEMA_UNAVAILABLE_DIAGNOSTIC);
-    });
+    await Promise.resolve().then(() =>
+      console.warn(CATALOG_SCHEMA_UNAVAILABLE_DIAGNOSTIC),
+    );
   } catch {
     // Diagnostics are best effort and must not take a public reader down.
   }

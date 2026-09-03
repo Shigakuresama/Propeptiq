@@ -48,6 +48,12 @@ function sqlStateError(code: string, message = "private database detail"): Error
   return error;
 }
 
+const connectionError = new Error("connection failure");
+const runtimeConnectionError = sqlStateError("42P01", "runtime connection failure");
+const environmentError = new Error("environment failure");
+const unrelatedSqlStateError = sqlStateError("23505", "private unique violation");
+const genericDatabaseError = new Error("private database failure");
+
 describe("legacy catalog server boundary", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -91,19 +97,38 @@ describe("legacy catalog server boundary", () => {
     expect(JSON.stringify(warning.mock.calls)).not.toContain("async diagnostic failure");
   });
 
+  it("waits for a deferred diagnostic reporter and contains its eventual rejection", async () => {
+    let rejectDiagnostic: ((reason?: unknown) => void) | undefined;
+    const warning = vi.spyOn(console, "warn").mockImplementation(() =>
+      new Promise<void>((_resolve, reject) => {
+        rejectDiagnostic = reject;
+      }) as never,
+    );
+    mocks.loadDatabaseCatalogRecords.mockRejectedValue(sqlStateError("42P01"));
+
+    let settled = false;
+    const catalogPromise = getPublicCatalog().then((catalog) => {
+      settled = true;
+      return catalog;
+    });
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect(warning).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+
+    rejectDiagnostic!(new Error("deferred diagnostic failure"));
+    await expect(catalogPromise).resolves.toBe(emptyPublicCatalog);
+    expect(settled).toBe(true);
+  });
+
   it.each([
-    ["connection", "connection failure", () => mocks.connection.mockRejectedValueOnce(new Error("connection failure"))],
-    ["runtime connection", "runtime connection failure", () => mocks.withRuntimeTransaction.mockRejectedValueOnce(sqlStateError("42P01", "runtime connection failure"))],
-    ["environment", "environment failure", () => mocks.readServerEnv.mockImplementationOnce(() => { throw new Error("environment failure"); })],
-    ["unrelated SQLSTATE", "private unique violation", () => mocks.loadDatabaseCatalogRecords.mockRejectedValueOnce(sqlStateError("23505", "private unique violation"))],
-    ["generic database", "private database failure", () => mocks.loadDatabaseCatalogRecords.mockRejectedValueOnce(new Error("private database failure"))],
-  ] as const)("rethrows %s failures unchanged", async (_label, message, arrange) => {
+    ["connection", connectionError, () => mocks.connection.mockRejectedValueOnce(connectionError)],
+    ["runtime connection", runtimeConnectionError, () => mocks.withRuntimeTransaction.mockRejectedValueOnce(runtimeConnectionError)],
+    ["environment", environmentError, () => mocks.readServerEnv.mockImplementationOnce(() => { throw environmentError; })],
+    ["unrelated SQLSTATE", unrelatedSqlStateError, () => mocks.loadDatabaseCatalogRecords.mockRejectedValueOnce(unrelatedSqlStateError)],
+    ["generic database", genericDatabaseError, () => mocks.loadDatabaseCatalogRecords.mockRejectedValueOnce(genericDatabaseError)],
+  ] as const)("rethrows %s failures unchanged", async (_label, expectedError, arrange) => {
     arrange();
-    const expected = _label === "connection"
-      ? await mocks.connection.mock.results[0]?.value.catch((error: unknown) => error)
-      : undefined;
-    void expected;
-    await expect(getPublicCatalog()).rejects.toThrow(message);
+    await expect(getPublicCatalog()).rejects.toBe(expectedError);
   });
 
   it.each([
@@ -122,6 +147,38 @@ describe("legacy catalog server boundary", () => {
     mocks.loadDatabaseCatalogRecords.mockRejectedValue(error);
 
     await expect(getPublicCatalog()).rejects.toBe(error);
+  });
+
+  it("does not fall back for an active proxy that forges an own SQLSTATE descriptor", async () => {
+    const error = new Error("private proxied database failure");
+    let descriptorTrapInvoked = false;
+    const proxy = new Proxy(error, {
+      getOwnPropertyDescriptor() {
+        descriptorTrapInvoked = true;
+        return {
+          configurable: true,
+          enumerable: true,
+          value: "42P01",
+          writable: true,
+        };
+      },
+    });
+    mocks.loadDatabaseCatalogRecords.mockRejectedValue(proxy);
+
+    await expect(getPublicCatalog()).rejects.toBe(proxy);
+    expect(descriptorTrapInvoked).toBe(false);
+  });
+
+  it("keeps demo-mode guard failures outside the missing-schema fallback", async () => {
+    mocks.readServerEnv.mockReturnValue({
+      ...environment,
+      APP_ENV: "production",
+      CATALOG_DEMO_MODE: "enabled",
+    } as ServerEnv);
+
+    await expect(getPublicCatalog()).rejects.toThrow(/CATALOG_DEMO_MODE.*production/iu);
+    expect(mocks.loadDatabaseCatalogRecords).not.toHaveBeenCalled();
+    expect(mocks.buildPublicCatalog).not.toHaveBeenCalled();
   });
 
   it("keeps source validation outside the missing-schema fallback", async () => {
