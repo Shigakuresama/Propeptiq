@@ -33,6 +33,12 @@ function rowStatus(presentation: PricePresentation): string {
   return "Checkout unavailable";
 }
 
+function disabledReason(presentation: PricePresentation): string {
+  if (presentation.state === "pending") return "Pricing coming soon.";
+  if (presentation.state === "unavailable") return "This variant is unavailable.";
+  return "This variant cannot be added to the cart.";
+}
+
 export function QuickAddVariantSheet({
   product,
   pricing,
@@ -48,6 +54,17 @@ export function QuickAddVariantSheet({
   const canAdd = variant
     ? canAddPublicVariant(variant, pricing.mode)
     : false;
+  const selectedPresentation = variant
+    ? resolvePublicVariantPrice({
+        variant,
+        productId: product.id,
+        quantity: 1,
+        pricing,
+      })
+    : null;
+  const selectedDisabledReason = selectedPresentation
+    ? disabledReason(selectedPresentation)
+    : "This variant cannot be added to the cart.";
 
   function handleOpenChange(nextOpen: boolean) {
     if (nextOpen) setSelected(product.defaultVariantId);
@@ -114,7 +131,7 @@ export function QuickAddVariantSheet({
             <AddToCartButton
               canAdd={canAdd}
               className="min-h-11 w-full"
-              disabledReason="This variant is unavailable for cart testing."
+              disabledReason={selectedDisabledReason}
               onAdded={() => setOpen(false)}
               productName={product.name}
               variantId={variant.id}

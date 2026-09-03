@@ -177,11 +177,15 @@ export function CartView({
       (item.effectiveDiscountBps ?? 0) > 0 &&
       (item.lineSavingsMinor ?? 0) > 0,
   ) ?? false;
-  const promotionSummary = hasAppliedPromotion
-    ? "Included in displayed merchandise prices"
-    : hasQuantityDiscount
-      ? "Quantity discount included in displayed prices"
-      : "No automatic promotion applied";
+  const promotionSummary = preview === null
+    ? error
+      ? "Unavailable"
+      : "Awaiting server preview"
+    : hasAppliedPromotion
+      ? "Included in displayed merchandise prices"
+      : hasQuantityDiscount
+        ? "Quantity discount included in displayed prices"
+        : "No automatic promotion applied";
 
   function beginCheckoutHandoff() {
     const handoff = prepareCheckoutHandoff(window.localStorage, items);

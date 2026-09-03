@@ -205,6 +205,10 @@ describe("QuickAddVariantSheet", () => {
       name: /synthetic product alpha unavailable/iu,
     });
     expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAccessibleName("Synthetic Product Alpha unavailable");
+    expect(confirm).toHaveTextContent("This variant is unavailable.");
+    expect(confirm).toHaveAttribute("title", "This variant is unavailable.");
+    expect(confirm).not.toHaveTextContent(/cart testing/iu);
     await user.click(confirm);
     expect(addVariantMock).not.toHaveBeenCalled();
 
@@ -250,11 +254,44 @@ describe("QuickAddVariantSheet", () => {
     expect(within(zeroRow).getByText("Pricing coming soon")).toBeVisible();
     expect(within(zeroRow).queryByText("$0.00")).toBeNull();
     expect(within(zeroRow).queryByText("-30%")).toBeNull();
-    expect(
-      within(dialog).getByRole("button", {
-        name: /synthetic product alpha unavailable/iu,
+    const confirm = within(dialog).getByRole("button", {
+      name: /synthetic product alpha unavailable/iu,
+    });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveAccessibleName("Synthetic Product Alpha unavailable");
+    expect(confirm).toHaveTextContent("Pricing coming soon.");
+    expect(confirm).toHaveAttribute("title", "Pricing coming soon.");
+    expect(confirm).not.toHaveTextContent(/cart testing/iu);
+  });
+
+  it("uses neutral cart-unavailable copy for a non-addable state that is still display-priced", async () => {
+    const user = userEvent.setup();
+    const inconsistentReadiness = testPublicVariant({
+      id: "variant-inconsistent-readiness",
+      label: "Display-priced only",
+      availability: "available",
+      priceStatus: "active",
+      baseUnitMinor: 2_500,
+      checkoutReady: false,
+    });
+    renderTrigger(
+      testCanonicalProduct([inconsistentReadiness], {
+        defaultVariantId: inconsistentReadiness.id,
       }),
-    ).toBeDisabled();
+      testPricingContext("production"),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }),
+    );
+
+    const confirm = within(screen.getByRole("dialog")).getByRole("button", {
+      name: /synthetic product alpha unavailable/iu,
+    });
+    expect(confirm).toBeDisabled();
+    expect(confirm).toHaveTextContent("This variant cannot be added to the cart.");
+    expect(confirm).toHaveAttribute("title", "This variant cannot be added to the cart.");
+    expect(confirm).not.toHaveTextContent(/cart testing/iu);
   });
 
   it("adds the exact positive preview-only Production variant while pending stays disabled", async () => {

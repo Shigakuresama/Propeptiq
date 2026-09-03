@@ -23,6 +23,26 @@ const campaign: PublicStorefrontAutomaticPromotion = {
   enabled: true, startAt: null, endAt: null, timezone: "America/Los_Angeles", scope: { kind: "sitewide" }, applicationMode: "automatic",
 };
 
+function promotion(
+  overrides: Record<string, unknown> = {},
+): PublicStorefrontAutomaticPromotion {
+  return { ...campaign, ...overrides } as PublicStorefrontAutomaticPromotion;
+}
+
+function runtimeView(
+  evaluatedAt: unknown,
+  promotions: unknown,
+): PublicStorefrontView {
+  return {
+    ...view([canonical]),
+    pricing: {
+      mode: "production",
+      evaluatedAt,
+      automaticPromotions: promotions,
+    },
+  } as PublicStorefrontView;
+}
+
 describe("public storefront cart source", () => {
   it("projects all 103 canonical variants once with 40 reviewed positive and 63 pending prices", () => {
     const source = projectPublicStorefrontPreviewSource(view());
@@ -73,6 +93,138 @@ describe("public storefront cart source", () => {
       { id: "synthetic-product", discountBps: 3_000, displayLabel: "Product display name" },
       { id: "synthetic-variant", discountBps: 3_000, displayLabel: "WINTER30" },
     ]);
+  });
+
+  it("uses evaluatedAt with inclusive start, exclusive end, null bounds, and offset nanosecond equivalence", () => {
+    const evaluatedAt = "2026-09-03T12:00:00.123456789Z";
+    const promotions = [
+      promotion({
+        id: "exact-start",
+        startAt: "2026-09-03T05:00:00.123456789-07:00",
+        endAt: "2026-09-03T12:00:00.123456790Z",
+      }),
+      promotion({
+        id: "product-null-bounds",
+        displayCode: null,
+        displayName: "Product display name",
+        scope: { kind: "products", productIds: [canonical.id] },
+      }),
+      promotion({
+        id: "variant-offset-window",
+        startAt: "2026-09-03T13:59:59.123456789+02:00",
+        endAt: "2026-09-03T14:00:01.123456789+02:00",
+        scope: { kind: "variants", variantIds: [first.id] },
+      }),
+    ];
+
+    expect(projectPublicStorefrontPreviewSource(runtimeView(evaluatedAt, promotions)).variants[0]?.eligiblePromotions)
+      .toEqual([
+        { id: "exact-start", discountBps: 3_000, displayLabel: "WINTER30" },
+        { id: "product-null-bounds", discountBps: 3_000, displayLabel: "Product display name" },
+        { id: "variant-offset-window", discountBps: 3_000, displayLabel: "WINTER30" },
+      ]);
+  });
+
+  it.each([
+    ["scheduled", { startAt: "2026-09-03T12:00:00.000000001Z" }],
+    ["expired", { endAt: "2026-09-03T11:59:59.999999999Z" }],
+    ["at the exclusive end", { endAt: "2026-09-03T12:00:00.000000000Z" }],
+  ] as const)("rejects a %s promotion from the promised active-only set", (_label, overrides) => {
+    expect(() => projectPublicStorefrontPreviewSource(runtimeView(
+      "2026-09-03T12:00:00.000000000Z",
+      [promotion(overrides)],
+    ))).toThrowError(new CartPreviewProjectionError("invalid_source"));
+  });
+
+  it.each([
+    ["invalid ID", { id: "not a stable id" }],
+    ["blank display name", { displayName: " " }],
+    ["blank display code", { displayCode: "" }],
+    ["zero discount", { discountBps: 0 }],
+    ["oversized discount", { discountBps: 10_001 }],
+    ["fractional discount", { discountBps: 1.5 }],
+    ["disabled lifecycle", { enabled: false }],
+    ["code-required mode", { applicationMode: "code_required" }],
+    ["invalid timezone", { timezone: "Mars/Olympus" }],
+    ["invalid start instant", { startAt: "2026-09-03 12:00:00Z" }],
+    ["invalid end instant", { endAt: "2026-09-03T12:00:00" }],
+    ["equal interval", { startAt: "2026-09-03T11:00:00Z", endAt: "2026-09-03T11:00:00Z" }],
+    ["reversed interval", { startAt: "2026-09-03T11:00:00.000000001Z", endAt: "2026-09-03T11:00:00Z" }],
+  ] as const)("rejects a promotion with %s", (_label, overrides) => {
+    expect(() => projectPublicStorefrontPreviewSource(runtimeView(
+      "2026-09-03T12:00:00Z",
+      [promotion(overrides)],
+    ))).toThrowError(new CartPreviewProjectionError("invalid_source"));
+  });
+
+  it.each([
+    ["sitewide extra data", { kind: "sitewide", productIds: [canonical.id] }],
+    ["empty product targets", { kind: "products", productIds: [] }],
+    ["duplicate product targets", { kind: "products", productIds: [canonical.id, canonical.id] }],
+    ["unstable product target", { kind: "products", productIds: ["not stable"] }],
+    ["empty variant targets", { kind: "variants", variantIds: [] }],
+    ["duplicate variant targets", { kind: "variants", variantIds: [first.id, first.id] }],
+    ["unknown scope kind", { kind: "collections", collectionIds: ["one"] }],
+  ] as const)("rejects a promotion with %s", (_label, scope) => {
+    expect(() => projectPublicStorefrontPreviewSource(runtimeView(
+      "2026-09-03T12:00:00Z",
+      [promotion({ scope })],
+    ))).toThrowError(new CartPreviewProjectionError("invalid_source"));
+  });
+
+  it("rejects sparse and over-bounded promotion scope snapshots", () => {
+    const sparseTargets = [canonical.id, "other-product"];
+    delete sparseTargets[0];
+    const overBoundedTargets = Array.from({ length: 1_001 }, (_, index) => `product-${index}`);
+    for (const scope of [
+      { kind: "products", productIds: sparseTargets },
+      { kind: "products", productIds: overBoundedTargets },
+    ]) {
+      expect(() => projectPublicStorefrontPreviewSource(runtimeView(
+        "2026-09-03T12:00:00Z",
+        [promotion({ scope })],
+      ))).toThrowError(new CartPreviewProjectionError("invalid_source"));
+    }
+  });
+
+  it("rejects duplicate promotion IDs even when only one duplicate scope matches", () => {
+    expect(() => projectPublicStorefrontPreviewSource(runtimeView(
+      "2026-09-03T12:00:00Z",
+      [
+        promotion({ id: "duplicate-active" }),
+        promotion({
+          id: "duplicate-active",
+          scope: { kind: "products", productIds: ["other-product"] },
+        }),
+      ],
+    ))).toThrowError(new CartPreviewProjectionError("invalid_source"));
+  });
+
+  it("rejects sparse and over-bounded active promotion lists before variant projection", () => {
+    const sparse = [promotion({ id: "promotion-one" }), promotion({ id: "promotion-two" })];
+    delete sparse[0];
+    const overBounded = Array.from(
+      { length: 1_001 },
+      (_, index) => promotion({ id: `promotion-${index}` }),
+    );
+    for (const promotions of [sparse, overBounded]) {
+      expect(() => projectPublicStorefrontPreviewSource(runtimeView(
+        "2026-09-03T12:00:00Z",
+        promotions,
+      ))).toThrowError(new CartPreviewProjectionError("invalid_source"));
+    }
+  });
+
+  it.each([
+    ["non-string", 0],
+    ["date without time", "2026-09-03"],
+    ["local timestamp", "2026-09-03T12:00:00"],
+    ["invalid instant", "2026-13-03T12:00:00Z"],
+  ] as const)("rejects %s evaluatedAt instead of consulting another clock", (_label, evaluatedAt) => {
+    expect(() => projectPublicStorefrontPreviewSource(runtimeView(
+      evaluatedAt,
+      [campaign],
+    ))).toThrowError(new CartPreviewProjectionError("invalid_source"));
   });
 
   it.each(["availability", "priceStatus"] as const)("marks explicit %s unavailability without adding authority", (field) => {

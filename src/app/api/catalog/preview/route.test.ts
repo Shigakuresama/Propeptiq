@@ -62,6 +62,15 @@ const canonicalVariant = canonicalProduct.variants.find((variant) => variant.id 
 function publicView(mode: PricePresentationMode = "production"): PublicStorefrontView {
   return { catalog, pricing: { mode, evaluatedAt: "2026-09-03T12:00:00.000Z", automaticPromotions: [WINTER30_STOREFRONT_PROMOTION] } };
 }
+function publicViewWithPricing(
+  evaluatedAt: unknown,
+  automaticPromotions: unknown,
+): PublicStorefrontView {
+  return {
+    catalog,
+    pricing: { mode: "production", evaluatedAt, automaticPromotions },
+  } as unknown as PublicStorefrontView;
+}
 function rawRequest(body: string) {
   return new Request("http://127.0.0.1:4631/api/catalog/preview", {
     method: "POST", headers: { "content-type": "application/json" }, body,
@@ -203,6 +212,36 @@ describe("POST /api/catalog/preview public display boundary", () => {
       { ...canonicalProduct, variants: [{ ...canonicalVariant, packageQuantity: 0 }] },
     ] } });
     await expectUnavailable(await POST(request()));
+  });
+
+  it.each([
+    ["disabled active-list entry", publicViewWithPricing("2026-09-03T12:00:00Z", [
+      { ...WINTER30_STOREFRONT_PROMOTION, enabled: false },
+    ])],
+    ["code-required active-list entry", publicViewWithPricing("2026-09-03T12:00:00Z", [
+      { ...WINTER30_STOREFRONT_PROMOTION, applicationMode: "code_required" },
+    ])],
+    ["expired active-list entry", publicViewWithPricing("2026-09-03T12:00:00Z", [
+      { ...WINTER30_STOREFRONT_PROMOTION, endAt: "2026-09-03T11:59:59.999999999Z" },
+    ])],
+    ["scheduled active-list entry", publicViewWithPricing("2026-09-03T12:00:00Z", [
+      { ...WINTER30_STOREFRONT_PROMOTION, startAt: "2026-09-03T12:00:00.000000001Z" },
+    ])],
+    ["malformed scope", publicViewWithPricing("2026-09-03T12:00:00Z", [
+      { ...WINTER30_STOREFRONT_PROMOTION, scope: { kind: "sitewide", variantIds: [publicVariantId] } },
+    ])],
+    ["duplicate IDs with one nonmatching scope", publicViewWithPricing("2026-09-03T12:00:00Z", [
+      WINTER30_STOREFRONT_PROMOTION,
+      { ...WINTER30_STOREFRONT_PROMOTION, scope: { kind: "products", productIds: ["other-product"] } },
+    ])],
+    ["invalid evaluatedAt", publicViewWithPricing("not-an-instant", [WINTER30_STOREFRONT_PROMOTION])],
+  ] as const)("returns the fixed unavailable response for a public view with %s", async (_label, malformedView) => {
+    getPublicStorefrontView.mockResolvedValue(malformedView);
+
+    await expectUnavailable(await POST(request()));
+
+    expect(getPublicStorefrontView).toHaveBeenCalledExactlyOnceWith();
+    expect(getRequestIdentity).toHaveBeenCalledExactlyOnceWith();
   });
 
   it.each(["view rejection", "view synchronous throw", "identity rejection", "identity synchronous throw", "raw 42P01", "unrelated SQLSTATE"])(

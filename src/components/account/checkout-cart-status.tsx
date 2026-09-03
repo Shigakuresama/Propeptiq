@@ -89,6 +89,11 @@ export function CheckoutCartStatus() {
             </h2>
           </div>
         </div>
+        {items.length > 0 && preview === null && !previewError ? (
+          <p className="mt-5 text-base leading-7 text-muted-ink" role="status">
+            Awaiting server verification.
+          </p>
+        ) : null}
         {previewError ? (
           <Notice className="mt-5" icon={CircleAlert} tone="danger" title="Server preview unavailable">
             The authoritative variant preview is unavailable. Browser request identifiers below are not verified variant facts.

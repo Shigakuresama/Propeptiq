@@ -323,9 +323,15 @@ describe("CartView", () => {
     const fallback = screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"));
     expect(fallback).toBeVisible();
     expect(fallback).toHaveAccessibleName(`Unverified saved variant: ${variantId}`);
+    const summary = screen.getByRole("complementary", { name: "Order summary" });
+    const promotionValue = within(summary).getByText("Promotion", { exact: true }).nextElementSibling;
+    expect(promotionValue).toHaveTextContent("Awaiting server preview");
+    expect(within(summary).queryByText("No automatic promotion applied", { exact: true })).toBeNull();
     await act(async () => rejectRequest?.(new Error("preview unavailable")));
     expect(await screen.findByRole("alert")).toHaveTextContent("The authoritative cart preview is unavailable.");
     expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
+    expect(promotionValue).toHaveTextContent("Unavailable");
+    expect(within(summary).queryByText("No automatic promotion applied", { exact: true })).toBeNull();
   });
 
   it.each([

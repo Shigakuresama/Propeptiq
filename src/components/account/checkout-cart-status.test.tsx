@@ -160,6 +160,29 @@ describe("CheckoutCartStatus", () => {
     }
   });
 
+  it("shows one polite verification status while awaiting a coherent response and removes it after success", async () => {
+    let resolveRequest: ((value: Response) => void) | undefined;
+    fetchMock.mockReturnValue(new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    }));
+
+    render(<CheckoutCartStatus />);
+
+    const status = screen.getByRole("status");
+    expect(status).toBeVisible();
+    expect(status).toHaveTextContent("Awaiting server verification.");
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
+
+    await act(async () => {
+      resolveRequest?.(response(preview()));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(screen.queryByText("Awaiting server verification.", { exact: true })).toBeNull());
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("sends only the exact saved IDs and quantities", async () => {
     render(<CheckoutCartStatus />);
 
@@ -258,5 +281,7 @@ describe("CheckoutCartStatus", () => {
     const fallback = screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"));
     expect(fallback).toBeVisible();
     expect(fallback).toHaveAccessibleName(`Unverified saved variant: ${variantId}`);
+    expect(screen.queryByText("Awaiting server verification.", { exact: true })).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
