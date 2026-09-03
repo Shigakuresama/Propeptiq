@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createElement, type ReactNode } from "react";
@@ -1399,42 +1399,92 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
   page,
 }) => {
   const expectedCards = [
-    { amount: "30 mg · 1 bottle", base: "$59.99", name: "Tirzepatide", sale: "$41.99" },
-    { amount: "10 mg · 1 bottle", base: "$69.99", name: "Retatrutide", sale: "$48.99" },
-    { amount: "500 mg · 1 bottle", base: "$69.99", name: "NAD+", sale: "$48.99" },
+    { amount: "30 mg · 1 bottle", base: "$59.99", imagePath: "/catalog/tirzepatide.webp", name: "Tirzepatide", sale: "$41.99" },
+    { amount: "10 mg · 1 bottle", base: "$69.99", imagePath: "/catalog/retatrutide.webp", name: "Retatrutide", sale: "$48.99" },
+    { amount: "500 mg · 1 bottle", base: "$69.99", imagePath: "/catalog/nad-plus.webp", name: "NAD+", sale: "$48.99" },
   ] as const;
+  const targetImagePaths = new Set<string>(expectedCards.map((card) => card.imagePath));
+  const nextImageRequest = /\/_next\/image(?:\?.*)?$/u;
 
   for (const width of [375, 1440]) {
-    await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
-    await page.goto("/catalog");
+    const heldImagePaths = new Set<string>();
+    let releaseActualImages: () => void = () => {};
+    const actualImagesReleased = new Promise<void>((resolve) => {
+      releaseActualImages = resolve;
+    });
+    const holdActualCatalogImages = async (route: Route) => {
+      const imagePath = new URL(route.request().url()).searchParams.get("url");
+      if (imagePath === null || !targetImagePaths.has(imagePath)) {
+        await route.continue();
+        return;
+      }
+      heldImagePaths.add(imagePath);
+      await actualImagesReleased;
+      await route.continue();
+    };
 
-    for (const expectedCard of expectedCards) {
-      const card = page.getByRole("article", { name: expectedCard.name, exact: true });
-      const imageFrame = card.locator(".catalog-image-frame");
-      const beforeImageCompletion = await clientRect(imageFrame);
+    await page.route(nextImageRequest, holdActualCatalogImages);
+    try {
+      await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
+      await page.goto("/catalog", { waitUntil: "domcontentloaded" });
+      const measuredFrames: Array<{
+        before: Awaited<ReturnType<typeof clientRect>>;
+        image: Locator;
+      }> = [];
 
-      await expect(card.getByText(expectedCard.amount, { exact: true })).toBeVisible();
-      await expect(card.locator("del")).toHaveText(expectedCard.base);
-      await expect(card.locator("strong")).toHaveText(expectedCard.sale);
-      await expect(imageFrame).toBeVisible();
-      expect(beforeImageCompletion.width / beforeImageCompletion.height).toBeCloseTo(4 / 3, 2);
+      for (const expectedCard of expectedCards) {
+        const card = page.getByRole("article", { name: expectedCard.name, exact: true });
+        const imageFrame = card.locator(".catalog-image-frame");
+        const image = imageFrame.locator("img");
 
-      const image = imageFrame.locator("img");
-      await imageFrame.scrollIntoViewIfNeeded();
-      await expect
-        .poll(() => image.evaluate((element) => {
+        await expect(card.getByText(expectedCard.amount, { exact: true })).toBeVisible();
+        await expect(card.locator("del")).toHaveText(expectedCard.base);
+        await expect(card.locator("strong")).toHaveText(expectedCard.sale);
+        await imageFrame.scrollIntoViewIfNeeded();
+        const beforeImageCompletion = await clientRect(imageFrame);
+        expect(beforeImageCompletion.width / beforeImageCompletion.height).toBeCloseTo(4 / 3, 2);
+        await expect(image).toHaveJSProperty("complete", false);
+        expect(await image.evaluate((element) => {
           const entry = element as HTMLImageElement;
-          return entry.complete && entry.naturalWidth > 0 && entry.naturalHeight > 0;
-        }))
-        .toBe(true);
-      const afterImageCompletion = await clientRect(imageFrame);
-      expect(Math.abs(afterImageCompletion.width - beforeImageCompletion.width)).toBeLessThanOrEqual(1);
-      expect(Math.abs(afterImageCompletion.height - beforeImageCompletion.height)).toBeLessThanOrEqual(1);
-    }
+          return { naturalHeight: entry.naturalHeight, naturalWidth: entry.naturalWidth };
+        })).toEqual({ naturalHeight: 0, naturalWidth: 0 });
+        measuredFrames.push({ before: beforeImageCompletion, image });
+      }
 
-    const layout = await horizontalLayout(page);
-    expect(layout.scrollWidth - layout.clientWidth, `${width}px catalog overflow`).toBeLessThanOrEqual(1);
-    expect(layout.offenders, `${width}px catalog overflow offenders`).toEqual([]);
+      await expect.poll(() => heldImagePaths.size).toBe(expectedCards.length);
+      releaseActualImages();
+
+      for (const { before, image } of measuredFrames) {
+        await expect
+          .poll(() => image.evaluate((element) => {
+            const entry = element as HTMLImageElement;
+            return entry.complete && entry.naturalWidth > 0 && entry.naturalHeight > 0;
+          }))
+          .toBe(true);
+        const decodedState = await image.evaluate(async (element) => {
+          const entry = element as HTMLImageElement;
+          await entry.decode();
+          return {
+            complete: entry.complete,
+            naturalHeight: entry.naturalHeight,
+            naturalWidth: entry.naturalWidth,
+          };
+        });
+        expect(decodedState.complete).toBe(true);
+        expect(decodedState.naturalHeight).toBeGreaterThan(0);
+        expect(decodedState.naturalWidth).toBeGreaterThan(0);
+        const afterImageCompletion = await clientRect(image.locator("xpath=.."));
+        expect(Math.abs(afterImageCompletion.width - before.width)).toBeLessThanOrEqual(1);
+        expect(Math.abs(afterImageCompletion.height - before.height)).toBeLessThanOrEqual(1);
+      }
+
+      const layout = await horizontalLayout(page);
+      expect(layout.scrollWidth - layout.clientWidth, `${width}px catalog overflow`).toBeLessThanOrEqual(1);
+      expect(layout.offenders, `${width}px catalog overflow offenders`).toEqual([]);
+    } finally {
+      releaseActualImages();
+      await page.unroute(nextImageRequest, holdActualCatalogImages);
+    }
   }
 
   const tirzepatideCard = page.getByRole("article", { name: "Tirzepatide", exact: true });
