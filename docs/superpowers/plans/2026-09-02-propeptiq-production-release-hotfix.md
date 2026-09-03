@@ -40,3 +40,23 @@ Implement the smallest server-only fallback around optional database acquisition
 ### Review and release
 
 Obtain an independent task review of the exact diff. After approval, commit and push normally to `origin/main`, wait for the exact Vercel deployment, promote only that deployment, and verify the public homepage, catalog, Tirzepatide detail, site search, health endpoint, and mobile overflow. Roll back immediately if any production route fails.
+
+## Task 2: Keep legacy public catalog readers available without the optional schema
+
+**Files:**
+
+- Create `src/catalog/catalog-schema-availability.ts`
+- Create `src/catalog/server.test.ts`
+- Modify `src/catalog/server.ts`
+- Modify `src/catalog/storefront-public-server.ts`
+- Modify focused existing tests only as required by the shared helper extraction
+
+### RED contract
+
+Add focused tests proving that `getPublicCatalog` returns the established immutable empty production catalog when its database loader rejects with exact SQLSTATE `42P01`. This keeps `/quality-records` available with its honest empty state and lets legacy catalog lookups resolve normally without inventing products, lots, COAs, prices, or promotions. Prove the reporter receives only a fixed diagnostic; async reporter rejection is contained; connection, environment, unrelated SQLSTATE, generic, inherited/accessor, Proxy, source-validation, and public-projection failures still reject unchanged.
+
+### GREEN contract
+
+Extract the already-reviewed safe own-data SQLSTATE recognition into one small shared catalog helper and reuse it from both public catalog loaders. Catch only the database-loader rejection inside `getPublicCatalog`; use `EMPTY_CATALOG_RECORD_SET` for the exact missing-table condition, then run the existing `buildPublicCatalog` projection. Keep connection/environment/demo/source/projection failures outside the fallback. Do not change checkout or provider behavior.
+
+Run the new test first and retain expected RED evidence, then run both catalog server suites, quality-record and legacy-route tests, checkout regressions, lint, typecheck, build, workspace-boundary, and diff checks. Obtain an independent review before release.

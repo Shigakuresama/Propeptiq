@@ -16,6 +16,10 @@ import { promotionApplies } from "@/domain/storefront-pricing";
 
 import { resolvePublishedBrowseCatalog } from "./browse-catalog-publication";
 import {
+  CATALOG_SCHEMA_UNAVAILABLE_DIAGNOSTIC,
+  isMissingCatalogSchemaError,
+} from "./catalog-schema-availability";
+import {
   loadDatabaseCatalogRecords,
   type DatabaseCatalogRecordSet,
 } from "./database-catalog";
@@ -41,7 +45,7 @@ import type { PricePresentationMode, PublicStorefrontAutomaticPromotion, PublicS
 export type PublicStorefrontView = Readonly<{ catalog: PublicStorefrontCatalog; pricing: PublicStorefrontPricingContext }>;
 
 export const STOREFRONT_CATALOG_DATABASE_UNAVAILABLE =
-  "STOREFRONT_CATALOG_DATABASE_UNAVAILABLE" as const;
+  CATALOG_SCHEMA_UNAVAILABLE_DIAGNOSTIC;
 
 export function resolvePricePresentationMode(
   environment: Pick<ServerEnv, "APP_ENV" | "VERCEL_ENV" | "VERCEL_TARGET_ENV">,
@@ -91,19 +95,6 @@ function defaultCatalogDatabaseUnavailableReporter(
   console.warn(diagnostic);
 }
 
-function ownStringCode(error: unknown): string | undefined {
-  if (typeof error !== "object" || error === null) return undefined;
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(error, "code");
-    return descriptor !== undefined && "value" in descriptor &&
-      typeof descriptor.value === "string"
-      ? descriptor.value
-      : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function loadPublicStorefrontCatalog(
   environment: ServerEnv,
   dependencies: StorefrontPublicServerDependencies = {},
@@ -145,7 +136,7 @@ export async function loadPublicStorefrontView(
         dependencies.loadDatabaseRecords ?? defaultDatabaseLoader
       )(environment);
     } catch (error: unknown) {
-      if (ownStringCode(error) !== "42P01") throw error;
+      if (!isMissingCatalogSchemaError(error)) throw error;
       databaseUnavailable = true;
       try {
         await (dependencies.reportCatalogDatabaseUnavailable ??
