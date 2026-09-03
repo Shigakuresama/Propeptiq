@@ -535,6 +535,25 @@ test("site search launcher stays centered, operable, and clear of the footer acr
     const trigger = page.getByRole("button", { name: "Search PropeptIQ" });
     await expect(trigger).toHaveCount(1);
     await expect(trigger).toBeVisible();
+    const visualLabel = trigger.getByText("SEARCH", { exact: true });
+    const visualLabelStyles = await visualLabel.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        height: styles.height,
+        overflow: styles.overflow,
+        position: styles.position,
+        width: styles.width,
+      };
+    });
+    if (width < 768) {
+      expect(visualLabelStyles.position).toBe("absolute");
+      expect(visualLabelStyles.width).toBe("1px");
+      expect(visualLabelStyles.height).toBe("1px");
+      expect(visualLabelStyles.overflow).toBe("hidden");
+    } else {
+      expect(visualLabelStyles.position).not.toBe("absolute");
+      expect(Number.parseFloat(visualLabelStyles.width)).toBeGreaterThan(1);
+    }
     const triggerBounds = await clientRect(trigger);
     expect(triggerBounds.width, `${width}px trigger width`).toBeGreaterThanOrEqual(44);
     expect(triggerBounds.height, `${width}px trigger height`).toBeGreaterThanOrEqual(44);
@@ -601,6 +620,122 @@ test("canonical catalog and detail stay within the viewport at every required wi
       expect(launcher.right, `${route} at ${width}px launcher right`).toBeLessThanOrEqual(width);
     }
   }
+});
+
+test("fixed mobile search stays compact and clear of product identity and purchase headings", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  for (const { width, height } of [
+    { width: 320, height: 812 },
+    { width: 375, height: 812 },
+    { width: 390, height: 812 },
+    { width: 320, height: 520 },
+    { width: 375, height: 720 },
+    { width: 390, height: 520 },
+  ]) {
+    await page.setViewportSize({ width, height });
+    await page.goto("/catalog/items/tirzepatide");
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+    });
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+
+    const trigger = page.getByRole("button", { name: "Search PropeptIQ" });
+    const triggerBounds = await clientRect(trigger);
+    expect(triggerBounds.width, `${width}x${height} compact search width`).toBeCloseTo(44, 0);
+    expect(triggerBounds.height, `${width}x${height} compact search height`).toBeCloseTo(44, 0);
+    expect(
+      Math.abs((triggerBounds.left + triggerBounds.right) / 2 - width / 2),
+      `${width}x${height} centered search`,
+    ).toBeLessThanOrEqual(1);
+    expect(await page.locator(".site-search-launcher-lane").evaluate(
+      (element) => getComputedStyle(element).position,
+    )).toBe("fixed");
+
+    for (const [label, locator] of [
+      ["product title", page.getByRole("heading", { level: 1, name: "Tirzepatide" })],
+      ["image disclosure", page.getByText("Illustrative product presentation", { exact: true })],
+      ["configuration heading", page.getByRole("heading", { name: "Supplied configurations" })],
+      ["purchase heading", page.getByRole("heading", { name: "Purchase" })],
+    ] as const) {
+      const targetBounds = await clientRect(locator);
+      expect(
+        rectanglesIntersect(triggerBounds, targetBounds),
+        `${width}x${height} search/${label} collision: ${JSON.stringify({ targetBounds, triggerBounds })}`,
+      ).toBe(false);
+    }
+
+    const purchaseControls = page.locator(
+      'section[aria-labelledby="purchase-heading"] button, section[aria-labelledby="purchase-heading"] input',
+    );
+    for (let index = 0; index < await purchaseControls.count(); index += 1) {
+      const controlBounds = await clientRect(purchaseControls.nth(index));
+      if (controlBounds.bottom > 0 && controlBounds.top < height) {
+        expect(
+          rectanglesIntersect(triggerBounds, controlBounds),
+          `${width}x${height} search/visible purchase control collision: ${JSON.stringify({ controlBounds, triggerBounds })}`,
+        ).toBe(false);
+      }
+    }
+  }
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/");
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  const homeTriggerBounds = await clientRect(
+    page.getByRole("button", { name: "Search PropeptIQ" }),
+  );
+  for (const [label, locator] of [
+    ["Browse catalog", page.getByRole("link", { name: "Browse catalog" })],
+    ["View cart", page.getByRole("link", { name: "View cart" })],
+  ] as const) {
+    expect(
+      rectanglesIntersect(homeTriggerBounds, await clientRect(locator)),
+      `375x812 search/${label} collision`,
+    ).toBe(false);
+  }
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/catalog/items/tirzepatide");
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  const desktopTriggerBounds = await clientRect(
+    page.getByRole("button", { name: "Search PropeptIQ" }),
+  );
+  const desktopDisclosureBounds = await clientRect(
+    page.getByText("Illustrative product presentation", { exact: true }),
+  );
+  expect(
+    rectanglesIntersect(desktopTriggerBounds, desktopDisclosureBounds),
+    `1440x900 search/image disclosure collision: ${JSON.stringify({ desktopDisclosureBounds, desktopTriggerBounds })}`,
+  ).toBe(false);
+  const desktopImageBounds = await clientRect(page.locator(".catalog-detail-image"));
+  const desktopTitleBounds = await clientRect(
+    page.getByRole("heading", { level: 1, name: "Tirzepatide" }),
+  );
+  expect(desktopImageBounds.right).toBeLessThan(desktopTitleBounds.left);
+  expect(desktopImageBounds.width / desktopImageBounds.height).toBeCloseTo(4 / 3, 1);
+
+  await page.setViewportSize({ width: 375, height: 720 });
+  await page.goto("/catalog/items/tirzepatide");
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
+  const addToCart = page.getByRole("button", { name: "Add Tirzepatide to cart" });
+  await addToCart.scrollIntoViewIfNeeded();
+  await expect(addToCart).toBeVisible();
+  expect(
+    rectanglesIntersect(
+      await clientRect(page.getByRole("button", { name: "Search PropeptIQ" })),
+      await clientRect(addToCart),
+    ),
+    "375x720 search/add-to-cart collision after bringing the control into view",
+  ).toBe(false);
 });
 
 test("site search Sheet switches from full-height phone geometry at 767px to capped desktop geometry at 768px", async ({

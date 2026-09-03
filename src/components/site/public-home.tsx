@@ -123,7 +123,7 @@ export function PublicHome({
                 ? "Explore the owner-supplied product catalog and package configurations. Purchasing and operational availability remain separate from this browse-only collection."
                 : "Explore the owner-supplied product catalog and package configurations. Current price and availability snapshots are displayed where configured and revalidated before checkout."}
             </p>
-            <div className="mt-9 flex flex-wrap gap-3">
+            <div className="mt-6 flex flex-wrap gap-3 sm:mt-9">
               <Button asChild className="action-primary">
                 <Link href="/catalog">
                   Browse catalog

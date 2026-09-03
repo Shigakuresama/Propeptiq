@@ -42,7 +42,29 @@ describe("CatalogItemDetail", () => {
     expect(heading).toBeVisible();
     expect(intro).toHaveAttribute("data-motion-sequence", "dossier-intro");
     expect(intro?.querySelectorAll("[data-motion-step]")).toHaveLength(3);
-    expect(screen.getByRole("img", { name: product.image.alt })).toBeVisible();
+    const image = screen.getByRole("img", { name: product.image.alt });
+    const suppliedConfigurations = screen.getByRole("heading", {
+      name: "Supplied configurations",
+    });
+    expect(image).toBeVisible();
+    expect(
+      heading.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      image.compareDocumentPosition(suppliedConfigurations) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(image.closest(".catalog-detail-image")).toHaveClass(
+      "lg:col-start-1",
+      "lg:row-start-1",
+      "lg:row-span-2",
+    );
+    expect(suppliedConfigurations.closest(".catalog-detail-content")).toHaveClass(
+      "pt-16",
+      "lg:col-start-2",
+      "lg:row-start-2",
+      "lg:pt-0",
+    );
     expect(screen.getByText("Source label: Pinealon10mg")).toBeVisible();
     expect(screen.getByText("PN5")).toBeVisible();
     expect(screen.getByText("5mg")).toBeVisible();
