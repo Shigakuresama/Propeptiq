@@ -7,6 +7,7 @@ import type {
 import {
   canAddPublicVariant,
   resolvePublicVariantPrice,
+  resolveVariantPricePresentation,
   selectCardVariant,
   summarizePublicStorefrontVariants,
   type PricePresentationMode,
@@ -87,6 +88,7 @@ describe("canAddPublicVariant", () => {
     ["active null currency", variant({ currency: null }), "preview", false],
     ["active unavailable", variant({ availability: "unavailable" }), "preview", false],
     ["active preview only", variant({ availability: "preview_only", checkoutReady: false }), "preview", true],
+    ["active preview only production", variant({ availability: "preview_only", checkoutReady: false }), "production", true],
     ["pending explicit preview zero", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "preview", true],
     ["pending explicit local zero", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "local", true],
     ["pending explicit test zero", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "test", true],
@@ -124,6 +126,15 @@ describe("public variant state equivalence", () => {
 });
 
 describe("resolvePublicVariantPrice", () => {
+  it("shares the narrow price-facts primitive without requiring catalog identity metadata", () => {
+    expect(resolveVariantPricePresentation({
+      variant: { id: "synthetic-line", baseUnitMinor: 1_005, currency: "USD", priceStatus: "active", availability: "preview_only", checkoutReady: false },
+      quantity: 2, mode: "production", eligiblePromotions: [{ id: "winter30", discountBps: 3_000 }],
+    })).toEqual({ state: "priced", purchaseState: "checkout_unavailable", price: {
+      variantId: "synthetic-line", quantity: 2, baseUnitMinor: 1_005, effectiveDiscountBps: 3_000,
+      effectiveUnitMinor: 704, lineSubtotalMinor: 1_408, lineSavingsMinor: 602, appliedPromotionIds: ["winter30"],
+    } });
+  });
   it("renders a valid active price once with a ready purchase state", () => {
     expect(resolvePublicVariantPrice({
       variant: variant(), productId: "product-alpha", quantity: 1, pricing: pricing("production"),
@@ -198,7 +209,7 @@ describe("resolvePublicVariantPrice", () => {
       variant: variant({ availability: "preview_only", checkoutReady: false }), productId: "product-alpha", quantity: 1,
       pricing: pricing("production", [winter30]),
     })).toMatchObject({ state: "priced", purchaseState: "checkout_unavailable" });
-    expect(canAddPublicVariant(variant({ availability: "preview_only", checkoutReady: false }), "production")).toBe(false);
+    expect(canAddPublicVariant(variant({ availability: "preview_only", checkoutReady: false }), "production")).toBe(true);
     expect(canAddPublicVariant(variant({ availability: "preview_only", checkoutReady: false }), "local")).toBe(true);
   });
 

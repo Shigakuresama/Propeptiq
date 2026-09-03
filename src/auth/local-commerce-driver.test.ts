@@ -170,6 +170,8 @@ describe("guarded local commerce driver", () => {
         baseUnitMinor: 2_400,
         availability: "available",
         availableQuantity: 12,
+        checkoutReady: true,
+        eligiblePromotions: [],
       })],
     });
   });

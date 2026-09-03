@@ -1024,6 +1024,7 @@ export function createLocalCommerceDriverV1(
           priceStatus: "active" as const,
           availability: availableQuantity > 0 ? "available" as const : "unavailable" as const,
           availableQuantity,
+          checkoutReady: true,
           eligiblePromotions: Object.freeze([]),
         })]),
       });

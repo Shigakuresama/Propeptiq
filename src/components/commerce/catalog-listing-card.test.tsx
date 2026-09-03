@@ -135,6 +135,30 @@ describe("CatalogListingCard", () => {
     expect(within(article).queryByText(/-\d+%/u)).toBeNull();
   });
 
+  it("adds a positive preview-only Production variant to real cart storage", async () => {
+    const user = userEvent.setup();
+    renderCanonical(
+      testCanonicalProduct([testPublicVariant({
+        id: "production-preview-variant",
+        label: "30 mg",
+        availability: "preview_only",
+        checkoutReady: false,
+      })]),
+      testPricingContext("production", [testWinter30]),
+    );
+
+    const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
+    expect(within(article).getByText("Checkout unavailable")).toBeVisible();
+    await user.click(within(article).getByRole("button", {
+      name: /add synthetic product alpha to cart/iu,
+    }));
+
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "null")).toEqual({
+      version: 2,
+      items: [{ variantId: "production-preview-variant", quantity: 1 }],
+    }));
+  });
+
   it("fails a production pending-zero variant closed without a price, savings, or badge", () => {
     const pending = testPublicVariant({
       availability: "preview_only",

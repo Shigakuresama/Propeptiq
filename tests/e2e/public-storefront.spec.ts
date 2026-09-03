@@ -1534,6 +1534,19 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
 });
 
 test("canonical product pricing, variant switching, tiers, and local cart identity stay exact", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  const forbiddenCommerceRequests: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (
+      /\/api\/(?:checkout|stripe|provider|tax|shipping|fulfillment)(?:\/|$)/iu.test(url.pathname) ||
+      /(?:^|\.)stripe\.com$/iu.test(url.hostname)
+    ) forbiddenCommerceRequests.push(request.url());
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/catalog");
   const card = page.locator("article.catalog-listing-card").filter({ hasText: "Tirzepatide" }).first();
   await expect(card.locator("del")).toContainText("$59.99");
@@ -1608,16 +1621,100 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     expect.objectContaining({ variantId: tirzepatideVariantIds.tr60, quantity: 1 }),
   ]));
 
-  const blockedRequests: string[] = [];
-  await page.route(/\/api\/(?:checkout|stripe|provider)(?:\/|$)/u, async (route) => {
-    blockedRequests.push(new URL(route.request().url()).pathname);
-    await route.abort();
-  });
   await page.goto("/cart");
-  const continueButton = page.getByRole("button", { name: "Continue to sign in" });
-  await expect(continueButton).toBeDisabled();
-  await expect(page.getByText(/unavailable|not currently available|review the server facts/iu).first()).toBeVisible();
-  expect(blockedRequests).toEqual([]);
+  const cartLines = page.getByRole("list", { name: "Cart lines" });
+  const tr30Line = cartLines.locator("li").filter({ hasText: "30mg" });
+  const tr60Line = cartLines.locator("li").filter({ hasText: "60mg" });
+  await expect(tr30Line).toHaveCount(1);
+  await expect(tr60Line).toHaveCount(1);
+  for (const line of [tr30Line, tr60Line]) {
+    await expect(line.getByRole("heading", { name: "Tirzepatide" })).toBeVisible();
+    await expect(line.getByText("1 bottle", { exact: true })).toBeVisible();
+    await expect(line.getByText("WINTER30", { exact: true })).toBeVisible();
+    await expect(line.getByText("-30%", { exact: true })).toBeVisible();
+    await expect(line.getByText(
+      "Local cart preview only. No payment will be created.",
+      { exact: true },
+    )).toBeVisible();
+  }
+  await expect(tr30Line.getByText("30mg", { exact: true })).toBeVisible();
+  await expect(tr30Line.getByText("SKU PPQ-TIRZEPATIDE-TR30", { exact: true })).toBeVisible();
+  await expect(tr30Line.locator("del")).toHaveText("$59.99");
+  await expect(tr30Line.locator("strong")).toHaveText("$41.99");
+  await expect(tr30Line.getByText("Save $36.00", { exact: true })).toBeVisible();
+  await expect(tr30Line.getByText("$83.98", { exact: true })).toBeVisible();
+  await expect(tr60Line.getByText("60mg", { exact: true })).toBeVisible();
+  await expect(tr60Line.getByText("SKU PPQ-TIRZEPATIDE-TR60", { exact: true })).toBeVisible();
+  await expect(tr60Line.locator("del")).toHaveText("$109.99");
+  await expect(tr60Line.locator("strong")).toHaveText("$76.99");
+  await expect(tr60Line.getByText("Save $33.00", { exact: true })).toBeVisible();
+  await expect(tr60Line.getByText("Line subtotal").locator("xpath=following-sibling::dd")).toHaveText("$76.99");
+  const cartSummary = page.getByRole("complementary", { name: "Order summary" });
+  await expect(cartSummary.getByText("$160.97", { exact: true })).toBeVisible();
+  await expect(cartSummary.getByText(
+    "Included in displayed merchandise prices",
+    { exact: true },
+  )).toBeVisible();
+  await expect(cartSummary.getByRole("heading", { name: "Display-price cart preview" })).toBeVisible();
+  await expect(cartSummary.getByRole("button", { name: "Checkout unavailable" })).toBeDisabled();
+
+  const increaseTr30 = page.getByRole("button", {
+    name: "Increase quantity for Tirzepatide, 30mg",
+  });
+  await increaseTr30.focus();
+  await expect(increaseTr30).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(tr30Line.getByText("$125.97", { exact: true })).toBeVisible();
+  await expect(cartSummary.getByText("$202.96", { exact: true })).toBeVisible();
+  await expect(tr30Line.getByText(
+    "Local cart preview only. No payment will be created.",
+    { exact: true },
+  )).toBeVisible();
+  const decreaseTr30 = page.getByRole("button", {
+    name: "Decrease quantity for Tirzepatide, 30mg",
+  });
+  await decreaseTr30.focus();
+  await expect(decreaseTr30).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(tr30Line.getByText("$83.98", { exact: true })).toBeVisible();
+  await expect(cartSummary.getByText("$160.97", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"))).toEqual({
+    version: 2,
+    items: [
+      { variantId: tirzepatideVariantIds.tr30, quantity: 2 },
+      { variantId: tirzepatideVariantIds.tr60, quantity: 1 },
+    ],
+  });
+
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: width <= 375 ? 720 : 900 });
+    await page.goto("/cart");
+    const responsiveSummary = page.getByRole("complementary", { name: "Order summary" });
+    const responsiveAction = responsiveSummary.getByRole("button", { name: "Checkout unavailable" });
+    const responsiveTrigger = page.getByRole("button", { name: "Search PropeptIQ" });
+    await expect(page.getByText("30mg", { exact: true })).toBeVisible();
+    await expect(page.getByText("60mg", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Increase quantity for Tirzepatide, 30mg" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Remove Tirzepatide, 60mg from cart" })).toBeVisible();
+    await expect(responsiveSummary.getByText("$160.97", { exact: true })).toBeVisible();
+    const layout = await horizontalLayout(page);
+    expect(
+      layout.scrollWidth - layout.clientWidth,
+      `${width}px cart overflow: ${JSON.stringify(layout.offenders)}`,
+    ).toBeLessThanOrEqual(1);
+    expect(layout.offenders, `${width}px cart overflow offenders`).toEqual([]);
+    await responsiveAction.scrollIntoViewIfNeeded();
+    await expect(responsiveAction).toBeVisible();
+    await expect(responsiveTrigger).toBeVisible();
+    expect(
+      rectanglesIntersect(await clientRect(responsiveAction), await clientRect(responsiveTrigger)),
+      `${width}px search/cart primary-action collision`,
+    ).toBe(false);
+  }
+
+  expect(await page.evaluate(() => matchMedia("(prefers-reduced-motion: reduce)").matches)).toBe(true);
+  expect(forbiddenCommerceRequests).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 });
 
 test("home and browse catalog hydrate without application console errors", async ({ page }) => {

@@ -151,6 +151,25 @@ describe("ProductPurchasePanel", () => {
     expect(resolver).not.toHaveBeenCalled(); resolver.mockRestore();
   });
 
+  it("adds a positive preview-only Production quantity with an honest announcement", async () => {
+    window.localStorage.clear();
+    const previewOnly = testPublicVariant({
+      id: "production-preview-variant",
+      label: "30 mg",
+      availability: "preview_only",
+      checkoutReady: false,
+    });
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([previewOnly])} pricing={testPricingContext("production")} /></CartProvider>);
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: "3" } });
+    expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Checkout unavailable");
+    fireEvent.click(screen.getByRole("button", { name: /add synthetic product alpha to cart/i }));
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "null")).toEqual({
+      version: 2,
+      items: [{ variantId: "production-preview-variant", quantity: 3 }],
+    }));
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("Synthetic Product Alpha, 30 mg: 3 units");
+  });
+
   it("links the panel error and recovers from invalid drafts to canonical 11", () => {
     render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct()} pricing={testPricingContext()} /></CartProvider>);
     const input = screen.getByRole("spinbutton", { name: "Exact quantity" }); fireEvent.change(input, { target: { value: "1.0" } });

@@ -4,6 +4,8 @@ import { createHmac } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
+import { PREVIEW_PRESENTATION_STORAGE_KEY } from "@/cart/preview-presentation";
+
 const origin = "http://127.0.0.1:4631";
 const variantId = "55000000-0000-4000-8000-000000000001";
 const localTestSecret = "task5-local-driver-secret-at-least-32-chars";
@@ -58,14 +60,15 @@ async function signInAs(page: Page, actor: string) {
 async function seedCart(page: Page, quantity = 2) {
   await page.goto("/cart");
   await expect(page.getByLabel("Loading saved cart")).toHaveCount(0);
-  await page.evaluate(({ id, requestedQuantity }) => {
+  await page.evaluate(({ id, requestedQuantity, previewStorageKey }) => {
     window.localStorage.setItem(
       "propeptiq.cart.v2",
       JSON.stringify({ version: 2, items: [{ variantId: id, quantity: requestedQuantity }] }),
     );
+    window.sessionStorage.removeItem(previewStorageKey);
     window.sessionStorage.removeItem("propeptiq.cart-preview.presentation.v1");
     window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2", storageArea: window.localStorage }));
-  }, { id: variantId, requestedQuantity: quantity });
+  }, { id: variantId, requestedQuantity: quantity, previewStorageKey: PREVIEW_PRESENTATION_STORAGE_KEY });
   await expect(page.getByRole("link", { name: `Cart, ${quantity} requested units` })).toBeVisible();
 }
 
