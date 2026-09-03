@@ -2,7 +2,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createCartPreviewToken } from "@/cart/preview-token";
-import type { CartPreviewItem } from "@/cart/preview-types";
+import { savePreviewPresentation } from "@/cart/preview-presentation";
+import type {
+  CartPreview,
+  CartPreviewItem,
+  CartPreviewPurchaseState,
+} from "@/cart/preview-types";
 
 const { useCart, fetchMock } = vi.hoisted(() => ({ useCart: vi.fn(), fetchMock: vi.fn() }));
 vi.mock("@/cart/cart-provider", () => ({ useCart }));
@@ -31,6 +36,46 @@ function preview({
     items,
     subtotalMinor: quantity * unitAmountMinor, currency: "USD", taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
     previewToken: createCartPreviewToken(items), requiresAcknowledgement, reasons,
+  };
+}
+
+function displayPreview(purchaseState: Exclude<CartPreviewPurchaseState, "ready">): CartPreview {
+  const priced = ["checkout_unavailable", "local_preview", "insufficient_quantity"].includes(purchaseState);
+  const local = purchaseState === "local_preview";
+  const unknown = purchaseState === "unknown_variant";
+  const items: CartPreviewItem[] = [{
+    variantId,
+    quantity: 2,
+    available: false,
+    purchaseState,
+    name: unknown ? null : "Synthetic local test only — Alpha",
+    variantLabel: unknown ? null : "Synthetic 5 mg",
+    sku: unknown ? null : "SYNTHETIC-5MG",
+    packageForm: unknown ? null : "1 bottle",
+    baseUnitMinor: priced ? (local ? 0 : 2_400) : null,
+    unitAmountMinor: priced ? (local ? 0 : 2_208) : null,
+    lineSubtotalMinor: priced ? (local ? 0 : 4_416) : null,
+    lineSavingsMinor: priced ? (local ? 0 : 384) : null,
+    effectiveDiscountBps: priced ? 800 : null,
+    appliedPromotions: [],
+    currency: priced ? "USD" : null,
+  }];
+  const reasons: CartPreview["reasons"] = purchaseState === "checkout_unavailable" || purchaseState === "local_preview"
+    ? ["checkout_unavailable"]
+    : purchaseState === "unavailable"
+      ? ["product_unavailable"]
+      : [purchaseState];
+  return {
+    schemaVersion: 2,
+    items,
+    subtotalMinor: items[0]!.lineSubtotalMinor ?? 0,
+    currency: items[0]!.currency,
+    taxMinor: null,
+    shippingMinor: null,
+    finalDiscountMinor: null,
+    previewToken: createCartPreviewToken(items),
+    requiresAcknowledgement: true,
+    reasons,
   };
 }
 function response(value: unknown): Response { return new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } }); }
@@ -126,6 +171,53 @@ describe("CheckoutForm", () => {
     expect(JSON.parse(String((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body))).toEqual(first);
   });
 
+  it.each([
+    "checkout_unavailable",
+    "local_preview",
+    "pricing_pending",
+    "unavailable",
+    "insufficient_quantity",
+    "unknown_variant",
+  ] as const)("refuses quote and session requests for a coherent %s display preview even with its retained token", async (state) => {
+    const user = userEvent.setup();
+    const displayOnly = displayPreview(state);
+    savePreviewPresentation(window.sessionStorage, displayOnly);
+    fetchMock.mockReset().mockResolvedValue(response(displayOnly));
+
+    render(<CheckoutForm promotions={[]} />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    const previewRequest = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+    expect(previewRequest).toEqual({
+      items: [{ variantId, quantity: 2 }],
+      previousPreviewToken: displayOnly.previewToken,
+    });
+    await fillDestination(user);
+    const quoteButton = screen.getByRole("button", { name: "Calculate authoritative total" });
+    expect(quoteButton).toBeDisabled();
+    await user.click(quoteButton);
+    expect(fetchMock.mock.calls.filter(([url]) =>
+      url === "/api/checkout/quote" || url === "/api/checkout/sessions")).toEqual([]);
+  });
+
+  it.each([
+    ["malformed", (valid: ReturnType<typeof preview>) => ({ ...valid, providerId: "private" })],
+    ["different quantity", () => preview({ quantity: 3 })],
+  ] as const)("treats a parser-valid or malformed 200 %s preview mismatch as a safe refusal", async (_label, mutate) => {
+    const user = userEvent.setup();
+    fetchMock.mockReset().mockResolvedValue(response(mutate(preview())));
+
+    render(<CheckoutForm promotions={[]} />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The current server preview is unavailable. No quote can be requested.",
+    );
+    await fillDestination(user);
+    expect(screen.getByRole("button", { name: "Calculate authoritative total" })).toBeDisabled();
+    expect(fetchMock.mock.calls.filter(([url]) =>
+      url === "/api/checkout/quote" || url === "/api/checkout/sessions")).toEqual([]);
+  });
+
   it("shows changed variant preview copy without replacing the v2 cart identity", async () => {
     fetchMock.mockReset()
       .mockResolvedValueOnce(response(preview()))
@@ -211,7 +303,7 @@ describe("CheckoutForm", () => {
       .toBe(firstHeaders["Idempotency-Key"]);
   });
 
-  it("does not rotate the idempotency key for a malformed PRICE_CHANGED response", async () => {
+  it("rejects display-preview extensions at the exact PRICE_CHANGED safe-cart boundary", async () => {
     const user = userEvent.setup();
     fetchMock.mockReset()
       .mockResolvedValueOnce(response(preview()))
@@ -219,7 +311,19 @@ describe("CheckoutForm", () => {
       .mockResolvedValueOnce(response({
         status: "PRICE_CHANGED",
         pricingRevision: "e".repeat(64),
-        cart: { items: [] },
+        cart: {
+          ...safePriceChangedCart(),
+          schemaVersion: 2,
+          previewToken: "f".repeat(64),
+          items: safePriceChangedCart().items.map((item) => ({
+            ...item,
+            purchaseState: "checkout_unavailable",
+            baseUnitMinor: 2_400,
+            lineSavingsMinor: 0,
+            effectiveDiscountBps: 0,
+            appliedPromotions: [],
+          })),
+        },
       }))
       .mockResolvedValueOnce(response({ status: "provider_unknown" }));
 

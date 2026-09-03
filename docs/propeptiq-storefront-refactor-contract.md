@@ -12,12 +12,12 @@
 
 The application uses Next.js 16.3.2 App Router, React 19, Tailwind CSS 4, Radix/shadcn primitives, Drizzle/PostgreSQL, Clerk, and Stripe Checkout. Money already uses integer minor units. The public route-group layout owns the header, main landmark, and footer; checkout, account, authentication, admin, and research-set routes sit outside that public layout.
 
-Two catalog models currently coexist without a shared purchasable variant:
+The original discovery found two catalog models without a shared purchasable variant:
 
-1. `src/catalog/browse-catalog.ts` drives `/catalog` and `/catalog/items/[slug]`. It contains 56 owner-supplied product families and 103 display variants with approved local images, codes, and package-form labels. It intentionally has no canonical variant identity, SKU guarantee, numeric amount, price, currency, inventory, Stripe mapping, popularity rank, release date, related-product configuration, or approved research content. At least one source code (`LPC`) is not globally unique.
-2. `src/catalog/types.ts`, `src/db/schema/catalog.ts`, `src/catalog/public-catalog.ts`, and `/catalog/[slug]` drive the transactional catalog. One database product currently represents one purchasable identity with product-level price and inventory. There is no variant table or normal link from the browse catalog into this route.
+1. `src/catalog/browse-catalog.ts` drove `/catalog` and `/catalog/items/[slug]` with 56 owner-supplied product families and 103 display variants, but without a purchasable canonical-variant boundary.
+2. `src/catalog/types.ts`, `src/db/schema/catalog.ts`, `src/catalog/public-catalog.ts`, and `/catalog/[slug]` drove the transactional catalog independently.
 
-The local cart in `src/cart/cart-storage.ts` stores `{ productId, quantity }`, merges by product ID, caps each line at 25, and caps the cart at 50 distinct lines. The checkout request in `src/domain/checkout.ts` uses the same product identity and rejects duplicates at the server boundary.
+Phase 1 and Phase 2 now give the public display catalog stable variant IDs and a display-only cart projection without making those rows purchasable. The browser cart in `src/cart/cart-storage.ts` stores only `{ variantId, quantity }`, merges repeated identical variant IDs, preserves different variants as separate lines, caps each line at 25, and caps the cart at 50 distinct lines. Checkout still independently reloads and validates its own server-authoritative facts.
 
 The complete buyer path is:
 
@@ -34,6 +34,8 @@ local cart
   -> idempotent provider-event, payment, inventory, and fulfillment processing
 ```
 
+The Phase 2 public display path stops at the cart for every public-view row. Only a separately authoritative checkout-ready source may proceed beyond that point; a displayed reference price is not permission to quote, reserve inventory, create a provider session, or take payment.
+
 `src/commerce/provider-contracts.ts` already sends server-created inline Stripe `price_data`; the repository has no configured Stripe Price ID field. The success page is read-only and does not mark payment complete. Verified provider events are authoritative.
 
 Four existing controls prevent zero-dollar checkout: the positive database price constraint, checkout fact validation, the zero-total money-domain rule, and the Stripe provider contract. Pending `$0` variants therefore require a presentation/cart state that cannot reach Checkout.
@@ -45,6 +47,7 @@ Four existing controls prevent zero-dollar checkout: the positive database price
 - Transactional catalog: `src/catalog/public-catalog.ts`, `src/catalog/types.ts`, `src/db/schema/catalog.ts`
 - Money and promotions: `src/domain/money.ts`, `src/domain/promotions.ts`
 - Cart and stale-preview acknowledgement: `src/cart/cart-storage.ts`, `src/cart/preview.ts`, `src/cart/preview-types.ts`
+- Public cart display projection and strict version-2 client parsing: `src/cart/storefront-preview-source.ts`, `src/cart/preview-presentation.ts`
 - Checkout boundary: `src/domain/checkout.ts`, `src/commerce/checkout-http.ts`, `src/commerce/checkout-service.ts`, `src/commerce/provider-contracts.ts`
 - Payment completion: `src/app/api/webhooks/stripe/route.ts`, `src/commerce/stripe-webhook-verifier.ts`, `src/commerce/provider-event-service.ts`
 - Accessible overlay and disclosure primitives: `src/components/ui/sheet.tsx` and the installed Radix primitives
@@ -181,9 +184,19 @@ Promotion activation uses the server clock. `startAt` is inclusive, `endAt` is e
 
 WINTER30 is configured as enabled, sitewide, 30%, automatic, no start, no end, and `America/Los_Angeles` unless a verified business timezone supersedes it. The banner disappears when it is disabled or inactive. The Stripe customer-entered promotion-code field remains disabled.
 
+## Public cart display-preview contract
+
+`src/cart/storefront-preview-source.ts` converts `PublicStorefrontView` rows into presentation-only cart inputs. It may carry only already-public product and variant identity, SKU, package summary, price status, base display amount, currency, and eligible public promotion labels. It forces public inventory to unknown (`availableQuantity: null`) and cannot produce checkout readiness. `src/cart/preview.ts` reuses the canonical quantity/promotion calculation and returns the explicit version-2 display DTO; `src/cart/preview-presentation.ts` strictly validates that DTO and its version-2 same-tab storage envelope before any client renders it.
+
+The preview request contains only the normalized ordered `{ variantId, quantity }` lines plus an optional prior display token. After parsing, each client requires the response count, order, variant ID, and quantity to match the initiating cart exactly. The display token commits to the visible line facts for change detection, but it is not authentication, inventory, quote, session, or payment authority.
+
+A reviewed positive `preview_only` variant may be added to the Production browser cart and display server-calculated standard/effective unit prices, the single winning quantity or automatic-promotion discount, savings, promotion label, and line subtotal. Its state is `checkout_unavailable`, `available` is false, and the cart action stays disabled. A pending Production row remains non-addable and displays `Pricing coming soon`; `$0.00` pending layout previews remain limited to local, test, or explicitly marked Preview modes.
+
+The public display projection never claims stock: its quantity is unknown, and only a separately authoritative source with a known count may report insufficient quantity. `SafeCartPreview` and the exact checkout `PRICE_CHANGED` DTO remain separate and unchanged. No display DTO or acknowledged display token can request a quote/session or satisfy provider capability checks. Production inventory, Stripe mapping, tax, shipping, fulfillment, legal, and launch gates therefore remain closed.
+
 ## Checkout contract
 
-The browser sends canonical `variantId`, quantity, destination, optional reward-redemption points under the existing contract, and an opaque server-issued pricing/preview token. Automatic promotions and referral attribution are resolved from server state. The browser does not send an amount, effective discount, promotion ID or eligibility, currency authority, Stripe Product ID, or Stripe Price ID.
+The display-preview request sends canonical `variantId`, quantity, and an optional prior display token. Checkout quote/session requests separately send canonical variant IDs and quantities, destination, optional reward-redemption points, and the checkout pricing revision where required. Automatic promotions and referral attribution are resolved from server state. The browser does not send an amount, effective discount, promotion ID or eligibility, currency authority, Stripe Product ID, or Stripe Price ID.
 
 Immediately before creating a session, the server:
 
