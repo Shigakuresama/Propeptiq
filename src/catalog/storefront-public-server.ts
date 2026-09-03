@@ -66,7 +66,7 @@ export type StorefrontPublicServerDependencies = Readonly<{
   reportPromotionDiagnostic?: (diagnostic: PromotionProjectionDiagnostic) => void;
   reportCatalogDatabaseUnavailable?: (
     diagnostic: typeof STOREFRONT_CATALOG_DATABASE_UNAVAILABLE,
-  ) => void;
+  ) => void | Promise<void>;
   configuredPromotions?: unknown;
 }>;
 
@@ -93,11 +93,15 @@ function defaultCatalogDatabaseUnavailableReporter(
 
 function ownStringCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null) return undefined;
-  const descriptor = Object.getOwnPropertyDescriptor(error, "code");
-  return descriptor !== undefined && "value" in descriptor &&
-    typeof descriptor.value === "string"
-    ? descriptor.value
-    : undefined;
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(error, "code");
+    return descriptor !== undefined && "value" in descriptor &&
+      typeof descriptor.value === "string"
+      ? descriptor.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function loadPublicStorefrontCatalog(
@@ -134,16 +138,37 @@ export async function loadPublicStorefrontView(
   ) as PublicStorefrontPricingContext["automaticPromotions"];
   let databaseOwnedVariantIds = new Set<string>();
   if (shouldLoadDatabase) {
+    let records: DatabaseCatalogRecordSet | undefined;
+    let databaseUnavailable = false;
+    try {
+      records = await (
+        dependencies.loadDatabaseRecords ?? defaultDatabaseLoader
+      )(environment);
+    } catch (error: unknown) {
+      if (ownStringCode(error) !== "42P01") throw error;
+      databaseUnavailable = true;
+      try {
+        await (dependencies.reportCatalogDatabaseUnavailable ??
+          defaultCatalogDatabaseUnavailableReporter)(
+          STOREFRONT_CATALOG_DATABASE_UNAVAILABLE,
+        );
+      } catch {
+        // A diagnostic failure must not take the public storefront down.
+      }
+    }
+    if (databaseUnavailable) {
+      records = undefined;
+    }
+    if (!databaseUnavailable && records === undefined) {
+      throw new Error("Storefront database loader returned no records");
+    }
     let projected: Readonly<{
       databaseOwnedVariantIds: Set<string>;
       runtimeVariantFacts: ReturnType<typeof buildRuntimeVariantPresentationFacts>;
       automaticPromotions: PublicStorefrontPricingContext["automaticPromotions"];
       diagnostics: readonly PromotionProjectionDiagnostic[];
     }> | undefined;
-    try {
-      const records = await (
-        dependencies.loadDatabaseRecords ?? defaultDatabaseLoader
-      )(environment);
+    if (records !== undefined) {
       if (records.source !== "production") {
         throw new Error("Storefront database loader returned a non-production source");
       }
@@ -160,16 +185,6 @@ export async function loadPublicStorefrontView(
         automaticPromotions: promotionProjection.promotions,
         diagnostics: promotionProjection.diagnostics,
       });
-    } catch (error: unknown) {
-      if (ownStringCode(error) !== "42P01") throw error;
-      try {
-        (dependencies.reportCatalogDatabaseUnavailable ??
-          defaultCatalogDatabaseUnavailableReporter)(
-          STOREFRONT_CATALOG_DATABASE_UNAVAILABLE,
-        );
-      } catch {
-        // A diagnostic failure must not take the public storefront down.
-      }
     }
     if (projected !== undefined) {
       databaseOwnedVariantIds = projected.databaseOwnedVariantIds;

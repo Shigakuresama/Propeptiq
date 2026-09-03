@@ -320,11 +320,11 @@ describe("public storefront server acquisition", () => {
     ]);
     expect(view.catalog.products.flatMap((product) =>
       product.kind === "canonical" ? product.variants : [],
-    ).some((variant) => variant.checkoutReady)).toBe(false);
+    ).every((variant) => variant.availability === "preview_only" && !variant.checkoutReady)).toBe(true);
     expect(reporter).toHaveBeenCalledWith(STOREFRONT_CATALOG_DATABASE_UNAVAILABLE);
   });
 
-  it("reports one fixed token and survives reporter failure without exposing the database error", async () => {
+  it("reports one fixed token and survives synchronous reporter failure without exposing the database error", async () => {
     const secret = "private product_variants schema detail";
     const reporter = vi.fn(() => {
       throw new Error("reporter failure");
@@ -344,18 +344,46 @@ describe("public storefront server acquisition", () => {
     expect(JSON.stringify(view)).not.toContain(secret);
   });
 
+  it("survives an asynchronously rejected fixed diagnostic reporter", async () => {
+    let rejectReporter: ((reason?: unknown) => void) | undefined;
+    let reporterPromise: Promise<void> | undefined;
+    const reporter = vi.fn(() => {
+      reporterPromise = new Promise<void>((_resolve, reject) => {
+        rejectReporter = reject;
+      });
+      void reporterPromise.catch(() => undefined);
+      return reporterPromise;
+    });
+    let viewFinished = false;
+    const viewPromise = loadPublicStorefrontView(databaseEnvironment(), {
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+      loadDatabaseRecords: vi.fn(async () => {
+        throw sqlStateError("42P01", "private schema detail");
+      }),
+      reportCatalogDatabaseUnavailable: reporter,
+      now: () => new Date("2026-08-31T12:00:00.000Z"),
+    }).then((view) => {
+      viewFinished = true;
+      return view;
+    });
+
+    for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    expect(reporter).toHaveBeenCalledOnce();
+    expect(viewFinished).toBe(false);
+    rejectReporter!(new Error("async reporter failure"));
+    const view = await viewPromise;
+    expect(view.catalog.products).toHaveLength(56);
+  });
+
   it("does not retain partially projected database facts after an absent-schema failure", async () => {
-    const partialVariants = {
-      map() {
-        throw sqlStateError("42P01", "private projection detail");
-      },
-    };
-    const recordsWithPartialProjection = { ...records, variants: partialVariants };
     const view = await loadPublicStorefrontView(databaseEnvironment(), {
       catalogData: boundCatalogData,
       controlledContent: [],
       verifiedImageMetadata: storefrontImageMetadata,
-      loadDatabaseRecords: vi.fn(async () => recordsWithPartialProjection as unknown as DatabaseCatalogRecordSet),
+      loadDatabaseRecords: vi.fn(async () => {
+        throw sqlStateError("42P01", "private acquisition detail");
+      }),
       reportCatalogDatabaseUnavailable: vi.fn(),
       now: () => new Date("2026-08-31T12:00:00.000Z"),
       configuredPromotions: Object.freeze([]),
@@ -391,6 +419,49 @@ describe("public storefront server acquisition", () => {
       loadDatabaseRecords: vi.fn(async () => { throw error; }),
       now: () => new Date("2026-08-31T12:00:00.000Z"),
     })).rejects.toBe(error);
+  });
+
+  it("preserves a revoked proxy rejection when own code inspection fails", async () => {
+    const revocable = Proxy.revocable({ code: "42P01" }, {});
+    const error = revocable.proxy;
+    revocable.revoke();
+
+    let caught: unknown;
+    try {
+      await loadPublicStorefrontView(databaseEnvironment(), {
+        controlledContent: [],
+        verifiedImageMetadata: storefrontImageMetadata,
+        loadDatabaseRecords: vi.fn(async () => { throw error; }),
+        now: () => new Date("2026-08-31T12:00:00.000Z"),
+      });
+    } catch (value) {
+      caught = value;
+    }
+    expect(Object.is(caught, error)).toBe(true);
+  });
+
+  it("rethrows an unchanged code-bearing 42P01 from database promotion projection", async () => {
+    const error = sqlStateError("42P01", "private projection detail");
+    const recordsWithProjectionFailure = {
+      ...records,
+      promotions: {
+        [Symbol.iterator]() {
+          throw error;
+        },
+      },
+    } as unknown as DatabaseCatalogRecordSet;
+    const reporter = vi.fn();
+
+    await expect(loadPublicStorefrontView(databaseEnvironment(), {
+      catalogData: boundCatalogData,
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+      loadDatabaseRecords: vi.fn(async () => recordsWithProjectionFailure),
+      reportCatalogDatabaseUnavailable: reporter,
+      now: () => new Date("2026-08-31T12:00:00.000Z"),
+      configuredPromotions: Object.freeze([]),
+    })).rejects.toBe(error);
+    expect(reporter).not.toHaveBeenCalled();
   });
 
   it("applies configured WINTER30 to static display facts when database is disabled", async () => {
