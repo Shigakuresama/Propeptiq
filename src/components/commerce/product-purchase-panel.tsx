@@ -7,7 +7,22 @@ import { AddToCartButton } from "./add-to-cart-button";
 import { QuantityTierSelector } from "./quantity-tier-selector";
 import { VariantSelector } from "./variant-selector";
 
-export type ProductPurchasePanelProps = Readonly<{ product: CanonicalPublicStorefrontProduct; pricing: PublicStorefrontPricingContext }>;
+type ProductPurchasePanelBaseProps = Readonly<{
+  onSelectedQuantityChange?: (quantity: number | null) => void;
+  product: CanonicalPublicStorefrontProduct;
+  pricing: PublicStorefrontPricingContext;
+}>;
+
+export type ProductPurchasePanelProps = ProductPurchasePanelBaseProps & (
+  | Readonly<{
+      selectedVariantId: string | null;
+      onSelectedVariantIdChange: (variantId: string) => void;
+    }>
+  | Readonly<{
+      selectedVariantId?: never;
+      onSelectedVariantIdChange?: never;
+    }>
+);
 const QUANTITY_ERROR = "Enter a whole number from 1 to 25.";
 const TEN_PLUS_QUANTITY_ERROR = "Enter a whole number from 10 to 25.";
 
@@ -17,8 +32,18 @@ function parseQuantityDraft(draft: string, minimum: number): number | null {
   return quantity >= minimum ? quantity : null;
 }
 
-export function ProductPurchasePanel({ product, pricing }: ProductPurchasePanelProps) {
-  const [selectedVariantId, setSelectedVariantId] = useState<string | null>(() => product.variants.some((v) => v.id === product.defaultVariantId) ? product.defaultVariantId : null);
+export function ProductPurchasePanel(props: ProductPurchasePanelProps) {
+  const { product, pricing } = props;
+  const [internalSelectedVariantId, setInternalSelectedVariantId] = useState<string | null>(() => product.variants.some((v) => v.id === product.defaultVariantId) ? product.defaultVariantId : null);
+  const selectionIsControlled = "selectedVariantId" in props;
+  const selectedVariantId = selectionIsControlled
+    ? props.selectedVariantId
+    : internalSelectedVariantId;
+  const selectVariant = (variantId: string) => {
+    const externalHandler = props.onSelectedVariantIdChange;
+    if (externalHandler) externalHandler(variantId);
+    else setInternalSelectedVariantId(variantId);
+  };
   const [lastValidQuantity, setLastValidQuantity] = useState(1);
   const [quantityDraft, setQuantityDraft] = useState("1");
   const minimumQuantity = lastValidQuantity >= 10 ? 10 : 1;
@@ -29,13 +54,17 @@ export function ProductPurchasePanel({ product, pricing }: ProductPurchasePanelP
   const selected = product.variants.find((variant) => variant.id === selectedVariantId) ?? null;
   const presentation = useMemo(() => quantityIsValid && selected ? resolvePublicVariantPrice({ variant: selected, productId: product.id, quantity, pricing }) : null, [pricing, product.id, quantity, quantityIsValid, selected]);
   const canAdd = quantityIsValid && selected !== null && canAddPublicVariant(selected, pricing.mode);
-  const chooseQuantity = (next: number) => { setLastValidQuantity(next); setQuantityDraft(String(next)); };
+  const storeValidQuantity = (next: number) => {
+    setLastValidQuantity(next);
+    props.onSelectedQuantityChange?.(next);
+  };
+  const chooseQuantity = (next: number) => { storeValidQuantity(next); setQuantityDraft(String(next)); };
   const status = selected === null ? "Choose a variant" : !quantityIsValid ? "Invalid quantity" : presentation ? publicVariantPurchaseLabel(presentation.purchaseState, "purchase_summary") : "Pricing coming soon";
   const price = presentation?.state === "priced" ? presentation.price : null;
   return <section className="mt-10 space-y-8" aria-labelledby="purchase-heading">
     <h2 id="purchase-heading" className="w-fit font-heading text-3xl text-ink">Purchase</h2>
-    <VariantSelector productId={product.id} productName={product.name} variants={product.variants} selectedVariantId={selectedVariantId} quantity={lastValidQuantity} pricing={pricing} onSelectedVariantIdChange={setSelectedVariantId} />
-    <div><h3 className="mb-3 font-heading text-2xl text-ink">Quantity</h3><QuantityTierSelector quantity={lastValidQuantity} quantityDraft={quantityDraft} errorId="quantity-error" errorMessage={errorMessage} onQuantityDraftChange={(draft) => { setQuantityDraft(draft); const parsed = parseQuantityDraft(draft, minimumQuantity); if (parsed !== null) setLastValidQuantity(parsed); }} onQuantitySelect={chooseQuantity} /></div>
+    <VariantSelector productId={product.id} productName={product.name} variants={product.variants} selectedVariantId={selectedVariantId} quantity={lastValidQuantity} pricing={pricing} onSelectedVariantIdChange={selectVariant} />
+    <div><h3 className="mb-3 font-heading text-2xl text-ink">Quantity</h3><QuantityTierSelector quantity={lastValidQuantity} quantityDraft={quantityDraft} errorId="quantity-error" errorMessage={errorMessage} onQuantityDraftChange={(draft) => { setQuantityDraft(draft); const parsed = parseQuantityDraft(draft, minimumQuantity); if (parsed !== null) storeValidQuantity(parsed); else props.onSelectedQuantityChange?.(null); }} onQuantitySelect={chooseQuantity} /></div>
     <div role="status" aria-label="Purchase summary" aria-live="polite" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-canvas p-4">
       <p className="font-semibold text-ink">{selected?.label ?? "No variant selected"} · {quantityIsValid ? `${quantity} bottle${quantity === 1 ? "" : "s"}` : errorMessage}</p>
       <p className="text-sm text-muted-ink">{status}</p>

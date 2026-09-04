@@ -12,7 +12,6 @@ import {
   resolvePublicVariantPrice,
   selectCardVariant,
   summarizePublicStorefrontVariants,
-  type PricePresentation,
   type PublicStorefrontPricingContext,
 } from "@/catalog/storefront-price-presentation";
 
@@ -55,6 +54,9 @@ export function CatalogListingCard({
   );
   const remainingConfigurationCount =
     product.displayConfigurations.length - visibleConfigurations.length;
+  const discountPercent = selectedPresentation?.state === "priced"
+    ? selectedPresentation.price.effectiveDiscountBps / 100
+    : undefined;
 
   return (
     <article
@@ -66,11 +68,8 @@ export function CatalogListingCard({
           product={product}
           priority={priority}
           variantLabel={selectedVariant?.label}
+          discountPercent={discountPercent}
         />
-        {selectedPresentation?.state === "priced" &&
-        selectedPresentation.price.effectiveDiscountBps > 0 ? (
-          <CardDiscountBadge presentation={selectedPresentation} />
-        ) : null}
       </div>
 
       <div className="flex flex-1 flex-col p-6 sm:p-7">
@@ -150,21 +149,5 @@ export function CatalogListingCard({
         </Link>
       </div>
     </article>
-  );
-}
-
-function CardDiscountBadge({
-  presentation,
-}: {
-  presentation: Extract<PricePresentation, { state: "priced" }>;
-}) {
-  const discountPercent = presentation.price.effectiveDiscountBps / 100;
-  return (
-    <span
-      aria-label={`-${discountPercent}%`}
-      className="absolute left-3 top-3 rounded-full bg-moss px-3 py-1 text-xs font-semibold text-white"
-    >
-      -{discountPercent}%
-    </span>
   );
 }

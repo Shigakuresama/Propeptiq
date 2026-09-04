@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
@@ -11,7 +11,12 @@ import {
 } from "@/catalog/storefront-public";
 
 import { CatalogItemDetail } from "./catalog-item-detail";
-import { testPricingContext, testCanonicalProduct, testPublicVariant } from "./storefront-test-fixtures";
+import {
+  testCanonicalProduct,
+  testPricingContext,
+  testPublicVariant,
+  testWinter30,
+} from "./storefront-test-fixtures";
 
 const calculator = Object.freeze({
   title: "Synthetic approved calculator",
@@ -20,7 +25,54 @@ const calculator = Object.freeze({
 });
 
 const { capturedPricing } = vi.hoisted(() => ({ capturedPricing: [] as unknown[] }));
-vi.mock("./product-purchase-panel", () => ({ ProductPurchasePanel: ({ pricing }: { pricing: unknown }) => { capturedPricing.push(pricing); return <section aria-labelledby="purchase-heading"><h2 id="purchase-heading">Purchase</h2><div data-testid="purchase-panel" /></section>; } }));
+vi.mock("./product-purchase-panel", () => ({
+  ProductPurchasePanel: ({
+    onSelectedQuantityChange,
+    onSelectedVariantIdChange,
+    pricing,
+    product,
+  }: {
+    onSelectedQuantityChange?: (quantity: number | null) => void;
+    onSelectedVariantIdChange?: (variantId: string) => void;
+    pricing: unknown;
+    product: { variants: readonly { id: string; label: string }[] };
+  }) => {
+    capturedPricing.push(pricing);
+    return (
+      <section aria-labelledby="purchase-heading">
+        <h2 id="purchase-heading">Purchase</h2>
+        <div data-testid="purchase-panel" />
+        {product.variants.map((variant) => (
+          <button
+            aria-label={`Select visual variant ${variant.label}`}
+            key={variant.id}
+            onClick={() => onSelectedVariantIdChange?.(variant.id)}
+            type="button"
+          >
+            {variant.label}
+          </button>
+        ))}
+        {[2, 3, 10].map((quantity) => (
+          <button
+            aria-label={`Select visual quantity ${quantity}`}
+            key={quantity}
+            onClick={() => onSelectedQuantityChange?.(quantity)}
+            type="button"
+          >
+            {quantity}
+          </button>
+        ))}
+        <button
+          aria-label="Invalidate visual quantity"
+          onClick={() => onSelectedQuantityChange?.(null)}
+          type="button"
+        >
+          Invalid quantity
+        </button>
+      </section>
+    );
+  },
+}));
 const { capturedRelated } = vi.hoisted(() => ({ capturedRelated: [] as Array<{ products: unknown; pricing: unknown }> }));
 vi.mock("./related-products-carousel", () => ({ RelatedProductsCarousel: (props: { products: unknown; pricing: unknown }) => { capturedRelated.push(props); return <section aria-label="Frequently Researched Together"><h2>Frequently Researched Together</h2><ul>{(props.products as Array<{ name: string }>).map((product) => <li key={product.name}>{product.name}</li>)}</ul></section>; } }));
 
@@ -102,6 +154,79 @@ describe("CatalogItemDetail", () => {
     const information = screen.getByRole("heading", { name: "Approved product information" });
     expect(purchase.compareDocumentPosition(configurations) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(configurations.compareDocumentPosition(information) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps the hero variant label and sale badge synchronized with purchase selection", () => {
+    const priced = testPublicVariant({
+      id: "priced-variant",
+      label: "Priced 10 mg",
+      baseUnitMinor: 10_00,
+    });
+    const pending = testPublicVariant({
+      id: "pending-variant",
+      label: "Pending 20 mg",
+      availability: "preview_only",
+      baseUnitMinor: 0,
+      checkoutReady: false,
+      priceStatus: "pending",
+    });
+    const unavailable = testPublicVariant({
+      id: "unavailable-variant",
+      label: "Unavailable 30 mg",
+      availability: "unavailable",
+      checkoutReady: false,
+    });
+    const product = testCanonicalProduct([priced, pending, unavailable], {
+      defaultVariantId: priced.id,
+    });
+    const { container } = render(
+      <CatalogItemDetail
+        calculator={null}
+        pricing={testPricingContext("local", [testWinter30])}
+        product={product}
+        relatedProducts={[]}
+      />,
+    );
+    const visual = container.querySelector<HTMLElement>(".catalog-product-visual")!;
+    const visualVariant = () => visual.querySelector<HTMLElement>(".catalog-product-visual__variant");
+
+    expect(visualVariant()).toHaveTextContent("Priced 10 mg");
+    expect(within(visual).getByLabelText("-30%")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual variant Pending 20 mg" }));
+    expect(visualVariant()).toHaveTextContent("Pending 20 mg");
+    expect(within(visual).queryByLabelText("-30%")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual variant Unavailable 30 mg" }));
+    expect(visualVariant()).toHaveTextContent("Unavailable 30 mg");
+    expect(within(visual).queryByLabelText("-30%")).toBeNull();
+  });
+
+  it("keeps the hero discount badge synchronized with quantity tiers", () => {
+    const product = testCanonicalProduct([testPublicVariant({ baseUnitMinor: 10_00 })]);
+    const { container } = render(
+      <CatalogItemDetail
+        calculator={null}
+        pricing={testPricingContext("production")}
+        product={product}
+        relatedProducts={[]}
+      />,
+    );
+    const visual = container.querySelector<HTMLElement>(".catalog-product-visual")!;
+
+    expect(within(visual).queryByLabelText(/^-\d+%$/u)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 2" }));
+    expect(within(visual).getByLabelText("-8%")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 3" }));
+    expect(within(visual).getByLabelText("-10%")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 10" }));
+    expect(within(visual).getByLabelText("-30%")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invalidate visual quantity" }));
+    expect(within(visual).queryByLabelText(/^-\d+%$/u)).toBeNull();
   });
 
   it("keeps browse-only configurations before its notice without purchase controls", () => {

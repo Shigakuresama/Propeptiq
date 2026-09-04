@@ -1,8 +1,14 @@
+"use client";
+
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
+import { useState } from "react";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
-import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import {
+  resolvePublicVariantPrice,
+  type PublicStorefrontPricingContext,
+} from "@/catalog/storefront-price-presentation";
 import type { PublicConcentrationCalculatorConfiguration } from "@/domain/concentration";
 import { CatalogProductVisual } from "./catalog-product-visual";
 import { LaboratoryConcentrationCalculator } from "./laboratory-concentration-calculator";
@@ -12,12 +18,44 @@ import { RelatedProductsCarousel } from "./related-products-carousel";
 
 export function CatalogItemDetail({ calculator, product, pricing, relatedProducts }: { calculator: PublicConcentrationCalculatorConfiguration | null; product: PublicStorefrontProduct; pricing: PublicStorefrontPricingContext; relatedProducts: readonly Extract<PublicStorefrontProduct, { kind: "canonical" }>[] }) {
   const canonical = product.kind === "canonical";
+  const configuredDefaultVariantId = product.kind === "canonical" && product.variants.some(
+    (variant) => variant.id === product.defaultVariantId,
+  )
+    ? product.defaultVariantId
+    : null;
+  const [purchaseSelection, setPurchaseSelection] = useState(() => ({
+    productSlug: product.slug,
+    quantity: 1 as number | null,
+    variantId: configuredDefaultVariantId,
+  }));
+  const selectedVariantId = purchaseSelection.productSlug === product.slug
+    ? purchaseSelection.variantId
+    : configuredDefaultVariantId;
+  const selectedQuantity = purchaseSelection.productSlug === product.slug
+    ? purchaseSelection.quantity
+    : 1;
   const sourceLabelIsDistinct =
     product.sourceName.replace(/\s+/gu, "").toLocaleLowerCase("en-US") !==
     product.name.replace(/\s+/gu, "").toLocaleLowerCase("en-US");
+  const visualVariant = product.kind === "canonical"
+    ? product.variants.find((variant) => variant.id === selectedVariantId)
+    : undefined;
   const visualVariantLabel = product.kind === "canonical"
-    ? product.variants.find((variant) => variant.id === product.defaultVariantId)?.label
+    ? visualVariant?.label
     : product.displayConfigurations[0]?.packageForm;
+  const visualPrice = product.kind === "canonical" && visualVariant && selectedQuantity !== null
+    ? resolvePublicVariantPrice({
+        variant: visualVariant,
+        productId: product.id,
+        quantity: selectedQuantity,
+        pricing,
+      })
+    : null;
+  const visualDiscountPercent = visualPrice?.state === "priced" &&
+      visualVariant?.priceStatus === "active" &&
+      visualVariant.availability !== "unavailable"
+    ? visualPrice.price.effectiveDiscountBps / 100
+    : undefined;
 
   return (
     <article className="site-container pb-20 pt-2 md:pt-14 lg:pt-16">
@@ -70,11 +108,31 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
             priority
             sizes="(min-width: 1024px) 55vw, calc(100vw - 2rem)"
             variantLabel={visualVariantLabel}
+            discountPercent={visualDiscountPercent}
           />
         </div>
 
         <div className="catalog-detail-content lg:col-start-2 lg:row-start-2 lg:pt-0">
-          {canonical ? <ProductPurchasePanel product={product} pricing={pricing} /> : null}
+          {canonical ? (
+            <ProductPurchasePanel
+              key={product.slug}
+              onSelectedQuantityChange={(quantity) => setPurchaseSelection((selection) => ({
+                productSlug: product.slug,
+                quantity,
+                variantId: selection.productSlug === product.slug
+                  ? selection.variantId
+                  : configuredDefaultVariantId,
+              }))}
+              onSelectedVariantIdChange={(variantId) => setPurchaseSelection((selection) => ({
+                productSlug: product.slug,
+                quantity: selection.productSlug === product.slug ? selection.quantity : 1,
+                variantId,
+              }))}
+              product={product}
+              pricing={pricing}
+              selectedVariantId={selectedVariantId}
+            />
+          ) : null}
           <section aria-labelledby="catalog-variants-heading" className="mt-10">
             <h2 id="catalog-variants-heading" className="font-heading text-3xl text-ink">
               Supplied configurations

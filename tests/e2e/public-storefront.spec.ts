@@ -2471,3 +2471,119 @@ test("scroll reveal public routes stay overflow-free and error-free on mobile an
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });
+
+test("PDP purchase choices synchronize the live hero discount badge without reload", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route(/\/catalog\/items\/tirzepatide(?:\?.*)?$/u, async (route) => {
+    if (route.request().headers().rsc !== "1") {
+      await route.continue();
+      return;
+    }
+
+    const response = await route.fetch();
+    let body = await response.text();
+    const promotionMarker = '"automaticPromotions":[';
+    let promotionStart = body.indexOf(promotionMarker);
+    while (promotionStart >= 0) {
+      const arrayStart = promotionStart + promotionMarker.length - 1;
+      let depth = 0;
+      let arrayEnd = -1;
+      for (let index = arrayStart; index < body.length; index += 1) {
+        if (body[index] === "[") depth += 1;
+        if (body[index] === "]") depth -= 1;
+        if (depth === 0) {
+          arrayEnd = index;
+          break;
+        }
+      }
+      expect(arrayEnd, "promotion array terminator").toBeGreaterThan(arrayStart);
+      body = `${body.slice(0, arrayStart)}[]${body.slice(arrayEnd + 1)}`;
+      promotionStart = body.indexOf(promotionMarker, arrayStart + 2);
+    }
+
+    const unavailableVariantId = "b1cdf4ea-2eb6-58dc-9dd3-a8245470cadf";
+    const unavailableStart = body.indexOf(`{"id":"${unavailableVariantId}"`);
+    expect(unavailableStart, "unavailable variant fixture").toBeGreaterThanOrEqual(0);
+    const unavailableEnd = body.indexOf("},{\"id\":", unavailableStart);
+    expect(unavailableEnd, "unavailable variant fixture terminator").toBeGreaterThan(
+      unavailableStart,
+    );
+    const unavailable = body
+      .slice(unavailableStart, unavailableEnd + 1)
+      .replace('"availability":"preview_only"', '"availability":"unavailable"')
+      .replace('"priceStatus":"pending"', '"priceStatus":"unavailable"')
+      .replace('"baseUnitMinor":0', '"baseUnitMinor":null')
+      .replace('"currency":"USD"', '"currency":null');
+    body = `${body.slice(0, unavailableStart)}${unavailable}${body.slice(unavailableEnd + 1)}`;
+    await route.fulfill({ response, body });
+  });
+
+  await page.goto("/catalog");
+  await page.getByRole("link", { name: "View catalog item: Tirzepatide" }).click();
+  await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide$/u);
+  await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
+  await page.evaluate(() => {
+    (window as Window & { __task6SelectionSentinel?: string }).__task6SelectionSentinel =
+      "selection-state-survived";
+  });
+
+  const hero = page.locator(".catalog-detail-image .catalog-product-visual");
+  const heroVariant = hero.locator(".catalog-product-visual__variant");
+  const heroBadge = hero.getByLabel(/^-[1-9]\d*%$/u);
+  const exactQuantity = page.getByRole("spinbutton", { name: "Exact quantity" });
+  await expect(heroVariant).toHaveText("30mg");
+  await expect(heroBadge).toHaveCount(0);
+
+  await page.getByRole("button", { name: "2 bottles" }).click();
+  await expect(hero.getByLabel("-8%")).toBeVisible();
+  await page.getByRole("button", { name: "3 bottles" }).click();
+  await expect(hero.getByLabel("-10%")).toBeVisible();
+  await page.getByRole("button", { name: "10 or more bottles" }).click();
+  await expect(hero.getByLabel("-30%")).toBeVisible();
+  await expect(exactQuantity).toHaveAttribute("min", "10");
+
+  await page.getByRole("button", { name: "Decrease quantity" }).click();
+  await expect(exactQuantity).toHaveValue("9");
+  await expect(exactQuantity).toHaveAttribute("min", "1");
+  await expect(hero.getByLabel("-10%")).toBeVisible();
+
+  await exactQuantity.fill("");
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText(
+    "Invalid quantity",
+  );
+  await expect(heroBadge).toHaveCount(0);
+
+  await page.getByRole("button", { name: "2 bottles" }).click();
+  await expect(hero.getByLabel("-8%")).toBeVisible();
+  await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`).check();
+  await expect(heroVariant).toHaveText("5mg");
+  await expect(heroBadge).toHaveCount(0);
+
+  await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
+  await expect(heroVariant).toHaveText("30mg");
+  await expect(hero.getByLabel("-8%")).toBeVisible();
+  await page.locator('input[type="radio"][value="b1cdf4ea-2eb6-58dc-9dd3-a8245470cadf"]').check();
+  await expect(heroVariant).toHaveText("10mg");
+  await expect(heroBadge).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText(
+    "Unavailable",
+  );
+
+  expect(
+    await page.evaluate(() =>
+      (window as Window & { __task6SelectionSentinel?: string }).__task6SelectionSentinel
+    ),
+  ).toBe("selection-state-survived");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});

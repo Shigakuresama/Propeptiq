@@ -58,6 +58,72 @@ describe("ProductPurchasePanel", () => {
     const summary = screen.getByRole("status", { name: "Purchase summary" }); expect(summary).toHaveTextContent("First"); expect(within(summary.querySelector("dl")!).getByText("Quantity").nextElementSibling).toHaveTextContent("11"); expect(summary).toHaveTextContent("$7.00"); expect(summary).not.toHaveTextContent("Checkout unavailable");
   });
 
+  it("supports one externally controlled variant selection without retaining stale internal state", () => {
+    const priced = testPublicVariant({ id: "controlled-priced", label: "Controlled priced" });
+    const pending = testPublicVariant({
+      id: "controlled-pending",
+      label: "Controlled pending",
+      availability: "preview_only",
+      baseUnitMinor: 0,
+      checkoutReady: false,
+      priceStatus: "pending",
+    });
+    const product = testCanonicalProduct([priced, pending], { defaultVariantId: priced.id });
+    const onSelectedVariantIdChange = vi.fn();
+    const view = render(
+      <CartProvider>
+        <ProductPurchasePanel
+          onSelectedVariantIdChange={onSelectedVariantIdChange}
+          pricing={testPricingContext("production")}
+          product={product}
+          selectedVariantId={priced.id}
+        />
+      </CartProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: /Controlled pending/u }));
+    expect(onSelectedVariantIdChange).toHaveBeenCalledOnce();
+    expect(onSelectedVariantIdChange).toHaveBeenCalledWith(pending.id);
+    expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Controlled priced");
+
+    view.rerender(
+      <CartProvider>
+        <ProductPurchasePanel
+          onSelectedVariantIdChange={onSelectedVariantIdChange}
+          pricing={testPricingContext("production")}
+          product={product}
+          selectedVariantId={pending.id}
+        />
+      </CartProvider>,
+    );
+    expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Controlled pending");
+    expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Pricing coming soon");
+  });
+
+  it("reports every valid quantity change to a shared visual selection owner", () => {
+    const onSelectedQuantityChange = vi.fn();
+    render(
+      <CartProvider>
+        <ProductPurchasePanel
+          onSelectedQuantityChange={onSelectedQuantityChange}
+          pricing={testPricingContext("production")}
+          product={testCanonicalProduct()}
+        />
+      </CartProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "2 bottles" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), {
+      target: { value: "3" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "10 or more bottles" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), {
+      target: { value: "" },
+    });
+
+    expect(onSelectedQuantityChange.mock.calls).toEqual([[2], [3], [10], [null]]);
+  });
+
   it("keeps the 10+ interaction synchronized with pricing and exits through decrement", () => {
     render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext()} /></CartProvider>);
     const exactQuantity = () => screen.getByRole("spinbutton", { name: "Exact quantity" });

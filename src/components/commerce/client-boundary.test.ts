@@ -19,6 +19,7 @@ const checkoutFormPath = "src/components/commerce/checkout-form.tsx";
 const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
   "src/components/commerce/catalog-explorer.tsx",
+  "src/components/commerce/catalog-item-detail.tsx",
   "src/components/commerce/catalog-listing-card.tsx",
   "src/components/commerce/related-products-carousel.tsx",
   "src/components/commerce/laboratory-concentration-calculator.tsx",
