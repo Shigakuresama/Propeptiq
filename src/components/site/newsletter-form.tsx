@@ -4,8 +4,8 @@ import { type FormEvent, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
-  isApprovedNewsletterPrivacyHref,
-  type ApprovedNewsletterPrivacyHref,
+  isNewsletterPrivacyLinkView,
+  type NewsletterPrivacyLinkView,
 } from "@/lib/site-content";
 import {
   parseNewsletterResult,
@@ -38,9 +38,14 @@ async function submitNewsletter(
     },
     body: JSON.stringify({ email: input.email, consent: true }),
   });
-  if (!response.ok) throw new TypeError("Newsletter request failed.");
   const parsed = parseNewsletterResult(await response.json());
   if (parsed === null) throw new TypeError("Newsletter response was invalid.");
+  if (
+    !response.ok &&
+    (parsed.status === "SUBSCRIBED" || parsed.status === "DUPLICATE")
+  ) {
+    throw new TypeError("Newsletter request failed.");
+  }
   return parsed;
 }
 
@@ -54,16 +59,18 @@ function messageForResult(value: unknown): string {
 }
 
 export function NewsletterForm({
+  available,
   privacyHref,
   submit = submitNewsletter,
 }: {
-  privacyHref: ApprovedNewsletterPrivacyHref | null;
+  available: boolean;
+  privacyHref: NewsletterPrivacyLinkView | null;
   submit?: NewsletterSubmit | undefined;
 }) {
-  const approvedPrivacyHref = isApprovedNewsletterPrivacyHref(privacyHref)
+  const privacyLink = isNewsletterPrivacyLinkView(privacyHref)
     ? privacyHref
     : null;
-  const unavailable = approvedPrivacyHref === null;
+  const unavailable = available !== true || privacyLink === null;
   const inFlight = useRef(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -159,12 +166,12 @@ export function NewsletterForm({
               type="checkbox"
             />
             <span>
-              {approvedPrivacyHref === null ? (
+              {privacyLink === null ? (
                 "Newsletter consent is unavailable until an approved privacy policy is configured."
               ) : (
                 <>
                   I consent to receive PropeptIQ newsletter emails. Review the{" "}
-                  <a className="record-link" href={approvedPrivacyHref.href}>Privacy Policy</a>.
+                  <a className="record-link" href={privacyLink.href}>Privacy Policy</a>.
                 </>
               )}
             </span>

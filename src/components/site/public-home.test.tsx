@@ -90,6 +90,28 @@ describe("PublicHome approved content composition", () => {
       "href",
       fictionalPrivacyHref.href,
     );
+    expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Newsletter signup is temporarily unavailable.",
+    );
     expect(screen.queryByText(/provider configured/iu)).toBeNull();
+  });
+
+  it("does not project an unapproved serialized clone into the client link view", () => {
+    const clonedPrivacyHref = JSON.parse(
+      JSON.stringify(fictionalPrivacyHref),
+    ) as typeof fictionalPrivacyHref;
+
+    render(
+      <PublicHome
+        newsletterPrivacyHref={clonedPrivacyHref}
+        products={[]}
+        variantCount={0}
+        pricing={testPricingContext()}
+      />,
+    );
+
+    expect(screen.queryByRole("link", { name: "Privacy Policy" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
   });
 });

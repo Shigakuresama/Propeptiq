@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   projectApprovedNewsletterPrivacyHref,
+  projectNewsletterPrivacyLinkView,
 } from "@/lib/site-content";
 
 import { NewsletterForm, type NewsletterSubmit } from "./newsletter-form";
@@ -12,6 +13,9 @@ const fictionalEmail = "subscriber@example.test";
 const fictionalPrivacyHref = projectApprovedNewsletterPrivacyHref(
   "/test-only-fictional-privacy",
   Object.freeze(["/test-only-fictional-privacy"]),
+)!;
+const fictionalPrivacyLinkView = projectNewsletterPrivacyLinkView(
+  fictionalPrivacyHref,
 )!;
 const forgedPrivacyHref = Object.freeze({
   href: "/privacy-policy",
@@ -44,8 +48,30 @@ afterEach(() => {
 });
 
 describe("NewsletterForm", () => {
+  it("keeps an approved privacy destination usable after the server-to-client serialization boundary", () => {
+    const serializedPrivacyHref = JSON.parse(
+      JSON.stringify(fictionalPrivacyLinkView),
+    ) as typeof fictionalPrivacyLinkView;
+
+    render(
+      <NewsletterForm
+        available
+        privacyHref={serializedPrivacyHref}
+        submit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("textbox", { name: "Email address" })).toBeEnabled();
+    expect(screen.getByRole("checkbox")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Subscribe" })).toBeEnabled();
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute(
+      "href",
+      fictionalPrivacyHref.href,
+    );
+  });
+
   it("renders the native email and unchecked consent contract with one live region", () => {
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} submit={vi.fn()} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} submit={vi.fn()} />);
 
     const email = screen.getByRole("textbox", { name: "Email address" });
     expect(email).toHaveAttribute("type", "email");
@@ -70,7 +96,7 @@ describe("NewsletterForm", () => {
     const submit = vi.fn<NewsletterSubmit>();
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    render(<NewsletterForm privacyHref={null} submit={submit} />);
+    render(<NewsletterForm available privacyHref={null} submit={submit} />);
 
     expect(screen.getByRole("heading", { name: "PropeptIQ newsletter" })).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Email address" })).toBeDisabled();
@@ -89,6 +115,7 @@ describe("NewsletterForm", () => {
   it("fails a safe-looking but unbranded runtime href closed without rendering a link", () => {
     render(
       <NewsletterForm
+        available
         privacyHref={"/test-only-fictional-privacy" as never}
         submit={vi.fn()}
       />,
@@ -109,7 +136,7 @@ describe("NewsletterForm", () => {
     const submit = vi.fn<NewsletterSubmit>();
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    render(<NewsletterForm privacyHref={privacyHref} submit={submit} />);
+    render(<NewsletterForm available privacyHref={privacyHref} submit={submit} />);
 
     expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
     expect(screen.queryByRole("link", { name: "Privacy Policy" })).toBeNull();
@@ -124,7 +151,7 @@ describe("NewsletterForm", () => {
   it("announces an invalid email and does not submit", async () => {
     const user = userEvent.setup();
     const submit = vi.fn<NewsletterSubmit>();
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} submit={submit} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} submit={submit} />);
 
     await user.type(screen.getByRole("textbox", { name: "Email address" }), "not-an-email");
     await user.click(screen.getByRole("checkbox"));
@@ -137,7 +164,7 @@ describe("NewsletterForm", () => {
   it("announces missing consent and does not submit", async () => {
     const user = userEvent.setup();
     const submit = vi.fn<NewsletterSubmit>();
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} submit={submit} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} submit={submit} />);
 
     await user.type(screen.getByRole("textbox", { name: "Email address" }), fictionalEmail);
     await user.click(screen.getByRole("button", { name: "Subscribe" }));
@@ -152,7 +179,7 @@ describe("NewsletterForm", () => {
     const user = userEvent.setup();
     const pending = deferred<unknown>();
     const submit = vi.fn<NewsletterSubmit>().mockReturnValue(pending.promise);
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} submit={submit} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} submit={submit} />);
     await fillConfiguredForm(user);
 
     const button = screen.getByRole("button", { name: "Subscribe" });
@@ -181,7 +208,7 @@ describe("NewsletterForm", () => {
   ] as const)("maps strict result $0 to fixed copy", async (result, message) => {
     const user = userEvent.setup();
     const submit = vi.fn<NewsletterSubmit>().mockResolvedValue(result);
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} submit={submit} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} submit={submit} />);
     await fillConfiguredForm(user);
 
     await user.click(screen.getByRole("button", { name: "Subscribe" }));
@@ -198,7 +225,7 @@ describe("NewsletterForm", () => {
   ] as const)("shows only the generic error for %s", async (_label, implementation) => {
     const user = userEvent.setup();
     const submit = vi.fn(implementation) as NewsletterSubmit;
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} submit={submit} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} submit={submit} />);
     await fillConfiguredForm(user);
 
     await user.click(screen.getByRole("button", { name: "Subscribe" }));
@@ -217,7 +244,7 @@ describe("NewsletterForm", () => {
       { status: 200, headers: { "Content-Type": "application/json" } },
     ));
     vi.stubGlobal("fetch", fetchSpy);
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} />);
     await fillConfiguredForm(user);
 
     await user.click(screen.getByRole("button", { name: "Subscribe" }));
@@ -240,14 +267,32 @@ describe("NewsletterForm", () => {
     );
   });
 
+  it("preserves the honest unavailable state for a typed non-OK closed response", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ status: "NEWSLETTER_NOT_CONFIGURED" }),
+      { status: 503 },
+    )));
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} />);
+    await fillConfiguredForm(user);
+
+    await user.click(screen.getByRole("button", { name: "Subscribe" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Newsletter signup is temporarily unavailable.",
+    );
+  });
+
   it.each([
-    ["non-OK", new Response(JSON.stringify({ status: "NEWSLETTER_NOT_CONFIGURED" }), { status: 503 })],
     ["invalid JSON", new Response("not-json", { status: 200 })],
     ["malformed JSON result", new Response(JSON.stringify({ status: "SUBSCRIBED", email: fictionalEmail }), { status: 200 })],
+    ["non-OK success result", new Response(JSON.stringify({ status: "SUBSCRIBED" }), { status: 503 })],
+    ["typed provider error", new Response(JSON.stringify({ status: "PROVIDER_ERROR" }), { status: 503 })],
+    ["typed invalid result", new Response(JSON.stringify({ status: "INVALID", field: "request" }), { status: 400 })],
   ] as const)("maps default fetch %s to the generic error", async (_label, response) => {
     const user = userEvent.setup();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} />);
     await fillConfiguredForm(user);
 
     await user.click(screen.getByRole("button", { name: "Subscribe" }));
@@ -255,6 +300,22 @@ describe("NewsletterForm", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Newsletter signup could not be completed. Please try again later.",
     );
+  });
+
+  it("maps a default transport rejection to the fixed generic error", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(
+      new Error(`network leaked ${fictionalEmail}`),
+    ));
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} />);
+    await fillConfiguredForm(user);
+
+    await user.click(screen.getByRole("button", { name: "Subscribe" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Newsletter signup could not be completed. Please try again later.",
+    );
+    expect(screen.getByRole("status")).not.toHaveTextContent(fictionalEmail);
   });
 
   it("does not write storage, cookies, or logs during default submission", async () => {
@@ -268,7 +329,7 @@ describe("NewsletterForm", () => {
       JSON.stringify({ status: "SUBSCRIBED" }),
       { status: 200 },
     )));
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} />);
     await fillConfiguredForm(user);
 
     await user.click(screen.getByRole("button", { name: "Subscribe" }));
@@ -282,11 +343,40 @@ describe("NewsletterForm", () => {
   });
 
   it("contains only the supplied approved privacy destination in the consent area", () => {
-    render(<NewsletterForm privacyHref={fictionalPrivacyHref} submit={vi.fn()} />);
+    render(<NewsletterForm available privacyHref={fictionalPrivacyLinkView} submit={vi.fn()} />);
     const form = screen.getByRole("form", { name: "Newsletter signup" });
     const links = within(form).getAllByRole("link");
 
     expect(links).toHaveLength(1);
     expect(links[0]).toHaveAttribute("href", fictionalPrivacyHref.href);
+  });
+
+  it("keeps a privacy-approved form disabled when the shared launch flag is false", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn<NewsletterSubmit>();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    render(
+      <NewsletterForm
+        available={false}
+        privacyHref={fictionalPrivacyLinkView}
+        submit={submit}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute(
+      "href",
+      fictionalPrivacyHref.href,
+    );
+    expect(screen.getByRole("textbox", { name: "Email address" })).toBeDisabled();
+    expect(screen.getByRole("checkbox")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Newsletter signup is temporarily unavailable.",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Subscribe" }));
+    expect(submit).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

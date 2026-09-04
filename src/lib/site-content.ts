@@ -5,11 +5,21 @@ export const siteName = "PROPEPTIQ LABS";
 declare const approvedNewsletterPrivacyHrefBrand: unique symbol;
 
 const approvedNewsletterPrivacyHrefKind = "approved-newsletter-privacy-href" as const;
+const newsletterPrivacyLinkViewKind = "newsletter-privacy-link-view" as const;
 
 export type ApprovedNewsletterPrivacyHref = Readonly<{
   href: `/${string}`;
   kind: typeof approvedNewsletterPrivacyHrefKind;
   [approvedNewsletterPrivacyHrefBrand]: true;
+}>;
+
+/**
+ * Serializable rendering data only. Business approval remains represented by
+ * ApprovedNewsletterPrivacyHref and is enforced again by the API runtime.
+ */
+export type NewsletterPrivacyLinkView = Readonly<{
+  href: `/${string}`;
+  kind: typeof newsletterPrivacyLinkViewKind;
 }>;
 
 const projectedNewsletterPrivacyHrefs = new WeakSet<object>();
@@ -148,12 +158,52 @@ export function isApprovedNewsletterPrivacyHref(
   }
 }
 
+export function projectNewsletterPrivacyLinkView(
+  value: unknown,
+): NewsletterPrivacyLinkView | null {
+  if (!isApprovedNewsletterPrivacyHref(value)) return null;
+  return Object.freeze({
+    href: value.href,
+    kind: newsletterPrivacyLinkViewKind,
+  });
+}
+
+/**
+ * Validates only the serialized client rendering shape and safe route syntax;
+ * it does not grant business approval or server subscription authority.
+ */
+export function isNewsletterPrivacyLinkView(
+  value: unknown,
+): value is NewsletterPrivacyLinkView {
+  try {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== 2 || !keys.includes("href") || !keys.includes("kind")) {
+      return false;
+    }
+    const hrefDescriptor = Reflect.getOwnPropertyDescriptor(value, "href");
+    const kindDescriptor = Reflect.getOwnPropertyDescriptor(value, "kind");
+    return hrefDescriptor !== undefined &&
+      kindDescriptor !== undefined &&
+      "value" in hrefDescriptor &&
+      "value" in kindDescriptor &&
+      kindDescriptor.value === newsletterPrivacyLinkViewKind &&
+      isSafeNewsletterPrivacyPath(hrefDescriptor.value);
+  } catch {
+    return false;
+  }
+}
+
 export const newsletterPrivacyDestinations: NewsletterPrivacyDestinationPolicy =
   Object.freeze([] as `/${string}`[]);
 
 export const newsletterConfiguration: Readonly<{
+  enabled: boolean;
   privacyHref: ApprovedNewsletterPrivacyHref | null;
 }> = Object.freeze({
+  enabled: false,
   privacyHref: projectApprovedNewsletterPrivacyHref(
     null,
     newsletterPrivacyDestinations,

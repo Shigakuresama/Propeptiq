@@ -47,6 +47,16 @@ const generatedSecret = z
     (value) => new Set(value).size >= 8 && !isRepeatedShortPattern(value),
     { message: "Expected generated secret material with sufficient variation" },
   );
+const newsletterTopicId = z.uuid().refine(
+  (value) => value !== "00000000-0000-0000-0000-000000000000",
+  { message: "Expected a non-nil newsletter Topic UUID" },
+);
+const newsletterRateLimitMaximum = z.coerce.number().int().min(1).max(100);
+const newsletterRateLimitWindowSeconds = z.coerce
+  .number()
+  .int()
+  .min(60)
+  .max(86_400);
 const settlementWindowDays = z.coerce.number().int().min(1).max(90);
 /** Owner-configured Stripe ShippingRate backing the shipping quote port. */
 const stripeShippingRateId = z.string().min(1).refine(
@@ -104,6 +114,7 @@ const rawServerEnvSchema = z.object({
   PAYMENTS_MODE: capabilityMode.default("disabled"),
   STORAGE_MODE: capabilityMode.default("disabled"),
   EMAIL_MODE: capabilityMode.default("disabled"),
+  NEWSLETTER_MODE: capabilityMode.default("disabled"),
   COMMERCE_LIVE_CAPABILITY: z.enum(["disabled", "enabled"]).default("disabled"),
   PAYMENTS_LIVE_CAPABILITY: z.enum(["disabled", "enabled"]).default("disabled"),
   TAX_MODE: capabilityMode.default("disabled"),
@@ -138,10 +149,24 @@ const rawServerEnvSchema = z.object({
   BLOB_READ_WRITE_TOKEN: nonBlank.optional(),
   RESEND_API_KEY: nonBlank.optional(),
   RESEND_FROM: nonBlank.pipe(z.email()).optional(),
+  NEWSLETTER_RESEND_API_KEY: nonBlank.optional(),
+  NEWSLETTER_RESEND_TOPIC_ID: newsletterTopicId.optional(),
+  NEWSLETTER_RATE_LIMIT_MAX: newsletterRateLimitMaximum.optional(),
+  NEWSLETTER_RATE_LIMIT_WINDOW_SECONDS:
+    newsletterRateLimitWindowSeconds.optional(),
   OTEL_SERVICE_NAME: nonBlank.default("propeptiq-labs"),
 });
 
-export type ServerEnv = z.infer<typeof rawServerEnvSchema>;
+type ParsedServerEnv = z.infer<typeof rawServerEnvSchema>;
+
+/**
+ * Parsed environments always include NEWSLETTER_MODE. It remains optional on
+ * the structural port so existing injected test/runtime environments retain
+ * the same meaning as the parser's disabled default.
+ */
+export type ServerEnv = Omit<ParsedServerEnv, "NEWSLETTER_MODE"> & Readonly<{
+  NEWSLETTER_MODE?: ParsedServerEnv["NEWSLETTER_MODE"];
+}>;
 
 export function hasProductionIdentity(
   environment: Pick<
@@ -162,14 +187,15 @@ const modeKeys = [
   "PAYMENTS_MODE",
   "STORAGE_MODE",
   "EMAIL_MODE",
+  "NEWSLETTER_MODE",
   "TAX_MODE",
   "SHIPPING_MODE",
   "FULFILLMENT_MODE",
-] as const satisfies ReadonlyArray<keyof ServerEnv>;
+] as const satisfies ReadonlyArray<keyof ParsedServerEnv>;
 
 function addRequiredIssue(
-  context: z.core.$RefinementCtx<ServerEnv>,
-  field: keyof ServerEnv,
+  context: z.core.$RefinementCtx<ParsedServerEnv>,
+  field: keyof ParsedServerEnv,
   modeField: (typeof modeKeys)[number],
 ) {
   context.addIssue({
@@ -180,10 +206,10 @@ function addRequiredIssue(
 }
 
 function requireFields(
-  env: ServerEnv,
-  context: z.core.$RefinementCtx<ServerEnv>,
+  env: ParsedServerEnv,
+  context: z.core.$RefinementCtx<ParsedServerEnv>,
   modeField: (typeof modeKeys)[number],
-  fields: ReadonlyArray<keyof ServerEnv>,
+  fields: ReadonlyArray<keyof ParsedServerEnv>,
 ) {
   if (env[modeField] === "disabled") {
     return;
@@ -331,6 +357,35 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
         code: "custom",
         path: ["EMAIL_MODE"],
         message: `AUTH_MODE=${env.AUTH_MODE} requires EMAIL_MODE=${env.AUTH_MODE}`,
+      });
+    }
+  }
+  if (env.NEWSLETTER_MODE !== "disabled") {
+    requireFields(env, context, "NEWSLETTER_MODE", [
+      "NEWSLETTER_RESEND_API_KEY",
+      "NEWSLETTER_RESEND_TOPIC_ID",
+      "NEWSLETTER_RATE_LIMIT_MAX",
+      "NEWSLETTER_RATE_LIMIT_WINDOW_SECONDS",
+      "RATE_LIMIT_SECRET",
+    ]);
+    if (env.DATABASE_MODE !== env.NEWSLETTER_MODE) {
+      context.addIssue({
+        code: "custom",
+        path: ["DATABASE_MODE"],
+        message:
+          `NEWSLETTER_MODE=${env.NEWSLETTER_MODE} requires DATABASE_MODE=${env.NEWSLETTER_MODE}`,
+      });
+    }
+    if (
+      env.NEWSLETTER_RESEND_API_KEY &&
+      env.RESEND_API_KEY &&
+      env.NEWSLETTER_RESEND_API_KEY === env.RESEND_API_KEY
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["NEWSLETTER_RESEND_API_KEY"],
+        message:
+          "Newsletter and transactional Resend keys must be independent",
       });
     }
   }

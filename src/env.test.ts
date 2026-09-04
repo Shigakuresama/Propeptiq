@@ -11,6 +11,22 @@ const neonAuthCookieSecret =
   "synthetic-neon-auth-cookie-secret-at-least-32-characters";
 const betterAuthSecret =
   "synthetic-better-auth-secret-material-0123456789ABCDEF";
+const newsletterRateLimitSecret =
+  "synthetic-newsletter-rate-limit-secret-0123456789ABCDEF";
+const newsletterTopicId = "11111111-1111-4111-8111-111111111111";
+
+const newsletterTestInput = {
+  NEWSLETTER_MODE: "test",
+  NEWSLETTER_RESEND_API_KEY: "re_synthetic_newsletter_test",
+  NEWSLETTER_RESEND_TOPIC_ID: newsletterTopicId,
+  NEWSLETTER_RATE_LIMIT_MAX: "5",
+  NEWSLETTER_RATE_LIMIT_WINDOW_SECONDS: "600",
+  RATE_LIMIT_SECRET: newsletterRateLimitSecret,
+  DATABASE_MODE: "test",
+  TEST_DATABASE_URL:
+    "postgresql://synthetic_newsletter:synthetic_password@db.example.invalid/propeptiq_newsletter_test",
+  TEST_DATABASE_CONFIRMATION: "isolated-test-database",
+} as const;
 
 const applicationOwnedAuthTestInput = {
   APP_ORIGIN: "http://localhost:3000",
@@ -91,6 +107,7 @@ describe("parseServerEnv", () => {
       PAYMENTS_MODE: "disabled",
       STORAGE_MODE: "disabled",
       EMAIL_MODE: "disabled",
+      NEWSLETTER_MODE: "disabled",
       COMMERCE_LIVE_CAPABILITY: "disabled",
       PAYMENTS_LIVE_CAPABILITY: "disabled",
       TAX_MODE: "disabled",
@@ -98,6 +115,95 @@ describe("parseServerEnv", () => {
       FULFILLMENT_MODE: "disabled",
     });
     expect(env.BROWSE_CATALOG_PUBLICATION).toBeUndefined();
+  });
+
+  it("accepts installed newsletter values without activating the disabled default", () => {
+    const env = parseServerEnv({
+      NEWSLETTER_RESEND_API_KEY: "re_synthetic_installed_only",
+      NEWSLETTER_RESEND_TOPIC_ID: newsletterTopicId,
+      NEWSLETTER_RATE_LIMIT_MAX: "5",
+      NEWSLETTER_RATE_LIMIT_WINDOW_SECONDS: "600",
+    });
+
+    expect(env.NEWSLETTER_MODE).toBe("disabled");
+    expect(env.NEWSLETTER_RESEND_TOPIC_ID).toBe(newsletterTopicId);
+  });
+
+  it("accepts a complete test newsletter configuration without email delivery mode", () => {
+    const env = parseServerEnv(newsletterTestInput);
+
+    expect(env).toMatchObject({
+      NEWSLETTER_MODE: "test",
+      NEWSLETTER_RESEND_API_KEY: "re_synthetic_newsletter_test",
+      NEWSLETTER_RESEND_TOPIC_ID: newsletterTopicId,
+      NEWSLETTER_RATE_LIMIT_MAX: 5,
+      NEWSLETTER_RATE_LIMIT_WINDOW_SECONDS: 600,
+      DATABASE_MODE: "test",
+      EMAIL_MODE: "disabled",
+    });
+    expect(env.RESEND_FROM).toBeUndefined();
+  });
+
+  it.each([
+    ["NEWSLETTER_RESEND_API_KEY"],
+    ["NEWSLETTER_RESEND_TOPIC_ID"],
+    ["NEWSLETTER_RATE_LIMIT_MAX"],
+    ["NEWSLETTER_RATE_LIMIT_WINDOW_SECONDS"],
+    ["RATE_LIMIT_SECRET"],
+  ] as const)("requires %s whenever newsletter mode is enabled", (field) => {
+    expect(() => parseServerEnv({
+      ...newsletterTestInput,
+      [field]: undefined,
+    })).toThrow(new RegExp(field));
+  });
+
+  it.each([
+    ["invalid topic", "NEWSLETTER_RESEND_TOPIC_ID", "not-a-uuid"],
+    ["nil-like topic", "NEWSLETTER_RESEND_TOPIC_ID", "00000000-0000-0000-0000-000000000000"],
+    ["zero maximum", "NEWSLETTER_RATE_LIMIT_MAX", "0"],
+    ["maximum above 100", "NEWSLETTER_RATE_LIMIT_MAX", "101"],
+    ["fractional maximum", "NEWSLETTER_RATE_LIMIT_MAX", "1.5"],
+    ["window below 60", "NEWSLETTER_RATE_LIMIT_WINDOW_SECONDS", "59"],
+    ["window above one day", "NEWSLETTER_RATE_LIMIT_WINDOW_SECONDS", "86401"],
+    ["fractional window", "NEWSLETTER_RATE_LIMIT_WINDOW_SECONDS", "60.5"],
+  ] as const)("rejects %s", (_label, field, value) => {
+    expect(() => parseServerEnv({
+      ...newsletterTestInput,
+      [field]: value,
+    })).toThrow(new RegExp(field));
+  });
+
+  it("requires newsletter and database modes to match", () => {
+    expect(() => parseServerEnv({
+      ...newsletterTestInput,
+      DATABASE_MODE: "disabled",
+      TEST_DATABASE_URL: undefined,
+      TEST_DATABASE_CONFIRMATION: undefined,
+    })).toThrow(/NEWSLETTER_MODE=test requires DATABASE_MODE=test/);
+  });
+
+  it("requires a newsletter key independent from transactional Auth email", () => {
+    expect(() => parseServerEnv({
+      ...newsletterTestInput,
+      NEWSLETTER_RESEND_API_KEY: "re_synthetic_shared",
+      RESEND_API_KEY: "re_synthetic_shared",
+    })).toThrow(/newsletter and transactional Resend keys must be independent/i);
+  });
+
+  it("applies provider deployment identity restrictions to newsletter mode", () => {
+    expect(() => parseServerEnv({
+      ...newsletterTestInput,
+      ...productionIdentity,
+    })).toThrow(/NEWSLETTER_MODE test mode is not permitted in production/);
+
+    expect(() => parseServerEnv({
+      ...newsletterTestInput,
+      NEWSLETTER_MODE: "live",
+      DATABASE_MODE: "live",
+      DATABASE_URL: "postgresql://synthetic.invalid/database?sslmode=require",
+      TEST_DATABASE_URL: undefined,
+      TEST_DATABASE_CONFIRMATION: undefined,
+    })).toThrow(/NEWSLETTER_MODE=live requires APP_ENV=production/);
   });
 
   it("accepts explicit preview and approved calculator modes outside the forbidden matrix", () => {

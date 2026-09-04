@@ -24,6 +24,7 @@ import type { LoyaltyPolicy } from "@/domain/rewards";
 import type { ReferralPolicy } from "@/domain/referrals";
 import {
   newsletterConfiguration,
+  projectNewsletterPrivacyLinkView,
   researchRestrictions,
   type ApprovedNewsletterPrivacyHref,
 } from "@/lib/site-content";
@@ -76,6 +77,9 @@ export function PublicHome({
   pricing: PublicStorefrontPricingContext;
 }) {
   const allBrowseOnly = products.every((product) => product.kind === "browse_only");
+  const newsletterPrivacyLink = projectNewsletterPrivacyLinkView(
+    newsletterPrivacyHref,
+  );
   const growthPrograms = [
     ...(loyaltyPolicy?.status === "active" ? [{
       title: "Earn points",
@@ -262,7 +266,10 @@ export function PublicHome({
 
       <WhyChoosePropeptIQ items={homepageContent.whyChoose} />
       <FaqSection entries={homepageContent.faqs} />
-      <NewsletterForm privacyHref={newsletterPrivacyHref} />
+      <NewsletterForm
+        available={newsletterConfiguration.enabled}
+        privacyHref={newsletterPrivacyLink}
+      />
 
       <section
         aria-labelledby="quality-callout-heading"

@@ -1,10 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const runtimeComposition = vi.hoisted(() => vi.fn());
+
+vi.mock("@/newsletter/runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/newsletter/runtime")>();
+  return {
+    ...actual,
+    createProductionNewsletterPostHandler() {
+      runtimeComposition();
+      return actual.createProductionNewsletterPostHandler();
+    },
+  };
+});
 
 import * as newsletterRoute from "./route";
 
 describe("production newsletter route", () => {
   it("exports POST only and remains closed before reading any request body", async () => {
     expect(Object.keys(newsletterRoute)).toEqual(["POST"]);
+    expect(runtimeComposition).toHaveBeenCalledTimes(1);
     const request = new Request("https://store.example.test/api/newsletter", {
       method: "POST",
       headers: {

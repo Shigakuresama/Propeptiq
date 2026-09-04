@@ -1,6 +1,6 @@
-import { createNewsletterPostHandler } from "@/newsletter/server";
+import { createProductionNewsletterPostHandler } from "@/newsletter/runtime";
 
-const productionPOST = createNewsletterPostHandler();
+const productionPOST = createProductionNewsletterPostHandler();
 
 export async function POST(request: Request): Promise<Response> {
   return productionPOST(request);

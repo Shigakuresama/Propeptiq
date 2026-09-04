@@ -11,9 +11,11 @@ import {
 } from "@/newsletter/server";
 import {
   isApprovedNewsletterPrivacyHref,
+  isNewsletterPrivacyLinkView,
   newsletterConfiguration,
   newsletterPrivacyDestinations,
   projectApprovedNewsletterPrivacyHref,
+  projectNewsletterPrivacyLinkView,
 } from "@/lib/site-content";
 
 const requestUrl = "https://store.example.test/api/newsletter";
@@ -190,7 +192,10 @@ describe("approved newsletter privacy destination", () => {
   it("keeps the production policy empty, frozen, and explicitly unconfigured", () => {
     expect(newsletterPrivacyDestinations).toEqual([]);
     expect(Object.isFrozen(newsletterPrivacyDestinations)).toBe(true);
-    expect(newsletterConfiguration).toEqual({ privacyHref: null });
+    expect(newsletterConfiguration).toEqual({
+      enabled: false,
+      privacyHref: null,
+    });
     expect(Object.isFrozen(newsletterConfiguration)).toBe(true);
   });
 
@@ -208,6 +213,20 @@ describe("approved newsletter privacy destination", () => {
     }, {});
     revocable.revoke();
     expect(isApprovedNewsletterPrivacyHref(revocable.proxy)).toBe(false);
+  });
+
+  it("projects approval into a frozen serializable client view without granting server authority", () => {
+    const view = projectNewsletterPrivacyLinkView(fictionalPrivacyHref);
+    const serialized = JSON.parse(JSON.stringify(view)) as unknown;
+
+    expect(view).toEqual({
+      href: "/test-only-fictional-privacy",
+      kind: "newsletter-privacy-link-view",
+    });
+    expect(Object.isFrozen(view)).toBe(true);
+    expect(isNewsletterPrivacyLinkView(serialized)).toBe(true);
+    expect(isApprovedNewsletterPrivacyHref(serialized)).toBe(false);
+    expect(projectNewsletterPrivacyLinkView(clonedFictionalPrivacyHref)).toBeNull();
   });
 });
 
