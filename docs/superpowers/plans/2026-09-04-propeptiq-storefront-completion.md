@@ -106,6 +106,8 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - Modify: `src/catalog/storefront-catalog-manifest.test.ts`
 - Modify: `src/catalog/storefront-catalog-data.ts`
 - Modify: `src/catalog/storefront-catalog-data.test.ts`
+- Modify: `src/catalog/storefront-price-presentation.ts`
+- Modify: `src/catalog/storefront-price-presentation.test.ts`
 - Modify: `docs/runbooks/storefront-configuration.md`
 - Create: `docs/reference/2026-09-04-amino-equivalent-price-audit.md`
 
@@ -113,14 +115,16 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - Consumes: exact local `(browseSlug, browseCode, numeric amount, unit)` identities and current official Amino Club standard/list prices.
 - Produces: `approvedStorefrontCatalogPriceDecisions` entries only for exact compound/blend and exact amount matches; unmatched or unprovable rows remain `pending` at zero. Also produces one explicit owner-approved `defaultVariantId` for each product.
 
-- [ ] Write an exhaustive table for all 103 local variants with local name, code, amount/unit, official product URL, official selected variant, standard price in cents, observation time, and `matched | no_exact_equivalent | unresolved` result.
-- [ ] Verify every official URL and variant interaction on the current Amino Club domain; never infer a higher-tier amount from “From” pricing and never use a temporary sale amount as the base price.
-- [ ] Add or change a manifest decision only when the exact variant and ordinary one-vial standard price are directly observable; preserve zero-dollar pending state otherwise.
-- [ ] Inventory all 56 products and record an explicit owner-approved `defaultVariantId`; never derive the default from array order, price approval, availability ordering, or a Stripe mapping. Leave this decision blocked rather than introducing a new implicit selection behavior when the owner has not chosen a default.
-- [ ] Add tests that require unique `(browseSlug,browseCode)` keys, positive integer minor units for approved rows, exact currency, absolute official URL, observation timestamp, and zero/no evidence for pending rows.
-- [ ] Add tests proving reorderings and later price approvals cannot silently change the selected default; regardless of a PDP default, multi-variant card `ADD` must open the variant chooser instead of adding an arbitrary variant.
-- [ ] Run `npm test -- src/catalog/storefront-catalog-manifest.test.ts src/catalog/storefront-catalog-data.test.ts src/catalog/storefront-price-presentation.test.ts src/domain/storefront-pricing.test.ts`.
-- [ ] Have a reviewer reproduce a representative single-variant, multi-variant, blend, and unmatched row from the official source before committing.
+- [x] Write an exhaustive table for all 103 local variants with local name, code, amount/unit, official product URL, official selected variant, standard price in cents, observation time, and `matched | no_exact_equivalent | unresolved` result.
+- [x] Verify every official URL and variant interaction on the current Amino Club domain; never infer a higher-tier amount from “From” pricing and never use a temporary sale amount as the base price.
+- [x] Add or change a manifest decision only when the exact variant and ordinary one-vial standard price are directly observable; preserve zero-dollar pending state otherwise.
+- [x] Inventory all 56 products and record an explicit owner-approved `defaultVariantId`; never derive the default from array order, price approval, availability ordering, or a Stripe mapping. Leave this decision blocked rather than introducing a new implicit selection behavior when the owner has not chosen a default.
+- [x] Add tests that require unique `(browseSlug,browseCode)` keys, positive integer minor units for approved rows, exact currency, absolute official URL, observation timestamp, and zero/no evidence for pending rows.
+- [x] Add tests proving reorderings and later price approvals cannot silently change the selected default; regardless of a PDP default, multi-variant card `ADD` must open the variant chooser instead of adding an arbitrary variant.
+- [x] Run `npm test -- src/catalog/storefront-catalog-manifest.test.ts src/catalog/storefront-catalog-data.test.ts src/catalog/storefront-price-presentation.test.ts src/domain/storefront-pricing.test.ts`.
+- [x] Have a reviewer reproduce a representative single-variant, multi-variant, blend, and unmatched row from the official source before committing.
+
+**Accepted evidence:** Task 2A commits `5a1e5d9..e2b2afb` established the 103-row primary-source audit (`40 matched`, `41 no_exact_equivalent`, `22 unresolved`) with 137 focused tests and independent source reproduction. Task 2B commit `f96fa53338c05c233f976c1ee98c44e868d32c4b` made all 56 defaults explicit; 152 focused tests, lint, typecheck, workspace-boundary, and diff checks passed. Fresh adversarial review reported zero findings and approved the exact Task 2B range. The two branch-wide unit failures remain the documented unrelated visible-UI expectations and are not represented as a clean full-suite result.
 
 ### Task 3: Preserve canonical product, variant, promotion, and checkout authority
 
