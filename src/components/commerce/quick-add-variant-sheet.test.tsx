@@ -57,7 +57,7 @@ describe("QuickAddVariantSheet", () => {
     const user = userEvent.setup();
     renderTrigger();
     const trigger = screen.getByRole("button", {
-      name: "Add Synthetic Product Alpha to cart",
+      name: "Add Synthetic Product Alpha: choose a variant",
     });
     trigger.focus();
 
@@ -95,7 +95,7 @@ describe("QuickAddVariantSheet", () => {
     const user = userEvent.setup();
     renderTrigger();
     const trigger = screen.getByRole("button", {
-      name: "Add Synthetic Product Alpha to cart",
+      name: "Add Synthetic Product Alpha: choose a variant",
     });
 
     await user.click(trigger);
@@ -118,7 +118,7 @@ describe("QuickAddVariantSheet", () => {
     renderTrigger();
 
     await user.click(
-      screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }),
+      screen.getByRole("button", { name: "Add Synthetic Product Alpha: choose a variant" }),
     );
     const dialog = screen.getByRole("dialog", {
       name: "Choose a variant for Synthetic Product Alpha",
@@ -148,7 +148,7 @@ describe("QuickAddVariantSheet", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }),
+      screen.getByRole("button", { name: "Add Synthetic Product Alpha: choose a variant" }),
     );
     const label = within(screen.getByRole("dialog")).getByText(longLabel);
     const copyColumn = label.parentElement;
@@ -185,7 +185,7 @@ describe("QuickAddVariantSheet", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }),
+      screen.getByRole("button", { name: "Add Synthetic Product Alpha: choose a variant" }),
     );
     const dialog = screen.getByRole("dialog");
     const unavailableRadio = within(dialog).getByRole("radio", {
@@ -242,7 +242,7 @@ describe("QuickAddVariantSheet", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }),
+      screen.getByRole("button", { name: "Add Synthetic Product Alpha: choose a variant" }),
     );
     const dialog = screen.getByRole("dialog");
     const zero = within(dialog).getByRole("radio", { name: /Zero preview/iu });
@@ -282,7 +282,7 @@ describe("QuickAddVariantSheet", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }),
+      screen.getByRole("button", { name: "Add Synthetic Product Alpha: choose a variant" }),
     );
 
     const confirm = within(screen.getByRole("dialog")).getByRole("button", {
@@ -292,6 +292,7 @@ describe("QuickAddVariantSheet", () => {
     expect(confirm).toHaveTextContent("This variant cannot be added to the cart.");
     expect(confirm).toHaveAttribute("title", "This variant cannot be added to the cart.");
     expect(confirm).not.toHaveTextContent(/cart testing/iu);
+    expect(within(screen.getByRole("dialog")).getByText("Checkout unavailable")).toBeVisible();
   });
 
   it("adds the exact positive preview-only Production variant while pending stays disabled", async () => {
@@ -307,12 +308,16 @@ describe("QuickAddVariantSheet", () => {
       testCanonicalProduct([previewOnly, pending], { defaultVariantId: previewOnly.id }),
       testPricingContext("production", [testWinter30]),
     );
-    await user.click(screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }));
+    await user.click(screen.getByRole("button", { name: "Add Synthetic Product Alpha: choose a variant" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("radio", { name: /30 mg/iu })).toBeEnabled();
     expect(within(dialog).getByRole("radio", { name: /Pending/iu })).toBeDisabled();
-    expect(within(dialog).getByText("Checkout unavailable")).toBeVisible();
-    await user.click(within(dialog).getByRole("button", { name: "Add Synthetic Product Alpha to cart" }));
+    expect(within(dialog).getByText("Cart preview only")).toBeVisible();
+    const confirm = within(dialog).getByRole("button", {
+      name: "Add Synthetic Product Alpha to preview cart",
+    });
+    expect(confirm).toHaveTextContent("Add to preview cart");
+    await user.click(confirm);
     expect(addVariantMock).toHaveBeenCalledExactlyOnceWith("production-preview-variant", 1, {
       productName: "Synthetic Product Alpha", variantLabel: "30 mg",
     });

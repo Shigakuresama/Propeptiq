@@ -31,6 +31,7 @@ describe("ProductPrice", () => {
     expect(screen.getByText("$7.00").tagName).toBe("STRONG");
     expect(screen.getByText("-30%")).toBeVisible();
     expect(screen.getByText("Save $3.00")).toBeVisible();
+    expect(screen.getByText("Available")).toBeVisible();
   });
 
   it("renders an undiscounted price once without deletion or a badge", () => {
@@ -41,7 +42,7 @@ describe("ProductPrice", () => {
     expect(screen.queryByText(/save/iu)).toBeNull();
   });
 
-  it("labels a truthful mapping-missing active price as checkout unavailable", () => {
+  it("labels a mapping-missing active price as checkout unavailable", () => {
     render(<ProductPrice productId="product-alpha" variant={variant({ checkoutReady: false })} pricing={pricing("production")} />);
     expect(screen.getByText("$7.00")).toBeVisible();
     expect(screen.getByText("Checkout unavailable")).toBeVisible();

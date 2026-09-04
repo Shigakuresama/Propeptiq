@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { canAddPublicVariant, formatStorefrontMoney, resolvePublicVariantPrice, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import { canAddPublicVariant, formatStorefrontMoney, publicVariantPurchaseLabel, resolvePublicVariantPrice, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 import type { CanonicalPublicStorefrontProduct } from "@/catalog/storefront-public";
 import { AddToCartButton } from "./add-to-cart-button";
 import { QuantityTierSelector } from "./quantity-tier-selector";
@@ -28,8 +28,9 @@ export function ProductPurchasePanel({ product, pricing }: ProductPurchasePanelP
   const errorMessage = quantityIsValid ? null : minimumQuantity === 10 ? TEN_PLUS_QUANTITY_ERROR : QUANTITY_ERROR;
   const selected = product.variants.find((variant) => variant.id === selectedVariantId) ?? null;
   const presentation = useMemo(() => quantityIsValid && selected ? resolvePublicVariantPrice({ variant: selected, productId: product.id, quantity, pricing }) : null, [pricing, product.id, quantity, quantityIsValid, selected]);
+  const canAdd = quantityIsValid && selected !== null && canAddPublicVariant(selected, pricing.mode);
   const chooseQuantity = (next: number) => { setLastValidQuantity(next); setQuantityDraft(String(next)); };
-  const status = selected === null ? "Choose a variant" : !quantityIsValid ? "Invalid quantity" : presentation?.state === "unavailable" ? "Unavailable" : presentation?.state === "pending" ? "Pricing coming soon" : presentation?.purchaseState === "checkout_unavailable" ? "Checkout unavailable" : presentation?.purchaseState === "local_preview" ? "Preview only" : "Ready to purchase";
+  const status = selected === null ? "Choose a variant" : !quantityIsValid ? "Invalid quantity" : presentation ? publicVariantPurchaseLabel(presentation.purchaseState, "purchase_summary") : "Pricing coming soon";
   const price = presentation?.state === "priced" ? presentation.price : null;
   return <section className="mt-10 space-y-8" aria-labelledby="purchase-heading">
     <h2 id="purchase-heading" className="w-fit font-heading text-3xl text-ink">Purchase</h2>
@@ -40,7 +41,7 @@ export function ProductPurchasePanel({ product, pricing }: ProductPurchasePanelP
       <p className="text-sm text-muted-ink">{status}</p>
       {price ? <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm"><dt>Standard unit price</dt><dd>{price.effectiveDiscountBps > 0 ? <del>{formatStorefrontMoney(price.baseUnitMinor)}</del> : formatStorefrontMoney(price.baseUnitMinor)}</dd><dt>Effective unit price</dt><dd className="font-semibold">{formatStorefrontMoney(price.effectiveUnitMinor)}</dd><dt>Discount</dt><dd>{price.effectiveDiscountBps / 100}%</dd><dt>Savings</dt><dd>{formatStorefrontMoney(price.lineSavingsMinor)}</dd><dt>Quantity</dt><dd>{price.quantity}</dd><dt>Subtotal</dt><dd className="font-semibold">{formatStorefrontMoney(price.lineSubtotalMinor)}</dd></dl> : null}
       {price?.appliedPromotionIds.length ? <p className="text-sm font-semibold text-moss">{price.appliedPromotionIds.map((id) => { const promotion = pricing.automaticPromotions.find((entry) => entry.id === id); return promotion?.displayCode ?? promotion?.displayName ?? null; }).filter((label): label is string => label !== null).join(", ")}</p> : null}
-      <AddToCartButton variantId={selected?.id ?? null} quantity={lastValidQuantity} productName={product.name} {...(selected ? { variantLabel: selected.label } : {})} canAdd={quantityIsValid && selected !== null && canAddPublicVariant(selected, pricing.mode)} />
+      <AddToCartButton variantId={selected?.id ?? null} quantity={lastValidQuantity} productName={product.name} {...(selected ? { variantLabel: selected.label } : {})} canAdd={canAdd} {...(canAdd && presentation?.purchaseState !== "ready" ? { presentation: "preview" as const } : {})} />
     </div>
   </section>;
 }

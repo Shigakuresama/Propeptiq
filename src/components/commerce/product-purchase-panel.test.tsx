@@ -136,7 +136,7 @@ describe("ProductPurchasePanel", () => {
     ["pending null", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: null, currency: null, checkoutReady: false }), "Pricing coming soon", false],
     ["pending positive", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 1000, currency: "USD", checkoutReady: false }), "Pricing coming soon", false],
     ["malformed active zero", testPublicVariant({ baseUnitMinor: 0, checkoutReady: false }), "Pricing coming soon", false],
-    ["preview zero", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, currency: "USD", checkoutReady: false }), "Preview only", true],
+    ["preview zero", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, currency: "USD", checkoutReady: false }), "Local cart preview", true],
   ] as const)("handles %s honestly", (_name, variant, status, hasMoney) => {
     render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([variant])} pricing={testPricingContext("preview", [{ ...testWinter30, displayCode: "ZERO" }])} /></CartProvider>);
     const summary = screen.getByRole("status", { name: "Purchase summary" }); expect(summary).toHaveTextContent(status); if (!hasMoney || String(status) === "Pricing coming soon") { expect(summary).not.toHaveTextContent("Standard unit price"); expect(summary).not.toHaveTextContent("Savings"); expect(summary).not.toHaveTextContent("Subtotal"); expect(summary.querySelector("del")).toBeNull(); expect(summary).not.toHaveTextContent("ZERO"); }
@@ -161,8 +161,10 @@ describe("ProductPurchasePanel", () => {
     });
     render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([previewOnly])} pricing={testPricingContext("production")} /></CartProvider>);
     fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: "3" } });
-    expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Checkout unavailable");
-    fireEvent.click(screen.getByRole("button", { name: /add synthetic product alpha to cart/i }));
+    expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Cart preview only");
+    const add = screen.getByRole("button", { name: "Add Synthetic Product Alpha to preview cart" });
+    expect(add).toHaveTextContent("Add to preview cart");
+    fireEvent.click(add);
     await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "null")).toEqual({
       version: 2,
       items: [{ variantId: "production-preview-variant", quantity: 3 }],
@@ -197,6 +199,6 @@ describe("ProductPurchasePanel", () => {
 
   it("does not announce success when cart normalization rejects an already-full line", async () => {
     window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({ version: 2, items: [{ variantId: "variant-5mg", quantity: 25 }] }));
-    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext()} /></CartProvider>); fireEvent.click(screen.getByRole("button", { name: /add synthetic product alpha to cart/i })); await waitFor(() => expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("cart was not changed")); expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Ready to purchase");
+    render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([testPublicVariant()])} pricing={testPricingContext()} /></CartProvider>); const add = screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" }); expect(add).toHaveTextContent("Add to cart"); fireEvent.click(add); await waitFor(() => expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("cart was not changed")); expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Ready to purchase");
   });
 });

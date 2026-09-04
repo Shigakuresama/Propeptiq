@@ -18,7 +18,7 @@ describe("RelatedProductsCarousel real commerce integration", () => {
     ], { id: "real-multi", name: "Real Multi" });
     const single = testCanonicalProduct([testPublicVariant({ id: "real-single", label: "2 mg" })], { id: "real-single-product", name: "Real Single" });
     render(<CartProvider><RelatedProductsCarousel currentProductId="current" products={[multi, single]} pricing={testPricingContext()} /></CartProvider>);
-    const trigger = screen.getByRole("button", { name: "Add Real Multi to cart" });
+    const trigger = screen.getByRole("button", { name: "Add Real Multi: choose a variant" });
     await user.click(trigger);
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(screen.queryByText(/Cart updated/iu)).toBeNull();
@@ -43,7 +43,7 @@ describe("RelatedProductsCarousel real commerce integration", () => {
     window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({ version: 2, items: Array.from({ length: MAX_CART_DISTINCT_ITEMS }, (_, index) => ({ variantId: `seed-${index}`, quantity: 1 })) }));
     const product = testCanonicalProduct([testPublicVariant({ id: "rejected-five", label: "5 mg" }), testPublicVariant({ id: "rejected-ten", label: "10 mg" })], { id: "rejected-product", name: "Rejected Product" });
     render(<CartProvider><RelatedProductsCarousel currentProductId="current" products={[product]} pricing={testPricingContext()} /></CartProvider>);
-    const trigger = screen.getByRole("button", { name: "Add Rejected Product to cart" });
+    const trigger = screen.getByRole("button", { name: "Add Rejected Product: choose a variant" });
     await user.click(trigger);
     const dialog = screen.getByRole("dialog");
     expect(dialog).toBeVisible();

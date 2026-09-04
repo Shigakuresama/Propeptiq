@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -6,14 +8,16 @@ import type {
 } from "./storefront-public";
 import {
   canAddPublicVariant,
+  publicVariantPurchaseLabel,
+  publicVariantPurchaseState,
   resolvePublicVariantPrice,
   resolveVariantPricePresentation,
   selectCardVariant,
   summarizePublicStorefrontVariants,
   type PricePresentationMode,
   type PublicStorefrontPricingContext,
+  type PublicVariantPurchaseState,
 } from "./storefront-price-presentation";
-import { publicVariantPurchaseState } from "./storefront-price-presentation";
 
 const evaluatedAt = "2026-08-31T12:00:00.000Z";
 
@@ -109,6 +113,15 @@ describe("public variant state equivalence", () => {
     expect(publicVariantPurchaseState(input, "production")).toBe("pricing_pending");
     expect(resolvePublicVariantPrice({ variant: input, productId: "product-alpha", quantity: 1, pricing: pricing("production", []) }).state).toBe("pending");
   });
+  it("separates an addable production cart preview from a missing checkout mapping", () => {
+    const cartPreview = variant({ availability: "preview_only", checkoutReady: false });
+    const checkoutUnavailable = variant({ availability: "available", checkoutReady: false });
+
+    expect(publicVariantPurchaseState(cartPreview, "production")).toBe("cart_preview");
+    expect(publicVariantPurchaseState(checkoutUnavailable, "production")).toBe("checkout_unavailable");
+    expect(canAddPublicVariant(cartPreview, "production")).toBe(true);
+    expect(canAddPublicVariant(checkoutUnavailable, "production")).toBe(false);
+  });
   it.each([
     ["available active ready", variant(), "ready", "priced"],
     ["available active mapping missing", variant({ checkoutReady: false }), "checkout_unavailable", "priced"],
@@ -125,12 +138,55 @@ describe("public variant state equivalence", () => {
   });
 });
 
+describe("public variant purchase labels", () => {
+  it.each([
+    ["ready", "availability", "Available"],
+    ["cart_preview", "availability", "Cart preview only"],
+    ["checkout_unavailable", "availability", "Checkout unavailable"],
+    ["local_preview", "availability", "Local cart preview"],
+    ["pricing_pending", "availability", "Pricing coming soon"],
+    ["unavailable", "availability", "Unavailable"],
+    ["ready", "purchase_summary", "Ready to purchase"],
+    ["cart_preview", "purchase_summary", "Cart preview only"],
+    ["checkout_unavailable", "purchase_summary", "Checkout unavailable"],
+    ["local_preview", "purchase_summary", "Local cart preview"],
+    ["pricing_pending", "purchase_summary", "Pricing coming soon"],
+    ["unavailable", "purchase_summary", "Unavailable"],
+  ] as const)(
+    "projects %s in the %s context as %s",
+    (state, context, expected) => {
+      expect(
+        publicVariantPurchaseLabel(
+          state satisfies PublicVariantPurchaseState,
+          context,
+        ),
+      ).toBe(expected);
+    },
+  );
+
+  it("defaults to the availability context", () => {
+    expect(publicVariantPurchaseLabel("ready")).toBe("Available");
+  });
+
+  it.each([
+    "src/components/commerce/catalog-listing-card.tsx",
+    "src/components/commerce/product-price.tsx",
+    "src/components/commerce/product-purchase-panel.tsx",
+    "src/components/commerce/variant-selector.tsx",
+    "src/components/commerce/quick-add-variant-sheet.tsx",
+  ])("keeps %s on the shared label boundary", (path) => {
+    const source = readFileSync(resolve(process.cwd(), path), "utf8");
+    expect(source).toContain("publicVariantPurchaseLabel");
+    expect(source).not.toContain("Checkout unavailable");
+  });
+});
+
 describe("resolvePublicVariantPrice", () => {
   it("shares the narrow price-facts primitive without requiring catalog identity metadata", () => {
     expect(resolveVariantPricePresentation({
       variant: { id: "synthetic-line", baseUnitMinor: 1_005, currency: "USD", priceStatus: "active", availability: "preview_only", checkoutReady: false },
       quantity: 2, mode: "production", eligiblePromotions: [{ id: "winter30", discountBps: 3_000 }],
-    })).toEqual({ state: "priced", purchaseState: "checkout_unavailable", price: {
+    })).toEqual({ state: "priced", purchaseState: "cart_preview", price: {
       variantId: "synthetic-line", quantity: 2, baseUnitMinor: 1_005, effectiveDiscountBps: 3_000,
       effectiveUnitMinor: 704, lineSubtotalMinor: 1_408, lineSavingsMinor: 602, appliedPromotionIds: ["winter30"],
     } });
@@ -208,7 +264,7 @@ describe("resolvePublicVariantPrice", () => {
     expect(resolvePublicVariantPrice({
       variant: variant({ availability: "preview_only", checkoutReady: false }), productId: "product-alpha", quantity: 1,
       pricing: pricing("production", [winter30]),
-    })).toMatchObject({ state: "priced", purchaseState: "checkout_unavailable" });
+    })).toMatchObject({ state: "priced", purchaseState: "cart_preview" });
     expect(canAddPublicVariant(variant({ availability: "preview_only", checkoutReady: false }), "production")).toBe(true);
     expect(canAddPublicVariant(variant({ availability: "preview_only", checkoutReady: false }), "local")).toBe(true);
   });

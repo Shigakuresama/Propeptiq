@@ -317,6 +317,7 @@ test.beforeEach(async ({ page }) => {
 test("owner-configured WINTER30 promotion remains visible with preview-only canonical lines", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -334,10 +335,64 @@ test("owner-configured WINTER30 promotion remains visible with preview-only cano
       { exact: true },
     ),
   ).toBeVisible();
-  await expect(
-    banner.getByRole("button", { name: "Copy promotion code WINTER30" }),
-  ).toBeVisible();
-  await banner.getByRole("button", { name: "Copy promotion code WINTER30" }).click();
+  const copy = banner.getByRole("button", { name: "Copy promotion code WINTER30" });
+  await expect(copy).toBeVisible();
+  const compactLayout = await banner.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    const root = document.documentElement;
+    const bannerBounds = element.getBoundingClientRect();
+    const visualChildren = [
+      element.querySelector('[aria-hidden="true"]'),
+      element.querySelector("p:not([role='status'])"),
+      element.querySelector("button"),
+    ].filter((child): child is Element => child !== null);
+    const childBounds = visualChildren.map((child) => {
+      const bounds = child.getBoundingClientRect();
+      return {
+        bottom: bounds.bottom,
+        center: bounds.top + bounds.height / 2,
+        top: bounds.top,
+      };
+    });
+    const middle = visualChildren[1] as HTMLElement | undefined;
+    const middleStyles = middle ? getComputedStyle(middle) : null;
+    const buttonBounds = visualChildren[2]?.getBoundingClientRect();
+    return {
+      bannerBottom: bannerBounds.bottom,
+      bannerHeight: bannerBounds.height,
+      bannerTop: bannerBounds.top,
+      buttonHeight: buttonBounds?.height ?? 0,
+      buttonWidth: buttonBounds?.width ?? 0,
+      childBounds,
+      columns: styles.gridTemplateColumns.trim().split(/\s+/u),
+      display: styles.display,
+      middleClientWidth: middle?.clientWidth ?? 0,
+      middleMinWidth: middleStyles?.minWidth ?? "",
+      middleScrollWidth: middle?.scrollWidth ?? 0,
+      middleWhiteSpace: middleStyles?.whiteSpace ?? "",
+      rows: styles.gridTemplateRows.trim().split(/\s+/u),
+      overflow: root.scrollWidth - root.clientWidth,
+    };
+  });
+  expect(compactLayout.display).toBe("grid");
+  expect(compactLayout.columns).toHaveLength(3);
+  expect(compactLayout.rows).toHaveLength(1);
+  expect(compactLayout.bannerHeight).toBeLessThanOrEqual(96);
+  expect(compactLayout.childBounds).toHaveLength(3);
+  expect(Math.max(...compactLayout.childBounds.map(({ center }) => center)) -
+    Math.min(...compactLayout.childBounds.map(({ center }) => center))).toBeLessThanOrEqual(1);
+  for (const bounds of compactLayout.childBounds) {
+    expect(bounds.top).toBeGreaterThanOrEqual(compactLayout.bannerTop);
+    expect(bounds.bottom).toBeLessThanOrEqual(compactLayout.bannerBottom);
+  }
+  expect(compactLayout.buttonHeight).toBeGreaterThanOrEqual(44);
+  expect(compactLayout.buttonWidth).toBeGreaterThanOrEqual(44);
+  expect(compactLayout.middleMinWidth).toBe("0px");
+  expect(compactLayout.middleWhiteSpace).toBe("normal");
+  expect(compactLayout.middleScrollWidth - compactLayout.middleClientWidth).toBeLessThanOrEqual(1);
+  expect(compactLayout.overflow).toBeLessThanOrEqual(1);
+  await copy.click();
+  await expect(banner.getByRole("button", { name: "Copied promotion code WINTER30" })).toHaveText("Copied");
   await expect(banner.getByRole("status")).toHaveText("WINTER30 copied");
 });
 
@@ -730,7 +785,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
-  const addToCart = page.getByRole("button", { name: "Add Tirzepatide to cart" });
+  const addToCart = page.getByRole("button", { name: "Add Tirzepatide to preview cart" });
   await addToCart.scrollIntoViewIfNeeded();
   await expect(addToCart).toBeVisible();
   expect(
@@ -1514,7 +1569,7 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves ever
   await page.goto("/catalog");
   await expect(page.locator("article.catalog-listing-card")).toHaveCount(56);
   await expect(page.getByText("103 supplied package configurations")).toBeVisible();
-  await expect(page.getByRole("button", { name: /add .* to cart/i })).toHaveCount(56);
+  await expect(page.getByRole("button", { name: /^add .+(?:: choose a variant| to (?:preview )?cart)$/iu })).toHaveCount(56);
   await expect(page.locator("main")).toContainText("$41.99");
   await expect(page.locator("main")).toContainText("-30%");
   const imagePaths = await page.locator("article.catalog-listing-card img").evaluateAll(
@@ -1539,7 +1594,7 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves ever
   await expect(page.getByText("TR5", { exact: true })).toBeVisible();
   await expect(page.getByRole("radio")).toHaveCount(9);
   await expect(page.locator("main")).toContainText("$41.99");
-  await expect(page.locator("main")).toContainText("Preview only");
+  await expect(page.locator("main")).toContainText("Local cart preview");
 
   const imageLoaded = await page.getByRole("img", {
     name: /illustrative research-catalog still life for Tirzepatide/i,
@@ -1664,12 +1719,15 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
   }
 
   const tirzepatideCard = page.getByRole("article", { name: "Tirzepatide", exact: true });
-  const chooserTrigger = tirzepatideCard.getByRole("button", { name: "Add Tirzepatide to cart" });
+  const chooserTrigger = tirzepatideCard.getByRole("button", { name: "Add Tirzepatide: choose a variant" });
   const cartBeforeChooser = await page.evaluate(() => window.localStorage.getItem("propeptiq.cart.v2"));
   await chooserTrigger.focus();
   await page.keyboard.press("Enter");
   const chooser = page.getByRole("dialog", { name: "Choose a variant for Tirzepatide" });
   await expect(chooser).toBeVisible();
+  await expect(chooser.getByRole("button", {
+    name: "Add Tirzepatide to preview cart",
+  })).toHaveText("Add to preview cart");
   const pendingVariant = chooser
     .locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`)
     .locator("xpath=ancestor::label[1]");
@@ -1752,7 +1810,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     Savings: "$0.00",
     Subtotal: "$0.00",
   });
-  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("Preview only");
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("Local cart preview");
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
   await expect(page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`)).toBeChecked();
   await expect(pricing).toContainText("$59.99");
@@ -1781,13 +1839,15 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
 
   await page.getByRole("button", { name: "1 bottle" }).click();
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
-  await page.getByRole("button", { name: /add tirzepatide to cart/i }).click();
-  await page.getByRole("button", { name: /add tirzepatide to cart/i }).click();
+  const addToPreviewCart = page.getByRole("button", { name: "Add Tirzepatide to preview cart" });
+  await expect(addToPreviewCart).toHaveText("Add to preview cart");
+  await addToPreviewCart.click();
+  await addToPreviewCart.click();
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr60}"]`).check();
   await expect(pricing).toContainText("$109.99");
   await expect(pricing).toContainText("$76.99");
   await expect(pricing).toContainText("$33.00");
-  await page.getByRole("button", { name: /add tirzepatide to cart/i }).click();
+  await addToPreviewCart.click();
   await page.getByRole("link", { name: /Cart, \d+ requested units/iu }).click();
   const persisted = await page.evaluate(() => JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"));
   expect(persisted.items).toHaveLength(2);

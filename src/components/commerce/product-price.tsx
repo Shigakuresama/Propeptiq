@@ -1,5 +1,5 @@
 import type { PublicStorefrontVariant } from "@/catalog/storefront-public";
-import { formatStorefrontMoney, resolvePublicVariantPrice, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
+import { formatStorefrontMoney, publicVariantPurchaseLabel, resolvePublicVariantPrice, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 
 export function ProductPrice({
   variant,
@@ -19,7 +19,7 @@ export function ProductPrice({
     if (!showPurchaseStatus) return null;
     return (
       <p className="text-sm font-medium text-muted-ink">
-        {presentation.state === "pending" ? "Pricing coming soon" : "Unavailable"}
+        {publicVariantPurchaseLabel(presentation.purchaseState)}
       </p>
     );
   }
@@ -47,11 +47,10 @@ export function ProductPrice({
           Save {formatStorefrontMoney(price.lineSavingsMinor)}
         </p>
       ) : null}
-      {showPurchaseStatus && presentation.purchaseState === "checkout_unavailable" ? (
-        <p className="text-xs font-medium text-muted-ink">Checkout unavailable</p>
-      ) : null}
-      {showPurchaseStatus && presentation.purchaseState === "local_preview" ? (
-        <p className="text-xs font-medium text-muted-ink">Local cart preview</p>
+      {showPurchaseStatus ? (
+        <p className="text-xs font-medium text-muted-ink">
+          {publicVariantPurchaseLabel(presentation.purchaseState)}
+        </p>
       ) : null}
     </div>
   );

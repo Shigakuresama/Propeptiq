@@ -50,6 +50,58 @@ describe("AddToCartButton", () => {
       variantLabel: "10 mg",
     });
     expect(onAdded).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button")).toHaveTextContent("Add to cart");
+  });
+
+  it("uses exact preview-cart copy without changing the cart write", async () => {
+    const user = userEvent.setup();
+    render(
+      <AddToCartButton
+        canAdd
+        presentation="preview"
+        productName="Synthetic Product Alpha"
+        quantity={3}
+        variantId="variant-preview"
+        variantLabel="30 mg"
+      />,
+    );
+
+    const button = screen.getByRole("button", {
+      name: "Add Synthetic Product Alpha to preview cart",
+    });
+    expect(button).toHaveTextContent("Add to preview cart");
+    await user.click(button);
+
+    expect(addVariantMock).toHaveBeenCalledExactlyOnceWith(
+      "variant-preview",
+      3,
+      {
+        productName: "Synthetic Product Alpha",
+        variantLabel: "30 mg",
+      },
+    );
+  });
+
+  it("keeps disabled semantics and reasons unchanged in preview presentation", async () => {
+    const user = userEvent.setup();
+    render(
+      <AddToCartButton
+        canAdd={false}
+        disabledReason="Pricing coming soon"
+        presentation="preview"
+        productName="Synthetic Product Alpha"
+        variantId="variant-preview"
+      />,
+    );
+
+    const button = screen.getByRole("button", {
+      name: "Synthetic Product Alpha unavailable",
+    });
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("Pricing coming soon");
+    expect(button).toHaveAttribute("title", "Pricing coming soon");
+    await user.click(button);
+    expect(addVariantMock).not.toHaveBeenCalled();
   });
 
   it("allows the exact cart line cap of 25", async () => {
