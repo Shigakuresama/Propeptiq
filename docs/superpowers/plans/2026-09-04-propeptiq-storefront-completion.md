@@ -75,7 +75,7 @@ These are not arbitrary engineering limits; they prevent the site from publishin
 
 #### Task 1 acceptance inventory — September 4, 2026
 
-The source recovery result is recorded in [`docs/reference/storefront-study-source-register.md`](../../reference/storefront-study-source-register.md). No owner-provided study set, approved claim/legal copy, product-image approval set, or footer reference was found. Repository visual files are catalogued as repository provenance only; they are not approval evidence. One re-upload containing the study set and footer reference is required before Tasks 8 and 13 can be completed.
+The source recovery result is recorded in [`docs/reference/storefront-study-source-register.md`](../../reference/storefront-study-source-register.md). No owner-provided study set, approved claim/legal copy, product-image approval set, or footer reference was found. Repository visual files are catalogued as repository provenance only; they are not approval evidence. One re-upload containing the study set and footer reference is required before Tasks 8, 9, 11, 12, and 13 can be completed.
 
 | Requested feature | Top-level task | Accountable owner | Required acceptance evidence |
 | --- | ---: | --- | --- |
