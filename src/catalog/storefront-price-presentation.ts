@@ -36,7 +36,7 @@ export type PublicStorefrontPricingContext = Readonly<{
 export type PricePresentation =
   | Readonly<{
       state: "priced";
-      purchaseState: "ready" | "checkout_unavailable" | "local_preview";
+      purchaseState: "ready" | "cart_preview" | "checkout_unavailable" | "local_preview";
       price: Omit<EffectiveLinePrice, "checkoutReady">;
     }>
   | Readonly<{
@@ -65,7 +65,29 @@ export function canAddPublicVariant(
   return false;
 }
 
-export type PublicVariantPurchaseState = "ready" | "checkout_unavailable" | "pricing_pending" | "unavailable" | "local_preview";
+export type PublicVariantPurchaseState = "ready" | "cart_preview" | "checkout_unavailable" | "pricing_pending" | "unavailable" | "local_preview";
+
+export type PublicVariantPurchaseLabelContext = "availability" | "purchase_summary";
+
+const PUBLIC_VARIANT_PURCHASE_LABELS = Object.freeze({
+  ready: "Available",
+  cart_preview: "Cart preview only",
+  checkout_unavailable: "Checkout unavailable",
+  local_preview: "Local cart preview",
+  pricing_pending: "Pricing coming soon",
+  unavailable: "Unavailable",
+} satisfies Readonly<Record<PublicVariantPurchaseState, string>>);
+
+/** Pure customer-facing copy projection; intentionally performs no state calculation. */
+export function publicVariantPurchaseLabel(
+  state: PublicVariantPurchaseState,
+  context: PublicVariantPurchaseLabelContext = "availability",
+): string {
+  if (state === "ready" && context === "purchase_summary") {
+    return "Ready to purchase";
+  }
+  return PUBLIC_VARIANT_PURCHASE_LABELS[state];
+}
 
 /** Pure status projection for selectors; intentionally performs no price arithmetic. */
 export function publicVariantPurchaseState(
@@ -80,7 +102,7 @@ export function publicVariantPurchaseState(
       : "pricing_pending";
   }
   if (variant.priceStatus !== "active" || (variant.availability !== "available" && variant.availability !== "preview_only") || variant.baseUnitMinor === null || !Number.isSafeInteger(variant.baseUnitMinor) || variant.baseUnitMinor <= 0 || variant.currency !== "USD") return "pricing_pending";
-  if (variant.availability === "preview_only") return variant.checkoutReady === false ? (mode === "production" ? "checkout_unavailable" : "local_preview") : "pricing_pending";
+  if (variant.availability === "preview_only") return variant.checkoutReady === false ? (mode === "production" ? "cart_preview" : "local_preview") : "pricing_pending";
   return variant.checkoutReady === true ? "ready" : "checkout_unavailable";
 }
 
@@ -170,7 +192,7 @@ export function resolveVariantPricePresentation(input: Readonly<{
     purchaseState: previewZero
       ? "local_preview"
       : variant.availability === "preview_only"
-        ? (mode === "production" ? "checkout_unavailable" : "local_preview")
+        ? (mode === "production" ? "cart_preview" : "local_preview")
         : variant.checkoutReady === true ? "ready" : "checkout_unavailable",
     price: publicPrice,
   };

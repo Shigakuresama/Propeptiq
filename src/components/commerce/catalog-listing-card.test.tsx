@@ -42,7 +42,7 @@ describe("CatalogListingCard", () => {
       testPublicVariant({ id: "variant-10", label: "10 mg" }),
     ];
     renderCanonical(testCanonicalProduct(variants, { defaultVariantId: "variant-5" }));
-    const trigger = screen.getByRole("button", { name: /add synthetic product alpha to cart/i });
+    const trigger = screen.getByRole("button", { name: "Add Synthetic Product Alpha: choose a variant" });
     await user.click(trigger);
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(screen.getByRole("radio", { name: /10 mg/i })).toBeEnabled();
@@ -112,11 +112,11 @@ describe("CatalogListingCard", () => {
     expect(within(article).getByText("$7.00").tagName).toBe("STRONG");
     expect(within(article).getAllByText("-30%")).toHaveLength(2);
     expect(within(article).getByText("Available")).toBeVisible();
-    expect(
-      within(article).getByRole("button", {
-        name: /add synthetic product alpha to cart/iu,
-      }),
-    ).toBeEnabled();
+    const add = within(article).getByRole("button", {
+      name: "Add Synthetic Product Alpha to cart",
+    });
+    expect(add).toBeEnabled();
+    expect(add).toHaveTextContent("Add to cart");
   });
 
   it("shows a truthful price but disables direct ADD when checkout mapping is unavailable", () => {
@@ -148,10 +148,12 @@ describe("CatalogListingCard", () => {
     );
 
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
-    expect(within(article).getByText("Checkout unavailable")).toBeVisible();
-    await user.click(within(article).getByRole("button", {
-      name: /add synthetic product alpha to cart/iu,
-    }));
+    expect(within(article).getByText("Cart preview only")).toBeVisible();
+    const add = within(article).getByRole("button", {
+      name: "Add Synthetic Product Alpha to preview cart",
+    });
+    expect(add).toHaveTextContent("Add to preview cart");
+    await user.click(add);
 
     await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "null")).toEqual({
       version: 2,
@@ -199,11 +201,11 @@ describe("CatalogListingCard", () => {
     expect(within(article).getAllByText("$0.00")).toHaveLength(2);
     expect(within(article).getAllByText("-30%")).toHaveLength(2);
     expect(within(article).getAllByText("Local cart preview").length).toBeGreaterThan(0);
-    expect(
-      within(article).getByRole("button", {
-        name: /add synthetic product alpha to cart/iu,
-      }),
-    ).toBeEnabled();
+    const add = within(article).getByRole("button", {
+      name: "Add Synthetic Product Alpha to preview cart",
+    });
+    expect(add).toBeEnabled();
+    expect(add).toHaveTextContent("Add to preview cart");
   });
 
   it("uses the selected higher-priced default for caption, price, and availability while ADD still opens the chooser", async () => {
@@ -235,7 +237,7 @@ describe("CatalogListingCard", () => {
     expect(within(article).getByText("Checkout unavailable")).toBeVisible();
     expect(within(article).queryByText("Available")).toBeNull();
     expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("");
-    await user.click(within(article).getByRole("button", { name: /add synthetic product alpha to cart/iu }));
+    await user.click(within(article).getByRole("button", { name: "Add Synthetic Product Alpha: choose a variant" }));
     expect(screen.getByRole("dialog")).toBeVisible();
     expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("");
   });

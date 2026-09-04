@@ -54,7 +54,7 @@ describe("PromotionBar", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders exact campaign copy, decorative snowflake semantics, and narrow-layout-safe classes", () => {
+  it("renders exact campaign copy in a non-wrapping three-column narrow layout with a 44-pixel copy target", () => {
     const { container } = render(<PromotionBar promotion={winter30} />);
 
     expect(
@@ -66,15 +66,16 @@ describe("PromotionBar", () => {
     expect(banner).toHaveClass(
       "bg-promotion",
       "text-promotion-foreground",
-      "flex",
-      "flex-wrap",
+      "grid",
+      "grid-cols-[auto_minmax(0,1fr)_auto]",
       "items-center",
       "justify-center",
-      "px-4",
+      "px-3",
       "leading-6",
     );
+    expect(banner).not.toHaveClass("flex-wrap");
     expect(screen.getByRole("button", { name: "Copy promotion code WINTER30" }))
-      .toHaveClass("min-h-11", "px-4");
+      .toHaveClass("min-h-11", "min-w-11", "px-2");
   });
 
   it("derives all campaign text and clipboard data from its safe promotion prop", async () => {
@@ -97,7 +98,7 @@ describe("PromotionBar", () => {
         `${safeProp.displayName.toUpperCase()}: ${safeProp.percentage}% OFF SITEWIDE — USE CODE ${safeProp.code}`,
       ),
     ).toBeVisible();
-    expect(copy).toHaveTextContent(`Copy ${safeProp.code}`);
+    expect(copy).toHaveTextContent("Copy");
 
     await user.click(copy);
 
@@ -105,6 +106,8 @@ describe("PromotionBar", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       `${safeProp.code} copied`,
     );
+    expect(copy).toHaveTextContent("Copied");
+    expect(copy).toHaveAccessibleName(`Copied promotion code ${safeProp.code}`);
   });
 
   it("copies only WINTER30, preserves focus, and announces one polite atomic success", async () => {
@@ -123,13 +126,17 @@ describe("PromotionBar", () => {
     expect(statuses[0]).toHaveAttribute("aria-live", "polite");
     expect(statuses[0]).toHaveAttribute("aria-atomic", "true");
     expect(statuses[0]).toHaveTextContent("WINTER30 copied");
-    expect(statuses[0]).toBeVisible();
+    expect(statuses[0]).toHaveClass("sr-only");
+    expect(button).toHaveTextContent("Copied");
+    expect(button).toHaveAccessibleName("Copied promotion code WINTER30");
     expect(button).toHaveFocus();
   });
 
-  it("shows an honest visible error when clipboard access rejects", async () => {
+  it("keeps clipboard failure safe and retryable without exposing the exception", async () => {
     const user = userEvent.setup();
-    const writeText = vi.fn().mockRejectedValue(new Error("clipboard unavailable"));
+    const writeText = vi.fn()
+      .mockRejectedValueOnce(new Error("private clipboard exception"))
+      .mockResolvedValueOnce(undefined);
     setClipboard({ writeText });
     render(<PromotionBar promotion={winter30} />);
 
@@ -138,7 +145,14 @@ describe("PromotionBar", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 could not be copied.");
     expect(screen.getByRole("status")).not.toHaveTextContent("WINTER30 copied");
+    expect(screen.getByRole("status")).not.toHaveTextContent("private clipboard exception");
+    expect(button).toHaveTextContent("Copy");
     expect(button).toHaveFocus();
+
+    await user.click(button);
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(button).toHaveTextContent("Copied");
+    expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
   });
 
   it("shows the same honest error when Clipboard API support is absent", async () => {
@@ -150,6 +164,7 @@ describe("PromotionBar", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 could not be copied.");
     expect(screen.getByRole("status")).not.toHaveTextContent("WINTER30 copied");
+    expect(screen.getByRole("button", { name: "Copy promotion code WINTER30" })).toHaveTextContent("Copy");
   });
 
   it("supports keyboard activation while retaining focus on the copy button", async () => {
@@ -165,6 +180,7 @@ describe("PromotionBar", () => {
 
     expect(writeText).toHaveBeenCalledWith("WINTER30");
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
+    expect(button).toHaveTextContent("Copied");
     expect(button).toHaveFocus();
   });
 
@@ -198,6 +214,7 @@ describe("PromotionBar", () => {
     expect(statuses[0]).toHaveTextContent("WINTER30 could not be copied.");
     expect(statuses[0]).toHaveAttribute("aria-live", "polite");
     expect(statuses[0]).toHaveAttribute("aria-atomic", "true");
+    expect(button).toHaveTextContent("Copy");
     expect(button).toHaveFocus();
   });
 
@@ -221,6 +238,7 @@ describe("PromotionBar", () => {
       await Promise.resolve();
     });
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
+    expect(button).toHaveTextContent("Copied");
 
     await act(async () => {
       first.reject(new Error("stale clipboard failure"));
@@ -242,8 +260,10 @@ describe("PromotionBar", () => {
         await Promise.resolve();
       });
       expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
+      expect(button).toHaveTextContent("Copied");
       act(() => vi.advanceTimersByTime(60_000));
       expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
+      expect(button).toHaveTextContent("Copied");
     } finally {
       vi.useRealTimers();
     }

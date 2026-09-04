@@ -9,6 +9,7 @@ import type {
 } from "@/catalog/storefront-public";
 import {
   canAddPublicVariant,
+  publicVariantPurchaseLabel,
   resolvePublicVariantPrice,
   selectCardVariant,
   summarizePublicStorefrontVariants,
@@ -21,14 +22,6 @@ import { ProductPrice } from "./product-price";
 import { VariantAddTrigger } from "./quick-add-variant-sheet";
 
 const CARD_VARIANT_LIMIT = 3;
-
-function presentationStatus(presentation: PricePresentation): string {
-  if (presentation.state === "pending") return "Pricing coming soon";
-  if (presentation.state === "unavailable") return "Unavailable";
-  if (presentation.purchaseState === "ready") return "Available";
-  if (presentation.purchaseState === "local_preview") return "Local cart preview";
-  return "Checkout unavailable";
-}
 
 export function CatalogListingCard({
   product,
@@ -52,6 +45,9 @@ export function CatalogListingCard({
           pricing,
         })
       : null;
+  const selectedCanAdd = selectedVariant
+    ? canAddPublicVariant(selectedVariant, pricing.mode)
+    : false;
   const headingId = `catalog-${product.slug}`;
   const visibleConfigurations = product.displayConfigurations.slice(
     0,
@@ -121,7 +117,7 @@ export function CatalogListingCard({
               showPurchaseStatus={false}
             />
             <p className="mt-2 text-sm text-muted-ink">
-              {presentationStatus(selectedPresentation)}
+              {publicVariantPurchaseLabel(selectedPresentation.purchaseState)}
             </p>
           </div>
         ) : (
@@ -136,9 +132,13 @@ export function CatalogListingCard({
               variantId={selectedVariant.id}
               productName={product.name}
               variantLabel={selectedVariant.label}
-              canAdd={canAddPublicVariant(selectedVariant, pricing.mode)}
+              canAdd={selectedCanAdd}
               disabledReason="This product is not currently available for cart testing."
               className="mt-5 min-h-11"
+              {...(selectedCanAdd &&
+              selectedPresentation?.purchaseState !== "ready"
+                ? { presentation: "preview" as const }
+                : {})}
             />
           ) : null
         ) : null}

@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import {
   canAddPublicVariant,
+  publicVariantPurchaseLabel,
   resolvePublicVariantPrice,
   type PricePresentation,
   type PublicStorefrontPricingContext,
@@ -24,14 +25,6 @@ import { AddToCartButton } from "./add-to-cart-button";
 import { ProductPrice } from "./product-price";
 
 type CanonicalProduct = Extract<PublicStorefrontProduct, { kind: "canonical" }>;
-
-function rowStatus(presentation: PricePresentation): string {
-  if (presentation.state === "pending") return "Pricing coming soon";
-  if (presentation.state === "unavailable") return "Unavailable";
-  if (presentation.purchaseState === "ready") return "Available";
-  if (presentation.purchaseState === "local_preview") return "Local cart preview";
-  return "Checkout unavailable";
-}
 
 function disabledReason(presentation: PricePresentation): string {
   if (presentation.state === "pending") return "Pricing coming soon.";
@@ -119,7 +112,7 @@ export function QuickAddVariantSheet({
                     variant={entry}
                   />
                   <span className="text-sm text-muted-ink">
-                    {rowStatus(presentation)}
+                    {publicVariantPurchaseLabel(presentation.purchaseState)}
                   </span>
                 </span>
               </label>
@@ -136,6 +129,9 @@ export function QuickAddVariantSheet({
               productName={product.name}
               variantId={variant.id}
               variantLabel={variant.label}
+              {...(canAdd && selectedPresentation?.purchaseState !== "ready"
+                ? { presentation: "preview" as const }
+                : {})}
             />
           ) : null}
         </div>
@@ -157,7 +153,7 @@ export function VariantAddTrigger({
       pricing={pricing}
       trigger={
         <Button
-          aria-label={`Add ${product.name} to cart`}
+          aria-label={`Add ${product.name}: choose a variant`}
           className="action-primary min-h-11"
           type="button"
         >

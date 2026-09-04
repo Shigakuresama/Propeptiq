@@ -79,9 +79,10 @@ export function buildCartPreview(
     });
     if (presentation.state !== "priced") return Object.freeze({ ...unpriced, purchaseState: presentation.purchaseState });
     const price = presentation.price;
-    const purchaseState = presentation.purchaseState !== "ready" ? presentation.purchaseState
-      : variant.availableQuantity === null ? "checkout_unavailable"
-        : variant.availableQuantity < line.quantity ? "insufficient_quantity" : "ready";
+    const purchaseState = presentation.purchaseState === "cart_preview" ? "checkout_unavailable"
+      : presentation.purchaseState !== "ready" ? presentation.purchaseState
+        : variant.availableQuantity === null ? "checkout_unavailable"
+          : variant.availableQuantity < line.quantity ? "insufficient_quantity" : "ready";
     return Object.freeze({
       ...unpriced,
       purchaseState,

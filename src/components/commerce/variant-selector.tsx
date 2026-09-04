@@ -1,6 +1,5 @@
 import type { CanonicalPublicStorefrontProduct } from "@/catalog/storefront-public";
-import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
-import { publicVariantPurchaseState } from "@/catalog/storefront-price-presentation";
+import { publicVariantPurchaseLabel, publicVariantPurchaseState, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 import { cn } from "@/lib/utils";
 
 export type VariantSelectorProps = Readonly<{
@@ -15,7 +14,7 @@ export type VariantSelectorProps = Readonly<{
 
 function status(variant: VariantSelectorProps["variants"][number], productId: string, quantity: number, pricing: PublicStorefrontPricingContext): string {
   const state = publicVariantPurchaseState(variant, pricing.mode);
-  return state === "unavailable" ? "Unavailable" : state === "pricing_pending" ? "Pricing coming soon" : state === "local_preview" ? "Preview only" : state === "checkout_unavailable" ? "Checkout unavailable" : "Available";
+  return publicVariantPurchaseLabel(state);
 }
 
 export function VariantSelector({ productId, productName, variants, selectedVariantId, quantity, pricing, onSelectedVariantIdChange }: VariantSelectorProps) {

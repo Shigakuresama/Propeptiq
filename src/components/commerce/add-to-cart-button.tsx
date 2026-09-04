@@ -17,6 +17,7 @@ export function AddToCartButton({
   quantity = 1,
   canAdd,
   disabledReason,
+  presentation = "checkout",
   className,
   onAdded,
 }: {
@@ -26,6 +27,7 @@ export function AddToCartButton({
   quantity?: number;
   canAdd: boolean;
   disabledReason?: string;
+  presentation?: "checkout" | "preview";
   className?: string;
   onAdded?: () => void;
 }) {
@@ -39,12 +41,18 @@ export function AddToCartButton({
     (variantId === null
       ? "Choose a variant before adding this item."
       : "This item is unavailable.");
+  const actionLabel = presentation === "preview"
+    ? `Add ${productName} to preview cart`
+    : `Add ${productName} to cart`;
+  const actionText = presentation === "preview"
+    ? "Add to preview cart"
+    : "Add to cart";
 
   return (
     <Button
       type="button"
       className={cn("action-primary whitespace-normal text-center", className)}
-      aria-label={unavailable ? `${productName} unavailable` : `Add ${productName} to cart`}
+      aria-label={unavailable ? `${productName} unavailable` : actionLabel}
       title={unavailable ? resolvedDisabledReason : undefined}
       disabled={unavailable}
       onClick={() => {
@@ -65,7 +73,7 @@ export function AddToCartButton({
       }}
     >
       <ShoppingBag aria-hidden="true" />
-      {unavailable ? resolvedDisabledReason : "Add to cart"}
+      {unavailable ? resolvedDisabledReason : actionText}
     </Button>
   );
 }
