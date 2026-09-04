@@ -1669,6 +1669,128 @@ footer a {
   }
 }
 
+@media (max-width: 17rem) {
+  .public-layout main section[aria-labelledby="home-hero-heading"] .site-container,
+  .public-layout main section[aria-labelledby="home-highlights-heading"] .site-container > ul,
+  .public-layout main section[aria-labelledby="quality-callout-heading"] .site-container,
+  .public-layout main section[aria-labelledby="quality-callout-heading"] ol,
+  .public-layout main section[aria-labelledby="research-use-heading"] .record-panel,
+  .public-layout main section[aria-labelledby="catalog-cta-heading"] .site-container {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .public-layout main section[aria-labelledby="home-hero-heading"] [data-motion-sequence="home-hero"] > div:last-child {
+    min-width: 0;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .public-layout main section[aria-labelledby="home-hero-heading"] :is(.action-primary, .action-secondary),
+  .public-layout main section[aria-labelledby="catalog-cta-heading"] .action-inverse {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding-inline: 0.75rem;
+    text-align: center;
+    white-space: normal;
+  }
+
+  .public-layout main section[aria-labelledby="home-hero-heading"] .record-panel > div > div {
+    min-width: 0;
+    padding-inline: 0.75rem;
+  }
+
+  .public-layout main section[aria-labelledby="home-hero-heading"] .record-panel > div > div:first-child {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .public-layout main section[aria-labelledby="home-hero-heading"] .record-panel > div > div:first-child > * {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .public-layout main section[aria-labelledby="home-hero-heading"] .record-panel > div > div:last-child > .grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  .public-layout main section[aria-labelledby="home-hero-heading"] .record-panel > div > div:last-child > .grid > div {
+    border-inline-start: 0;
+    padding-inline: 0;
+  }
+
+  .public-layout main section[aria-labelledby="home-evidence-heading"] .proof-rail > li {
+    grid-template-columns: 2.5rem minmax(0, 1fr);
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+
+  .public-layout main section[aria-labelledby="home-evidence-heading"] .proof-rail > li > div {
+    min-width: 0;
+  }
+
+  .public-layout main section[aria-labelledby="home-evidence-heading"] .proof-rail :is(h3, p, a) {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .public-layout main section[aria-labelledby="home-evidence-heading"] .proof-rail h3 {
+    font-size: 1.25rem;
+  }
+
+  .public-layout main section[aria-labelledby="home-highlights-heading"] .site-container > ul > li,
+  .public-layout main section[aria-labelledby="home-highlights-heading"] .catalog-listing-card > div:last-child {
+    min-width: 0;
+  }
+
+  .public-layout main section[aria-labelledby="home-highlights-heading"] .catalog-listing-card > div:last-child {
+    padding-inline: 0.75rem;
+  }
+
+  .public-layout main section[aria-labelledby="home-highlights-heading"] .catalog-listing-card ul > li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+  }
+
+  .public-layout main section[aria-labelledby="home-highlights-heading"] .catalog-listing-card :is(a, button) {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .public-layout main section[aria-labelledby="faq-heading"] summary {
+    gap: 0.5rem;
+    padding-inline: 0.75rem;
+    overflow-wrap: anywhere;
+  }
+
+  .public-layout main section[aria-labelledby="quality-callout-heading"] .site-container > *,
+  .public-layout main section[aria-labelledby="quality-callout-heading"] ol > li {
+    min-width: 0;
+  }
+
+  .public-layout main section[aria-labelledby="quality-callout-heading"] :is(.data-label, h2) {
+    overflow-wrap: anywhere;
+  }
+
+  .public-layout main section[aria-labelledby="research-use-heading"] .record-panel > * {
+    min-width: 0;
+    padding-inline: 0.75rem;
+  }
+
+  .public-layout main section[aria-labelledby="research-use-heading"] :is(.data-label, a) {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .public-layout main section[aria-labelledby="catalog-cta-heading"] .site-container > * {
+    min-width: 0;
+  }
+}
+
 @media (min-width: 64rem) {
   .site-container {
     padding-inline: 2rem;
@@ -1844,6 +1966,12 @@ footer a {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
+  }
+
+  .header-brand-motion__field {
+    opacity: 0.16;
+    animation: none;
+    transform: none;
   }
 
   *,

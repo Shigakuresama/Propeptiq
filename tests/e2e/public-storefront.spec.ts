@@ -1532,6 +1532,19 @@ test("header brand uses a contained alpha mark and motion field while navigation
     ).toBeLessThanOrEqual(1);
     expect(headerLayout.left).toBeGreaterThanOrEqual(-0.5);
     expect(headerLayout.right).toBeLessThanOrEqual(width + 0.5);
+
+    if (width === 195) {
+      await page.evaluate(() => document.fonts.ready);
+      const homepageLayout = await horizontalLayout(page);
+      expect(
+        homepageLayout.scrollWidth,
+        `hydrated 195px homepage overflow: ${JSON.stringify(homepageLayout.offenders)}`,
+      ).toBe(homepageLayout.clientWidth);
+      expect(
+        homepageLayout.offenders,
+        `hydrated 195px homepage offenders: ${JSON.stringify(homepageLayout)}`,
+      ).toEqual([]);
+    }
   }
 
   await page.setViewportSize({ width: 375, height: 812 });
@@ -1606,19 +1619,105 @@ test("header brand uses a contained alpha mark and motion field while navigation
   expect(pageErrors).toEqual([]);
 });
 
-test("header logo remains visible and linked when JavaScript is disabled", async ({
+test("homepage stays contained and reduced-motion safe before hydration with JavaScript disabled", async ({
   baseURL,
   browser,
 }) => {
-  const context = await browser.newContext({ javaScriptEnabled: false });
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    reducedMotion: "reduce",
+    viewport: { width: 195, height: 812 },
+  });
   const page = await context.newPage();
   try {
-    await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(new URL("/", baseURL).toString());
+    await page.evaluate(() => document.fonts.ready);
     const brandLink = page.locator('header a[href="/"]').first();
     await expect(brandLink).toBeVisible();
     await expect(brandLink).toContainText("PROPEPTIQ");
     await expect(brandLink.locator('img[src*="propeptiq-mark.png"]')).toBeVisible();
+
+    const staticMotion = await brandLink.locator(".header-brand-motion__field").evaluate((field) => {
+      const styles = getComputedStyle(field);
+      return {
+        animationName: styles.animationName,
+        opacity: styles.opacity,
+        transform: styles.transform,
+      };
+    });
+    expect(staticMotion).toEqual({
+      animationName: "none",
+      opacity: "0.16",
+      transform: "none",
+    });
+
+    const publicLayout = page.locator(".public-layout");
+    const publicOverflow = await publicLayout.evaluate((element) => ({
+      overflow: getComputedStyle(element).overflow,
+      overflowX: getComputedStyle(element).overflowX,
+    }));
+    expect(["hidden", "clip"]).not.toContain(publicOverflow.overflow);
+    expect(["hidden", "clip"]).not.toContain(publicOverflow.overflowX);
+
+    const layout = await horizontalLayout(page);
+    expect(
+      layout.scrollWidth,
+      `pre-hydration homepage overflow: ${JSON.stringify(layout.offenders)}`,
+    ).toBe(layout.clientWidth);
+    expect(
+      layout.offenders,
+      `pre-hydration homepage offenders: ${JSON.stringify(layout)}`,
+    ).toEqual([]);
+
+    const internalOverflow = await page.locator("main").evaluate((main) =>
+      [...main.querySelectorAll<HTMLElement>("*")]
+        .filter((element) =>
+          element.scrollWidth > element.clientWidth + 1 &&
+          element.closest('[aria-hidden="true"]') === null &&
+          !element.classList.contains("sr-only")
+        )
+        .map((element) => ({
+          className: element.getAttribute("class") ?? "",
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+          tagName: element.tagName,
+          text: element.textContent?.trim().slice(0, 80) ?? "",
+        })),
+    );
+    expect(
+      internalOverflow,
+      `pre-hydration homepage internal overflow: ${JSON.stringify(internalOverflow)}`,
+    ).toEqual([]);
+
+    const focusTargets = page.locator(
+      "main a[href]:visible, main button:not([disabled]):visible, main summary:visible",
+    );
+    expect(await focusTargets.count()).toBeGreaterThan(0);
+    for (let index = 0; index < await focusTargets.count(); index += 1) {
+      const target = focusTargets.nth(index);
+      await target.focus();
+      await expect(target).toBeFocused();
+      const focusBounds = await target.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const styles = getComputedStyle(element);
+        const focusExtent = Number.parseFloat(styles.outlineWidth) +
+          Number.parseFloat(styles.outlineOffset);
+        return {
+          focusExtent,
+          label: element.getAttribute("aria-label") ?? element.textContent?.trim() ?? "",
+          left: bounds.left,
+          right: bounds.right,
+        };
+      });
+      expect.soft(
+        focusBounds.left - focusBounds.focusExtent,
+        `${focusBounds.label} left focus ring`,
+      ).toBeGreaterThanOrEqual(-0.5);
+      expect.soft(
+        focusBounds.right + focusBounds.focusExtent,
+        `${focusBounds.label} right focus ring`,
+      ).toBeLessThanOrEqual(195.5);
+    }
   } finally {
     await context.close();
   }
