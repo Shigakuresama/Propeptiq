@@ -289,7 +289,7 @@ Browser tests use the configured local Playwright server; they do not prove live
 
 ## Amino Club exact-equivalent price snapshot
 
-The dated September 4, 2026 primary-source audit is recorded in [`docs/reference/2026-09-04-amino-equivalent-price-audit.md`](../reference/2026-09-04-amino-equivalent-price-audit.md). Its exhaustive 103-row result is 40 exact matches, 41 proved amount/unit mismatches, and 22 unresolved identities. The 40 exact matches reproduce the existing manifest's ordinary one-bottle USD list prices, so the audit changes no price. Temporary Amino Club HEAT35 and Club Sale amounts are recorded separately and are not PropeptIQ base-price authority. The other 63 rows remain pending at zero with no evidence object.
+The dated September 4, 2026 primary-source audit is recorded in [`docs/reference/2026-09-04-amino-equivalent-price-audit.md`](../reference/2026-09-04-amino-equivalent-price-audit.md). Its exhaustive 103-row result is 40 `matched`, 41 `no_exact_equivalent`, and 22 `unresolved`. The 40 matched rows reproduce the existing manifest's ordinary one-bottle USD list prices, so the audit changes no price. Temporary Amino Club HEAT35 and Club Sale amounts are recorded separately and are not PropeptIQ base-price authority. The other 63 rows remain pending at zero with no evidence object.
 
 Task 2B remains a release blocker: none of the 56 products has an owner-approved explicit `defaultVariantId` decision. The audit records the current derived runtime value for review, but it is neither approval nor a recommendation. Do not change default selection from array order, price, amount, or competitor merchandising.
 
