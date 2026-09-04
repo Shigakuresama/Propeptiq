@@ -214,6 +214,17 @@ function rectanglesIntersect(
     left.bottom > right.top;
 }
 
+function rectangleFitsInside(
+  outer: Awaited<ReturnType<typeof clientRect>>,
+  inner: Awaited<ReturnType<typeof clientRect>>,
+  tolerance = 1,
+): boolean {
+  return inner.left >= outer.left - tolerance &&
+    inner.right <= outer.right + tolerance &&
+    inner.top >= outer.top - tolerance &&
+    inner.bottom <= outer.bottom + tolerance;
+}
+
 async function horizontalLayout(page: Page) {
   return page.evaluate(() => {
     const root = document.documentElement;
@@ -1562,7 +1573,7 @@ test("unknown product slugs fail closed", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("owner-supplied catalog is complete, priced where reviewed, and serves the original vial presentation", async ({
+test("owner-supplied catalog is complete, priced where reviewed, and serves individual composite vial presentations", async ({
   page,
   request,
 }) => {
@@ -1572,19 +1583,37 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves the 
   await expect(page.getByRole("button", { name: /^add .+(?:: choose a variant| to (?:preview )?cart)$/iu })).toHaveCount(56);
   await expect(page.locator("main")).toContainText("$41.99");
   await expect(page.locator("main")).toContainText("-30%");
-  const imagePaths = await page.locator("article.catalog-listing-card img").evaluateAll(
-    (images) =>
-      images.map((image) => {
-        const url = new URL((image as HTMLImageElement).src);
+  const visualSources = await page.locator("article.catalog-listing-card .catalog-product-visual").evaluateAll(
+    (visuals) => visuals.map((visual) => {
+      const pathFor = (selector: string) => {
+        const image = visual.querySelector<HTMLImageElement>(selector);
+        if (!image) return null;
+        const url = new URL(image.src);
         return url.searchParams.get("url") ?? url.pathname;
-      }),
+      };
+      return {
+        backdrop: pathFor(".catalog-product-visual__backdrop"),
+        base: pathFor(".catalog-product-visual__base"),
+        mode: visual.getAttribute("data-visual-presentation"),
+      };
+    }),
   );
-  expect([...new Set(imagePaths)]).toEqual(["/catalog/vial-base-v2.png"]);
+  expect(visualSources).toHaveLength(56);
+  expect(new Set(visualSources.map(({ backdrop }) => backdrop)).size).toBe(56);
+  expect(visualSources.every(({ backdrop, base, mode }) =>
+    typeof backdrop === "string" &&
+    backdrop.endsWith(".webp") &&
+    base === "/catalog/vial-base-v2.png" &&
+    mode === "composite_data_label_overlay"
+  )).toBe(true);
 
-  for (const imagePath of imagePaths) {
+  for (const imagePath of [
+    "/catalog/vial-base-v2.png",
+    ...visualSources.slice(0, 3).map(({ backdrop }) => backdrop!),
+  ]) {
     const response = await request.get(imagePath);
     expect(response.ok(), `${imagePath} illustration response`).toBe(true);
-    expect(response.headers()["content-type"]).toContain("image/png");
+    expect(response.headers()["content-type"]).toMatch(/^image\/(?:png|webp)/u);
     expect((await response.body()).byteLength).toBeGreaterThan(1_000);
   }
 
@@ -1603,9 +1632,110 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves the 
     return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0;
   });
   expect(imageLoaded).toBe(true);
+  const heroBackdrop = page.locator(
+    '.catalog-detail-image .catalog-product-visual[data-category="metabolic"] .catalog-product-visual__backdrop',
+  );
+  await expect(heroBackdrop).toHaveCSS("object-position", "50% 48%");
+  await expect(page.locator(".catalog-detail-image .catalog-product-visual__base")).toHaveCSS(
+    "object-position",
+    "50% 50%",
+  );
 
   const unknown = await page.goto("/catalog/items/not-a-real-item");
   expect(unknown?.status()).toBe(404);
+});
+
+test("catalog product hierarchy keeps visual layers and longest labels inside reserved frames", async ({
+  page,
+}) => {
+  const checkedCards = [
+    { name: "CJC-1295 NO DAC 10mg + IPA 10mg", expectsSale: true },
+    { name: "Tirzepatide", expectsSale: true },
+  ] as const;
+
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: width < 768 ? 812 : 1000 });
+    await page.goto("/catalog");
+
+    for (const { name, expectsSale } of checkedCards) {
+      const card = page.getByRole("article", { name, exact: true });
+      const frame = card.locator(".catalog-image-frame");
+      const visual = frame.locator(".catalog-product-visual");
+      const backdrop = visual.locator(".catalog-product-visual__backdrop");
+      const base = visual.getByRole("img", {
+        name: `Illustrative laboratory vial presentation for ${name}`,
+      });
+      const labelName = visual.locator(".catalog-product-visual__name");
+      const variant = visual.locator(".catalog-product-visual__variant");
+      const notice = visual.getByText("RESEARCH USE ONLY", { exact: true });
+      const disclosure = visual.getByText("Illustrative product presentation", {
+        exact: true,
+      });
+      const sale = visual.getByLabel(/^-[1-9]\d*%$/u);
+
+      await frame.scrollIntoViewIfNeeded();
+      await expect(card.getByRole("heading", { name, exact: true })).toBeVisible();
+      await expect(base).toBeVisible();
+      await expect(disclosure).toBeVisible();
+      await expect(backdrop).toHaveAttribute("aria-hidden", "true");
+      await expect(variant).toBeVisible();
+      await expect(notice).toBeVisible();
+      await expect(sale).toHaveCount(expectsSale ? 1 : 0);
+
+      const frameRect = await clientRect(frame);
+      expect(frameRect.width / frameRect.height, `${width}px ${name} reserved ratio`).toBeCloseTo(4 / 3, 2);
+      for (const [layerName, layer] of [
+        ["backdrop", backdrop],
+        ["base", base],
+        ["name", labelName],
+        ["variant", variant],
+        ["RUO notice", notice],
+        ["disclosure", disclosure],
+        ...(expectsSale ? [["sale badge", sale] as const] : []),
+      ] as const) {
+        expect(
+          rectangleFitsInside(frameRect, await clientRect(layer)),
+          `${width}px ${name} ${layerName} containment`,
+        ).toBe(true);
+      }
+
+      const nameRect = await clientRect(labelName);
+      const variantRect = await clientRect(variant);
+      const noticeRect = await clientRect(notice);
+      const disclosureRect = await clientRect(disclosure);
+      expect(rectanglesIntersect(nameRect, variantRect), `${width}px ${name} name/variant overlap`).toBe(false);
+      expect(rectanglesIntersect(nameRect, noticeRect), `${width}px ${name} name/RUO overlap`).toBe(false);
+      expect(rectanglesIntersect(nameRect, disclosureRect), `${width}px ${name} name/disclosure overlap`).toBe(false);
+      expect(rectanglesIntersect(variantRect, noticeRect), `${width}px ${name} variant/RUO overlap`).toBe(false);
+      expect(rectanglesIntersect(variantRect, disclosureRect), `${width}px ${name} variant/disclosure overlap`).toBe(false);
+      expect(rectanglesIntersect(noticeRect, disclosureRect), `${width}px ${name} RUO/disclosure overlap`).toBe(false);
+      if (expectsSale) {
+        const saleRect = await clientRect(sale);
+        for (const [label, rect] of [
+          ["name", nameRect],
+          ["variant", variantRect],
+          ["RUO notice", noticeRect],
+          ["disclosure", disclosureRect],
+        ] as const) {
+          expect(rectanglesIntersect(saleRect, rect), `${width}px ${name} sale/${label} overlap`).toBe(false);
+        }
+      }
+      if (width <= 375) {
+        await card.hover();
+        expect(
+          rectangleFitsInside(await clientRect(frame), await clientRect(base)),
+          `${width}px ${name} hovered base containment`,
+        ).toBe(true);
+      }
+    }
+
+    const layout = await horizontalLayout(page);
+    expect(layout.scrollWidth - layout.clientWidth, `${width}px visual catalog overflow`).toBeLessThanOrEqual(1);
+    expect(
+      layout.offenders.filter(({ className }) => className.includes("catalog-product-visual")),
+      `${width}px catalog visual overflow offenders`,
+    ).toEqual([]);
+  }
 });
 
 test("navigation, homepage trust content, product research, and related records are visibly complete", async ({
@@ -1642,12 +1772,12 @@ test("navigation, homepage trust content, product research, and related records 
   await expect(page.getByRole("region", { name: "Frequently Researched Together" })).toBeVisible();
   await expect(page.getByRole("list", { name: "Related products, 4 items" }).locator(":scope > li")).toHaveCount(4);
 
-  expect(await page.locator("main img").evaluateAll((images) =>
-    images.every((image) => {
-      const url = new URL((image as HTMLImageElement).src);
-      return (url.searchParams.get("url") ?? url.pathname) === "/catalog/vial-base-v2.png";
-    })),
-  ).toBe(true);
+  const productVisuals = page.locator("main .catalog-product-visual");
+  await expect(productVisuals).toHaveCount(5);
+  expect(await productVisuals.evaluateAll((visuals) => visuals.every((visual) =>
+    visual.querySelectorAll("img").length === 2 &&
+    visual.getAttribute("data-visual-presentation") === "composite_data_label_overlay"
+  ))).toBe(true);
 });
 
 test("preview item keeps the calculator gated while product information and related records remain visible", async ({ page }) => {
@@ -1715,7 +1845,7 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
       for (const expectedCard of expectedCards) {
         const card = page.getByRole("article", { name: expectedCard.name, exact: true });
         const imageFrame = card.locator(".catalog-image-frame");
-        const image = imageFrame.locator("img");
+        const image = imageFrame.locator(".catalog-product-visual__base");
 
         await expect(card.getByText(expectedCard.amount, { exact: true })).toBeVisible();
         await expect(card.locator("del")).toHaveText(expectedCard.base);

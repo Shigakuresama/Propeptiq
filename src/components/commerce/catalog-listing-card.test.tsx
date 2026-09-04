@@ -86,6 +86,21 @@ describe("CatalogListingCard", () => {
       "sizes",
       "(min-width: 1280px) 28vw, (min-width: 768px) 45vw, calc(100vw - 2rem)",
     );
+    const visual = image.closest(".catalog-product-visual");
+    const backdrop = visual?.querySelector<HTMLImageElement>(
+      ".catalog-product-visual__backdrop",
+    );
+    expect(visual).toHaveAttribute(
+      "data-visual-presentation",
+      "composite_data_label_overlay",
+    );
+    expect(backdrop).toHaveAttribute("aria-hidden", "true");
+    expect(backdrop?.getAttribute("src")).toContain(
+      encodeURIComponent(product.image.src),
+    );
+    expect(image.getAttribute("src")).toContain(
+      encodeURIComponent("/catalog/vial-base-v2.png"),
+    );
     expect(image.closest(".catalog-image-frame")).not.toBeNull();
     expect(within(article).getByRole("heading", { name: product.name })).toBeVisible();
     expect(within(article).getByText("TR5")).toBeVisible();

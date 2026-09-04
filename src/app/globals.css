@@ -540,20 +540,16 @@ footer a,
   background: color-mix(in srgb, var(--moss-soft) 72%, var(--canvas));
 }
 
-.catalog-image-frame[data-category="metabolic"] img,
-.catalog-detail-image[data-category="metabolic"] img {
+.catalog-product-visual[data-category="metabolic"] .catalog-product-visual__backdrop {
   object-position: 50% 48%;
 }
 
-.catalog-image-frame[data-category="cellular"] img,
-.catalog-detail-image[data-category="cellular"] img,
-.catalog-image-frame[data-category="cosmetic"] img,
-.catalog-detail-image[data-category="cosmetic"] img {
+.catalog-product-visual[data-category="cellular"] .catalog-product-visual__backdrop,
+.catalog-product-visual[data-category="cosmetic"] .catalog-product-visual__backdrop {
   object-position: 50% 52%;
 }
 
-.catalog-image-frame[data-category="laboratory"] img,
-.catalog-detail-image[data-category="laboratory"] img {
+.catalog-product-visual[data-category="laboratory"] .catalog-product-visual__backdrop {
   object-position: 50% 55%;
 }
 
@@ -594,16 +590,24 @@ footer a,
   background: linear-gradient(145deg, color-mix(in srgb, var(--moss-soft) 72%, var(--canvas)), var(--canvas));
 }
 
+.catalog-product-visual__backdrop {
+  object-fit: cover;
+  opacity: 0.18;
+  filter: saturate(0.65) contrast(0.92);
+}
+
 .catalog-product-visual__base {
   object-fit: contain;
   object-position: center;
+  opacity: 0.96;
   padding: 0.35rem 12%;
-  transition: transform 300ms ease-out;
+  z-index: 1;
+  transition: opacity 300ms ease-out;
 }
 
 .catalog-listing-card:hover .catalog-product-visual__base,
 .catalog-listing-card:focus-within .catalog-product-visual__base {
-  transform: scale(1.02);
+  opacity: 1;
 }
 
 .catalog-product-visual__label {
@@ -619,11 +623,12 @@ footer a,
   font-family: var(--font-geist-sans), sans-serif;
   text-align: left;
   text-transform: uppercase;
+  z-index: 2;
 }
 
 .catalog-product-visual__name {
   overflow: hidden;
-  font-size: clamp(0.48rem, 1.4vw, 0.75rem);
+  font-size: clamp(0.68rem, 1.4vw, 0.82rem);
   font-weight: 700;
   letter-spacing: 0.04em;
   line-height: 1.1;
@@ -636,20 +641,21 @@ footer a,
   border: 1px solid currentColor;
   border-radius: 999px;
   padding: 0.1rem 0.35rem;
-  font-size: clamp(0.38rem, 1vw, 0.55rem);
+  font-size: clamp(0.56rem, 1vw, 0.65rem);
   letter-spacing: 0.04em;
 }
 
 .catalog-product-visual__notice {
-  margin-top: 2.6rem;
-  font-size: clamp(0.3rem, 0.7vw, 0.43rem);
+  margin-top: clamp(1rem, 6vw, 2.2rem);
+  font-size: clamp(0.48rem, 0.7vw, 0.55rem);
   letter-spacing: 0.08em;
 }
 
 .catalog-product-visual .catalog-image-disclosure {
   padding: 0.34rem 0.55rem;
-  font-size: 0.58rem;
+  font-size: clamp(0.55rem, 2.1vw, 0.6875rem);
   letter-spacing: 0.025em;
+  z-index: 2;
 }
 
 @media (max-width: 40rem) {
