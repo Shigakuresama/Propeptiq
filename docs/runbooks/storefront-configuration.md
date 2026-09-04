@@ -287,6 +287,12 @@ Browser tests use the configured local Playwright server; they do not prove live
 | Laboratory calculator | [`.env.example`](../../.env.example), [`concentration-calculator.ts`](../../src/config/concentration-calculator.ts), controlled content | Business/legal reviewer approves; deployment owner sets mode after reviewed code/content | Limits, neutral-copy policy, product page, keyboard/mobile/reduced-motion tests | Mode defaults disabled; configuration null; approved copy absent |
 | Cutover and rollback | [production cutover](./production-cutover.md) and [incidents/recovery](./incidents-and-recovery.md) | Explicitly authorized deployment/operations owner | Backup, migration, provider, webhook, smoke test, rollback read-back | No deployment was authorized or performed by this task |
 
+## Amino Club exact-equivalent price snapshot
+
+The dated September 4, 2026 primary-source audit is recorded in [`docs/reference/2026-09-04-amino-equivalent-price-audit.md`](../reference/2026-09-04-amino-equivalent-price-audit.md). Its exhaustive 103-row result is 40 exact matches, 41 proved amount/unit mismatches, and 22 unresolved identities. The 40 exact matches reproduce the existing manifest's ordinary one-bottle USD list prices, so the audit changes no price. Temporary Amino Club HEAT35 and Club Sale amounts are recorded separately and are not PropeptIQ base-price authority. The other 63 rows remain pending at zero with no evidence object.
+
+Task 2B remains a release blocker: none of the 56 products has an owner-approved explicit `defaultVariantId` decision. The audit records the current derived runtime value for review, but it is neither approval nor a recommendation. Do not change default selection from array order, price, amount, or competitor merchandising.
+
 ## Launch blockers still requiring business input
 
 - [ ] Canonical stable product IDs and exact joins for the owner browse products.
