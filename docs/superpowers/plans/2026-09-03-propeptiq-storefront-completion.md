@@ -93,7 +93,7 @@ No external CMS is justified. If browser-based publishing later becomes an opera
 
 1. Implement the existing `NewsletterGateway` against the installed Resend SDK using the current official Contacts/Topics model, not the transactional send API as a fake mailing list.
 2. Implement a durable, privacy-preserving attempt gate appropriate to the deployed runtime; do not rely on process memory in production.
-3. Add strict environment configuration for the newsletter key scope and Resend audience/topic identifiers. Server-only modules must import `server-only`; no key or provider response reaches the client.
+3. Add strict environment configuration for a dedicated full-access newsletter key and the global Resend Contact Topic identifier. Do not use the deprecated Audience model. Server-only modules must import `server-only`; no key or provider response reaches the client.
 4. Preserve `NEWSLETTER_NOT_CONFIGURED` and do not read/store/transmit an address unless gateway, attempt gate, approved privacy destination, and all required configuration are present.
 5. Before creating a provider key, verify the signed-in Resend team, verified domain, intended key scope, and target Vercel project/environments. Obtain action-time confirmation, create the least-privileged key, install it directly without exposing it in logs/chat, and verify Preview before Production.
 6. Activate only after the owner approves consent wording, privacy route, duplicate semantics, retention/deletion policy, abuse policy, and incident owner.

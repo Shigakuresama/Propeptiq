@@ -83,7 +83,7 @@ These sources justify a controlled-content and launch-gate design. They are not 
 | Controlled content statuses | Adopt | Public and search projections include approved content only. No AI-generated legal, medical, research, or marketing copy is introduced. |
 | Calculator launch gate | Adopt | Implement neutral concentration arithmetic only, but production rendering remains disabled by server configuration until the binding content policy and business/legal review explicitly approve it. |
 | Shared deterministic search contract | Adopt | One pure normalized index/scorer powers catalog and bottom search. No external AI, embeddings, vector database, or hosted search service. |
-| Newsletter not configured | Adopt | Validate but do not store or transmit email; return `NEWSLETTER_NOT_CONFIGURED` and show honest temporary-unavailable copy. |
+| Newsletter not configured | Adopt | Return `NEWSLETTER_NOT_CONFIGURED` before reading the request body, store/transmit no email, and show honest temporary-unavailable copy. Configured submissions still receive strict client and server validation. |
 | Null social URLs | Rejected by owner | Preserve the original placeholder requirement: initialize Instagram, TikTok, X, and Facebook to `/`, render all four accessible icon links, and identify them as placeholders in the owner guide until real approved URLs are supplied. |
 | Claimed June 2026 FDA example | Reject as unverified | The verified March FDA example and current FTC/Stripe primary sources are sufficient context. |
 
@@ -264,7 +264,7 @@ Only approved content is public or searchable. Missing legal/support routes rema
 
 The calculator performs only `mg / mL`, `mg/mL -> mcg/mL`, and material in a user-entered sample volume. It never supplies dosage, recommended volume, syringe units, frequency, injection technique, administration, treatment, protocol, or product-specific human-use examples. Its code and tests may ship while production rendering remains disabled by a server-owned `RECONSTITUTION_CALCULATOR_MODE=disabled|preview|approved` setting; production accepts only `disabled` or `approved`, and the default is `disabled`.
 
-Newsletter submission uses a provider adapter. Without a configured provider it validates the email and explicit consent, stores/transmits nothing, returns `NEWSLETTER_NOT_CONFIGURED`, and displays an accessible temporary-unavailable state rather than success.
+Newsletter submission uses a provider adapter. The deliberate disabled/unconfigured production path returns `NEWSLETTER_NOT_CONFIGURED` before reading the request body, stores/transmits nothing, and displays an accessible temporary-unavailable state rather than success. A fully configured submission validates the email and explicit consent at both client and server boundaries before provider work.
 
 ## Dependency graph and phase gates
 
