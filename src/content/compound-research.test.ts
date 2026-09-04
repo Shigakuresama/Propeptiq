@@ -298,15 +298,23 @@ describe("projectPublicCompoundResearch", () => {
 
   it("rejects duplicate IDs and broken two-way study references", () => {
     const duplicateCompound = freshSource();
-    duplicateCompound.compounds.compounds.push(
-      structuredClone(duplicateCompound.compounds.compounds[0]!),
+    const duplicateCompoundRecord = findRecord(
+      duplicateCompound.compounds.compounds,
+      "tirzepatide",
     );
+    duplicateCompoundRecord.id = "semaglutide";
+    duplicateCompoundRecord.productSlug = "semaglutide";
     expectInvalid(duplicateCompound);
 
     const duplicateStudy = freshSource();
-    duplicateStudy.studies.studies.push(
-      structuredClone(duplicateStudy.studies.studies[0]!),
+    const duplicateStudyRecord = findRecord(
+      duplicateStudy.studies.studies,
+      "pmid-35658024",
     );
+    duplicateStudy.studies.studies[1] = {
+      ...duplicateStudy.studies.studies[1],
+      ...duplicateStudyRecord,
+    };
     expectInvalid(duplicateStudy);
 
     const missingStudy = freshSource();
@@ -366,5 +374,25 @@ describe("projectPublicCompoundResearch", () => {
     findRecord(unknownStudyKey.studies.studies, "pmid-35658024").reviewNote =
       "Must remain private";
     expectInvalid(unknownStudyKey);
+  });
+
+  it("rejects incompatible evidence contexts and altered approved metadata", () => {
+    const hostileContext = freshSource();
+    findRecord(hostileContext.studies.studies, "pmid-35658024").evidenceContext =
+      "animal";
+    expectInvalid(hostileContext);
+
+    const alteredNames = freshSource();
+    const compound = findRecord(
+      alteredNames.compounds.compounds,
+      "tirzepatide",
+    );
+    compound.alternateNames = [...(compound.alternateNames as string[]), "altered"];
+    expectInvalid(alteredNames);
+
+    const alteredDuration = freshSource();
+    findRecord(alteredDuration.studies.studies, "pmid-35658024").duration =
+      "999 years";
+    expectInvalid(alteredDuration);
   });
 });

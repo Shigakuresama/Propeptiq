@@ -101,6 +101,21 @@ type ParsedResearch = Readonly<{
   studies: readonly ParsedStudy[];
 }>;
 
+const compatibleEvidenceContexts: Readonly<Record<StudyDesign, EvidenceContext>> =
+  Object.freeze({
+    animal_experimental: "animal",
+    human_interventional: "human",
+    human_observational: "human",
+    human_pharmacokinetic_pharmacodynamic: "human",
+    human_pilot: "human",
+    human_safety_pilot: "human",
+    multicenter_clinical_trial: "human",
+    pooled_randomized_controlled_trials: "human",
+    preclinical_experimental: "preclinical",
+    randomized_controlled_trial: "human",
+    retrospective_observational: "human",
+  });
+
 const authorizedCompoundSlugs = Object.freeze({
   "5-amino-1mq": "5-amino-1mq",
   "aod-9604": "aod-9604",
@@ -410,6 +425,10 @@ function parseStudy(value: unknown): ParsedStudy {
   if (record.publicationStatus !== "public_neutral_metadata") return invalid();
   if (record.reviewedOn !== REVIEWED_ON) return invalid();
 
+  const design = readEnum(record.design, studyDesigns);
+  const evidenceContext = readEnum(record.evidenceContext, evidenceContexts);
+  if (compatibleEvidenceContexts[design] !== evidenceContext) return invalid();
+
   return {
     id,
     compoundId,
@@ -419,8 +438,8 @@ function parseStudy(value: unknown): ParsedStudy {
     firstAuthor: readString(record.firstAuthor, 300),
     year: readYear(record.year),
     journal: readString(record.journal, 300),
-    design: readEnum(record.design, studyDesigns),
-    evidenceContext: readEnum(record.evidenceContext, evidenceContexts),
+    design,
+    evidenceContext,
     sampleSize: readSampleSize(record.sampleSize),
     population: readNullableString(record.population, 500),
     studiedAmount: readNullableString(record.studiedAmount, 300),
@@ -438,8 +457,9 @@ function expectedStrongestEvidence(
   studies: readonly ParsedStudy[],
 ): StrongestEvidence {
   if (studies.some((study) =>
-    study.design === "randomized_controlled_trial" ||
-    study.design === "pooled_randomized_controlled_trials"
+    study.evidenceContext === "human" &&
+    (study.design === "randomized_controlled_trial" ||
+      study.design === "pooled_randomized_controlled_trials")
   )) {
     return "human_rct";
   }
@@ -527,6 +547,37 @@ function parseResearch(input: unknown): ParsedResearch {
   return { compounds, studies };
 }
 
+function approvedComparableResearch(parsed: ParsedResearch): string {
+  const compounds = [...parsed.compounds]
+    .map((compound) => ({
+      ...compound,
+      alternateNames: [...compound.alternateNames].sort(compareText),
+      studyIds: [...compound.studyIds].sort(compareText),
+    }))
+    .sort((left, right) => compareText(left.id, right.id));
+  const studies = [...parsed.studies]
+    .sort((left, right) => compareText(left.id, right.id))
+    .map((study) => ({ ...study }));
+  return JSON.stringify({ compounds, studies });
+}
+
+function assertApprovedResearch(parsed: ParsedResearch): void {
+  if (
+    approvedComparableResearch(parsed) !==
+    approvedComparableResearch(approvedParsedResearch)
+  ) {
+    return invalid();
+  }
+}
+
+const approvedParsedResearch = deepFreeze(
+  parseResearch({
+    compounds: compoundsJson,
+    studies: studiesJson,
+    claimsAudit: claimsAuditJson,
+  }),
+);
+
 function compareText(left: string, right: string): number {
   if (left < right) return -1;
   if (left > right) return 1;
@@ -593,7 +644,9 @@ export function projectPublicCompoundResearch(
   input: unknown,
 ): PublicCompoundResearch {
   try {
-    return projectParsedResearch(parseResearch(input));
+    const parsed = parseResearch(input);
+    assertApprovedResearch(parsed);
+    return projectParsedResearch(parsed);
   } catch {
     return invalid();
   }
