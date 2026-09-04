@@ -18,11 +18,9 @@ const products: StorefrontProduct[] = browseCatalogProducts.map((browse) => {
   if (!manifest) throw new Error(`Missing catalog manifest product: ${browse.slug}`);
   const publicContent = getStorefrontProductContent(browse.slug);
   if (!publicContent) throw new Error(`Missing storefront product content: ${browse.slug}`);
-  const variants = browse.variants.map((variant) => decisionsByKey.get(`${browse.slug}:${variant.code}`)!);
-  const defaultVariant = variants.find((variant) => variant.decisionStatus === "approved_candidate") ?? variants[0]!;
   return { id: manifest.id, slug: browse.slug, name: browse.name, category: browse.category, description: publicContent.description,
     image: { ...browse.image, width: 1254, height: 1254 }, aliases: [browse.sourceName], popularityRank: null,
-    releasedAt: null, defaultVariantId: defaultVariant.id, variantIds: manifest.variantIds,
+    releasedAt: null, defaultVariantId: manifest.defaultVariantId, variantIds: manifest.variantIds,
     relatedProductIds: getRelatedProductIds(manifest.id), contentIds: publicContent.contentIds };
 });
 const variants = browseCatalogProducts.flatMap((browse) => browse.variants.map((source) => {

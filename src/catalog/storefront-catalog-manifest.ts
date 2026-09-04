@@ -36,6 +36,11 @@ export type StorefrontCatalogAmountDecision = Readonly<{
   amount: StorefrontCatalogAmount | null;
 }>;
 
+export type StorefrontCatalogDefaultDecision = Readonly<{
+  browseSlug: string;
+  browseCode: string;
+}>;
+
 export type StorefrontCatalogVariantDecision = Readonly<{
   browseSlug: string;
   browseCode: string;
@@ -54,7 +59,7 @@ export type StorefrontCatalogVariantDecision = Readonly<{
 }>;
 
 export type StorefrontCatalogDecisionManifest = Readonly<{
-  products: readonly Readonly<{ browseSlug: string; id: string; variantIds: readonly string[] }>[];
+  products: readonly Readonly<{ browseSlug: string; id: string; defaultVariantId: string; variantIds: readonly string[] }>[];
   variants: readonly StorefrontCatalogVariantDecision[];
 }>;
 
@@ -72,6 +77,11 @@ const amount = (
   browseCode,
   amount: configuredAmount,
 });
+
+const defaultDecision = (
+  browseSlug: string,
+  browseCode: string,
+): StorefrontCatalogDefaultDecision => ({ browseSlug, browseCode });
 
 export const approvedStorefrontCatalogPriceDecisions: readonly StorefrontCatalogPriceDecision[] = deepFreeze([
   decision("tirzepatide", "TR30", 5999, amino("glp-2")), decision("tirzepatide", "TR60", 10999, amino("glp-2")),
@@ -197,6 +207,65 @@ export const approvedStorefrontCatalogAmountDecisions: readonly StorefrontCatalo
   amount("bac-water", "BA10", null),
 ]);
 
+export const approvedStorefrontCatalogDefaultDecisions: readonly StorefrontCatalogDefaultDecision[] = deepFreeze([
+  defaultDecision("tirzepatide", "TR30"),
+  defaultDecision("retatrutide", "RT10"),
+  defaultDecision("nad-plus", "NJ500"),
+  defaultDecision("hgh", "H10"),
+  defaultDecision("ghk-cu", "CU50"),
+  defaultDecision("tesmorelin", "TESA10"),
+  defaultDecision("tesmorelin-ipa", "TI13"),
+  defaultDecision("bpc-157", "BPC10"),
+  defaultDecision("tb500", "TB10"),
+  defaultDecision("bpc-tb-blend", "BB10"),
+  defaultDecision("bpc-tb-blend-bb20", "BB20"),
+  defaultDecision("bpc-tb-blend-bb40", "BB40"),
+  defaultDecision("aod-9604", "AOD5"),
+  defaultDecision("mots-c", "MS10"),
+  defaultDecision("selank", "SK10"),
+  defaultDecision("semax", "XA10"),
+  defaultDecision("semax-selank", "20SS"),
+  defaultDecision("thymosin-alpha-1", "TA10"),
+  defaultDecision("dsip", "DS5"),
+  defaultDecision("cjc-1295-no-dac-ipa", "CP10"),
+  defaultDecision("cjc-1295-no-dac-ipa-cp20", "CP20"),
+  defaultDecision("ipamorelin", "IP10"),
+  defaultDecision("hcg", "G5K"),
+  defaultDecision("cargrilintide", "CGL10"),
+  defaultDecision("sermorelin-acetate", "SMO10"),
+  defaultDecision("pt-141", "PT141"),
+  defaultDecision("glow", "BBG70"),
+  defaultDecision("oxytocin-acetate", "OT10"),
+  defaultDecision("ll37", "LL375"),
+  defaultDecision("glutathione", "GT1500"),
+  defaultDecision("snap", "SNP10"),
+  defaultDecision("li-po-c", "LPC"),
+  defaultDecision("li-po-c-without-b12", "LPC"),
+  defaultDecision("lemon-bottle", "LB"),
+  defaultDecision("mt1", "MT1"),
+  defaultDecision("mt2", "MT210"),
+  defaultDecision("ss-31", "2S10"),
+  defaultDecision("klow", "BBGK"),
+  defaultDecision("5-amino-1mq", "5A50"),
+  defaultDecision("kisspeptin", "KS10"),
+  defaultDecision("pinealon", "PN5"),
+  defaultDecision("pe-22-28", "PE10"),
+  defaultDecision("igf-1-lr3", "IG1"),
+  defaultDecision("ara-290", "RA10"),
+  defaultDecision("acetic-acid", "AA"),
+  defaultDecision("semaglutide", "SM10"),
+  defaultDecision("kpv", "KPV10"),
+  defaultDecision("epithalon", "ET10"),
+  defaultDecision("cjc-1295-with-dac", "CD5"),
+  defaultDecision("cjc-1295-no-dac", "CND5"),
+  defaultDecision("grp-2", "GRP-2"),
+  defaultDecision("vip", "VP10"),
+  defaultDecision("survodutide", "SUR10"),
+  defaultDecision("admax", "Admax"),
+  defaultDecision("cartalax", "Car20"),
+  defaultDecision("bac-water", "BA3"),
+]);
+
 function uuidBytes(uuid: string): Buffer {
   return Buffer.from(uuid.replaceAll("-", ""), "hex");
 }
@@ -248,12 +317,27 @@ function validAmountDecision(candidate: StorefrontCatalogAmountDecision): void {
   }
 }
 
+function validDefaultDecision(candidate: StorefrontCatalogDefaultDecision): void {
+  if (
+    !candidate ||
+    typeof candidate !== "object" ||
+    Object.keys(candidate).sort().join(",") !== "browseCode,browseSlug" ||
+    typeof candidate.browseSlug !== "string" ||
+    !candidate.browseSlug ||
+    typeof candidate.browseCode !== "string" ||
+    !candidate.browseCode
+  ) {
+    fail("Invalid storefront catalog default decision");
+  }
+}
+
 export function buildStorefrontCatalogDecisionManifest(
   products: readonly BrowseCatalogProduct[],
   decisions: readonly StorefrontCatalogPriceDecision[],
   amountDecisions: readonly StorefrontCatalogAmountDecision[] = approvedStorefrontCatalogAmountDecisions,
+  defaultDecisions: readonly StorefrontCatalogDefaultDecision[] = approvedStorefrontCatalogDefaultDecisions,
 ): StorefrontCatalogDecisionManifest {
-  if (!Array.isArray(products) || !Array.isArray(decisions) || !Array.isArray(amountDecisions) || products.length !== 56 || decisions.length !== 40 || amountDecisions.length !== 103) fail("Invalid storefront catalog coverage");
+  if (!Array.isArray(products) || !Array.isArray(decisions) || !Array.isArray(amountDecisions) || !Array.isArray(defaultDecisions) || products.length !== 56 || decisions.length !== 40 || amountDecisions.length !== 103 || defaultDecisions.length !== 56) fail("Invalid storefront catalog coverage");
   const rows = new Map<string, { product: BrowseCatalogProduct; variant: BrowseCatalogProduct["variants"][number] }>();
   const productIds = new Set<string>();
   for (const product of products) {
@@ -272,12 +356,14 @@ export function buildStorefrontCatalogDecisionManifest(
     if (candidateSkus.has(candidateSku)) fail("Storefront catalog identity collision");
     candidateSkus.add(candidateSku);
   }
-  for (const [productIndex, product] of products.entries()) {
-    const canonicalProduct = browseCatalogProducts[productIndex];
-    if (!canonicalProduct || product.slug !== canonicalProduct.slug || product.variants.length !== canonicalProduct.variants.length) fail("Storefront catalog browse input is not canonical");
-    for (const [variantIndex, variant] of product.variants.entries()) {
-      const canonicalVariant = canonicalProduct.variants[variantIndex];
-      if (!canonicalVariant || variant.code !== canonicalVariant.code || variant.packageForm !== canonicalVariant.packageForm) fail("Storefront catalog browse input is not canonical");
+  const canonicalProducts = new Map(browseCatalogProducts.map((product) => [product.slug, product]));
+  for (const product of products) {
+    const canonicalProduct = canonicalProducts.get(product.slug);
+    if (!canonicalProduct || product.variants.length !== canonicalProduct.variants.length) fail("Storefront catalog browse input is not canonical");
+    const canonicalVariants = new Map(canonicalProduct.variants.map((variant) => [variant.code, variant]));
+    for (const variant of product.variants) {
+      const canonicalVariant = canonicalVariants.get(variant.code);
+      if (!canonicalVariant || variant.packageForm !== canonicalVariant.packageForm) fail("Storefront catalog browse input is not canonical");
     }
   }
   const approved = new Map<string, StorefrontCatalogPriceDecision>();
@@ -303,6 +389,31 @@ export function buildStorefrontCatalogDecisionManifest(
   }
   if (configuredAmounts.size !== rows.size) {
     fail("Invalid storefront catalog amount decision coverage");
+  }
+  const configuredDefaults = new Map<string, StorefrontCatalogDefaultDecision>();
+  const configuredDefaultKeys = new Set<string>();
+  const canonicalDefaults = new Map(
+    approvedStorefrontCatalogDefaultDecisions.map((item) => [item.browseSlug, item.browseCode]),
+  );
+  for (const item of defaultDecisions) {
+    validDefaultDecision(item);
+    const scoped = `${item.browseSlug}:${item.browseCode}`;
+    if (
+      configuredDefaults.has(item.browseSlug) ||
+      configuredDefaultKeys.has(scoped) ||
+      !productIds.has(item.browseSlug) ||
+      !rows.has(scoped)
+    ) {
+      fail("Invalid storefront catalog default decision coverage");
+    }
+    if (canonicalDefaults.get(item.browseSlug) !== item.browseCode) {
+      fail("Storefront catalog default decisions are not canonical");
+    }
+    configuredDefaults.set(item.browseSlug, item);
+    configuredDefaultKeys.add(scoped);
+  }
+  if (configuredDefaults.size !== products.length) {
+    fail("Invalid storefront catalog default decision coverage");
   }
   const ids = new Set<string>();
   const skus = new Set<string>();
@@ -331,7 +442,11 @@ export function buildStorefrontCatalogDecisionManifest(
         stripeProductId: null, stripePriceId: null,
       });
     }
-    return { browseSlug: product.slug, id: productId, variantIds };
+    const configuredDefault = configuredDefaults.get(product.slug)!;
+    const defaultVariantId = uuidV5(
+      `propeptiq.com/storefront/variant/${product.slug}/${configuredDefault.browseCode}`,
+    );
+    return { browseSlug: product.slug, id: productId, defaultVariantId, variantIds };
   });
   return deepFreeze({ products: productRows, variants });
 }
@@ -340,6 +455,7 @@ export const storefrontCatalogDecisionManifest = buildStorefrontCatalogDecisionM
   browseCatalogProducts,
   approvedStorefrontCatalogPriceDecisions,
   approvedStorefrontCatalogAmountDecisions,
+  approvedStorefrontCatalogDefaultDecisions,
 );
 
 export function getStorefrontCatalogDecision(browseSlug: string, browseCode: string): StorefrontCatalogVariantDecision {

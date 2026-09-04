@@ -6,6 +6,22 @@ import { buildConfiguredDisplayVariantFacts } from "./storefront-public";
 import { storefrontCatalogDecisionManifest } from "./storefront-catalog-manifest";
 
 describe("canonical storefront catalog data", () => {
+  it("copies every explicit manifest default into canonical catalog data", () => {
+    const manifestDefaults = new Map(
+      storefrontCatalogDecisionManifest.products.map((product) => [
+        product.browseSlug,
+        product.defaultVariantId,
+      ]),
+    );
+
+    expect(manifestDefaults.size).toBe(56);
+    expect(storefrontCatalogData.products).toHaveLength(56);
+    for (const product of storefrontCatalogData.products) {
+      expect(product.defaultVariantId).toBe(manifestDefaults.get(product.slug));
+      expect(product.variantIds).toContain(product.defaultVariantId);
+    }
+  });
+
   it("publishes every reviewed product and variant identity", () => {
     expect(browseCatalogProducts).toHaveLength(56);
     expect(browseCatalogVariantCount).toBe(103);

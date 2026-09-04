@@ -162,72 +162,72 @@ The Wolverine variant identifier was also tested as a direct `?v_id=...` query a
 
 For independent review, confirm the selected button and list price in the rendered product block, then inspect the first-party inline `self.__next_f` response record for the exact identifier/title/price/currency tuple above. Do not use the unselected page's `From` price. A headless request that receives HTTP 403 does not reproduce the evidence and must not be treated as contradictory price data.
 
-## Task 2B explicit-default decision register — blocked
+## Task 2B explicit-default decision register — owner authorized
 
-The values below are observations of the current runtime result only. They are not owner approvals or recommendations. The current implementation derives them from the first approved price in owner order, otherwise the first owner row. Task 2B must replace that derivation with one explicit owner-approved `defaultVariantId` per product. No default may be inferred from array order, price, amount, or competitor merchandising.
+The owner's September 4 instruction to review once more and then implement without another approval pause authorizes preserving the 56 previously displayed defaults below as explicit configuration. Each decision is keyed only by the exact `{ browseSlug, browseCode }` identity; its UUID is derived through the canonical storefront UUIDv5 identity function. Price, array position, amount, availability, Stripe data, and competitor merchandising do not select or change these defaults.
 
-| Product | Current runtime code | Current runtime `defaultVariantId` | Owner-approved `defaultVariantId` |
-| --- | --- | --- | --- |
-| tirzepatide | TR30 | `5ff78cc3-c541-5bf4-9f3b-12be2222cc75` | Awaiting owner approval |
-| retatrutide | RT10 | `e10294a1-d79c-51a1-9137-ff69d2a9e762` | Awaiting owner approval |
-| nad-plus | NJ500 | `edc81516-bf06-582a-a1cf-1421d6bb3068` | Awaiting owner approval |
-| hgh | H10 | `c7907155-bca4-58e1-8e9e-b97bc3caa3e4` | Awaiting owner approval |
-| ghk-cu | CU50 | `24c833de-f4f8-53c1-8b89-667fa10a0e5f` | Awaiting owner approval |
-| tesmorelin | TESA10 | `b162f82c-8d1c-5665-87c8-d370c5c1ac9f` | Awaiting owner approval |
-| tesmorelin-ipa | TI13 | `1710b19e-78dc-5ae9-9ee3-4151b1c4b8b7` | Awaiting owner approval |
-| bpc-157 | BPC10 | `b0447a0a-6da0-5209-a273-cdb0035a5d97` | Awaiting owner approval |
-| tb500 | TB10 | `d6f3dbef-459b-5bbe-bbeb-e097973174bc` | Awaiting owner approval |
-| bpc-tb-blend | BB10 | `a09ac646-5e3b-515b-8ae3-04624282ee8c` | Awaiting owner approval |
-| bpc-tb-blend-bb20 | BB20 | `76108f01-80e6-5f11-968b-4ba69d762320` | Awaiting owner approval |
-| bpc-tb-blend-bb40 | BB40 | `552bcdae-13f0-54e9-8adb-5e686a5c0bf3` | Awaiting owner approval |
-| aod-9604 | AOD5 | `2d3efed4-2c53-5593-9dec-0931bd2f1c44` | Awaiting owner approval |
-| mots-c | MS10 | `844c60d7-36b7-526f-89a6-82ec1d501050` | Awaiting owner approval |
-| selank | SK10 | `89f0742c-30ef-5196-a15b-1cb1e03426e9` | Awaiting owner approval |
-| semax | XA10 | `005059ad-dd45-504c-b3e9-cfde386bbd2b` | Awaiting owner approval |
-| semax-selank | 20SS | `3305a442-cc1d-5049-a7d2-097bdc41dd32` | Awaiting owner approval |
-| thymosin-alpha-1 | TA10 | `cd66cb9a-e2f9-5971-9a01-0dbd1d9f6450` | Awaiting owner approval |
-| dsip | DS5 | `8bc743dd-ddf2-54d7-9858-587b4b762605` | Awaiting owner approval |
-| cjc-1295-no-dac-ipa | CP10 | `bbffa403-e0e5-53a4-a144-a60cc1fa8cf1` | Awaiting owner approval |
-| cjc-1295-no-dac-ipa-cp20 | CP20 | `2c3211f2-34a5-5f05-b8e4-4813b7a50e42` | Awaiting owner approval |
-| ipamorelin | IP10 | `e410a116-8f12-582d-890e-22dd9318fc56` | Awaiting owner approval |
-| hcg | G5K | `f3106b5d-ef6a-5d8d-937a-536de87e4f05` | Awaiting owner approval |
-| cargrilintide | CGL10 | `3b0273b9-3b5c-5111-b09a-b8419b5adc89` | Awaiting owner approval |
-| sermorelin-acetate | SMO10 | `e1d9205b-4fbf-5bfc-95da-7c12f3bb63a7` | Awaiting owner approval |
-| pt-141 | PT141 | `b3947bde-0c8a-5c54-91fc-45d2f12c1ad4` | Awaiting owner approval |
-| glow | BBG70 | `5ffb2718-6989-55b4-a72d-01ff197ffdbc` | Awaiting owner approval |
-| oxytocin-acetate | OT10 | `cdcc5a32-201a-5467-9dd8-aca915cc55df` | Awaiting owner approval |
-| ll37 | LL375 | `5edfccec-11c5-5000-9cb0-7141dd144278` | Awaiting owner approval |
-| glutathione | GT1500 | `05e9617d-8d17-5525-b8ba-2ef30ea1213d` | Awaiting owner approval |
-| snap | SNP10 | `964bb892-b516-5d08-93c2-3e13ba47afad` | Awaiting owner approval |
-| li-po-c | LPC | `49a95c80-1230-57db-8d74-f97b12d80dd7` | Awaiting owner approval |
-| li-po-c-without-b12 | LPC | `db2c79d4-942d-5708-bbdd-0cd020641efd` | Awaiting owner approval |
-| lemon-bottle | LB | `fe5ff5df-c740-5fe6-8a53-6e1e317590cd` | Awaiting owner approval |
-| mt1 | MT1 | `c0a4886e-0762-54db-bb11-447dc673fa30` | Awaiting owner approval |
-| mt2 | MT210 | `43e37aab-c03f-5376-bd16-7ea75e9e4e9f` | Awaiting owner approval |
-| ss-31 | 2S10 | `dcf29255-da96-588f-804e-442a336cbe69` | Awaiting owner approval |
-| klow | BBGK | `c12d3994-0164-52cc-a4fd-71d8b7720eb1` | Awaiting owner approval |
-| 5-amino-1mq | 5A50 | `1c56b823-848e-5d8c-aaca-056168a033a2` | Awaiting owner approval |
-| kisspeptin | KS10 | `513745eb-55bd-5baf-87fb-4915a6aee5a6` | Awaiting owner approval |
-| pinealon | PN5 | `7881fc75-3c25-5bb6-b235-89b4a7baaa44` | Awaiting owner approval |
-| pe-22-28 | PE10 | `b63653f8-a84d-556f-9e71-6643c6080a0d` | Awaiting owner approval |
-| igf-1-lr3 | IG1 | `8f9bb57e-0355-566f-adde-2474a9c3efbc` | Awaiting owner approval |
-| ara-290 | RA10 | `14520cb5-06ff-50c0-bebd-bf6c147f0cd8` | Awaiting owner approval |
-| acetic-acid | AA | `ee0b5072-6daf-5cbb-917c-8dc81c92486d` | Awaiting owner approval |
-| semaglutide | SM10 | `a6181236-9de5-55b3-ab83-0d7524f371b6` | Awaiting owner approval |
-| kpv | KPV10 | `a9402071-c149-5af5-95f2-ad6588604210` | Awaiting owner approval |
-| epithalon | ET10 | `f9dfb304-780f-5bdb-af82-660f5d6fe1d2` | Awaiting owner approval |
-| cjc-1295-with-dac | CD5 | `ab7a14bf-9b9a-56b9-aca6-16ac31fb3d12` | Awaiting owner approval |
-| cjc-1295-no-dac | CND5 | `37f13254-0e24-52ab-8cf0-5095d9ff5982` | Awaiting owner approval |
-| grp-2 | GRP-2 | `bc60b820-f680-5376-b618-31a3d7be9ee7` | Awaiting owner approval |
-| vip | VP10 | `a321b5e3-d39a-5b73-a26f-1614b4523d40` | Awaiting owner approval |
-| survodutide | SUR10 | `c0b57d84-558c-541a-b6a0-189babae6fc4` | Awaiting owner approval |
-| admax | Admax | `b6e9d630-8131-5e4b-bbb5-ca04abf087c2` | Awaiting owner approval |
-| cartalax | Car20 | `5b420c28-d963-5673-9778-0730d0cae4de` | Awaiting owner approval |
-| bac-water | BA3 | `3e70c3a4-a773-539d-a9b8-4e51427be8c4` | Awaiting owner approval |
+| `browseSlug` | Owner-authorized `browseCode` | Derived `defaultVariantId` |
+| --- | --- | --- |
+| tirzepatide | TR30 | `5ff78cc3-c541-5bf4-9f3b-12be2222cc75` |
+| retatrutide | RT10 | `e10294a1-d79c-51a1-9137-ff69d2a9e762` |
+| nad-plus | NJ500 | `edc81516-bf06-582a-a1cf-1421d6bb3068` |
+| hgh | H10 | `c7907155-bca4-58e1-8e9e-b97bc3caa3e4` |
+| ghk-cu | CU50 | `24c833de-f4f8-53c1-8b89-667fa10a0e5f` |
+| tesmorelin | TESA10 | `b162f82c-8d1c-5665-87c8-d370c5c1ac9f` |
+| tesmorelin-ipa | TI13 | `1710b19e-78dc-5ae9-9ee3-4151b1c4b8b7` |
+| bpc-157 | BPC10 | `b0447a0a-6da0-5209-a273-cdb0035a5d97` |
+| tb500 | TB10 | `d6f3dbef-459b-5bbe-bbeb-e097973174bc` |
+| bpc-tb-blend | BB10 | `a09ac646-5e3b-515b-8ae3-04624282ee8c` |
+| bpc-tb-blend-bb20 | BB20 | `76108f01-80e6-5f11-968b-4ba69d762320` |
+| bpc-tb-blend-bb40 | BB40 | `552bcdae-13f0-54e9-8adb-5e686a5c0bf3` |
+| aod-9604 | AOD5 | `2d3efed4-2c53-5593-9dec-0931bd2f1c44` |
+| mots-c | MS10 | `844c60d7-36b7-526f-89a6-82ec1d501050` |
+| selank | SK10 | `89f0742c-30ef-5196-a15b-1cb1e03426e9` |
+| semax | XA10 | `005059ad-dd45-504c-b3e9-cfde386bbd2b` |
+| semax-selank | 20SS | `3305a442-cc1d-5049-a7d2-097bdc41dd32` |
+| thymosin-alpha-1 | TA10 | `cd66cb9a-e2f9-5971-9a01-0dbd1d9f6450` |
+| dsip | DS5 | `8bc743dd-ddf2-54d7-9858-587b4b762605` |
+| cjc-1295-no-dac-ipa | CP10 | `bbffa403-e0e5-53a4-a144-a60cc1fa8cf1` |
+| cjc-1295-no-dac-ipa-cp20 | CP20 | `2c3211f2-34a5-5f05-b8e4-4813b7a50e42` |
+| ipamorelin | IP10 | `e410a116-8f12-582d-890e-22dd9318fc56` |
+| hcg | G5K | `f3106b5d-ef6a-5d8d-937a-536de87e4f05` |
+| cargrilintide | CGL10 | `3b0273b9-3b5c-5111-b09a-b8419b5adc89` |
+| sermorelin-acetate | SMO10 | `e1d9205b-4fbf-5bfc-95da-7c12f3bb63a7` |
+| pt-141 | PT141 | `b3947bde-0c8a-5c54-91fc-45d2f12c1ad4` |
+| glow | BBG70 | `5ffb2718-6989-55b4-a72d-01ff197ffdbc` |
+| oxytocin-acetate | OT10 | `cdcc5a32-201a-5467-9dd8-aca915cc55df` |
+| ll37 | LL375 | `5edfccec-11c5-5000-9cb0-7141dd144278` |
+| glutathione | GT1500 | `05e9617d-8d17-5525-b8ba-2ef30ea1213d` |
+| snap | SNP10 | `964bb892-b516-5d08-93c2-3e13ba47afad` |
+| li-po-c | LPC | `49a95c80-1230-57db-8d74-f97b12d80dd7` |
+| li-po-c-without-b12 | LPC | `db2c79d4-942d-5708-bbdd-0cd020641efd` |
+| lemon-bottle | LB | `fe5ff5df-c740-5fe6-8a53-6e1e317590cd` |
+| mt1 | MT1 | `c0a4886e-0762-54db-bb11-447dc673fa30` |
+| mt2 | MT210 | `43e37aab-c03f-5376-bd16-7ea75e9e4e9f` |
+| ss-31 | 2S10 | `dcf29255-da96-588f-804e-442a336cbe69` |
+| klow | BBGK | `c12d3994-0164-52cc-a4fd-71d8b7720eb1` |
+| 5-amino-1mq | 5A50 | `1c56b823-848e-5d8c-aaca-056168a033a2` |
+| kisspeptin | KS10 | `513745eb-55bd-5baf-87fb-4915a6aee5a6` |
+| pinealon | PN5 | `7881fc75-3c25-5bb6-b235-89b4a7baaa44` |
+| pe-22-28 | PE10 | `b63653f8-a84d-556f-9e71-6643c6080a0d` |
+| igf-1-lr3 | IG1 | `8f9bb57e-0355-566f-adde-2474a9c3efbc` |
+| ara-290 | RA10 | `14520cb5-06ff-50c0-bebd-bf6c147f0cd8` |
+| acetic-acid | AA | `ee0b5072-6daf-5cbb-917c-8dc81c92486d` |
+| semaglutide | SM10 | `a6181236-9de5-55b3-ab83-0d7524f371b6` |
+| kpv | KPV10 | `a9402071-c149-5af5-95f2-ad6588604210` |
+| epithalon | ET10 | `f9dfb304-780f-5bdb-af82-660f5d6fe1d2` |
+| cjc-1295-with-dac | CD5 | `ab7a14bf-9b9a-56b9-aca6-16ac31fb3d12` |
+| cjc-1295-no-dac | CND5 | `37f13254-0e24-52ab-8cf0-5095d9ff5982` |
+| grp-2 | GRP-2 | `bc60b820-f680-5376-b618-31a3d7be9ee7` |
+| vip | VP10 | `a321b5e3-d39a-5b73-a26f-1614b4523d40` |
+| survodutide | SUR10 | `c0b57d84-558c-541a-b6a0-189babae6fc4` |
+| admax | Admax | `b6e9d630-8131-5e4b-bbb5-ca04abf087c2` |
+| cartalax | Car20 | `5b420c28-d963-5673-9778-0730d0cae4de` |
+| bac-water | BA3 | `3e70c3a4-a773-539d-a9b8-4e51427be8c4` |
 
 ## Change and release status
 
 - Exact price changes: none. The re-audit confirms all 40 current manifest amounts.
 - Pending rows: 63 remain at zero with no evidence object in the manifest.
-- Task 2B release blocker: all 56 owner-approved `defaultVariantId` decisions are still missing. No runtime default logic was changed in Task 2A.
+- Explicit defaults: the owner authorized preserving all 56 listed defaults; each is now an immutable scoped decision and no runtime price/order fallback selects another variant.
 - Provider boundary: no Stripe live/test reads or writes, no database/provider writes, and no secret or environment inspection occurred during this audit.
