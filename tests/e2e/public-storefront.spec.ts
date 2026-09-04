@@ -1429,7 +1429,14 @@ test("mobile explanatory copy meets the 16px body minimum", async ({ page }) => 
   }
 });
 
-test("header logo remains uncropped while brand and footer targets stay accessible", async ({ page }) => {
+test("header brand uses a contained alpha mark and motion field while navigation targets stay accessible", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
   for (const width of [375, 1440]) {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
     await page.goto("/");
@@ -1446,7 +1453,11 @@ test("header logo remains uncropped while brand and footer targets stay accessib
           borderRadius: wrapperStyles.borderRadius,
           objectFit: imageStyles.objectFit,
           overflow: wrapperStyles.overflow,
+          position: imageStyles.position,
           transform: imageStyles.transform,
+          left: image.style.left,
+          top: image.style.top,
+          width: image.style.width,
         };
       });
 
@@ -1455,25 +1466,76 @@ test("header logo remains uncropped while brand and footer targets stay accessib
       borderRadius: "0px",
       objectFit: "contain",
       overflow: "visible",
+      position: "absolute",
       transform: "none",
+      left: "0px",
+      top: "0px",
+      width: "100%",
     });
+  }
+
+  for (const width of [195, 320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 812 });
+    await page.goto("/");
+    const brandLink = page
+      .getByRole("banner")
+      .getByRole("link", { name: "PROPEPTIQ LABS home" });
+    const mark = brandLink.locator(".brand-logo__mark");
+    const markImage = mark.locator("img");
+    const motionField = brandLink.locator(".header-brand-motion__field");
+    const brandTarget = await brandLink.evaluate((link) => {
+      const bounds = link.getBoundingClientRect();
+      const mark = link.querySelector<HTMLElement>(".brand-logo__mark");
+      const wordmark = link.querySelector<HTMLElement>(".brand-logo__wordmark");
+      return {
+        height: bounds.height,
+        markDisplay: mark ? getComputedStyle(mark).display : "missing",
+        width: bounds.width,
+        wordmarkDisplay: wordmark ? getComputedStyle(wordmark).display : "missing",
+      };
+    });
+
+    console.info(`Header brand target size at ${width}px: ${JSON.stringify(brandTarget)}`);
+    expect(brandTarget.height).toBeGreaterThanOrEqual(44);
+    expect(brandTarget.width).toBeGreaterThanOrEqual(44);
+    expect(brandTarget.markDisplay).not.toBe("none");
+    if (width === 195) expect(brandTarget.wordmarkDisplay).toBe("none");
+    expect(await markImage.getAttribute("src")).toContain("%2Fbrand%2Fpropeptiq-mark.png");
+    expect(
+      rectangleFitsInside(await clientRect(mark), await clientRect(markImage)),
+      `${width}px logo image must stay inside its one-to-one mark box`,
+    ).toBe(true);
+    expect(
+      rectangleFitsInside(await clientRect(brandLink), await clientRect(markImage)),
+      `${width}px logo image must stay inside the home link`,
+    ).toBe(true);
+    await expect(motionField).toHaveAttribute("aria-hidden", "true");
+    expect(await motionField.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe("none");
+    const brandLinkBounds = await clientRect(brandLink);
+    const motionFieldBounds = await clientRect(motionField);
+    expect(
+      rectangleFitsInside(brandLinkBounds, motionFieldBounds),
+      `${width}px motion field must stay inside the padded home link: ${JSON.stringify({ brandLinkBounds, motionFieldBounds })}`,
+    ).toBe(true);
+    const headerLayout = await page.getByRole("banner").evaluate((header) => {
+      const bounds = header.getBoundingClientRect();
+      return {
+        clientWidth: header.clientWidth,
+        left: bounds.left,
+        right: bounds.right,
+        scrollWidth: header.scrollWidth,
+      };
+    });
+    expect(
+      headerLayout.scrollWidth - headerLayout.clientWidth,
+      `${width}px persistent header overflow: ${JSON.stringify(headerLayout)}`,
+    ).toBeLessThanOrEqual(1);
+    expect(headerLayout.left).toBeGreaterThanOrEqual(-0.5);
+    expect(headerLayout.right).toBeLessThanOrEqual(width + 0.5);
   }
 
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
-
-  const brandTarget = await page
-    .getByRole("banner")
-    .getByRole("link", { name: "PROPEPTIQ LABS home" })
-    .evaluate((link) => {
-      const bounds = link.getBoundingClientRect();
-      return { height: bounds.height, width: bounds.width };
-    });
-
-  console.info(`Header brand target size at 375px: ${JSON.stringify(brandTarget)}`);
-  expect(brandTarget.height).toBeGreaterThanOrEqual(44);
-  expect(brandTarget.width).toBeGreaterThanOrEqual(44);
-
   const targetSizes = await page
     .getByRole("navigation", { name: "Footer" })
     .getByRole("link")
@@ -1487,6 +1549,79 @@ test("header logo remains uncropped while brand and footer targets stay accessib
   expect(targetSizes.length).toBeGreaterThan(0);
   console.info(`Footer target sizes at 375px: ${JSON.stringify(targetSizes)}`);
   expect(targetSizes.every(({ height, width }) => height >= 44 && width >= 44)).toBe(true);
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+  const animatedBrand = page.getByRole("banner").getByRole("link", {
+    name: "PROPEPTIQ LABS home",
+  });
+  const animatedWrapper = animatedBrand.locator(".header-brand-motion");
+  await expect(animatedWrapper).toHaveAttribute("data-motion-state", "running");
+  const beforeAnimation = await clientRect(animatedBrand);
+  await page.waitForTimeout(12_000);
+  const afterAnimation = await clientRect(animatedBrand);
+  expect(Math.abs(afterAnimation.left - beforeAnimation.left)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(afterAnimation.top - beforeAnimation.top)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(afterAnimation.width - beforeAnimation.width)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(afterAnimation.height - beforeAnimation.height)).toBeLessThanOrEqual(0.5);
+
+  await page.goto("/catalog");
+  const catalogBrand = page.getByRole("banner").getByRole("link", {
+    name: "PROPEPTIQ LABS home",
+  });
+  await catalogBrand.focus();
+  await expect(catalogBrand).toBeFocused();
+  const focusEvidence = await catalogBrand.evaluate((link) => {
+    const bounds = link.getBoundingClientRect();
+    const styles = getComputedStyle(link);
+    return {
+      focusVisible: link.matches(":focus-visible"),
+      left: bounds.left,
+      outlineOffset: Number.parseFloat(styles.outlineOffset),
+      outlineWidth: Number.parseFloat(styles.outlineWidth),
+      right: bounds.right,
+    };
+  });
+  expect(focusEvidence.focusVisible).toBe(true);
+  expect(focusEvidence.left - focusEvidence.outlineOffset - focusEvidence.outlineWidth)
+    .toBeGreaterThanOrEqual(0);
+  expect(focusEvidence.right + focusEvidence.outlineOffset + focusEvidence.outlineWidth)
+    .toBeLessThanOrEqual(375);
+  await catalogBrand.click();
+  await expect(page).toHaveURL(/\/$/u);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.reload();
+  const staticWrapper = page.locator(".header-brand-motion");
+  await expect(staticWrapper).toHaveAttribute("data-motion-state", "static");
+  const staticMotion = await staticWrapper.locator(".header-brand-motion__field").evaluate((field) => {
+    const styles = getComputedStyle(field);
+    return {
+      animationName: styles.animationName,
+      transform: styles.transform,
+    };
+  });
+  expect(staticMotion).toEqual({ animationName: "none", transform: "none" });
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("header logo remains visible and linked when JavaScript is disabled", async ({
+  baseURL,
+  browser,
+}) => {
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  try {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto(new URL("/", baseURL).toString());
+    const brandLink = page.locator('header a[href="/"]').first();
+    await expect(brandLink).toBeVisible();
+    await expect(brandLink).toContainText("PROPEPTIQ");
+    await expect(brandLink.locator('img[src*="propeptiq-mark.png"]')).toBeVisible();
+  } finally {
+    await context.close();
+  }
 });
 
 test("explicit 200% CSS rendering pass remains operable without horizontal overflow", async ({
