@@ -6,7 +6,7 @@ Stripe-hosted Checkout is the first adapter, not a claim of business acceptance.
 
 ## Checkout creation
 
-The browser sends product IDs, quantities, destination, and promotion identifiers. The server:
+The browser sends exact canonical variant IDs and quantities, destination fields, optional reward-redemption points, and the current pricing revision required by the endpoint. It does not send authoritative prices, totals, discount percentages, promotion identifiers or codes, currency, or Stripe identifiers. The server:
 
 1. authenticates the buyer and loads the current attestation;
 2. reloads active products, versioned prices, promotions, destination rules, and inventory;
@@ -16,6 +16,17 @@ The browser sends product IDs, quantities, destination, and promotion identifier
 6. creates hosted Checkout with an idempotency key and internal order reference.
 
 Any missing or changed fact denies creation. Browser totals, provider redirect parameters, and cached catalog data are ignored.
+
+The canonical public product route is `/catalog/items/[slug]`; `/catalog/[slug]`
+remains a separate legacy/evidence route until a reviewed convergence decision.
+The current code-backed catalog identities cover 56 products and 103 variants,
+with 40 reviewed positive display references and 63 pending exact-unmatched
+rows. These are preview-only reference data, not production checkout prices.
+Better Auth has a transactional Resend adapter, but the newsletter subscriber
+gateway and verified deployed delivery evidence are absent. The two missing
+buyer-activation pieces are production checkout-page readiness and an
+authoritative live cart/preview bridge; neither is implied by the browser
+form or by a successful local synthetic request.
 
 ## Tax and shipping quotes
 

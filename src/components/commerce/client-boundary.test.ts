@@ -14,6 +14,7 @@ const searchClientPaths = [
 ] as const;
 const newsletterClientPath = "src/components/site/newsletter-form.tsx";
 const scrollRevealClientPath = "src/components/site/scroll-reveal-controller.tsx";
+const checkoutFormPath = "src/components/commerce/checkout-form.tsx";
 
 const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
@@ -23,6 +24,7 @@ const clientEntries = [
   "src/components/commerce/laboratory-concentration-calculator.tsx",
   "src/components/commerce/quick-add-variant-sheet.tsx",
   "src/components/commerce/product-purchase-panel.tsx",
+  checkoutFormPath,
   promotionBarPath,
   newsletterClientPath,
   scrollRevealClientPath,
@@ -53,10 +55,11 @@ function importSpecifiers(contents: string): readonly string[] {
 function genericClientAuthorityViolation(specifier: string): boolean {
   return specifier === "server-only" ||
     /storefront-public-server|storefront-preview-source/iu.test(specifier) ||
+    /(?:^|\/)catalog\/server(?:$|[./])/iu.test(specifier) ||
     /^@\/env(?:\/|$)/u.test(specifier) ||
     /^@\/config(?:\/|$)/u.test(specifier) ||
     /^@\/db(?:\/|$)/u.test(specifier) ||
-    /checkout|cart-repository/iu.test(specifier) ||
+    /(?:checkout-service|checkout-repositor|checkout-http|checkout-runtime)|cart-repository/iu.test(specifier) ||
     /stripe|payment-provider|provider-repositor/iu.test(specifier);
 }
 
@@ -164,6 +167,19 @@ function searchClientAuthorityViolation(from: string, specifier: string): boolea
   );
 }
 
+function checkoutClientAuthorityViolation(from: string, specifier: string): boolean {
+  if (genericClientAuthorityViolation(specifier)) return true;
+  if (!isLocalRuntimeSpecifier(specifier)) return false;
+
+  const resolvedPath = resolveRuntimeLocalImportForTest(from, specifier);
+  return /^src\/(?:config|env|db)(?:\/|$)/u.test(resolvedPath) ||
+    resolvedPath === "src/catalog/server.ts" ||
+    /stripe|payment-provider|provider-(?:checkout|repositor)|checkout-(?:service|repositor|http|runtime)/iu.test(
+      resolvedPath,
+    ) ||
+    runtimeImportSpecifiers(source(resolvedPath)).includes("server-only");
+}
+
 describe("storefront client boundary", () => {
   it("enumerates every direct client entry and keeps server/env/database/payment code out", () => {
     for (const path of clientEntries) {
@@ -178,6 +194,56 @@ describe("storefront client boundary", () => {
         ).toBe(false);
       }
     }
+  });
+
+  it.each([
+    ["legacy catalog alias", "@/catalog/server"],
+    ["legacy catalog relative path", "../../catalog/server"],
+    ["promotion configuration", "@/config/storefront-promotions"],
+    ["Stripe provider", "@/commerce/stripe-payment-provider"],
+    ["database runtime", "@/db/runtime"],
+    ["environment runtime", "@/env/runtime"],
+    ["provider repository", "@/db/repositories/provider-event-repository"],
+    ["checkout success reader", "@/commerce/checkout-success-read"],
+    ["invoice checkout orchestration", "@/commerce/invoice-checkout-orchestration"],
+    ["provider checkout orchestration", "@/commerce/provider-checkout-orchestration"],
+  ] as const)("rejects a CheckoutForm runtime import of %s", (_label, specifier) => {
+    expect(checkoutClientAuthorityViolation(checkoutFormPath, specifier)).toBe(true);
+  });
+
+  it("allows CheckoutForm to import its client-safe identity validator", () => {
+    expect(
+      checkoutClientAuthorityViolation(
+        checkoutFormPath,
+        "@/commerce/checkout-identity",
+      ),
+    ).toBe(false);
+  });
+
+  it("recursively keeps CheckoutForm free of legacy catalog, promotion, provider, and server authority", () => {
+    const pending = [checkoutFormPath];
+    const visited = new Set<string>();
+
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const contents = source(current);
+      expect(contents, `${current} process environment`).not.toMatch(/\bprocess\.env\b/u);
+
+      for (const specifier of runtimeImportSpecifiers(contents)) {
+        expect(
+          checkoutClientAuthorityViolation(current, specifier),
+          `${current} forbidden checkout client authority ${specifier}`,
+        ).toBe(false);
+        if (isLocalRuntimeSpecifier(specifier)) {
+          pending.push(resolveRuntimeLocalImportForTest(current, specifier));
+        }
+      }
+    }
+
+    expect(visited).toContain(checkoutFormPath);
+    expect(visited).toContain("src/commerce/checkout-identity.ts");
   });
 
   it.each([

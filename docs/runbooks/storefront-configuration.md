@@ -149,7 +149,7 @@ Newsletter signup is intentionally closed. [`src/lib/site-content.ts`](../../src
 
 Because the approved privacy destination, subscriber gateway, and abuse/attempt gate are absent, the server returns `NEWSLETTER_NOT_CONFIGURED` before reading the request body. The form stays disabled, does not store or transmit the address, and cannot show a success state. This behavior is protected by [`src/newsletter/server.ts`](../../src/newsletter/server.ts), [`src/newsletter/contracts.ts`](../../src/newsletter/contracts.ts), and [`src/components/site/newsletter-form.tsx`](../../src/components/site/newsletter-form.tsx).
 
-The repository's `EMAIL_MODE` and Resend fields are reserved for transactional-email architecture. There is no production Resend delivery adapter in the current runtime, and those fields are not a mailing-list subscriber provider. Do not reuse them for newsletter collection without a reviewed subscriber provider, consent/retention policy, privacy route, attempt gate, duplicate semantics, deletion process, and incident owner.
+The current runtime includes a server-side Better Auth Resend adapter for transactional verification and password-reset email. It is gated by `EMAIL_MODE` and the validated auth email environment, and it is not a mailing-list subscriber provider. Do not reuse its key or delivery path for newsletter collection without a separately reviewed subscriber gateway, consent/retention policy, privacy route, attempt gate, duplicate semantics, deletion process, and incident owner.
 
 ## 8. Footer and social URLs
 

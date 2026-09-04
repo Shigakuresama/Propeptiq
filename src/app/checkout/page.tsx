@@ -6,7 +6,6 @@ import { redirect } from "next/navigation";
 import { accountAccessReason } from "@/account/access";
 import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
-import { getPublicCatalog } from "@/catalog/server";
 import { isBuyerCheckoutRuntimeReady } from "@/commerce/server-runtime";
 import { AccountFactsForm } from "@/components/account/account-facts-form";
 import { AccountShell } from "@/components/account/account-shell";
@@ -62,10 +61,6 @@ export default async function CheckoutPage() {
   const buyerCheckoutReady =
     checkoutEligible && isBuyerCheckoutRuntimeReady(request);
   const browseOnlyPreview = request.environment.APP_ENV === "preview";
-  const catalog = buyerCheckoutReady ? await getPublicCatalog() : null;
-  const promotionOptions = catalog?.promotions
-    .filter((promotion) => promotion.kind === "discount")
-    .map((promotion) => ({ id: promotion.id, name: promotion.name })) ?? [];
   return (
     <AccountShell
       authEnabled={request.environment.AUTH_MODE !== "disabled"}
@@ -134,7 +129,7 @@ export default async function CheckoutPage() {
               ) : null}
             </RecordPanel>
           ) : null}
-          {buyerCheckoutReady ? <CheckoutForm promotions={promotionOptions} syntheticLocal={request.localDriver !== null} /> : null}
+          {buyerCheckoutReady ? <CheckoutForm syntheticLocal={request.localDriver !== null} /> : null}
         </div>
         <CheckoutCartStatus />
       </div>

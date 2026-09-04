@@ -144,10 +144,11 @@ describe("CheckoutForm", () => {
     fetchMock.mockReset()
       .mockResolvedValueOnce(response(preview()))
       .mockResolvedValueOnce(response(authoritativeQuote()));
-    render(<CheckoutForm promotions={[]} />);
+    render(<CheckoutForm />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/catalog/preview", expect.objectContaining({ method: "POST" })));
     expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ items: [{ variantId, quantity: 2 }] });
     await fillDestination(user);
+    await user.type(screen.getByLabelText("Points to redeem (optional)"), "250");
     await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
     await screen.findByRole("heading", { name: "Authoritative total" });
     const quoteCall = fetchMock.mock.calls.find(([url]) => url === "/api/checkout/quote")!;
@@ -158,14 +159,17 @@ describe("CheckoutForm", () => {
         recipientName: "Synthetic Research Buyer", line1: "100 Test Way", line2: null,
         city: "Los Angeles", stateCode: "CA", postalCode: "90001", countryCode: "US",
       },
+      rewardRedemptionPoints: 250,
     });
-    expect(JSON.stringify(body)).not.toMatch(/productId|price|total|currency|promotion/iu);
+    expect(JSON.stringify(body)).not.toMatch(
+      /productId|baseUnitMinor|unitAmountMinor|subtotalMinor|totalMinor|discount|currency|promotion|coupon|stripe|priceId/iu,
+    );
   });
 
   it("retries the same variant preview request without opening checkout", async () => {
     const user = userEvent.setup();
     fetchMock.mockRejectedValueOnce(new Error("preview unavailable")).mockResolvedValueOnce(response(preview()));
-    render(<CheckoutForm promotions={[]} />);
+    render(<CheckoutForm />);
     expect(await screen.findByRole("alert")).toHaveTextContent("The current server preview is unavailable.");
     const first = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
     const callsBeforeRetry = fetchMock.mock.calls.length;
@@ -200,10 +204,10 @@ describe("CheckoutForm", () => {
       .mockResolvedValueOnce(response(current))
       .mockResolvedValueOnce(response(following));
 
-    const { rerender } = render(<CheckoutForm promotions={[]} />);
+    const { rerender } = render(<CheckoutForm />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity: 3 }] });
-    rerender(<CheckoutForm promotions={[]} />);
+    rerender(<CheckoutForm />);
 
     expect(await screen.findByRole("heading", {
       name: "Server preview changed or became unavailable.",
@@ -233,7 +237,7 @@ describe("CheckoutForm", () => {
     ).preview.previewToken;
 
     useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity: 4 }] });
-    rerender(<CheckoutForm promotions={[]} />);
+    rerender(<CheckoutForm />);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
     const followingRequest = JSON.parse(String(
       (fetchMock.mock.calls[2]?.[1] as RequestInit).body,
@@ -261,7 +265,7 @@ describe("CheckoutForm", () => {
     savePreviewPresentation(window.sessionStorage, displayOnly);
     fetchMock.mockReset().mockResolvedValue(response(displayOnly));
 
-    render(<CheckoutForm promotions={[]} />);
+    render(<CheckoutForm />);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     const previewRequest = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
@@ -284,7 +288,7 @@ describe("CheckoutForm", () => {
     const user = userEvent.setup();
     fetchMock.mockReset().mockResolvedValue(response(mutate(preview())));
 
-    render(<CheckoutForm promotions={[]} />);
+    render(<CheckoutForm />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The current server preview is unavailable. No quote can be requested.",
@@ -299,10 +303,10 @@ describe("CheckoutForm", () => {
     fetchMock.mockReset()
       .mockResolvedValueOnce(response(preview()))
       .mockResolvedValueOnce(response(preview({ quantity: 3, requiresAcknowledgement: true, reasons: ["server_facts_changed"] })));
-    const { rerender } = render(<CheckoutForm promotions={[]} />);
+    const { rerender } = render(<CheckoutForm />);
     await screen.findByText("This is the current authoritative baseline; no earlier same-tab server preview was available.");
     useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity: 3 }] });
-    rerender(<CheckoutForm promotions={[]} />);
+    rerender(<CheckoutForm />);
     expect(await screen.findByRole("heading", { name: "Server preview changed or became unavailable." })).toBeVisible();
     expect(screen.getByText("Your requested variant identifiers and quantities were not replaced. Review the current server facts before checkout.")).toBeVisible();
   });
@@ -317,9 +321,10 @@ describe("CheckoutForm", () => {
         cart: safePriceChangedCart(),
       }))
       .mockResolvedValueOnce(response(authoritativeQuote("e".repeat(64))));
-    render(<CheckoutForm promotions={[]} />);
+    render(<CheckoutForm />);
     await screen.findByRole("status");
     await fillDestination(user);
+    await user.type(screen.getByLabelText("Points to redeem (optional)"), "250");
     await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
     await user.click(await screen.findByRole("button", { name: "Continue to hosted payment" }));
     expect(await screen.findByText(/authoritative price changed/iu)).toBeVisible();
@@ -331,8 +336,12 @@ describe("CheckoutForm", () => {
         recipientName: "Synthetic Research Buyer", line1: "100 Test Way", line2: null,
         city: "Los Angeles", stateCode: "CA", postalCode: "90001", countryCode: "US",
       },
+      rewardRedemptionPoints: 250,
       pricingRevision,
     });
+    expect(JSON.stringify(JSON.parse(String((sessionCall[1] as RequestInit).body)))).not.toMatch(
+      /productId|baseUnitMinor|unitAmountMinor|subtotalMinor|totalMinor|discount|currency|promotion|coupon|stripe|priceId/iu,
+    );
     await user.click(screen.getByRole("button", { name: "Try authoritative quote again" }));
     expect(await screen.findByRole("button", { name: "Continue to hosted payment" })).toBeVisible();
     const quoteCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/checkout/quote");
@@ -358,7 +367,7 @@ describe("CheckoutForm", () => {
     }
     fetchMock.mockResolvedValueOnce(response({ status: "provider_unknown" }));
 
-    render(<CheckoutForm promotions={[]} />);
+    render(<CheckoutForm />);
     await screen.findByRole("status");
     await fillDestination(user);
     await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
@@ -404,7 +413,7 @@ describe("CheckoutForm", () => {
       }))
       .mockResolvedValueOnce(response({ status: "provider_unknown" }));
 
-    render(<CheckoutForm promotions={[]} />);
+    render(<CheckoutForm />);
     await screen.findByRole("status");
     await fillDestination(user);
     await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
@@ -426,7 +435,7 @@ describe("CheckoutForm", () => {
   });
 
   it("retains accessible required destination controls", async () => {
-    render(<CheckoutForm promotions={[]} />);
+    render(<CheckoutForm />);
     await screen.findByRole("status");
     for (const label of ["Recipient name", "Address line 1", "Address line 2 (optional)", "City", "State or district", "Postal code"]) {
       expect(screen.getByLabelText(label)).toBeVisible();

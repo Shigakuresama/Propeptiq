@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { parseServerEnv } from "@/config/env-schema";
 
@@ -60,12 +62,11 @@ const exactPreviewEnvironment = parseServerEnv({
   PAYMENTS_LIVE_CAPABILITY: "disabled",
 });
 
-const { buyerCheckoutReadyMock, getRequestIdentityMock, getRequestRepositoriesMock, getPublicCatalogMock, redirectMock } = vi.hoisted(
+const { buyerCheckoutReadyMock, getRequestIdentityMock, getRequestRepositoriesMock, redirectMock } = vi.hoisted(
   () => ({
     buyerCheckoutReadyMock: vi.fn(),
     getRequestIdentityMock: vi.fn(),
     getRequestRepositoriesMock: vi.fn(),
-    getPublicCatalogMock: vi.fn(),
     redirectMock: vi.fn((destination: string) => {
       throw new Error(`redirect:${destination}`);
     }),
@@ -77,10 +78,9 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/checkout",
 }));
 vi.mock("server-only", () => ({}));
-vi.mock("@/catalog/server", () => ({ getPublicCatalog: getPublicCatalogMock }));
 vi.mock("@/components/commerce/checkout-form", () => ({
-  CheckoutForm: ({ promotions, syntheticLocal }: { promotions: readonly { name: string }[]; syntheticLocal: boolean }) => (
-    <section data-testid="checkout-form" data-synthetic-local={String(syntheticLocal)}>{promotions.map((promotion) => promotion.name).join(",")}</section>
+  CheckoutForm: ({ syntheticLocal }: { syntheticLocal: boolean }) => (
+    <section data-testid="checkout-form" data-synthetic-local={String(syntheticLocal)} />
   ),
 }));
 vi.mock("@/components/account/checkout-cart-status", () => ({
@@ -107,6 +107,15 @@ describe("CheckoutPage", () => {
       localDriver: null,
     });
     getRequestRepositoriesMock.mockReturnValue(null);
+  });
+
+  it("does not import the legacy public catalog or project promotion options", () => {
+    const contents = readFileSync(
+      resolve(process.cwd(), "src/app/checkout/page.tsx"),
+      "utf8",
+    );
+
+    expect(contents).not.toMatch(/@\/catalog\/server|getPublicCatalog|promotionOptions/u);
   });
 
   it("redirects signed-out checkout requests to sign-in", async () => {
@@ -139,19 +148,10 @@ describe("CheckoutPage", () => {
       loadAccount: async () => ({ status: "active", acceptedAttestationVersion: 1 }),
       loadCurrentAttestation: async () => ({ version: 1, policyText: "Research only." }),
     });
-    getPublicCatalogMock.mockResolvedValue({
-      promotions: [
-        { id: "66000000-0000-4000-8000-000000000001", kind: "discount", name: "Current discount" },
-        { id: "66000000-0000-4000-8000-000000000002", kind: "bundle", name: "Display bundle" },
-      ],
-    });
-
     const markup = renderToStaticMarkup(await CheckoutPage());
     expect(markup).toContain("Authoritative checkout is available");
     expect(markup).toContain("data-testid=\"checkout-form\"");
     expect(markup).toContain("data-synthetic-local=\"true\"");
-    expect(markup).toContain("Current discount");
-    expect(markup).not.toContain("Display bundle");
   });
 
   it("renders the exact Preview matrix as browse-only without a checkout form", async () => {

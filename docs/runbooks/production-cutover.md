@@ -88,8 +88,12 @@ Live checkout requires **all** of the following
 - `AUTH_MODE`, `DATABASE_MODE`, `PAYMENTS_MODE`, `TAX_MODE`, `SHIPPING_MODE`, and `FULFILLMENT_MODE` all `live`.
 - Both attestations enabled: `COMMERCE_LIVE_CAPABILITY=enabled` and `PAYMENTS_LIVE_CAPABILITY=enabled`.
 
-`STORAGE_MODE` and `EMAIL_MODE` are not part of this gate. Set them from their
-own readiness, not from checkout activation.
+`STORAGE_MODE` is not part of this gate. `EMAIL_MODE` is part of the exact
+`isLiveCheckoutEnvironmentConfigured` contract and must be `live` alongside
+`AUTH_MODE`; the environment schema also requires `RESEND_API_KEY` and
+`RESEND_FROM` for that live transactional-email capability. This Better Auth
+email support is not a newsletter subscriber gateway, and it does not by
+itself authorize newsletter collection.
 
 `LOCAL_TEST_DRIVER` and `CATALOG_DEMO_MODE` must remain `disabled` under a
 production build identity; `next.config.ts` throws at config time otherwise.
@@ -107,6 +111,12 @@ Confirm before opening traffic:
 - A signed provider webhook, deduplicated and journaled, is what establishes payment. A success-page redirect never is.
 - Missing or unclassified jurisdiction resolves to `Unknown`, and `Unknown` never permits checkout.
 - Production catalog rows come from a real owner manifest. No invented product, price, purity, lot, supplier, lab, certification, review, or shipping promise.
+
+The two buyer-activation pieces remain separate launch inputs: production
+checkout-page readiness and an authoritative live cart/preview bridge. The
+checkout page preserves its account, attestation, environment, destination,
+inventory, tax, shipping, payment, and provider gates; the public preview cart
+is not a production checkout authorization.
 
 ## What this runbook does not prove
 

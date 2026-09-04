@@ -81,7 +81,7 @@ When commerce or growth policies are inactive, omit their modules rather than sh
 ### Cart and checkout
 
 - Show merchandise, promotion, referral benefit, points redemption, tax, shipping, and final total as separate server-authoritative rows.
-- Accept only product IDs, quantities, destination, promotion identifiers, a referral code, and requested points from the browser. Ignore browser-provided prices, percentages, balances, and commission data.
+- Accept only exact canonical variant IDs and quantities, destination fields, optional requested points, and the current pricing revision required by the endpoint. Resolve promotions and referral attribution from current server facts; do not accept browser-provided prices, totals, discount percentages, promotion identifiers or codes, currency, Stripe identifiers, balances, or commission data.
 - Label points as pending until the qualifying lifecycle event. Explain the exact amount that will be earned on this order.
 - A referral first-order benefit competes with other acquisition promotions; the server applies the greatest eligible customer discount. Points redemption may stack within its cap.
 - Affiliate commission never changes the checkout total and is never disclosed to the referred buyer.
