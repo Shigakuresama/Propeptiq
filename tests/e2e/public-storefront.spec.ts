@@ -715,7 +715,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
 
     for (const [label, locator] of [
       ["product title", page.getByRole("heading", { level: 1, name: "Tirzepatide" })],
-      ["image disclosure", page.getByText("Illustrative product presentation", { exact: true })],
+      ["image disclosure", page.locator(".catalog-detail-image .catalog-image-disclosure")],
       ["configuration heading", page.getByRole("heading", { name: "Supplied configurations" })],
       ["purchase heading", page.getByRole("heading", { name: "Purchase" })],
     ] as const) {
@@ -767,7 +767,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
     page.getByRole("button", { name: "Search PropeptIQ" }),
   );
   const desktopDisclosureBounds = await clientRect(
-    page.getByText("Illustrative product presentation", { exact: true }),
+    page.locator(".catalog-detail-image .catalog-image-disclosure"),
   );
   expect(
     rectanglesIntersect(desktopTriggerBounds, desktopDisclosureBounds),
@@ -1562,7 +1562,7 @@ test("unknown product slugs fail closed", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("owner-supplied catalog is complete, priced where reviewed, and serves every illustration", async ({
+test("owner-supplied catalog is complete, priced where reviewed, and serves the original vial presentation", async ({
   page,
   request,
 }) => {
@@ -1579,12 +1579,12 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves ever
         return url.searchParams.get("url") ?? url.pathname;
       }),
   );
-  expect(new Set(imagePaths).size).toBe(56);
+  expect([...new Set(imagePaths)]).toEqual(["/catalog/vial-base-v2.png"]);
 
   for (const imagePath of imagePaths) {
     const response = await request.get(imagePath);
     expect(response.ok(), `${imagePath} illustration response`).toBe(true);
-    expect(response.headers()["content-type"]).toContain("image/webp");
+    expect(response.headers()["content-type"]).toContain("image/png");
     expect((await response.body()).byteLength).toBeGreaterThan(1_000);
   }
 
@@ -1597,7 +1597,7 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves ever
   await expect(page.locator("main")).toContainText("Local cart preview");
 
   const imageLoaded = await page.getByRole("img", {
-    name: /illustrative research-catalog still life for Tirzepatide/i,
+    name: "Illustrative laboratory vial presentation for Tirzepatide",
   }).evaluate((image) => {
     const element = image as HTMLImageElement;
     return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0;
@@ -1608,7 +1608,49 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves ever
   expect(unknown?.status()).toBe(404);
 });
 
-test("preview item has no gated calculator, related carousel, overflow, or eager related media", async ({ page }) => {
+test("navigation, homepage trust content, product research, and related records are visibly complete", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/");
+
+  const brandHome = page.locator('header a[href="/"]').first();
+  await expect(brandHome).toBeVisible();
+  await expect(brandHome).toContainText("PROPEPTIQ");
+  await expect(brandHome).toContainText("LABS");
+  await expect(brandHome).not.toHaveClass(/bg-ink/u);
+  await expect(page.getByRole("heading", { name: "Why choose PropeptIQ" })).toBeVisible();
+  await expect(page.locator("#why-choose-propeptiq li")).toHaveCount(6);
+  await expect(page.getByRole("heading", { name: "Frequently Asked Questions" })).toBeVisible();
+  await expect(page.locator("#faq details")).toHaveCount(8);
+
+  await page.goto("/catalog/items/bpc-157");
+  const heroImage = page.getByRole("img", {
+    name: "Illustrative laboratory vial presentation for BPC-157",
+  });
+  await expect(heroImage).toBeVisible();
+  expect(await heroImage.evaluate((image) => {
+    const url = new URL((image as HTMLImageElement).src);
+    return url.searchParams.get("url") ?? url.pathname;
+  })).toBe("/catalog/vial-base-v2.png");
+  await expect(page.getByText(/BPC-157 is an owner-supplied catalog identity/u)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Product information" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Search PubMed for BPC-157" })).toHaveAttribute(
+    "href",
+    "https://pubmed.ncbi.nlm.nih.gov/?term=BPC-157",
+  );
+  await expect(page.getByRole("region", { name: "Frequently Researched Together" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Related products, 4 items" }).locator(":scope > li")).toHaveCount(4);
+
+  expect(await page.locator("main img").evaluateAll((images) =>
+    images.every((image) => {
+      const url = new URL((image as HTMLImageElement).src);
+      return (url.searchParams.get("url") ?? url.pathname) === "/catalog/vial-base-v2.png";
+    })),
+  ).toBe(true);
+});
+
+test("preview item keeps the calculator gated while product information and related records remain visible", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/catalog/items/tirzepatide");
@@ -1617,9 +1659,16 @@ test("preview item has no gated calculator, related carousel, overflow, or eager
   await expect(page.getByRole("textbox", { name: "Diluent volume (mL)", exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Sample volume (mL, optional)", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Calculate", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Frequently Researched Together", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Previous related products" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Next related products" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Product information", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "PubMed literature discovery", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Search PubMed for Tirzepatide" })).toHaveAttribute(
+    "href",
+    "https://pubmed.ncbi.nlm.nih.gov/?term=Tirzepatide",
+  );
+  await expect(page.getByRole("heading", { name: "Frequently Researched Together", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Previous related products" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Next related products" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Related products, 4 items" }).locator(":scope > li")).toHaveCount(4);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(1);
   const images = await page.locator("main img").evaluateAll((entries) => entries.map((image) => ({ loading: (image as HTMLImageElement).loading, fetchPriority: image.getAttribute("fetchpriority") })));
@@ -1630,11 +1679,11 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
   page,
 }) => {
   const expectedCards = [
-    { amount: "30 mg · 1 bottle", base: "$59.99", imagePath: "/catalog/tirzepatide.webp", name: "Tirzepatide", sale: "$41.99" },
-    { amount: "10 mg · 1 bottle", base: "$69.99", imagePath: "/catalog/retatrutide.webp", name: "Retatrutide", sale: "$48.99" },
-    { amount: "500 mg · 1 bottle", base: "$69.99", imagePath: "/catalog/nad-plus.webp", name: "NAD+", sale: "$48.99" },
+    { amount: "30 mg · 1 bottle", base: "$59.99", name: "Tirzepatide", sale: "$41.99" },
+    { amount: "10 mg · 1 bottle", base: "$69.99", name: "Retatrutide", sale: "$48.99" },
+    { amount: "500 mg · 1 bottle", base: "$69.99", name: "NAD+", sale: "$48.99" },
   ] as const;
-  const targetImagePaths = new Set<string>(expectedCards.map((card) => card.imagePath));
+  const targetImagePaths = new Set<string>(["/catalog/vial-base-v2.png"]);
   const nextImageRequest = /\/_next\/image(?:\?.*)?$/u;
 
   for (const width of [375, 1440]) {
@@ -1682,7 +1731,7 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
         measuredFrames.push({ before: beforeImageCompletion, image });
       }
 
-      await expect.poll(() => heldImagePaths.size).toBe(expectedCards.length);
+      await expect.poll(() => heldImagePaths.size).toBe(1);
       releaseActualImages();
 
       for (const { before, image } of measuredFrames) {

@@ -31,7 +31,7 @@ describe("SharedSetCard", () => {
     expect(screen.getByRole("heading", { name: "Analytical reference set" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Reference A" })).toHaveAttribute(
       "href",
-      "/catalog/reference-a",
+      "/catalog/items/reference-a",
     );
     expect(screen.getByText("sealed research unit · Quantity 2")).toBeVisible();
     expect(screen.getByText(/one saved product is no longer available and was omitted/iu)).toBeVisible();

@@ -587,6 +587,81 @@ footer a,
   backdrop-filter: blur(6px);
 }
 
+.catalog-product-visual {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--moss-soft) 72%, var(--canvas)), var(--canvas));
+}
+
+.catalog-product-visual__base {
+  object-fit: contain;
+  object-position: center;
+  padding: 0.35rem 12%;
+  transition: transform 300ms ease-out;
+}
+
+.catalog-listing-card:hover .catalog-product-visual__base,
+.catalog-listing-card:focus-within .catalog-product-visual__base {
+  transform: scale(1.02);
+}
+
+.catalog-product-visual__label {
+  position: absolute;
+  left: 29%;
+  top: 38%;
+  display: flex;
+  width: 43%;
+  transform: rotate(-1deg);
+  flex-direction: column;
+  gap: 0.12rem;
+  color: #173b42;
+  font-family: var(--font-geist-sans), sans-serif;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.catalog-product-visual__name {
+  overflow: hidden;
+  font-size: clamp(0.48rem, 1.4vw, 0.75rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.catalog-product-visual__variant {
+  align-self: flex-start;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.1rem 0.35rem;
+  font-size: clamp(0.38rem, 1vw, 0.55rem);
+  letter-spacing: 0.04em;
+}
+
+.catalog-product-visual__notice {
+  margin-top: 2.6rem;
+  font-size: clamp(0.3rem, 0.7vw, 0.43rem);
+  letter-spacing: 0.08em;
+}
+
+.catalog-product-visual .catalog-image-disclosure {
+  padding: 0.34rem 0.55rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.025em;
+}
+
+@media (max-width: 40rem) {
+  .catalog-detail-image .catalog-image-disclosure {
+    bottom: 5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .catalog-product-visual__base { transition: none; }
+}
+
 .action-primary,
 .action-secondary,
 .action-inverse {
@@ -1299,6 +1374,10 @@ footer a {
   padding-bottom: calc(var(--site-search-reserved-height) + env(safe-area-inset-bottom, 0px));
 }
 
+.public-layout main {
+  padding-bottom: calc(var(--site-search-reserved-height) + env(safe-area-inset-bottom, 0px));
+}
+
 .public-layout > footer nav a {
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -1308,7 +1387,7 @@ footer a {
 .site-search-launcher-lane {
   position: fixed;
   left: 50%;
-  bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
   z-index: 30;
   display: flex;
   width: min(24rem, calc(100vw - 1rem));
@@ -1437,6 +1516,29 @@ footer a {
 
   .catalog-listing-card:hover img {
     transform: none;
+  }
+}
+
+@media (max-width: 30rem) {
+  .public-layout .persistent-chrome .site-container {
+    gap: 0.25rem;
+  }
+
+  .public-layout .persistent-chrome .site-container > a[href^="/sign-in"] {
+    min-width: 44px;
+    justify-content: center;
+    gap: 0;
+    padding-inline: 0;
+  }
+
+  .public-layout .persistent-chrome .site-container > a[href^="/sign-in"] > span:last-child {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
 }
 

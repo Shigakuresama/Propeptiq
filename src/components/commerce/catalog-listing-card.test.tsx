@@ -78,13 +78,15 @@ describe("CatalogListingCard", () => {
     );
 
     const article = screen.getByRole("article", { name: product.name });
-    const image = within(article).getByRole("img", { name: product.image.alt });
+    const image = within(article).getByRole("img", {
+      name: `Illustrative laboratory vial presentation for ${product.name}`,
+    });
     expect(image).toBeVisible();
     expect(image).toHaveAttribute(
       "sizes",
       "(min-width: 1280px) 28vw, (min-width: 768px) 45vw, calc(100vw - 2rem)",
     );
-    expect(image.parentElement).toHaveClass("catalog-image-frame");
+    expect(image.closest(".catalog-image-frame")).not.toBeNull();
     expect(within(article).getByRole("heading", { name: product.name })).toBeVisible();
     expect(within(article).getByText("TR5")).toBeVisible();
     expect(within(article).getByText("5mg")).toBeVisible();

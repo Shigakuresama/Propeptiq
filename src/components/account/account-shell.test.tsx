@@ -32,7 +32,10 @@ describe("AccountShell", () => {
       expect(within(navigation).getByRole("link", { name })).toHaveAttribute("href", href);
     }
     const home = screen.getByRole("link", { name: "PROPEPTIQ LABS home" });
-    expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("w-24");
+    expect(home).toHaveAttribute("href", "/");
+    expect(within(home).getByText("PROPEPTIQ")).toBeVisible();
+    expect(within(home).getByText("LABS")).toBeVisible();
+    expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("size-9", "sm:size-10");
     expect(screen.getByText("Private records", { exact: true })).toBeVisible();
     expect(navigation.closest("aside")).toHaveClass("hidden", "xl:block");
     expect(screen.getByText("Owner content").closest("[data-motion-surface]"))

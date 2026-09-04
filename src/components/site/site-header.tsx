@@ -35,10 +35,10 @@ export function SiteHeader() {
           <Link
             href="/"
             aria-label={`${siteName} home`}
-            className="group flex min-h-11 shrink-0 items-center rounded-lg bg-ink px-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-canvas"
+            className="group flex min-h-11 shrink-0 items-center rounded-lg px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-canvas"
           >
             <BrandLogo
-              className="w-24 transition-transform duration-200 ease-out group-hover:-translate-y-0.5 motion-reduce:transform-none sm:w-28"
+              className="w-auto transition-transform duration-200 ease-out group-hover:-translate-y-0.5 motion-reduce:transform-none"
               decorative
               priority
             />
@@ -92,9 +92,7 @@ export function SiteHeader() {
             >
               <SheetHeader className="border-b border-border px-6 pb-5 pt-6 text-left">
                 <div className="flex items-center pr-10">
-                  <span className="rounded-lg bg-ink px-1.5">
-                    <BrandLogo className="w-28" decorative />
-                  </span>
+                  <BrandLogo className="w-auto" decorative />
                   <SheetTitle className="sr-only">{siteName}</SheetTitle>
                 </div>
                 <SheetDescription className="pt-4 leading-6 text-muted-ink">

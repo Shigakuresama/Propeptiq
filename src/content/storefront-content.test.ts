@@ -156,8 +156,55 @@ describe("storefront controlled content", () => {
     expect(getApprovedStorefrontContent(runtimeRecords)).toEqual([]);
   });
 
-  it("keeps the production controlled-content registry empty until owner approval", async () => {
-    expect(storefrontContentRecords).toEqual([]);
+  it("publishes the owner-approved homepage content in the exact configured order", () => {
+    const homepage = getApprovedHomepageContent();
+
+    expect(homepage.whyChoose.map((item) => item.id)).toEqual([
+      "owner-supplied-records",
+      "clear-purchase-states",
+      "exact-variant-identity",
+      "visible-quantity-pricing",
+      "shared-search-index",
+      "research-use-boundary",
+    ]);
+    expect(homepage.faqs.map((entry) => entry.id)).toEqual([
+      "what-is-in-the-catalog",
+      "how-does-search-work",
+      "how-do-i-choose-a-configuration",
+      "how-do-quantity-discounts-work",
+      "does-the-cart-combine-configurations",
+      "what-does-pricing-coming-soon-mean",
+      "what-happens-before-checkout",
+      "where-are-research-use-restrictions",
+    ]);
+    expect(homepage.faqs.map((entry) => entry.anchor)).toEqual([
+      "faq-what-is-in-the-catalog",
+      "faq-how-does-search-work",
+      "faq-how-do-i-choose-a-configuration",
+      "faq-how-do-quantity-discounts-work",
+      "faq-does-the-cart-combine-configurations",
+      "faq-what-does-pricing-coming-soon-mean",
+      "faq-what-happens-before-checkout",
+      "faq-where-are-research-use-restrictions",
+    ]);
+    expect(homepage.whyChoose).toHaveLength(6);
+    expect(homepage.faqs).toHaveLength(8);
+    expect(Object.isFrozen(storefrontContentRecords)).toBe(true);
+    expect(Object.isFrozen(homepage.whyChoose)).toBe(true);
+    expect(Object.isFrozen(homepage.faqs)).toBe(true);
+  });
+
+  it("keeps approved homepage copy limited to verifiable storefront behavior and policy", () => {
+    const homepage = getApprovedHomepageContent();
+    const serialized = JSON.stringify(homepage);
+
+    expect(serialized).toContain("owner-supplied product names and package configurations");
+    expect(serialized).toContain("same exact variant");
+    expect(serialized).toContain("single higher percentage");
+    expect(serialized).toContain("Research-Use Policy");
+    expect(serialized).not.toMatch(
+      /Amino Club|purity|steril|tested|testing|shipment|delivery speed|guarantee|dose|dosage|administer|inject|treat|patient|medical advice/iu,
+    );
   });
 });
 
@@ -384,8 +431,8 @@ describe("approved homepage content", () => {
     expect(Object.isFrozen(input.nestedPrivateData)).toBe(false);
   });
 
-  it("returns one deeply frozen empty homepage view for the empty production registry", () => {
-    const projected = getApprovedHomepageContent();
+  it("returns one deeply frozen empty homepage view for an explicit empty registry", () => {
+    const projected = getApprovedHomepageContent([]);
 
     expect(projected).toEqual({ whyChoose: [], faqs: [] });
     expect(Object.isFrozen(projected)).toBe(true);

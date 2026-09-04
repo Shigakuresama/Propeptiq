@@ -44,11 +44,18 @@ describe("RelatedProductsCarousel", () => {
     Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false })) });
     render(<RelatedProductsCarousel currentProductId="current" products={[second, current, first, second]} pricing={pricing} />);
     const list = screen.getByRole("list");
+    const region = screen.getByRole("region", { name: "Frequently Researched Together" });
     Object.defineProperty(list, "clientWidth", { configurable: true, value: 640 });
     const next = screen.getByRole("button", { name: "Next related products" });
     const previous = screen.getByRole("button", { name: "Previous related products" });
-    expect(list).toHaveClass("flex", "list-none", "gap-6", "overflow-x-auto", "overscroll-x-contain", "p-2", "scroll-px-2", "snap-x", "snap-proximity");
-    expect(screen.getAllByRole("listitem")[0]).toHaveClass("flex", "w-[min(85vw,24rem)]", "shrink-0", "snap-start", "md:w-[min(45vw,24rem)]", "xl:w-[min(28vw,24rem)]");
+    expect(region).toHaveAttribute("aria-roledescription", "carousel");
+    expect(screen.getByText("Related catalog")).toBeVisible();
+    expect(screen.getByText("Continue exploring adjacent records in the PropeptIQ catalog.")).toBeVisible();
+    expect(screen.getByText("2 records")).toBeVisible();
+    expect(list).toHaveAttribute("aria-label", "Related products, 2 items");
+    expect(list).toHaveAttribute("tabindex", "0");
+    expect(list).toHaveClass("flex", "list-none", "gap-4", "overflow-x-auto", "overscroll-x-contain", "scroll-px-2", "snap-x", "snap-mandatory");
+    expect(screen.getAllByRole("listitem")[0]).toHaveClass("flex", "w-[min(82vw,20rem)]", "shrink-0", "snap-start", "sm:w-[19rem]", "lg:w-[20rem]");
     next.focus();
     await user.keyboard("{Enter}");
     expect(document.activeElement).toBe(next);
@@ -58,6 +65,8 @@ describe("RelatedProductsCarousel", () => {
     expect(screen.getAllByRole("article")[0]).toHaveAttribute("data-priority", "false");
     expect(next).toHaveAttribute("aria-controls", list.id);
     expect(previous).toHaveAttribute("aria-controls", list.id);
+    expect(next).toHaveAttribute("title", "Next related products");
+    expect(previous).toHaveAttribute("title", "Previous related products");
     expect(capturedCards).toHaveLength(2);
     expect(capturedCards.every((card) => card.priority === false && card.pricing === pricing)).toBe(true);
     previous.focus();
@@ -71,5 +80,25 @@ describe("RelatedProductsCarousel", () => {
     await user.click(next);
     expect(scrollBy).toHaveBeenLastCalledWith({ left: 640, behavior: "smooth" });
     expect((RelatedProductsCarousel as unknown as { toString(): string }).toString()).not.toMatch(/setTimeout|setInterval|autoplay|clone/iu);
+  });
+
+  it("assigns a unique list target to each carousel instance", () => {
+    const first = testCanonicalProduct([testPublicVariant()], { id: "related-a", name: "Related A" });
+    const second = testCanonicalProduct([testPublicVariant({ id: "related-b-variant" })], { id: "related-b", name: "Related B" });
+
+    render(
+      <>
+        <RelatedProductsCarousel currentProductId="current-a" products={[first, second]} pricing={testPricingContext()} />
+        <RelatedProductsCarousel currentProductId="current-b" products={[second, first]} pricing={testPricingContext()} />
+      </>,
+    );
+
+    const lists = screen.getAllByRole("list");
+    const nextButtons = screen.getAllByRole("button", { name: "Next related products" });
+    const firstList = lists[0]!;
+    const secondList = lists[1]!;
+    expect(firstList.id).not.toBe(secondList.id);
+    expect(nextButtons[0]).toHaveAttribute("aria-controls", firstList.id);
+    expect(nextButtons[1]).toHaveAttribute("aria-controls", secondList.id);
   });
 });

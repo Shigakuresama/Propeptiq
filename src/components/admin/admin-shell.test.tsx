@@ -18,7 +18,10 @@ describe("Task 8A administration navigation", () => {
 
     render(<AdminShell resources={[loyalty, payouts]}><p>Growth administration</p></AdminShell>);
     const home = screen.getByRole("link", { name: "PROPEPTIQ LABS administration home" });
-    expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("w-24");
+    expect(home).toHaveAttribute("href", "/admin");
+    expect(within(home).getByText("PROPEPTIQ")).toBeVisible();
+    expect(within(home).getByText("LABS")).toBeVisible();
+    expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("size-9", "sm:size-10");
     expect(screen.getByText("Admin operations", { exact: true })).toBeVisible();
     expect(screen.getByText("Growth administration").closest("[data-motion-surface]"))
       .toHaveAttribute("data-motion-surface", "admin");

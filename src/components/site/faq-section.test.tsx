@@ -47,15 +47,19 @@ describe("FaqSection", () => {
     const user = userEvent.setup();
     const { container } = render(<FaqSection entries={fictionalEntries} />);
     const firstDetails = container.querySelector("details");
-    const firstSummary = within(firstDetails as HTMLElement).getByText("First fictional question?");
+    if (firstDetails === null) throw new Error("expected first details");
+    const firstSummary = firstDetails.querySelector("summary");
+    expect(firstSummary).not.toBeNull();
+    if (firstSummary === null) throw new Error("expected first summary");
 
+    expect(within(firstSummary).getByText("First fictional question?")).toBeVisible();
     expect(firstSummary.tagName).toBe("SUMMARY");
     expect(firstSummary).not.toHaveAttribute("role");
     expect(firstSummary).not.toHaveAttribute("aria-expanded");
     expect(firstSummary).not.toHaveAttribute("aria-controls");
     expect(firstSummary).not.toHaveAttribute("onkeydown");
     expect(firstSummary).toHaveClass("focus-visible:ring-2");
-    expect(firstSummary).toHaveClass("min-h-11");
+    expect(firstSummary).toHaveClass("min-h-14");
 
     await user.click(firstSummary);
     expect(firstDetails).toHaveAttribute("open");

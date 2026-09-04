@@ -345,7 +345,7 @@ describe("server-only public storefront content view", () => {
     warn.mockRestore();
   });
 
-  it("uses the exact empty production registries by default without reporting a failure", async () => {
+  it("projects the approved production homepage into the shared information index without reporting a failure", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const view = await getPublicStorefrontContentView();
@@ -354,9 +354,22 @@ describe("server-only public storefront content view", () => {
       information: view.information,
     });
 
-    expect(view).toEqual({ homepage: { whyChoose: [], faqs: [] }, information: [] });
-    expect(index).toEqual({ version: 1, entries: [] });
-    expect(JSON.stringify(index)).not.toMatch(/why choose|frequently asked|faq/iu);
+    expect(view.homepage.whyChoose).toHaveLength(6);
+    expect(view.homepage.faqs).toHaveLength(8);
+    expect(view.information.map((entry) => entry.href)).toEqual([
+      "/#why-choose-propeptiq",
+      "/#faq-what-is-in-the-catalog",
+      "/#faq-how-does-search-work",
+      "/#faq-how-do-i-choose-a-configuration",
+      "/#faq-how-do-quantity-discounts-work",
+      "/#faq-does-the-cart-combine-configurations",
+      "/#faq-what-does-pricing-coming-soon-mean",
+      "/#faq-what-happens-before-checkout",
+      "/#faq-where-are-research-use-restrictions",
+    ]);
+    expect(index.version).toBe(1);
+    expect(index.entries).toHaveLength(9);
+    expect(index.entries.every((entry) => entry.group === "information")).toBe(true);
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
   });

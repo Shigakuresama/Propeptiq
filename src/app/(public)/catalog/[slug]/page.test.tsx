@@ -1,108 +1,136 @@
-import { render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CartProvider } from "@/cart/cart-provider";
+import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
+import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
+import {
+  buildPublicStorefrontCatalog,
+  storefrontImageMetadata,
+} from "@/catalog/storefront-public";
 
-const { getPublicCatalogMock, getPublicGrowthProjectionMock } = vi.hoisted(() => ({
-  getPublicCatalogMock: vi.fn(),
-  getPublicGrowthProjectionMock: vi.fn(),
+const {
+  getPublicStorefrontViewMock,
+  legacyGetPublicCatalogMock,
+  notFoundMock,
+  redirectMock,
+  requestCacheState,
+} = vi.hoisted(() => ({
+  getPublicStorefrontViewMock: vi.fn(),
+  legacyGetPublicCatalogMock: vi.fn(() => {
+    throw new Error("legacy catalog bypass invoked");
+  }),
+  notFoundMock: vi.fn(() => {
+    throw new Error("NEXT_NOT_FOUND");
+  }),
+  redirectMock: vi.fn((destination: string) => {
+    throw new Error(`NEXT_REDIRECT:${destination}`);
+  }),
+  requestCacheState: { generation: 0 },
 }));
 
-vi.mock("@/catalog/server", () => ({ getPublicCatalog: getPublicCatalogMock }));
-vi.mock("@/growth/public-growth-server", () => ({
-  getPublicGrowthProjection: getPublicGrowthProjectionMock,
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    cache: <Args extends unknown[], Result>(loader: (...args: Args) => Result) => {
+      let cached: { generation: number; result: Result } | undefined;
+      return (...args: Args): Result => {
+        if (!cached || cached.generation !== requestCacheState.generation) {
+          cached = { generation: requestCacheState.generation, result: loader(...args) };
+        }
+        return cached.result;
+      };
+    },
+  };
+});
+
+vi.mock("@/catalog/server", () => ({ getPublicCatalog: legacyGetPublicCatalogMock }));
+vi.mock("@/catalog/storefront-public-server", () => ({
+  getPublicStorefrontView: getPublicStorefrontViewMock,
 }));
-vi.mock("@/components/site/page-transition", () => ({
-  PageTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
-  ProductTitleTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
+vi.mock("next/navigation", () => ({
+  notFound: notFoundMock,
+  redirect: redirectMock,
 }));
 
-import ProductPage from "./page";
+import LegacyProductPage, { generateMetadata } from "./page";
 
-const product = {
-  id: "product-1",
-  slug: "reference-record",
-  name: "Reference record",
-  packageForm: "sealed unit",
-  price: { id: "price-1", amountMinor: 5_621, currency: "USD", version: 1 },
-  availableQuantity: 4,
-  claims: [],
-  merchandising: [],
-  relatedProducts: [],
-  proof: [
-    { label: "Material identity", state: "Recorded identity" },
-    { label: "Analytical method", state: "No approved public record" },
-    { label: "Lot/batch", state: "LOT-1" },
-    { label: "COA state", state: "No approved public record" },
-  ],
-} as const;
+const projectedCatalog = buildPublicStorefrontCatalog({
+  configuredPublicationId: browseCatalogPublicationId,
+  catalogData: storefrontCatalogData,
+  runtimeVariantFacts: [],
+  controlledContent: [],
+  verifiedImageMetadata: storefrontImageMetadata,
+});
 
-describe("database-backed product page rewards", () => {
-  it("shows points only from the active server loyalty projection", async () => {
-    getPublicCatalogMock.mockResolvedValue({
-      source: "production",
-      products: [product],
-      promotions: [],
-      qualityRecords: [],
-    });
-    getPublicGrowthProjectionMock.mockResolvedValue({
-      status: "active",
-      projection: {
-        loyalty: {
-          id: "loyalty-1",
-          version: 1,
-          status: "active",
-          pointsPerDollar: 2,
-          redemptionMinorPerPoint: 1,
-          minimumRedemptionPoints: 500,
-          maximumRedemptionBasisPoints: 2_500,
-          expiresAfterDays: null,
-          effectiveAt: "2026-08-27T00:00:00.000Z",
-          supersededAt: null,
-        },
-        referral: null,
-        affiliate: null,
-        terms: { rewards: null, partner: null },
-      },
-    });
+const pricing = Object.freeze({
+  mode: "test" as const,
+  evaluatedAt: "2026-08-31T12:00:00.000Z",
+  automaticPromotions: Object.freeze([]),
+});
 
-    render(
-      <CartProvider>
-        {await ProductPage({ params: Promise.resolve({ slug: product.slug }) })}
-      </CartProvider>,
-    );
-
-    expect(screen.getByText("Earn 112 points")).toBeVisible();
-    const intro = screen
-      .getByRole("heading", { level: 1, name: product.name })
-      .closest("header");
-    expect(intro).toHaveAttribute("data-motion-sequence", "dossier-intro");
-    expect(intro?.querySelectorAll("[data-motion-step]")).toHaveLength(3);
-    const addButton = screen.getByRole("button", {
-      name: "Reference record unavailable",
-    });
-    expect(addButton).toBeDisabled();
-    expect(addButton).toHaveTextContent("Choose a variant before adding this item.");
+describe("legacy catalog product route", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    requestCacheState.generation += 1;
+    getPublicStorefrontViewMock.mockResolvedValue({ catalog: projectedCatalog, pricing });
   });
 
-  it.each(["inactive", "read_error"] as const)(
-    "does not show points when the policy read is %s",
-    async (status) => {
-      getPublicCatalogMock.mockResolvedValue({
-        source: "production",
-        products: [product],
-        promotions: [],
-        qualityRecords: [],
-      });
-      getPublicGrowthProjectionMock.mockResolvedValue({ status });
+  it("redirects an owner-published slug to its canonical item route", async () => {
+    await expect(
+      LegacyProductPage({ params: Promise.resolve({ slug: "tirzepatide" }) }),
+    ).rejects.toThrow("NEXT_REDIRECT:/catalog/items/tirzepatide");
 
-      render(
-        <CartProvider>
-          {await ProductPage({ params: Promise.resolve({ slug: product.slug }) })}
-        </CartProvider>,
-      );
-      expect(screen.queryByText(/Earn \d+ points/)).toBeNull();
-    },
-  );
+    expect(redirectMock).toHaveBeenCalledOnce();
+    expect(redirectMock).toHaveBeenCalledWith("/catalog/items/tirzepatide");
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
+    expect(legacyGetPublicCatalogMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unknown slug on the not-found path without redirecting", async () => {
+    await expect(
+      LegacyProductPage({ params: Promise.resolve({ slug: "not-a-real-item" }) }),
+    ).rejects.toThrow("NEXT_NOT_FOUND");
+
+    expect(notFoundMock).toHaveBeenCalledOnce();
+    expect(redirectMock).not.toHaveBeenCalled();
+    expect(legacyGetPublicCatalogMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the authoritative storefront view cannot be loaded", async () => {
+    const readError = new Error("authoritative storefront unavailable");
+    getPublicStorefrontViewMock.mockRejectedValue(readError);
+
+    await expect(
+      LegacyProductPage({ params: Promise.resolve({ slug: "tirzepatide" }) }),
+    ).rejects.toBe(readError);
+
+    expect(notFoundMock).not.toHaveBeenCalled();
+    expect(redirectMock).not.toHaveBeenCalled();
+    expect(legacyGetPublicCatalogMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the canonical storefront record for legacy-route metadata", async () => {
+    await expect(
+      generateMetadata({ params: Promise.resolve({ slug: "tirzepatide" }) }),
+    ).resolves.toEqual({
+      title: "Tirzepatide",
+      description: "Browse supplied catalog configurations for Tirzepatide.",
+      alternates: { canonical: "/catalog/items/tirzepatide" },
+    });
+
+    await expect(
+      generateMetadata({ params: Promise.resolve({ slug: "not-a-real-item" }) }),
+    ).resolves.toEqual({ title: "Catalog item unavailable" });
+  });
+
+  it("shares one authoritative acquisition between metadata and redirect per request", async () => {
+    const params = Promise.resolve({ slug: "tirzepatide" });
+
+    await generateMetadata({ params });
+    await expect(LegacyProductPage({ params })).rejects.toThrow(
+      "NEXT_REDIRECT:/catalog/items/tirzepatide",
+    );
+
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
+  });
 });

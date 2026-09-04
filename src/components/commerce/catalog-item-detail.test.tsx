@@ -35,14 +35,19 @@ describe("CatalogItemDetail", () => {
 
   it("shows every supplied variant and exposes a normalized source label", () => {
     const product = findPublicStorefrontProduct(catalog, "pinealon")!;
+    expect(product.kind).toBe("canonical");
+    if (product.kind !== "canonical") throw new Error("Expected canonical fixture");
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
     const heading = screen.getByRole("heading", { level: 1, name: "Pinealon" });
     const intro = heading.closest("header");
     expect(heading).toBeVisible();
     expect(intro).toHaveAttribute("data-motion-sequence", "dossier-intro");
-    expect(intro?.querySelectorAll("[data-motion-step]")).toHaveLength(3);
-    const image = screen.getByRole("img", { name: product.image.alt });
+    expect(intro?.querySelectorAll("[data-motion-step]")).toHaveLength(4);
+    expect(screen.getByText(product.description!)).toBeVisible();
+    const image = screen.getByRole("img", {
+      name: "Illustrative laboratory vial presentation for Pinealon",
+    });
     const suppliedConfigurations = screen.getByRole("heading", {
       name: "Supplied configurations",
     });
@@ -69,7 +74,7 @@ describe("CatalogItemDetail", () => {
     );
     expect(screen.getByText("Source label: Pinealon10mg")).toBeVisible();
     expect(screen.getByText("PN5")).toBeVisible();
-    expect(screen.getByText("5mg")).toBeVisible();
+    expect(within(suppliedConfigurations.closest("section")!).getByText("5mg")).toBeVisible();
     expect(screen.queryByText("5mg × 10 vials")).not.toBeInTheDocument();
     expect(screen.getByText("Illustrative product presentation")).toBeVisible();
     expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
@@ -142,7 +147,7 @@ describe("CatalogItemDetail", () => {
     const product = testCanonicalProduct([], { content: content as never, description: "raw description" });
     render(<CatalogItemDetail product={product} pricing={pricing} relatedProducts={[]} calculator={null} />);
     expect(screen.getByTestId("purchase-panel")).toBeVisible(); expect(capturedPricing[0]).toBe(pricing); expect(screen.getByText("literal <em>text</em>")).toBeVisible(); expect(screen.getByText("Approved legal")).toBeVisible();
-    expect(screen.queryByText("raw description")).toBeNull(); expect(screen.queryByText("DRAFT")).toBeNull(); expect(screen.queryByText("FAQ")).toBeNull(); expect(screen.queryByText("private")).toBeNull(); expect(screen.queryByText("secret")).toBeNull(); expect(screen.queryByText("2026")).toBeNull(); expect(screen.queryByText("Browse-only catalog item")).toBeNull(); expect(screen.queryByText(/not represented/u)).toBeNull(); expect(screen.getByText("Approved info").compareDocumentPosition(screen.getByText("Legal")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("raw description")).toBeVisible(); expect(screen.queryByText("DRAFT")).toBeNull(); expect(screen.queryByText("FAQ")).toBeNull(); expect(screen.queryByText("private")).toBeNull(); expect(screen.queryByText("secret")).toBeNull(); expect(screen.queryByText("2026")).toBeNull(); expect(screen.queryByText("Browse-only catalog item")).toBeNull(); expect(screen.queryByText(/not represented/u)).toBeNull(); expect(screen.getByText("Approved info").compareDocumentPosition(screen.getByText("Legal")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("keeps a synthetic browse-only item entirely purchase-free with all configurations", () => {

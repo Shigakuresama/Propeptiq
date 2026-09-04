@@ -1,7 +1,6 @@
 "use client";
 
 import { ArrowRight } from "lucide-react";
-import Image from "next/image";
 import Link from "next/link";
 
 import type {
@@ -20,6 +19,7 @@ import {
 import { AddToCartButton } from "./add-to-cart-button";
 import { ProductPrice } from "./product-price";
 import { VariantAddTrigger } from "./quick-add-variant-sheet";
+import { CatalogProductVisual } from "./catalog-product-visual";
 
 const CARD_VARIANT_LIMIT = 3;
 
@@ -61,20 +61,16 @@ export function CatalogListingCard({
       aria-labelledby={headingId}
       className="catalog-listing-card group record-card flex h-full flex-col overflow-hidden p-0"
     >
-      <div className="catalog-image-frame" data-category={product.category}>
-        <Image
-          alt={product.image.alt}
-          className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02] motion-reduce:transform-none"
-          fill
+      <div className="catalog-image-frame">
+        <CatalogProductVisual
+          product={product}
           priority={priority}
-          sizes="(min-width: 1280px) 28vw, (min-width: 768px) 45vw, calc(100vw - 2rem)"
-          src={product.image.src}
+          variantLabel={selectedVariant?.label}
         />
         {selectedPresentation?.state === "priced" &&
         selectedPresentation.price.effectiveDiscountBps > 0 ? (
           <CardDiscountBadge presentation={selectedPresentation} />
         ) : null}
-        <p className="catalog-image-disclosure">Illustrative product presentation</p>
       </div>
 
       <div className="flex flex-1 flex-col p-6 sm:p-7">

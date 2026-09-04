@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { AuthPageFrame } from "./auth-page-frame";
@@ -29,7 +29,9 @@ describe("AuthPageFrame", () => {
     expect(screen.getByRole("link", { name: "Return to cart" })).toHaveAttribute("href", "/cart");
     const home = screen.getByRole("link", { name: "PROPEPTIQ LABS home" });
     expect(home).toHaveAttribute("href", "/");
-    expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("w-28");
+    expect(within(home).getByText("PROPEPTIQ")).toBeVisible();
+    expect(within(home).getByText("LABS")).toBeVisible();
+    expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("size-9", "sm:size-10");
     expect(screen.getByRole("main")).toHaveAttribute("data-motion-surface", "auth");
     const field = container.querySelector("[data-science-field='trace']");
     expect(field).toHaveAttribute("aria-hidden", "true");

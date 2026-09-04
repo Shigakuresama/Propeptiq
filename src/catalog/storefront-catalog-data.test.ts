@@ -57,6 +57,29 @@ describe("canonical storefront catalog data", () => {
     ))).toBe(true);
   });
 
+  it("joins approved descriptions, controlled content, and explicit related products for every product", () => {
+    const knownProductIds = new Set(
+      storefrontCatalogData.products.map((product) => product.id),
+    );
+
+    for (const product of storefrontCatalogData.products) {
+      expect(product.description).toContain(product.name);
+      expect(product.contentIds).toHaveLength(2);
+      expect(new Set(product.contentIds).size).toBe(2);
+      expect(product.relatedProductIds.length).toBeGreaterThanOrEqual(2);
+      expect(product.relatedProductIds.length).toBeLessThanOrEqual(4);
+      expect(new Set(product.relatedProductIds).size).toBe(
+        product.relatedProductIds.length,
+      );
+      expect(product.relatedProductIds).not.toContain(product.id);
+      expect(
+        product.relatedProductIds.every((relatedId) =>
+          knownProductIds.has(relatedId)
+        ),
+      ).toBe(true);
+    }
+  });
+
   it("only projects deliberately pending preview bindings", () => {
     expect(buildConfiguredDisplayVariantFacts(storefrontCatalogData)).toHaveLength(103);
     const altered = {

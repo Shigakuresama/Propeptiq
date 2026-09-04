@@ -52,7 +52,7 @@ export function SharedSetCard(props: SharedSetCardProps) {
           <ul className="grid gap-4 p-0">
             {props.items.map((item) => (
               <li className="record-card min-w-0" key={item.productId}>
-                <Link className="record-link text-lg font-semibold" href={`/catalog/${item.slug}`}>
+                <Link className="record-link text-lg font-semibold" href={`/catalog/items/${item.slug}`}>
                   {item.name}
                 </Link>
                 <p className="mt-2 text-base leading-7 text-muted-ink">

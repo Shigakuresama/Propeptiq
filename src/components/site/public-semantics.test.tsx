@@ -86,7 +86,9 @@ describe("public storefront semantics", () => {
     );
     expect(catalogExplanation).toHaveClass("text-base");
     expect(catalogExplanation).not.toHaveClass("text-sm");
-    expect(screen.getByText("Tirzepatide")).toBeVisible();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Tirzepatide" }),
+    ).toBeVisible();
     expect(
       screen.getByRole("link", { name: /view catalog item: tirzepatide/i }),
     ).toHaveAttribute("href", `/catalog/items/${publicCatalog.products[0]!.slug}`);

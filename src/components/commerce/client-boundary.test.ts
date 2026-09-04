@@ -402,8 +402,11 @@ describe("storefront client boundary", () => {
           /publicInformationRecords|getApprovedPublicInformation/iu,
         );
       }
+      // Approved navigation copy may mention checkout. Authority is bounded by
+      // imports, while provider/cart implementation names remain forbidden in
+      // the browser graph itself.
       expect(contents, `${current} commerce authority`).not.toMatch(
-        /checkout|stripe|payment-provider|provider-repositor|cart-provider/iu,
+        /stripe|payment-provider|provider-repositor|cart-provider/iu,
       );
       for (const specifier of runtimeImportSpecifiers(contents)) {
         expect(

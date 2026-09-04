@@ -21,16 +21,30 @@ export type PublicInformationDestination = Readonly<{
   allowedAnchors: readonly string[];
 }>;
 
-function destination(path: `/${string}`): PublicInformationDestination {
+function destination(
+  path: `/${string}`,
+  allowedAnchors: readonly string[] = [],
+): PublicInformationDestination {
   return Object.freeze({
     path,
-    allowedAnchors: Object.freeze([] as string[]),
+    allowedAnchors: Object.freeze([...allowedAnchors]),
   });
 }
 
 export const publicInformationDestinations: readonly PublicInformationDestination[] =
   Object.freeze([
-    destination("/"),
+    destination("/", [
+      "why-choose-propeptiq",
+      "faq",
+      "faq-what-is-in-the-catalog",
+      "faq-how-does-search-work",
+      "faq-how-do-i-choose-a-configuration",
+      "faq-how-do-quantity-discounts-work",
+      "faq-does-the-cart-combine-configurations",
+      "faq-what-does-pricing-coming-soon-mean",
+      "faq-what-happens-before-checkout",
+      "faq-where-are-research-use-restrictions",
+    ]),
     destination("/catalog"),
     destination("/quality-records"),
     destination("/research-use-policy"),

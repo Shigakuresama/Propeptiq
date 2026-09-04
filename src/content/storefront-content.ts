@@ -1,3 +1,5 @@
+import { storefrontProductContentRecords } from "./storefront-product-content";
+
 export type ControlledContentRecord = Readonly<{
   id: string;
   kind:
@@ -36,8 +38,135 @@ export type ApprovedHomepageContent = Readonly<{
   faqs: readonly ApprovedFaqEntry[];
 }>;
 
+const APPROVAL_NOTE = "Owner-approved neutral storefront content.";
+const REVIEWED_AT = "2026-09-04T00:00:00.000-07:00";
+
+function homepageRecord(
+  id: string,
+  kind: "why_choose" | "faq",
+  title: string,
+  body: string,
+  sourceReferences: readonly string[],
+): ControlledContentRecord {
+  return Object.freeze({
+    id,
+    kind,
+    status: "approved",
+    title,
+    body,
+    sourceReferences: Object.freeze([...sourceReferences]),
+    approvalNote: APPROVAL_NOTE,
+    reviewedAt: REVIEWED_AT,
+    effectiveAt: null,
+  });
+}
+
+const homepageContentRecords: readonly ControlledContentRecord[] = Object.freeze([
+  homepageRecord(
+    "owner-supplied-records",
+    "why_choose",
+    "Catalog clarity",
+    "Product names, categories, and supplied configurations follow one consistent record format, separate from price, inventory, and checkout status.",
+    ["/catalog"],
+  ),
+  homepageRecord(
+    "clear-purchase-states",
+    "why_choose",
+    "Honest purchase states",
+    "Every catalog entry states whether pricing is active, pending, or unavailable, while checkout readiness remains a separate verified state.",
+    ["/catalog", "/cart"],
+  ),
+  homepageRecord(
+    "exact-variant-identity",
+    "why_choose",
+    "Exact variant selection",
+    "The cart tracks the exact selected configuration, and different variants remain clearly separated.",
+    ["/cart"],
+  ),
+  homepageRecord(
+    "visible-quantity-pricing",
+    "why_choose",
+    "Pricing that updates",
+    "Quantity, discount, savings, and subtotal update together as the selected configuration or quantity changes.",
+    ["/catalog"],
+  ),
+  homepageRecord(
+    "shared-search-index",
+    "why_choose",
+    "Search from anywhere",
+    "Catalog search and the permanent site search share the same approved product and information index.",
+    ["/catalog"],
+  ),
+  homepageRecord(
+    "research-use-boundary",
+    "why_choose",
+    "A visible research-use boundary",
+    "The catalog is limited to legitimate laboratory, analytical, educational, and other nonclinical research contexts under the site's current policy.",
+    ["/research-use-policy"],
+  ),
+  homepageRecord(
+    "what-is-in-the-catalog",
+    "faq",
+    "What information is in the catalog?",
+    "The catalog presents owner-supplied product names and package configurations. Price and availability appear only where current records provide them.",
+    ["/catalog"],
+  ),
+  homepageRecord(
+    "how-does-search-work",
+    "faq",
+    "How does storefront search work?",
+    "Catalog search covers product names, categories, SKUs, variant labels, aliases, and approved descriptions. The bottom search also includes approved pages and FAQ entries.",
+    ["/catalog"],
+  ),
+  homepageRecord(
+    "how-do-i-choose-a-configuration",
+    "faq",
+    "How do I choose a product configuration?",
+    "Choose the listed variant you want before adding a multi-variant product. The cart stores each exact variant as its own line identity.",
+    ["/catalog", "/cart"],
+  ),
+  homepageRecord(
+    "how-do-quantity-discounts-work",
+    "faq",
+    "How do quantity discounts work?",
+    "One item has no volume discount; two receive 8%; three through nine receive 10%; and ten or more receive 30%. If an eligible promotion is higher, only the single higher percentage applies.",
+    ["/catalog", "/cart"],
+  ),
+  homepageRecord(
+    "does-the-cart-combine-configurations",
+    "faq",
+    "Does the cart combine different configurations?",
+    "Repeated additions of the same exact variant merge and recalculate its quantity tier. Different variants remain separate and do not combine toward a tier.",
+    ["/cart"],
+  ),
+  homepageRecord(
+    "what-does-pricing-coming-soon-mean",
+    "faq",
+    "What does Pricing coming soon mean?",
+    "It means an active price has not been approved for that variant. The item remains visible for catalog review, but it cannot open a production checkout session.",
+    ["/catalog"],
+  ),
+  homepageRecord(
+    "what-happens-before-checkout",
+    "faq",
+    "What happens before checkout opens?",
+    "The server reloads current product, price, promotion, destination, inventory, tax, and payment facts. Checkout stays unavailable if a required fact is missing or changed.",
+    ["/cart", "/research-use-policy"],
+  ),
+  homepageRecord(
+    "where-are-research-use-restrictions",
+    "faq",
+    "Where can I review the research-use restrictions?",
+    "Open the Research-Use Policy from the site navigation or footer. It lists the permitted nonclinical research contexts and purchaser responsibilities.",
+    ["/research-use-policy"],
+  ),
+]);
+
 export const storefrontContentRecords: readonly ControlledContentRecord[] =
-  Object.freeze([]);
+  Object.freeze([
+    ...homepageContentRecords,
+    ...storefrontProductContentRecords,
+  ]);
 
 function isControlledContentKind(
   value: unknown,

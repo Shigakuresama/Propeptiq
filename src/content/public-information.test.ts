@@ -18,6 +18,19 @@ const exactProductionPaths = [
   "/partners",
 ] as const;
 
+const exactHomepageAnchors = [
+  "why-choose-propeptiq",
+  "faq",
+  "faq-what-is-in-the-catalog",
+  "faq-how-does-search-work",
+  "faq-how-do-i-choose-a-configuration",
+  "faq-how-do-quantity-discounts-work",
+  "faq-does-the-cart-combine-configurations",
+  "faq-what-does-pricing-coming-soon-mean",
+  "faq-what-happens-before-checkout",
+  "faq-where-are-research-use-restrictions",
+] as const;
+
 function approvedRecord(overrides: Record<string, unknown> = {}): PublicInformationRecord {
   return {
     id: "approved-entry",
@@ -31,11 +44,14 @@ function approvedRecord(overrides: Record<string, unknown> = {}): PublicInformat
 }
 
 describe("approved public-information registry", () => {
-  it("keeps the production registry empty and deeply freezes the exact destination policy", () => {
+  it("keeps the manual registry empty and deeply freezes the exact destination policy", () => {
     expect(publicInformationRecords).toEqual([]);
     expect(Object.isFrozen(publicInformationRecords)).toBe(true);
     expect(publicInformationDestinations).toEqual(
-      exactProductionPaths.map((path) => ({ path, allowedAnchors: [] })),
+      exactProductionPaths.map((path) => ({
+        path,
+        allowedAnchors: path === "/" ? exactHomepageAnchors : [],
+      })),
     );
     expect(Object.isFrozen(publicInformationDestinations)).toBe(true);
     for (const destination of publicInformationDestinations) {
@@ -551,7 +567,7 @@ describe("approved homepage destination join", () => {
     ]);
   });
 
-  it("keeps the production destination policy and registry unchanged with no approved homepage anchors", () => {
+  it("publishes only the exact approved homepage and FAQ anchors", () => {
     const projected = projectHomepageContentForApprovedDestinations(
       { whyChoose: [], faqs: [] },
       publicInformationDestinations,
@@ -561,7 +577,15 @@ describe("approved homepage destination join", () => {
       homepage: { whyChoose: [], faqs: [] },
       information: [],
     });
-    expect(publicInformationDestinations.every((entry) => entry.allowedAnchors.length === 0)).toBe(true);
+    expect(publicInformationDestinations[0]).toEqual({
+      path: "/",
+      allowedAnchors: exactHomepageAnchors,
+    });
+    expect(publicInformationDestinations.slice(1).every((entry) => entry.allowedAnchors.length === 0)).toBe(true);
+    for (const anchor of exactHomepageAnchors) {
+      expect(isApprovedPublicInformationHref(`/#${anchor}`)).toBe(true);
+    }
+    expect(isApprovedPublicInformationHref("/#faq-unapproved")).toBe(false);
     expect(publicInformationRecords).toEqual([]);
   });
 

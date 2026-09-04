@@ -539,7 +539,7 @@ describe("GET /api/storefront-search", () => {
     }
   });
 
-  it("keeps the exact production content view information-empty without fabricated FAQ or Why copy", async () => {
+  it("indexes the exact approved production Why and FAQ destinations", async () => {
     const actualContent = await vi.importActual<
       typeof import("@/content/storefront-public-content-server")
     >("@/content/storefront-public-content-server");
@@ -557,9 +557,23 @@ describe("GET /api/storefront-search", () => {
     const body = await response.json() as StorefrontSearchIndex;
 
     expect(response.status).toBe(200);
-    expect(body).toEqual({ version: 1, entries: [] });
-    expect(body.entries.filter(({ group }) => group === "information")).toEqual([]);
-    expect(JSON.stringify(body)).not.toMatch(/why choose|frequently asked|faq/iu);
+    expect(body.version).toBe(1);
+    expect(body.entries).toHaveLength(9);
+    expect(body.entries.every(({ group }) => group === "information")).toBe(true);
+    expect(body.entries.map(({ href }) => href)).toEqual([
+      "/#why-choose-propeptiq",
+      "/#faq-what-is-in-the-catalog",
+      "/#faq-how-does-search-work",
+      "/#faq-how-do-i-choose-a-configuration",
+      "/#faq-how-do-quantity-discounts-work",
+      "/#faq-does-the-cart-combine-configurations",
+      "/#faq-what-does-pricing-coming-soon-mean",
+      "/#faq-what-happens-before-checkout",
+      "/#faq-where-are-research-use-restrictions",
+    ]);
+    expect(JSON.stringify(body)).not.toMatch(
+      /approvalNote|sourceReferences|reviewedAt|effectiveAt|provider|stripe/iu,
+    );
   });
 
   it("serializes only the wrapper and eight SearchEntry fields without raw records or server-view leakage", async () => {
