@@ -64,7 +64,7 @@ A review decision is immutable and bound to an exact buyer/cart/destination snap
 
 ## 6. Checkout, payment, and fulfillment
 
-- The browser submits product IDs, quantities, destination, and promotion identifiers only.
+- The browser sends exact canonical variant IDs and quantities, destination fields, optional reward-redemption points, and the current pricing revision required by the endpoint. It does not send authoritative prices, totals, discount percentages, promotion identifiers or codes, currency, or Stripe identifiers.
 - The server reloads buyer, attestation, catalog, versioned prices, promotions, destination, inventory, tax, shipping, and payment-provider state.
 - Hosted card collection is created only after all gates and prerequisites pass.
 - Signed webhooks use the raw body, reject invalid signatures and payload-hash conflicts, deduplicate provider events, and append payment events idempotently.
@@ -74,7 +74,7 @@ A review decision is immutable and bound to an exact buyer/cart/destination snap
 
 ## 7. Routes and design
 
-- Public: `/`, `/catalog`, `/catalog/[slug]`, `/cart`, `/quality-records`, `/research-use-policy`.
+- Public: `/`, `/catalog`, `/catalog/items/[slug]`, `/catalog/[slug]`, `/cart`, `/quality-records`, `/research-use-policy`.
 - Account required at checkout and for customer order history; staff routes require staff capability plus MFA.
 - `/research-use-policy` is canonical. A future `/research-use` route may only redirect to it.
 - Preserve the approved desktop-v3 visual system. `responsive-v2` changes behavior by permitting public catalog, prices, promotions, and anonymous cart access and defines responsive/accessibility adaptation.

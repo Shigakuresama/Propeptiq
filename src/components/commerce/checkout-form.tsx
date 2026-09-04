@@ -12,7 +12,6 @@ import { canContinueFromPreview, type CartPreview } from "@/cart/preview-types";
 import { isCanonicalUuid } from "@/commerce/checkout-identity";
 import { Button } from "@/components/ui/button";
 
-type PromotionOption = Readonly<{ id: string; name: string }>;
 type DestinationField = "recipientName" | "line1" | "city" | "stateCode" | "postalCode";
 type Errors = Partial<Record<DestinationField | "items" | "rewardRedemptionPoints", string>>;
 
@@ -315,7 +314,6 @@ export function CheckoutForm({
   syntheticLocal = false,
   navigate = (url) => window.location.assign(url),
 }: {
-  promotions: readonly PromotionOption[];
   syntheticLocal?: boolean;
   navigate?: (url: string) => void;
 }) {
