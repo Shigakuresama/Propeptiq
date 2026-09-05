@@ -70,6 +70,7 @@ export function QuickAddVariantSheet({
       <SheetContent
         aria-describedby={`${product.slug}-variant-description`}
         className="w-full overflow-y-auto sm:max-w-md"
+        motionScope="public"
       >
         <SheetHeader>
           <SheetTitle>Choose a variant for {product.name}</SheetTitle>

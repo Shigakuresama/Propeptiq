@@ -39,7 +39,7 @@ export function FaqSection({
                 <span>{entry.question}</span>
                 <span
                   aria-hidden="true"
-                  className="flex size-8 shrink-0 items-center justify-center rounded-full border border-border text-lg leading-none transition-transform duration-200 group-open:rotate-45 motion-reduce:transition-none"
+                  className="faq-disclosure-indicator flex size-8 shrink-0 items-center justify-center rounded-full border border-border text-lg leading-none transition-transform duration-200 motion-reduce:transition-none"
                 >
                   +
                 </span>

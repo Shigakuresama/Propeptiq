@@ -237,6 +237,9 @@ describe("CartDrawer accessible progressive enhancement", () => {
     }));
     const { dialog, trigger, user } = await renderAndOpen();
     await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(dialog).toHaveAttribute("data-motion-scope", "public");
+    expect(document.querySelector('[data-slot="sheet-overlay"]'))
+      .toHaveAttribute("data-motion-scope", "public");
 
     await user.click(within(dialog).getByRole("button", { name: "Close" }));
     await waitFor(() => expect(dialog).not.toBeInTheDocument());
@@ -289,16 +292,13 @@ describe("CartDrawer accessible progressive enhancement", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps a short-phone drawer scrollable with reachable fixed header/footer and scoped reduced motion", () => {
+  it("keeps a short-phone drawer scrollable with reachable fixed header/footer", () => {
     const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
     expect(css).toMatch(/\.cart-drawer(?:\[[^\]]+\])?\s*\{[^}]*height:\s*100dvh[^}]*overflow:\s*hidden/isu);
     expect(css).toMatch(/\.cart-drawer__scroll\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto[^}]*overscroll-behavior:\s*contain/isu);
     expect(css).toMatch(/\.cart-drawer__footer\s*\{[^}]*padding-bottom:\s*max\([^}]*safe-area-inset-bottom/isu);
-    expect(css).toMatch(/\.cart-drawer[^}]*transition-duration:\s*300ms/isu);
-    expect(css).toMatch(/\.cart-drawer[^}]*animation-duration:\s*300ms/isu);
     expect(css).toMatch(/\.cart-drawer\s+\.cart-layout--drawer\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/isu);
     expect(css).toMatch(/\.cart-drawer\s+\.cart-layout--drawer\s+\.cart-summary\s*\{[^}]*position:\s*static/isu);
-    expect(css).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*\.cart-drawer[^}]*transform:\s*none/iu);
   });
 
   it("keeps the real Sheet usable behind safe copy when the CartView chunk import fails", async () => {

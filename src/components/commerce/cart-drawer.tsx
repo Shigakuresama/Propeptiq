@@ -119,6 +119,7 @@ export function CartDrawer({
       <SheetContent
         className="cart-drawer gap-0 border-border bg-canvas p-0"
         id={dialogId}
+        motionScope="public"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           triggerRef.current?.focus();

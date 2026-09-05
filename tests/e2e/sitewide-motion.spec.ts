@@ -157,7 +157,7 @@ test("click navigation keeps the public destination content visible", async ({ p
         headingOpacity: number;
         nodeOpacity: number;
         path: string;
-        signalOffset: number;
+        signalOpacity: number;
         signalPlayState: string;
         surfaceOpacity: number;
       }>;
@@ -176,9 +176,7 @@ test("click navigation keeps the public destination content visible", async ({ p
         headingOpacity: heading ? Number.parseFloat(getComputedStyle(heading).opacity) : 0,
         nodeOpacity: node ? Number.parseFloat(getComputedStyle(node).opacity) : 1,
         path: window.location.pathname,
-        signalOffset: signal
-          ? Number.parseFloat(getComputedStyle(signal).strokeDashoffset)
-          : 0,
+        signalOpacity: signal ? Number.parseFloat(getComputedStyle(signal).opacity) : 1,
         signalPlayState: signal ? getComputedStyle(signal).animationPlayState : "none",
         surfaceOpacity: surface ? Number.parseFloat(getComputedStyle(surface).opacity) : 0,
       });
@@ -206,7 +204,7 @@ test("click navigation keeps the public destination content visible", async ({ p
         headingOpacity: number;
         nodeOpacity: number;
         path: string;
-        signalOffset: number;
+        signalOpacity: number;
         signalPlayState: string;
         surfaceOpacity: number;
       }>;
@@ -218,7 +216,7 @@ test("click navigation keeps the public destination content visible", async ({ p
     expect(Math.min(...destinationSamples.map((sample) => sample[key]))).toBeGreaterThan(0.98);
   }
   expect(destinationSamples.some(({ signalPlayState }) => signalPlayState === "paused")).toBe(true);
-  expect(destinationSamples[0]!.signalOffset).toBeGreaterThan(0.98);
+  expect(destinationSamples[0]!.signalOpacity).toBeLessThan(0.02);
   expect(destinationSamples[0]!.nodeOpacity).toBeLessThan(0.02);
 });
 

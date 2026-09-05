@@ -218,7 +218,7 @@ export function SiteSearchSheet({
           </button>
         </SheetTrigger>
       </PublicActionDock>
-      <SheetContent className="site-search-sheet w-full gap-0" side="bottom">
+      <SheetContent className="site-search-sheet w-full gap-0" motionScope="public" side="bottom">
         <SheetHeader>
           <SheetTitle>Search PropeptIQ</SheetTitle>
           <SheetDescription>

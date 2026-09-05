@@ -56,6 +56,8 @@
   --duration-enter: 200ms;
   --duration-move: 240ms;
   --motion-duration-micro: 160ms;
+  --motion-duration-interaction: 200ms;
+  --motion-duration-drawer: 300ms;
   --motion-duration-reveal: 240ms;
   --motion-duration-signal: 680ms;
   --motion-ease-brand-drift: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -423,6 +425,15 @@ footer a,
   animation: science-node-in 260ms var(--motion-ease-enter) 300ms backwards;
 }
 
+.public-layout .science-field__signal {
+  animation: site-surface-fade var(--motion-duration-reveal) var(--motion-ease-standard) 140ms backwards;
+}
+
+.public-layout :is(.science-field__node, .science-field__core, .science-field__core-dot) {
+  animation-duration: var(--motion-duration-reveal);
+  animation-timing-function: var(--motion-ease-standard);
+}
+
 .science-field__node,
 .science-field__core-dot {
   fill: currentcolor;
@@ -665,7 +676,7 @@ footer a,
   height: 100%;
   object-fit: contain;
   object-position: center;
-  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--motion-duration-interaction) var(--motion-ease-standard);
 }
 
 .catalog-listing-card:hover .catalog-product-visual__base,
@@ -1033,9 +1044,6 @@ footer a,
   height: 100dvh;
   max-height: 100dvh;
   overflow: hidden;
-  animation-duration: 300ms;
-  transition-duration: 300ms;
-  transition-property: transform, opacity;
 }
 
 .cart-drawer__header,
@@ -1292,7 +1300,7 @@ footer a,
 .rewards-hero__copy {
   z-index: 1;
   min-width: 0;
-  animation: site-reveal var(--motion-duration-reveal) var(--motion-ease-enter) backwards;
+  animation: site-reveal var(--motion-duration-reveal) var(--motion-ease-standard) backwards;
 }
 
 .rewards-page .data-label,
@@ -1385,7 +1393,7 @@ footer a,
     0 22px 56px rgba(0, 0, 0, 0.18);
   color: color-mix(in srgb, var(--canvas) 74%, var(--moss));
   backdrop-filter: blur(12px);
-  animation: site-reveal 260ms var(--motion-ease-enter) 80ms backwards;
+  animation: site-reveal var(--motion-duration-reveal) var(--motion-ease-standard) 80ms backwards;
 }
 
 .rewards-science-scene[data-status="inactive"] {
@@ -1561,7 +1569,7 @@ footer a,
 
 .rewards-records {
   padding-top: clamp(3.5rem, 8vw, 7rem);
-  animation: site-reveal var(--motion-duration-reveal) var(--motion-ease-enter) 120ms backwards;
+  animation: site-reveal var(--motion-duration-reveal) var(--motion-ease-standard) 120ms backwards;
 }
 
 .rewards-records__intro {
@@ -1692,6 +1700,40 @@ footer a {
 
 .public-layout {
   min-width: 0;
+}
+
+[data-motion-scope="public"][data-slot="sheet-content"],
+[data-motion-scope="public"][data-slot="sheet-overlay"] {
+  animation-duration: var(--motion-duration-drawer);
+  animation-timing-function: var(--motion-ease-standard);
+  transition-duration: var(--motion-duration-drawer);
+  transition-property: transform, opacity;
+  transition-timing-function: var(--motion-ease-standard);
+}
+
+.public-layout :is([data-slot="button"], a, button, input, select, textarea, summary),
+[data-motion-scope="public"][data-slot="sheet-content"] :is([data-slot="button"], a, button, input, select, textarea, summary) {
+  transition-duration: var(--motion-duration-interaction);
+  transition-property: transform, opacity;
+  transition-timing-function: var(--motion-ease-standard);
+}
+
+.public-layout main :is(.catalog-listing-card, .record-panel-interactive) {
+  transition-duration: var(--motion-duration-interaction);
+  transition-property: transform, opacity;
+  transition-timing-function: var(--motion-ease-standard);
+}
+
+.public-layout #faq details[open] .faq-disclosure-indicator {
+  transform: rotate(45deg);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .public-layout main :is(.catalog-listing-card, .record-panel-interactive):hover,
+  .public-layout main :is(a, button):is(.action-primary, .action-secondary):not(:disabled):not([aria-disabled="true"]):hover,
+  [data-motion-scope="public"][data-slot="sheet-content"] :is(a, button):is(.action-primary, .action-secondary):not(:disabled):not([aria-disabled="true"]):hover {
+    transform: translateY(-4px);
+  }
 }
 
 .public-layout > footer {
@@ -2289,7 +2331,8 @@ footer a {
     transform: none;
   }
 
-  .cart-drawer {
+  [data-motion-scope="public"][data-slot="sheet-content"],
+  [data-motion-scope="public"][data-slot="sheet-overlay"] {
     animation: none;
     transform: none;
     transition-duration: 0s;
@@ -2322,6 +2365,24 @@ footer a {
 
   .rewards-action:hover {
     transform: none;
+  }
+
+  .public-layout .header-brand-mark,
+  .public-layout main :is(.catalog-listing-card, .record-panel-interactive),
+  .public-layout main :is(a, button):is(.action-primary, .action-secondary),
+  [data-motion-scope="public"][data-slot="sheet-content"] :is(a, button):is(.action-primary, .action-secondary),
+  .public-layout .catalog-product-visual__base {
+    transform: none !important;
+    translate: none !important;
+    rotate: none !important;
+    scale: none !important;
+  }
+
+  .public-layout #faq .faq-disclosure-indicator {
+    transform: none !important;
+    translate: none !important;
+    rotate: 0deg !important;
+    scale: none !important;
   }
 
   .rewards-hero__copy,
