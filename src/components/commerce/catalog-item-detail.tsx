@@ -70,7 +70,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
         Back to catalog
       </Link>
 
-      <div className="mt-2 grid gap-10 md:mt-8 lg:grid-cols-[minmax(0,7fr)_minmax(20rem,5fr)] lg:items-start lg:gap-x-16 lg:gap-y-0">
+      <div className="mt-2 grid gap-10 md:mt-8 lg:grid-cols-2 lg:items-start lg:gap-x-36 lg:gap-y-0">
         <header
           className="lg:col-start-2 lg:row-start-1"
           data-motion-sequence="dossier-intro"

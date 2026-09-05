@@ -68,6 +68,10 @@ test("six-view product gallery loads all scenes and keeps keyboard, focus, and g
     await page.setViewportSize({ width, height: 1000 });
     await page.goto("/catalog/items/tirzepatide");
     const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
+    await page.evaluate(() => document.fonts.ready);
+    const search = page.getByRole("button", { name: "Search PropeptIQ" });
+    const initialSearch = await clientRect(search);
+    expect((initialSearch.left + initialSearch.right) / 2).toBeCloseTo(width / 2, 0);
     const panel = gallery.getByRole("tabpanel");
     const before = await panel.boundingBox();
     expect(before).not.toBeNull();
@@ -103,6 +107,9 @@ test("six-view product gallery loads all scenes and keeps keyboard, focus, and g
       expect(rect!.width).toBeGreaterThanOrEqual(44);
       expect(rect!.height).toBeGreaterThanOrEqual(44);
     }
+    const searchAfterGalleryActions = await clientRect(search);
+    expect(searchAfterGalleryActions.left).toBeCloseTo(initialSearch.left, 0);
+    expect(searchAfterGalleryActions.bottom).toBeCloseTo(initialSearch.bottom, 0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     expect((await new AxeBuilder({ page }).include(".catalog-product-gallery").analyze()).violations).toEqual([]);
     await gallery.screenshot({ path: path.resolve(process.cwd(), `.superpowers/sdd/2026-09-04-propeptiq-storefront-completion/gallery-${width}.png`) });
@@ -127,6 +134,123 @@ test("six-view product gallery keeps a visible front image with JavaScript disab
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   } finally {
     await context.close();
+  }
+});
+
+async function waitForUntouchedGallery(page: Page, gallery: Locator) {
+  await page.evaluate(() => document.fonts.ready);
+  await expect.poll(() => gallery.getByRole("img").evaluate((element) => {
+    const image = element as HTMLImageElement;
+    return image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
+  })).toBe(true);
+  await gallery.evaluate(async (element) => {
+    let previous: number[] | undefined;
+    let stableFrames = 0;
+    const deadline = performance.now() + 5_000;
+    while (performance.now() < deadline) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const targets = [element, ...element.querySelectorAll('[role="tabpanel"], button')];
+      const geometry = [window.scrollY, document.documentElement.scrollHeight, ...targets.flatMap((target) => {
+        const bounds = target.getBoundingClientRect();
+        return [bounds.top, bounds.bottom, bounds.left, bounds.right];
+      })];
+      const visibleAnimationRunning = document.getAnimations().some((animation) => {
+        if (animation.playState !== "running" || !Number.isFinite(animation.effect?.getComputedTiming().endTime)) return false;
+        const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+        if (!(target instanceof Element)) return false;
+        const bounds = target.getBoundingClientRect();
+        return bounds.bottom > 0 && bounds.top < window.innerHeight;
+      });
+      if (!visibleAnimationRunning && previous && geometry.every((value, index) => Math.abs(value - previous![index]!) < 0.01)) {
+        stableFrames += 1;
+        if (stableFrames >= 6) return;
+      } else {
+        stableFrames = 0;
+      }
+      previous = geometry;
+    }
+    throw new Error("Initial gallery geometry did not settle after fonts, images, and finite visible motion.");
+  });
+  // Readiness must preserve the original view: no target focus or scroll can
+  // move a partially covered control into safety before the collision check.
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+}
+
+async function desktopGalleryGeometry(page: Page, productName: string) {
+  const gallery = page.getByRole("region", { name: `${productName} product illustration gallery` });
+  await waitForUntouchedGallery(page, gallery);
+  const search = await clientRect(page.getByRole("button", { name: "Search PropeptIQ" }));
+  const controls = [
+    ["Previous product illustration", gallery.getByRole("button", { name: "Previous product illustration" })],
+    ["Next product illustration", gallery.getByRole("button", { name: "Next product illustration" })],
+    ...["Front", "Three-quarter", "Multi-vial study", "Copy-space detail", "Overhead", "Ambient studio"].map((name) => (
+      [name, gallery.getByRole("tab", { name, exact: true })] as const
+    )),
+    ["Gallery panel", gallery.getByRole("tabpanel")],
+  ] as const;
+  const measuredControls = [];
+  for (const [name, locator] of controls) measuredControls.push({ name, bounds: await clientRect(locator) });
+  return {
+    productName,
+    viewport: page.viewportSize()!,
+    gallery: await clientRect(gallery),
+    panel: await clientRect(gallery.getByRole("tabpanel")),
+    image: await clientRect(gallery.getByRole("img")),
+    labelPanel: await clientRect(gallery.locator(".catalog-product-visual__label")),
+    labelName: await clientRect(gallery.locator(".catalog-product-visual__name")),
+    displayedName: (await gallery.locator(".catalog-product-visual__name").textContent())?.trim(),
+    purchaseColumn: await clientRect(page.locator(".catalog-detail-content")),
+    search,
+    controls: measuredControls,
+    collisions: measuredControls.filter(({ bounds }) => rectanglesIntersect(search, bounds)),
+  };
+}
+
+test("desktop search leaves the untouched BPC-157 gallery rectangles clear", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/catalog/items/bpc-157");
+  const geometry = await desktopGalleryGeometry(page, "BPC-157");
+  await testInfo.attach("initial-bpc157-desktop-geometry", { body: JSON.stringify(geometry, null, 2), contentType: "application/json" });
+  expect((geometry.search.left + geometry.search.right) / 2).toBeCloseTo(720, 0);
+  expect(geometry.collisions, `Untouched page-top rectangles: ${JSON.stringify(geometry)}`).toEqual([]);
+  expect(geometry.gallery.right).toBeLessThanOrEqual(geometry.search.left);
+  expect(geometry.search.right).toBeLessThanOrEqual(geometry.purchaseColumn.left);
+});
+
+test("desktop gallery clearance survives container widths and real catalog titles", async ({ page }, testInfo) => {
+  const products = [
+    { slug: "bpc-157", name: "BPC-157" },
+    { slug: "tirzepatide", name: "Tirzepatide" },
+    { slug: "cjc-1295-no-dac-ipa-cp20", name: "CJC-1295 NO DAC 10mg + IPA 10mg" },
+  ];
+  for (const product of products) {
+    for (const viewport of [
+      { width: 1024, height: 1000 },
+      { width: 1025, height: 1000 },
+      { width: 1280, height: 800 },
+      { width: 1440, height: 1000 },
+      { width: 1920, height: 1080 },
+    ]) {
+      await page.setViewportSize(viewport);
+      await page.goto(`/catalog/items/${product.slug}`);
+      const geometry = await desktopGalleryGeometry(page, product.name);
+      await testInfo.attach(`initial-gallery-${product.slug}-${viewport.width}`, { body: JSON.stringify(geometry, null, 2), contentType: "application/json" });
+      expect(geometry.collisions, `Untouched page-top rectangles: ${JSON.stringify(geometry)}`).toEqual([]);
+      expect(geometry.gallery.right).toBeLessThanOrEqual(geometry.search.left);
+      expect(geometry.search.right).toBeLessThanOrEqual(geometry.purchaseColumn.left);
+      expect((geometry.search.left + geometry.search.right) / 2).toBeCloseTo(viewport.width / 2, 0);
+      expect(viewport.height - geometry.search.bottom).toBeCloseTo(32, 0);
+      expect(geometry.panel.width / geometry.panel.height).toBeCloseTo(4 / 3, 2);
+      if (viewport.width === 1024 || viewport.width === 1025) {
+        expect(geometry.displayedName).toBe(product.name);
+        expect(rectangleFitsInside(geometry.panel, geometry.labelPanel, 1), `${product.name} label panel at ${viewport.width}px`).toBe(true);
+        expect(rectangleFitsInside(geometry.labelPanel, geometry.labelName, 1), `${product.name} full label at ${viewport.width}px`).toBe(true);
+        for (const control of geometry.controls) {
+          expect(rectangleFitsInside(geometry.gallery, control.bounds, 1), `${product.name} ${control.name} containment at ${viewport.width}px`).toBe(true);
+        }
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    }
   }
 });
 
