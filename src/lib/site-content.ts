@@ -252,7 +252,7 @@ export const footerNavigationGroups: readonly FooterNavigationGroup[] =
     ]),
     footerNavigationGroup("Support", [
       { label: "Order tracking", href: "/account/orders" },
-      { label: "FAQ", href: null },
+      { label: "FAQ", href: "/#faq" },
       { label: "Contact or Support", href: null },
       { label: "Shipping information", href: null },
     ]),
