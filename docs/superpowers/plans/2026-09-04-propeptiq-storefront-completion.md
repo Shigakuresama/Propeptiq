@@ -432,6 +432,8 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 
 **Current production projection:** PR #27 serves 20 exact compound-to-catalog-slug mappings and 33 studies, with two separate correction notices and zero claims. Original review dates remain September 4; six new study records use September 5. The server validates strict identities, design/context compatibility, canonical links, correction relationships and approved-record correspondence before projecting a frozen public bibliography. Public types and neutral wording are isolated in `compound-research-public.ts`. Mechanisms/benefit claims are null and `claims-audit.json` has no claims; studied amounts/routes/outcomes and private approval metadata are not included in the public DTO. This implements a neutral bibliography subset, not all compound research fields, product substantiation, or the missing owner attachments. The release leaves 36 products unmapped; notices never inflate study counts. Exact primary-source metadata and publication-status read-back accompanied this release, but complete Task 8 research coverage and product substantiation remain open.
 
+**Task 8C local candidate — not deployed:** `a9ad6613bedb31f1512eb4a30c71392e8566c98d` appends Selank and Semax plus four exact study records. Local counts are 22 compounds / 37 studies / 2 notices / 0 claims; the previous 20/33 records remain unchanged and the separate `semax-selank` blend remains unmapped. RED reproduced eight missing-record/join failures; GREEN passed 87 focused checks, 22 product-content browser tests and 233 files / 3,540 full unit tests. Static checks passed, and independent scoped review approved the exact seven-file change with no Critical or Important findings. The final source-status, combined release, merge/deployment and live gates remain pending. Research-only DSIP/Epithalon candidates are separate ignored evidence, not part of this release or permission to label cell-line evidence as human-participant research.
+
 ### Task 9: Complete every product information page
 
 **Files:**
@@ -621,6 +623,14 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 ## Phase E — Motion, verification, merge, and production proof
 
 ### Task 18: Complete the shared motion and responsive polish pass
+
+**September 5 working sequence — not deployed:** the accepted local motion candidate is `fee172072eeac6aa937a7ad3b4a46481c1849073` on `feat/storefront-shared-motion`. Production remains the application delivered by PR #27, with the documentation-only PR #28 at `5c8935b3cbc9461b1488ddee241b4fa86957a72b`. These unchecked release items keep code acceptance separate from customer-visible delivery:
+
+- [ ] **18D — shared reveal and lifecycle.** Source and scoped review accepted: 240ms / 12px / 70ms, threshold 0.15, live reduced-motion changes, tall-section visibility, and no route-navigation rewind. The original contained logo loop retains its separate easing. Focused tests passed; merge and live proof remain pending.
+- [ ] **18E — public drawers and controls.** Source and scoped repair review accepted: four public drawers use 300ms; interactions use 200ms and transform/opacity transitions. Private account navigation stays unchanged. The final 18/18 browser repair run covers open panels at 375/768/1440, both reduced-motion Sheet surfaces, and the real disabled action. The initial mid-slide measurement failure and corrected coverage claim remain in the execution record. Merge and live proof remain pending.
+- [ ] **18G — remaining autoplay and screenshot hygiene.** Source and scoped review accepted: rewards artwork is preserved with static orbits, and screenshots leave input caret styles untouched. The final growth suite passed 13/13 with all 16 captures and no caret mutations, hydration mismatches or page errors. The existing image-loading advisory and process color warnings remain disclosed. Merge and live proof remain pending.
+- [ ] **18F — production-build measurements.** Prepared, not run: measure real cold-load CLS/LCP, seven-width geometry, JavaScript-disabled rendering and separate 4x CPU frame intervals. Record individual results; do not infer a 60fps guarantee from passing browser tests.
+- [ ] **Release verification.** Review the combined exact candidate, run the applicable full release checks, merge, wait for READY, and inspect the deployed pages. The separate pending prices, photos, product facts, newsletter and recurring-commerce decisions remain open.
 
 **Files:**
 - Modify: `src/components/site/site-motion.tsx` or the existing shared motion module
