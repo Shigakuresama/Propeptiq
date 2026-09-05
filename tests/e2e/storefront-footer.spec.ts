@@ -192,8 +192,7 @@ test("footer long content stays contained at 195px and 320px", async ({ page }) 
   for (const width of [195, 320] as const) {
     for (const route of ["/", "/catalog", "/catalog/items/tirzepatide"] as const) {
       const footer = await openFooter(page, route, width);
-      const hasKnownPdpPageOverflow = width === 195 && route === "/catalog/items/tirzepatide";
-      await expectContained(page, footer, width, !hasKnownPdpPageOverflow);
+      await expectContained(page, footer, width);
     }
   }
 });

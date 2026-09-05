@@ -20,10 +20,10 @@ export function QuantityTierSelector({ quantity, quantityDraft, errorId, errorMe
     <div className="flex flex-wrap gap-2" aria-label="Quantity presets">
       {QUANTITY_PRESETS.map((preset) => <Button key={preset.quantity} type="button" variant="outline" className="min-h-11" aria-pressed={preset.quantity === 10 ? tenPlusActive : quantity === preset.quantity} onClick={() => onQuantitySelect(preset.quantity)}>{preset.label}</Button>)}
     </div>
-    <div className="flex items-center gap-2">
+    <div className="flex w-full max-w-[12.5rem] items-center gap-2">
       <Button type="button" variant="outline" className="min-h-11 min-w-11" aria-label="Decrease quantity" disabled={quantity <= 1} onClick={() => onQuantitySelect(Math.max(1, quantity - 1))}><Minus aria-hidden="true" /></Button>
       <label className="sr-only" htmlFor="exact-quantity">Exact quantity</label>
-      <input id="exact-quantity" className="min-h-11 w-24 rounded-lg border border-border bg-canvas px-3 text-center text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" type="number" min={minimumQuantity} max={MAX_CART_ITEM_QUANTITY} step={1} value={quantityDraft} aria-label="Exact quantity" aria-invalid={invalid ? "true" : undefined} aria-describedby={invalid ? errorId : undefined} onChange={(event) => onQuantityDraftChange(event.currentTarget.value)} />
+      <input id="exact-quantity" className="min-h-11 min-w-0 flex-1 rounded-lg border border-border bg-canvas px-3 text-center text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" type="number" min={minimumQuantity} max={MAX_CART_ITEM_QUANTITY} step={1} value={quantityDraft} aria-label="Exact quantity" aria-invalid={invalid ? "true" : undefined} aria-describedby={invalid ? errorId : undefined} onChange={(event) => onQuantityDraftChange(event.currentTarget.value)} />
       <Button type="button" variant="outline" className="min-h-11 min-w-11" aria-label="Increase quantity" disabled={quantity >= MAX_CART_ITEM_QUANTITY} onClick={() => onQuantitySelect(Math.min(MAX_CART_ITEM_QUANTITY, quantity + 1))}><Plus aria-hidden="true" /></Button>
     </div>
     {invalid ? <p id={errorId} className="text-sm text-destructive">{errorMessage}</p> : null}

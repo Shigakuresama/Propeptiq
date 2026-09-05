@@ -72,14 +72,14 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
 
       <div className="mt-2 grid gap-10 md:mt-8 lg:grid-cols-2 lg:items-start lg:gap-x-36 lg:gap-y-0">
         <header
-          className="lg:col-start-2 lg:row-start-1"
+          className="min-w-0 lg:col-start-2 lg:row-start-1"
           data-motion-sequence="dossier-intro"
         >
           <p className="eyebrow" data-motion-step="1">
             {canonical ? "Product" : "Browse-only catalog item"}
           </p>
           <h1
-            className="mt-5 text-balance font-heading text-page leading-[1.02] text-ink"
+            className="mt-5 text-balance font-heading text-page leading-[1.02] text-ink [overflow-wrap:anywhere]"
             data-motion-step="2"
           >
             {product.name}
@@ -112,7 +112,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
           />
         </div>
 
-        <div className="catalog-detail-content lg:col-start-2 lg:row-start-2 lg:pt-0">
+        <div className="catalog-detail-content min-w-0 [overflow-wrap:anywhere] lg:col-start-2 lg:row-start-2 lg:pt-0">
           {canonical ? (
             <ProductPurchasePanel
               key={product.slug}

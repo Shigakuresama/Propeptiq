@@ -94,6 +94,8 @@ describe("CatalogItemDetail", () => {
     const heading = screen.getByRole("heading", { level: 1, name: "Pinealon" });
     const intro = heading.closest("header");
     expect(heading).toBeVisible();
+    expect(intro).toHaveClass("min-w-0");
+    expect(heading).toHaveClass("[overflow-wrap:anywhere]");
     expect(intro).toHaveAttribute("data-motion-sequence", "dossier-intro");
     const motionSteps = Array.from(intro?.querySelectorAll("[data-motion-step]") ?? []);
     const expectedMotionStepCount = 3 + (product.description ? 1 : 0);
@@ -125,6 +127,8 @@ describe("CatalogItemDetail", () => {
       "pt-16",
     );
     expect(suppliedConfigurations.closest(".catalog-detail-content")).toHaveClass(
+      "min-w-0",
+      "[overflow-wrap:anywhere]",
       "lg:col-start-2",
       "lg:row-start-2",
       "lg:pt-0",
