@@ -2676,6 +2676,16 @@ test("scroll reveal keeps server content visible, hides only below-fold sections
   await expect(firstSection).toHaveCSS("opacity", "1");
   await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "pending");
   await expect(belowFoldSection).toHaveCSS("transition-duration", "0s");
+  expect(await belowFoldSection.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return {
+      opacity: styles.opacity,
+      transform: styles.transform,
+    };
+  })).toEqual({
+    opacity: "0",
+    transform: "matrix(1, 0, 0, 1, 0, 12)",
+  });
   const before = await belowFoldSection.evaluate((element) => ({
     height: (element as HTMLElement).offsetHeight,
     offsetTop: (element as HTMLElement).offsetTop,
@@ -2686,7 +2696,11 @@ test("scroll reveal keeps server content visible, hides only below-fold sections
   await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
   await expect(belowFoldSection).toHaveCSS(
     "transition-duration",
-    /^0\.28s(?:,\s*0\.28s)?$/u,
+    /^0\.24s(?:,\s*0\.24s)?$/u,
+  );
+  await expect(belowFoldSection).toHaveCSS(
+    "transition-timing-function",
+    /^cubic-bezier\(0\.4, 0, 0\.2, 1\)(?:,\s*cubic-bezier\(0\.4, 0, 0\.2, 1\))?$/u,
   );
   const after = await belowFoldSection.evaluate((element) => ({
     height: (element as HTMLElement).offsetHeight,
@@ -2800,6 +2814,50 @@ test("scroll reveal public routes stay overflow-free and error-free on mobile an
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
+});
+
+test("scroll reveal permanently exposes pending sections after reduced motion changes live", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: 375, height: 520 });
+  await page.goto("/");
+  const belowFoldSection = page
+    .locator(".public-layout > main section")
+    .filter({ hasText: "Catalog highlights" });
+
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "pending");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  await expect(belowFoldSection).toHaveCSS("opacity", "1");
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  await expect(belowFoldSection).toHaveCSS("opacity", "1");
+});
+
+test("scroll reveal reaches a naturally tall section on a short narrow viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 195, height: 320 });
+  await page.goto("/");
+  const tallSection = page.locator(
+    '.public-layout > main section[aria-labelledby="home-highlights-heading"]',
+  );
+  const geometry = await tallSection.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    viewportHeight: window.innerHeight,
+  }));
+  expect(geometry.height * 0.15).toBeGreaterThan(geometry.viewportHeight);
+  await expect(tallSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+
+  await page.locator("#home-highlights-heading")
+    .evaluate((heading) => heading.scrollIntoView({ behavior: "instant", block: "start" }));
+
+  await expect(tallSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  await expect(tallSection).toHaveCSS("opacity", "1");
+  expect(await page.locator("#home-highlights-heading").evaluate((heading) => {
+    const bounds = heading.getBoundingClientRect();
+    return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+  })).toBe(true);
 });
 
 test("PDP purchase choices synchronize the live hero discount badge without reload", async ({

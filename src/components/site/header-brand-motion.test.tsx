@@ -148,6 +148,67 @@ describe("HeaderBrandMotion", () => {
     expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
   });
 
+  it("uses the latest relevant observation in a mixed delivered batch", () => {
+    const { container } = render(
+      <HeaderBrandMotion>
+        <span>Brand</span>
+      </HeaderBrandMotion>,
+    );
+    const wrapper = container.querySelector<HTMLElement>(".header-brand-motion")!;
+    const unrelatedTarget = document.createElement("span");
+    const observer = observers[0]!;
+
+    act(() => observer.callback([
+      intersectionEntry(wrapper, true),
+      intersectionEntry(unrelatedTarget, true),
+      intersectionEntry(wrapper, false),
+    ], observer as never));
+    expect(wrapper).toHaveAttribute("data-motion-state", "paused");
+
+    act(() => observer.callback([
+      intersectionEntry(wrapper, false),
+      intersectionEntry(unrelatedTarget, false),
+      intersectionEntry(wrapper, true),
+    ], observer as never));
+    expect(wrapper).toHaveAttribute("data-motion-state", "running");
+  });
+
+  it("lets reduced motion and hidden-document gates override a final entering batch entry", () => {
+    const { container } = render(
+      <HeaderBrandMotion>
+        <span>Brand</span>
+      </HeaderBrandMotion>,
+    );
+    const wrapper = container.querySelector<HTMLElement>(".header-brand-motion")!;
+    const observer = observers[0]!;
+
+    act(() => {
+      for (const listener of mediaListeners) {
+        listener({ matches: true } as MediaQueryListEvent);
+      }
+      observer.callback([
+        intersectionEntry(wrapper, false),
+        intersectionEntry(wrapper, true),
+      ], observer as never);
+    });
+    expect(wrapper).toHaveAttribute("data-motion-state", "static");
+
+    act(() => {
+      for (const listener of mediaListeners) {
+        listener({ matches: false } as MediaQueryListEvent);
+      }
+    });
+    visibilityState = "hidden";
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      observer.callback([
+        intersectionEntry(wrapper, false),
+        intersectionEntry(wrapper, true),
+      ], observer as never);
+    });
+    expect(wrapper).toHaveAttribute("data-motion-state", "paused");
+  });
+
   it("renders a static frame for reduced motion and responds to preference changes", () => {
     reducedMotion = true;
     const { container } = render(

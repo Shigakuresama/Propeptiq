@@ -59,7 +59,9 @@
   --motion-duration-reveal: 240ms;
   --motion-duration-signal: 680ms;
   --motion-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
-  --motion-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-rise-reveal: 12px;
+  --motion-stagger-reveal: 70ms;
   --site-search-reserved-height: 4.5rem;
 }
 
@@ -321,8 +323,12 @@ footer a,
 [data-motion-sequence="home-hero"] > *,
 [data-motion-sequence="auth-intro"] > *,
 .catalog-grid > :nth-child(-n + 3) {
-  animation: site-reveal var(--motion-duration-reveal) var(--motion-ease-enter) backwards;
-  animation-delay: calc(var(--motion-index, 0) * 40ms);
+  animation: site-reveal var(--motion-duration-reveal) var(--motion-ease-standard) backwards;
+  animation-delay: calc(var(--motion-index, 0) * var(--motion-stagger-reveal));
+}
+
+.public-layout > main [data-finite-reveal-state="complete"] {
+  animation: none;
 }
 
 [data-motion-step="1"],
@@ -1812,12 +1818,14 @@ footer a {
 .public-layout main section[data-scroll-reveal-state] {
   opacity: 1;
   transform: translateY(0);
-  transition: opacity 280ms ease-out, transform 280ms ease-out;
+  transition:
+    opacity var(--motion-duration-reveal) var(--motion-ease-standard),
+    transform var(--motion-duration-reveal) var(--motion-ease-standard);
 }
 
 .public-layout main section[data-scroll-reveal-state="pending"] {
   opacity: 0;
-  transform: translateY(0.625rem);
+  transform: translateY(var(--motion-rise-reveal));
   transition: none;
 }
 
@@ -2182,7 +2190,7 @@ footer a {
 @keyframes site-reveal {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(var(--motion-rise-reveal));
   }
   to {
     opacity: 1;

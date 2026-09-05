@@ -1,13 +1,22 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
+
+const revealThreshold = 0.15;
 
 const observerOptions: IntersectionObserverInit = Object.freeze({
   root: null,
-  rootMargin: "0px 0px -8% 0px",
-  threshold: 0.08,
+  rootMargin: "0px",
+  threshold: revealThreshold,
 });
+
+const reducedMotionQuery = "(prefers-reduced-motion: reduce)";
+const finiteRevealSelector = [
+  "[data-motion-step]",
+  '[data-motion-sequence="home-hero"] > *',
+  ".catalog-grid > :nth-child(-n + 3)",
+].join(", ");
 
 function topLevelPublicSections(): readonly HTMLElement[] {
   const main = document.querySelector<HTMLElement>(".public-layout > main");
@@ -36,14 +45,27 @@ function currentFragmentTarget(): HTMLElement | null {
 
 export function ScrollRevealController() {
   const pathname = usePathname();
+  const previousPathnameRef = useRef(pathname);
+
+  useLayoutEffect(() => {
+    const previousPathname = previousPathnameRef.current;
+    previousPathnameRef.current = pathname;
+    if (pathname === previousPathname) return;
+
+    const main = document.querySelector<HTMLElement>(".public-layout > main");
+    main?.querySelectorAll<HTMLElement>(finiteRevealSelector).forEach((element) => {
+      element.dataset.finiteRevealState = "complete";
+    });
+  }, [pathname]);
 
   useEffect(() => {
     const sections = topLevelPublicSections();
     if (sections.length === 0) return;
 
-    const reducedMotion = typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (reducedMotion || typeof window.IntersectionObserver !== "function") {
+    const mediaQuery = typeof window.matchMedia === "function"
+      ? window.matchMedia(reducedMotionQuery)
+      : null;
+    if (mediaQuery?.matches || typeof window.IntersectionObserver !== "function") {
       sections.forEach(markVisible);
       return;
     }
@@ -51,9 +73,12 @@ export function ScrollRevealController() {
     const pending = new Set<HTMLElement>();
     const fragmentTarget = currentFragmentTarget();
     for (const section of sections) {
+      const bounds = section.getBoundingClientRect();
       const isFragmentSection = fragmentTarget !== null && section.contains(fragmentTarget);
-      const isWhollyBelowViewport = section.getBoundingClientRect().top >= window.innerHeight;
-      if (!isWhollyBelowViewport || isFragmentSection) {
+      const isWhollyBelowViewport = bounds.top >= window.innerHeight;
+      const isThresholdUnreachable = bounds.height > 0 &&
+        window.innerHeight / bounds.height < revealThreshold;
+      if (!isWhollyBelowViewport || isFragmentSection || isThresholdUnreachable) {
         markVisible(section);
         continue;
       }
@@ -99,14 +124,21 @@ export function ScrollRevealController() {
         }
       }
     };
+    const revealForReducedMotion = (event: MediaQueryListEvent): void => {
+      if (!event.matches) return;
+      for (const section of [...pending]) reveal(section);
+      observer?.disconnect();
+    };
 
     document.addEventListener("focusin", revealFocusedSection);
     window.addEventListener("hashchange", revealFragmentSection);
+    mediaQuery?.addEventListener("change", revealForReducedMotion);
 
     return () => {
       observer?.disconnect();
       document.removeEventListener("focusin", revealFocusedSection);
       window.removeEventListener("hashchange", revealFragmentSection);
+      mediaQuery?.removeEventListener("change", revealForReducedMotion);
       pending.forEach(markVisible);
       pending.clear();
     };
