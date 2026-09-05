@@ -70,7 +70,7 @@ describe("footer configuration", () => {
         label: "Support",
         links: [
           { label: "Order tracking", href: "/account/orders" },
-          { label: "FAQ", href: null },
+          { label: "FAQ", href: "/#faq" },
           { label: "Contact or Support", href: null },
           { label: "Shipping information", href: null },
         ],
@@ -202,11 +202,11 @@ describe("SiteFooter", () => {
       { label: "Rewards", href: "/rewards" },
       { label: "Partner Program", href: "/partners" },
       { label: "Order tracking", href: "/account/orders" },
+      { label: "FAQ", href: "/#faq" },
       { label: "Research Use Only", href: "/research-use-policy" },
     ]);
 
     for (const missingLabel of [
-      "FAQ",
       "Contact or Support",
       "Shipping information",
       "Privacy Policy",

@@ -64,7 +64,10 @@ describe("public shell growth navigation", () => {
     expect(
       within(footer).getByRole("link", { name: "Research Use Only" }),
     ).toHaveAttribute("href", "/research-use-policy");
-    expect(within(footer).queryByRole("link", { name: "FAQ" })).toBeNull();
+    expect(within(footer).getByRole("link", { name: "FAQ" })).toHaveAttribute(
+      "href",
+      "/#faq",
+    );
     expect(
       within(footer).queryByRole("link", { name: "Terms and Conditions" }),
     ).toBeNull();
