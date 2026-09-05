@@ -13,15 +13,25 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
+function CartDrawerBodyFallback() {
+  return (
+    <div className="error-record m-4 text-base leading-7" role="alert">
+      The cart preview could not be loaded. Close this panel or use View cart to continue.
+    </div>
+  );
+}
+
 const DrawerCartView = dynamic(
   () => import("./cart-view").then((module) => module.CartView),
   {
-    loading: () => (
+    loading: ({ error }) => error ? <CartDrawerBodyFallback /> : (
       <div
         aria-label="Loading cart preview"
         className="cart-loading m-4"
         role="status"
-      />
+      >
+        Loading cart preview…
+      </div>
     ),
     ssr: false,
   },
@@ -39,11 +49,7 @@ class CartDrawerBodyBoundary extends Component<
 
   render() {
     if (this.state.failed) {
-      return (
-        <div className="error-record m-4 text-base leading-7" role="alert">
-          The cart preview could not be loaded. Close this panel or use View cart to continue.
-        </div>
-      );
+      return <CartDrawerBodyFallback />;
     }
     return this.props.children;
   }

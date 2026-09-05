@@ -262,11 +262,17 @@ test("preview failure retry, stale response isolation, short-phone layout, and r
   holdNextPreview = true;
   await increase.click();
   await expect.poll(() => previewRequestCount).toBe(beforeHeldRequest + 1);
+  await expect.poll(() => typeof releaseHeld).toBe("function");
   await increase.click();
   await expect.poll(() => previewRequestCount).toBe(beforeHeldRequest + 2);
   await expect(drawer.getByRole("spinbutton", { name: "Quantity for BPC-157, 10mg" })).toHaveValue("3");
-  await releaseHeld?.();
+  if (!releaseHeld) throw new Error("Held preview release callback was not installed.");
+  await releaseHeld();
   await expect(drawer.getByRole("spinbutton", { name: "Quantity for BPC-157, 10mg" })).toHaveValue("3");
+  await expect(drawer.getByRole("listitem").filter({ hasText: "BPC-157" }).getByText(
+    "$83.97",
+    { exact: true },
+  )).toBeVisible();
 
   for (const width of [195, 320, 375, 768, 1440]) {
     await page.setViewportSize({ width, height: width <= 375 ? 520 : 900 });

@@ -300,4 +300,65 @@ describe("CartDrawer accessible progressive enhancement", () => {
     expect(css).toMatch(/\.cart-drawer\s+\.cart-layout--drawer\s+\.cart-summary\s*\{[^}]*position:\s*static/isu);
     expect(css).toMatch(/prefers-reduced-motion:\s*reduce[\s\S]*\.cart-drawer[^}]*transform:\s*none/iu);
   });
+
+  it("keeps the real Sheet usable behind safe copy when the CartView chunk import fails", async () => {
+    let rejectChunk!: (error: Error) => void;
+    vi.resetModules();
+    vi.doMock("next/dynamic", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("next/dynamic")>();
+      const dynamic = actual.default;
+      return {
+        ...actual,
+        default: ((loader, options) => {
+          void loader;
+          return dynamic(
+            () => new Promise((_resolve, reject) => {
+              rejectChunk = reject;
+            }),
+            options,
+          );
+        }) satisfies typeof dynamic,
+      };
+    });
+    const { CartDrawer: ImportFailingCartDrawer } = await import("./cart-drawer");
+    seed([{ variantId: alphaId, quantity: 1 }]);
+    const user = userEvent.setup();
+
+    function ImportFailureHarness() {
+      const { itemCount } = useCart();
+      return <ImportFailingCartDrawer enabled itemCount={itemCount} />;
+    }
+
+    try {
+      render(<CartProvider><ImportFailureHarness /></CartProvider>);
+      const trigger = await screen.findByRole("link", { name: "Cart, 1 requested unit" });
+      await user.click(trigger);
+      const dialog = await screen.findByRole("dialog", { name: "Your cart" });
+      const loading = within(dialog).getByRole("status", { name: "Loading cart preview" });
+      expect(loading).toBeVisible();
+      expect(loading).toHaveTextContent("Loading cart preview…");
+      await waitFor(() => expect(typeof rejectChunk).toBe("function"));
+      await act(async () => rejectChunk(new Error("synthetic cart chunk import failure")));
+      const fallback = await within(dialog).findByRole("alert");
+
+      expect(fallback).toHaveTextContent(
+        "The cart preview could not be loaded. Close this panel or use View cart to continue.",
+      );
+      expect(fallback).not.toHaveTextContent("synthetic cart chunk import failure");
+      const viewCart = within(dialog).getByRole("link", { name: "View cart" });
+      expect(viewCart).toHaveAttribute("href", "/cart");
+
+      await user.click(within(dialog).getByRole("button", { name: "Close" }));
+      await waitFor(() => expect(dialog).not.toBeInTheDocument());
+      expect(document.activeElement).toBe(trigger);
+
+      await user.click(trigger);
+      const reopened = await screen.findByRole("dialog", { name: "Your cart" });
+      expect(fireEvent.click(within(reopened).getByRole("link", { name: "View cart" }))).toBe(true);
+      await waitFor(() => expect(reopened).not.toBeInTheDocument());
+    } finally {
+      vi.doUnmock("next/dynamic");
+      vi.resetModules();
+    }
+  });
 });
