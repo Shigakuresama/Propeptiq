@@ -585,7 +585,15 @@ describe("CartView", () => {
     render(<CartView checkoutIntent="resume" />);
 
     expect(screen.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
-    expect(screen.getByRole("link", { name: "Continue to catalog" })).toHaveAttribute("href", "/catalog");
+    const catalogLink = screen.getByRole("link", { name: "Continue to catalog" });
+    expect(catalogLink).toHaveAttribute("href", "/catalog");
+    expect(catalogLink).toHaveClass(
+      "h-auto",
+      "max-w-full",
+      "whitespace-normal",
+      "py-2.5",
+      "text-center",
+    );
     expect(screen.queryByText("Your saved request is ready to continue at checkout.", { exact: true })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });

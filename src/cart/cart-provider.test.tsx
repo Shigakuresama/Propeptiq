@@ -240,6 +240,16 @@ describe("CartProvider exact-variant announcements", () => {
     window.localStorage.clear();
   });
 
+  it("keeps one polite atomic cart status anchored at the document origin", () => {
+    render(<CartProvider><CartHarness /></CartProvider>);
+
+    const status = screen.getByRole("status", { name: "Cart updates" });
+    expect(screen.getAllByRole("status", { name: "Cart updates" })).toHaveLength(1);
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status).toHaveAttribute("aria-atomic", "true");
+    expect(status).toHaveClass("sr-only", "left-0", "top-0");
+  });
+
   it("persists an immediate canonical add over an empty legacy cart and restores it after remount", async () => {
     window.localStorage.setItem(LEGACY_CART_STORAGE_KEY, emptyLegacyFixture);
     const mounted = render(<CartProvider><LegacyCartHarness immediate /></CartProvider>);

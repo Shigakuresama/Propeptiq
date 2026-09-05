@@ -299,7 +299,7 @@ export function CartView(props: CartViewProps) {
           Add an exact eligible catalog variant to create a browser-saved request. Display prices
           and purchase state will be reloaded from the server.
         </p>
-        <Button asChild className="action-primary mt-7">
+        <Button asChild className="action-primary mt-7 h-auto max-w-full whitespace-normal py-2.5 text-center">
           <Link href="/catalog" {...(drawer && onNavigate ? { onClick: onNavigate } : {})}>Continue to catalog</Link>
         </Button>
       </section>

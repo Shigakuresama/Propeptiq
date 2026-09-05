@@ -263,7 +263,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         aria-atomic="true"
         aria-label="Cart updates"
         aria-live="polite"
-        className="sr-only"
+        className="sr-only left-0 top-0"
         role="status"
       >
         {announcement}
