@@ -192,7 +192,8 @@ test("footer long content stays contained at 195px and 320px", async ({ page }) 
   for (const width of [195, 320] as const) {
     for (const route of ["/", "/catalog", "/catalog/items/tirzepatide"] as const) {
       const footer = await openFooter(page, route, width);
-      await expectContained(page, footer, width, route !== "/catalog/items/tirzepatide");
+      const hasKnownPdpPageOverflow = width === 195 && route === "/catalog/items/tirzepatide";
+      await expectContained(page, footer, width, !hasKnownPdpPageOverflow);
     }
   }
 });
@@ -219,10 +220,18 @@ test("footer clears fixed public controls and passes Axe under reduced motion", 
   const footer = await openFooter(page, "/catalog/items/tirzepatide", 375);
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   const search = page.getByRole("button", { name: "Search PropeptIQ" });
+  const purchase = page.getByRole("region", { name: "Mobile purchase controls" });
   const bottomRow = footer.locator(".footer-bottom-row");
   await expect(bottomRow).toBeVisible();
-  const [searchBounds, rowBounds] = await Promise.all([search.boundingBox(), bottomRow.boundingBox()]);
+  await expect(purchase).toBeVisible();
+  await expect(search).toBeVisible();
+  const [searchBounds, purchaseBounds, rowBounds] = await Promise.all([
+    search.boundingBox(),
+    purchase.boundingBox(),
+    bottomRow.boundingBox(),
+  ]);
   expect(searchBounds).not.toBeNull();
+  expect(purchaseBounds).not.toBeNull();
   expect(rowBounds).not.toBeNull();
   expect(
     searchBounds!.x < rowBounds!.x + rowBounds!.width &&
@@ -230,6 +239,13 @@ test("footer clears fixed public controls and passes Axe under reduced motion", 
       searchBounds!.y < rowBounds!.y + rowBounds!.height &&
       searchBounds!.y + searchBounds!.height > rowBounds!.y,
   ).toBe(false);
+  expect(
+    purchaseBounds!.x < rowBounds!.x + rowBounds!.width &&
+      purchaseBounds!.x + purchaseBounds!.width > rowBounds!.x &&
+      purchaseBounds!.y < rowBounds!.y + rowBounds!.height &&
+      purchaseBounds!.y + purchaseBounds!.height > rowBounds!.y,
+  ).toBe(false);
+  expect(purchaseBounds!.y + purchaseBounds!.height).toBeLessThan(searchBounds!.y);
   expect((await new AxeBuilder({ page }).include("footer").analyze()).violations).toEqual([]);
 });
 
