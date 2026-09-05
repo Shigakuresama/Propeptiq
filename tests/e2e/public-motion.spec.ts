@@ -10,6 +10,15 @@ type MotionStyles = Readonly<{
   transitionTimingFunction: string;
 }>;
 
+type ReducedMotionStyles = Readonly<{
+  animationDuration: string;
+  rotate: string;
+  scale: string;
+  transform: string;
+  transitionDuration: string;
+  translate: string;
+}>;
+
 async function motionStyles(locator: Locator): Promise<MotionStyles> {
   return locator.evaluate((element) => {
     const styles = getComputedStyle(element);
@@ -21,6 +30,46 @@ async function motionStyles(locator: Locator): Promise<MotionStyles> {
       transitionTimingFunction: styles.transitionTimingFunction,
     };
   });
+}
+
+async function reducedMotionStyles(locator: Locator): Promise<ReducedMotionStyles> {
+  return locator.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return {
+      animationDuration: styles.animationDuration,
+      rotate: styles.rotate,
+      scale: styles.scale,
+      transform: styles.transform,
+      transitionDuration: styles.transitionDuration,
+      translate: styles.translate,
+    };
+  });
+}
+
+async function expectTargetAtLeast44(locator: Locator, label: string) {
+  await expect(locator, `${label} must be visible`).toBeVisible();
+  const box = await locator.boundingBox();
+  expect(box, `${label} must have a rendered hit target`).not.toBeNull();
+  expect(box!.width, `${label} width`).toBeGreaterThanOrEqual(44);
+  expect(box!.height, `${label} height`).toBeGreaterThanOrEqual(44);
+}
+
+async function expectDocumentContainment(page: Page, dialog: Locator, label: string) {
+  await expect.poll(
+    () => dialog.evaluate((element) => getComputedStyle(element).transform),
+    { message: `${label} must settle before its bounds are measured` },
+  ).toBe("none");
+  const viewport = page.viewportSize();
+  const box = await dialog.boundingBox();
+  expect(viewport, `${label} viewport`).not.toBeNull();
+  expect(box, `${label} sheet bounds`).not.toBeNull();
+  expect(box!.x, `${label} left edge`).toBeGreaterThanOrEqual(-1);
+  expect(box!.y, `${label} top edge`).toBeGreaterThanOrEqual(-1);
+  expect(box!.x + box!.width, `${label} right edge`).toBeLessThanOrEqual(viewport!.width + 1);
+  expect(box!.y + box!.height, `${label} bottom edge`).toBeLessThanOrEqual(viewport!.height + 1);
+  expect(await page.evaluate(() => (
+    document.documentElement.scrollWidth - document.documentElement.clientWidth
+  )), `${label} document overflow`).toBeLessThanOrEqual(1);
 }
 
 async function expectPublicSheetMotion(page: Page, dialog: Locator) {
@@ -151,6 +200,18 @@ test("public controls and interactive catalog records use restrained transform-o
   await launcher.hover();
   await expect(launcher).toHaveCSS("transform", "none");
   expect(Math.abs(laneCenter - (await page.evaluate(() => innerWidth / 2)))).toBeLessThanOrEqual(1);
+
+  const disabledAction = page.getByRole("button", { name: "Subscribe" });
+  await expect(disabledAction).toBeDisabled();
+  await disabledAction.scrollIntoViewIfNeeded();
+  const disabledBox = await disabledAction.boundingBox();
+  expect(disabledBox).not.toBeNull();
+  await page.mouse.move(
+    disabledBox!.x + disabledBox!.width / 2,
+    disabledBox!.y + disabledBox!.height / 2,
+  );
+  await expect(disabledAction).toBeDisabled();
+  await expect(disabledAction).toHaveCSS("transform", "none");
 });
 
 test("an unmarked private account sheet retains the generic 200ms behavior", async ({ page }) => {
@@ -259,27 +320,110 @@ test("reduced motion neutralizes decorative individual transforms without shifti
   })).toBeLessThanOrEqual(1);
   await trigger.click();
   const search = page.getByRole("dialog", { name: "Search PropeptIQ" });
-  await expect(search).toHaveCSS("transition-duration", "0s");
+  const overlay = page.locator('[data-slot="sheet-overlay"][data-motion-scope="public"]');
+  await expect.poll(() => reducedMotionStyles(search), {
+    message: "reduced public Sheet content motion",
+  }).toEqual({
+    animationDuration: "0s",
+    rotate: "none",
+    scale: "none",
+    transform: "none",
+    transitionDuration: "0s",
+    translate: "none",
+  });
+  await expect.poll(() => reducedMotionStyles(overlay), {
+    message: "reduced public Sheet overlay motion",
+  }).toEqual({
+    animationDuration: "0s",
+    rotate: "none",
+    scale: "none",
+    transform: "none",
+    transitionDuration: "0s",
+    translate: "none",
+  });
   await expect(search.getByRole("searchbox", { name: "Search products and information" }))
     .toBeFocused();
-  const closeBox = await search.getByRole("button", { name: "Close" }).boundingBox();
-  expect(closeBox?.width).toBeGreaterThanOrEqual(44);
-  expect(closeBox?.height).toBeGreaterThanOrEqual(44);
+  await expectTargetAtLeast44(search.getByRole("button", { name: "Close" }), "search close");
+  expect(await search.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return Math.abs(rect.left + rect.width / 2 - innerWidth / 2);
+  })).toBeLessThanOrEqual(1);
 });
 
-test("public search controls stay reachable without document overflow at target widths", async ({ page }) => {
+test("all public sheets remain contained with reachable controls at target widths", async ({ page }) => {
   for (const width of [375, 768, 1440]) {
-    await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
+    const height = width === 375 ? 812 : 900;
+    await page.setViewportSize({ width: width === 1440 ? 768 : width, height });
     await page.goto("/catalog");
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth))
-      .toBeLessThanOrEqual(1);
-    await page.getByRole("button", { name: "Search PropeptIQ" }).click();
-    const sheet = page.getByRole("dialog", { name: "Search PropeptIQ" });
-    for (const control of await sheet.locator("button, input").all()) {
-      const box = await control.boundingBox();
-      expect(box?.width).toBeGreaterThanOrEqual(44);
-      expect(box?.height).toBeGreaterThanOrEqual(44);
+
+    const navigationTrigger = page.getByRole("button", { name: "Open navigation" });
+    await navigationTrigger.click();
+    const navigation = page.getByRole("dialog", { name: "PROPEPTIQ LABS" });
+    if (width === 1440) {
+      await page.setViewportSize({ width, height });
     }
-    await page.keyboard.press("Escape");
+    await expect(navigation).toBeVisible();
+    await expectDocumentContainment(page, navigation, `${width}px navigation`);
+    await expectTargetAtLeast44(
+      navigation.getByRole("button", { name: "Close" }),
+      `${width}px navigation close`,
+    );
+    await expectTargetAtLeast44(
+      navigation.getByRole("navigation", { name: "Mobile primary" }).getByRole("link").first(),
+      `${width}px navigation link`,
+    );
+    if (width === 1440) {
+      await navigation.getByRole("button", { name: "Close" }).click();
+      await expect(navigation).toBeHidden();
+    } else {
+      await closeWithEscape(page, navigation, navigationTrigger);
+    }
+
+    const searchTrigger = page.getByRole("button", { name: "Search PropeptIQ" });
+    await searchTrigger.click();
+    const search = page.getByRole("dialog", { name: "Search PropeptIQ" });
+    await expectDocumentContainment(page, search, `${width}px search`);
+    await expectTargetAtLeast44(
+      search.getByRole("button", { name: "Close" }),
+      `${width}px search close`,
+    );
+    await expectTargetAtLeast44(
+      search.getByRole("searchbox", { name: "Search products and information" }),
+      `${width}px search input`,
+    );
+    await closeWithEscape(page, search, searchTrigger);
+
+    const cartTrigger = page.getByRole("link", { name: /Cart, 0 requested units/iu });
+    await cartTrigger.click();
+    const cart = page.getByRole("dialog", { name: "Your cart" });
+    await expect(cart.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
+    await expectDocumentContainment(page, cart, `${width}px cart`);
+    await expectTargetAtLeast44(
+      cart.getByRole("button", { name: "Close" }),
+      `${width}px cart close`,
+    );
+    await expectTargetAtLeast44(
+      cart.getByRole("link", { name: "View cart" }),
+      `${width}px cart link`,
+    );
+    await closeWithEscape(page, cart, cartTrigger);
+
+    const quickAddTrigger = page.getByRole("button", { name: /choose a variant/iu }).first();
+    await quickAddTrigger.click();
+    const quickAdd = page.getByRole("dialog", { name: /Choose a variant for/iu });
+    await expectDocumentContainment(page, quickAdd, `${width}px quick-add`);
+    await expectTargetAtLeast44(
+      quickAdd.getByRole("button", { name: "Close" }),
+      `${width}px quick-add close`,
+    );
+    const enabledVariants = quickAdd.getByRole("radio").and(page.locator(":not(:disabled)"));
+    expect(await enabledVariants.count()).toBeGreaterThan(1);
+    const selectedVariant = enabledVariants.nth(1);
+    await selectedVariant.check();
+    await expectTargetAtLeast44(
+      selectedVariant.locator("xpath=ancestor::label[1]"),
+      `${width}px quick-add associated radio label`,
+    );
+    await closeWithEscape(page, quickAdd, quickAddTrigger);
   }
 });
