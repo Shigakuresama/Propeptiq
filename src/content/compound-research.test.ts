@@ -40,13 +40,129 @@ const expectedExistingPmids = [
   "12107212",
 ] as const;
 
-const expectedNewStudies = [
+const expectedPreviousReleaseStudies = [
   { id: "pmid-23168581", compoundId: "ara-290", pmid: "23168581", firstAuthor: "Heij L", reviewedOn: "2026-09-05" },
   { id: "pmid-24136731", compoundId: "ara-290", pmid: "24136731", firstAuthor: "Dahan A", reviewedOn: "2026-09-05" },
   { id: "pmid-33077895", compoundId: "ss-31", pmid: "33077895", firstAuthor: "Reid Thompson W", reviewedOn: "2026-09-05" },
   { id: "pmid-37268435", compoundId: "ss-31", pmid: "37268435", firstAuthor: "Karaa A", reviewedOn: "2026-09-05" },
   { id: "pmid-35713670", compoundId: "thymosin-alpha-1", pmid: "35713670", firstAuthor: "Ke L", reviewedOn: "2026-09-05" },
   { id: "pmid-39814420", compoundId: "thymosin-alpha-1", pmid: "39814420", firstAuthor: "Wu J", reviewedOn: "2026-09-05" },
+] as const;
+
+const expectedTask8CStudies = [
+  {
+    id: "pmid-18454096",
+    compoundId: "selank",
+    pmid: "18454096",
+    url: "https://pubmed.ncbi.nlm.nih.gov/18454096/",
+    title: "[Efficacy and possible mechanisms of action of a new peptide anxiolytic selank in the therapy of generalized anxiety disorders and neurasthenia].",
+    firstAuthor: "Zozulia AA",
+    year: 2008,
+    journal: "Zh Nevrol Psikhiatr Im S S Korsakova",
+    design: "randomized_controlled_trial",
+    evidenceContext: "human",
+    sampleSize: 62,
+    population: "62 patients with generalized anxiety disorder and neurasthenia; 30 in the Selank group and 32 in the medazepam comparison group.",
+    studiedAmount: null,
+    duration: null,
+    route: null,
+    doi: null,
+    outcomeSummary: null,
+    verificationStatus: "verified_primary_source",
+    publicationStatus: "public_neutral_metadata",
+    reviewedOn: "2026-09-05",
+  },
+  {
+    id: "pmid-25176261",
+    compoundId: "selank",
+    pmid: "25176261",
+    url: "https://pubmed.ncbi.nlm.nih.gov/25176261/",
+    title: "[A comparison of the anxiolytic effect and tolerability of selank and phenazepam in the treatment of anxiety disorders].",
+    firstAuthor: "Medvedev VE",
+    year: 2014,
+    journal: "Zh Nevrol Psikhiatr Im S S Korsakova",
+    design: "human_interventional",
+    evidenceContext: "human",
+    sampleSize: 60,
+    population: "60 patients with phobic-anxiety and somatoform disorders; the indexed abstract does not specify allocation or blinding.",
+    studiedAmount: null,
+    duration: null,
+    route: null,
+    doi: null,
+    outcomeSummary: null,
+    verificationStatus: "verified_primary_source",
+    publicationStatus: "public_neutral_metadata",
+    reviewedOn: "2026-09-05",
+  },
+  {
+    id: "pmid-11517472",
+    compoundId: "semax",
+    pmid: "11517472",
+    url: "https://pubmed.ncbi.nlm.nih.gov/11517472/",
+    title: "[Effectiveness of semax in acute period of hemispheric ischemic stroke (a clinical and electrophysiological study)].",
+    firstAuthor: "Gusev EI",
+    year: 1997,
+    journal: "Zh Nevrol Psikhiatr Im S S Korsakova",
+    design: "human_interventional",
+    evidenceContext: "human",
+    sampleSize: 110,
+    population: "30 patients in the acute period of hemispheric ischemic stroke and 80 conventionally treated controls; random allocation and blinding are not stated in the indexed abstract.",
+    studiedAmount: null,
+    duration: null,
+    route: null,
+    doi: null,
+    outcomeSummary: null,
+    verificationStatus: "verified_primary_source",
+    publicationStatus: "public_neutral_metadata",
+    reviewedOn: "2026-09-05",
+  },
+  {
+    id: "pmid-29798983",
+    compoundId: "semax",
+    pmid: "29798983",
+    url: "https://pubmed.ncbi.nlm.nih.gov/29798983/",
+    title: "[The efficacy of semax in the tretament of patients at different stages of ischemic stroke].",
+    firstAuthor: "Gusev EI",
+    year: 2018,
+    journal: "Zh Nevrol Psikhiatr Im S S Korsakova",
+    design: "human_interventional",
+    evidenceContext: "human",
+    sampleSize: 110,
+    population: "110 patients after ischemic stroke, divided by rehabilitation timing and receipt of Semax; the indexed abstract does not specify randomization or blinding.",
+    studiedAmount: null,
+    duration: null,
+    route: null,
+    doi: "10.17116/jnevro20181183261-68",
+    outcomeSummary: null,
+    verificationStatus: "verified_primary_source",
+    publicationStatus: "public_neutral_metadata",
+    reviewedOn: "2026-09-05",
+  },
+] as const;
+
+const expectedTask8CCompounds = [
+  {
+    id: "selank",
+    productSlug: "selank",
+    displayName: "Selank",
+    alternateNames: [],
+    studyIds: ["pmid-18454096", "pmid-25176261"],
+    strongestEvidence: "human_rct",
+    identityCaveat: "The cited literature names Selank as a study intervention; that name correspondence does not establish the identity, composition, formulation, quality, or equivalence of the PropeptIQ catalog material.",
+    mechanism: null,
+    benefitClaim: null,
+  },
+  {
+    id: "semax",
+    productSlug: "semax",
+    displayName: "Semax",
+    alternateNames: [],
+    studyIds: ["pmid-11517472", "pmid-29798983"],
+    strongestEvidence: "human_observational",
+    identityCaveat: "The cited literature names Semax as a study intervention; that name correspondence does not establish the identity, composition, formulation, quality, or equivalence of the PropeptIQ catalog material.",
+    mechanism: null,
+    benefitClaim: null,
+  },
 ] as const;
 
 const approvedCorrections = {
@@ -71,7 +187,9 @@ const expectedCompoundOrder = [
   "mots-c",
   "nad-plus",
   "retatrutide",
+  "selank",
   "semaglutide",
+  "semax",
   "sermorelin-acetate",
   "ss-31",
   "survodutide",
@@ -140,18 +258,22 @@ function expectInvalid(source: unknown, corrections?: unknown): void {
 }
 
 describe("verified compound research source", () => {
-  it("preserves the exact existing bibliography and appends only the six authorized studies", () => {
+  it("preserves the exact existing bibliography and appends only the four Task 8C studies", () => {
     expect(studiesJson.schemaVersion).toBe(1);
     expect(studiesJson.studies.map((study) => study.pmid)).toEqual([
       ...expectedExistingPmids,
-      ...expectedNewStudies.map((study) => study.pmid),
+      ...expectedPreviousReleaseStudies.map((study) => study.pmid),
+      ...expectedTask8CStudies.map((study) => study.pmid),
     ]);
-    expect(new Set(studiesJson.studies.map((study) => study.pmid)).size).toBe(33);
+    expect(new Set(studiesJson.studies.map((study) => study.pmid)).size).toBe(37);
     expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(0, 27))).digest("hex")).toBe(
       "13c0d57425ffcda4e861fecb10199b0e7fd83d16d8b69063b40c0ca7a80ba44f",
     );
-    expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(27))).digest("hex")).toBe(
+    expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(27, 33))).digest("hex")).toBe(
       "5a3bd19d1edd1ca83615fd14c4c4cb9d186bdeb62f2a39b011d454d51e2f3cda",
+    );
+    expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(0, 33))).digest("hex")).toBe(
+      "388f28368d2080e031e2d902748bd3ca02c7bc573493f5b3bd98e60acc46acc7",
     );
 
     for (const study of studiesJson.studies.slice(0, 27)) {
@@ -173,8 +295,8 @@ describe("verified compound research source", () => {
         );
       }
     }
-    expect(studiesJson.studies.slice(27)).toMatchObject(expectedNewStudies);
-    for (const study of studiesJson.studies.slice(27)) {
+    expect(studiesJson.studies.slice(27, 33)).toMatchObject(expectedPreviousReleaseStudies);
+    for (const study of studiesJson.studies.slice(27, 33)) {
       expect(study.design).toBe("randomized_controlled_trial");
       expect(study.evidenceContext).toBe("human");
       expect(study.studiedAmount).toBeNull();
@@ -182,22 +304,27 @@ describe("verified compound research source", () => {
       expect(study.route).toBeNull();
       expect(study.outcomeSummary).toBeNull();
     }
+    expect(studiesJson.studies.slice(33)).toEqual(expectedTask8CStudies);
   });
 
-  it("keeps immutable catalog spelling mappings without adding excluded products", () => {
+  it("keeps immutable catalog spelling mappings and appends only the exact Task 8C compounds", () => {
     expect(compoundsJson.schemaVersion).toBe(1);
-    expect(compoundsJson.compounds).toHaveLength(20);
+    expect(compoundsJson.compounds).toHaveLength(22);
     expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(0, 17))).digest("hex")).toBe(
       "b23f9802f40eb3d17dc01f7ff7bf614218b060e816ceaf87261f3c32cb526f0c",
     );
-    expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(17))).digest("hex")).toBe(
+    expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(17, 20))).digest("hex")).toBe(
       "13128802d80682a7aef7d0065e278ee41d5abf8306e6f898efe736e6e5c8f526",
     );
-    expect(compoundsJson.compounds.slice(17)).toMatchObject([
+    expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(0, 20))).digest("hex")).toBe(
+      "fe21ba3f1d18e4359c5ad50ed04a883c5bf879d2514c368ff5f96c3e8d0c9370",
+    );
+    expect(compoundsJson.compounds.slice(17, 20)).toMatchObject([
       { id: "ara-290", productSlug: "ara-290", studyIds: ["pmid-23168581", "pmid-24136731"], strongestEvidence: "human_rct", mechanism: null, benefitClaim: null },
       { id: "ss-31", productSlug: "ss-31", studyIds: ["pmid-33077895", "pmid-37268435"], strongestEvidence: "human_rct", mechanism: null, benefitClaim: null },
       { id: "thymosin-alpha-1", productSlug: "thymosin-alpha-1", studyIds: ["pmid-35713670", "pmid-39814420"], strongestEvidence: "human_rct", mechanism: null, benefitClaim: null },
     ]);
+    expect(compoundsJson.compounds.slice(20)).toEqual(expectedTask8CCompounds);
 
     const cagrilintide = compoundsJson.compounds.find(
       (compound) => compound.id === "cagrilintide",
@@ -224,6 +351,7 @@ describe("verified compound research source", () => {
     expect(identities).not.toContain("cjc-1295-no-dac");
     expect(identities).not.toContain("hgh");
     expect(identities).not.toContain("somatropin");
+    expect(identities).not.toContain("semax-selank");
 
     for (const compound of compoundsJson.compounds) {
       expect(compound.id).toMatch(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u);
@@ -261,7 +389,7 @@ describe("projectPublicCompoundResearch", () => {
     );
     expect(projected.compounds.flatMap((compound) =>
       compound.studies.map((study) => study.pmid)
-    )).toHaveLength(33);
+    )).toHaveLength(37);
 
     const compoundKeys = Object.keys(projected.compounds[0]!).sort();
     const studyKeys = Object.keys(projected.compounds.find((compound) => compound.id === "ss-31")!.studies[0]!).sort();
@@ -368,7 +496,7 @@ describe("projectPublicCompoundResearch", () => {
 
   it("binds every approved PMID to its exact compound and review date", () => {
     const wrongNewDate = freshSource();
-    findRecord(wrongNewDate.studies.studies, "pmid-23168581").reviewedOn = "2026-09-04";
+    findRecord(wrongNewDate.studies.studies, "pmid-18454096").reviewedOn = "2026-09-04";
     expectInvalid(wrongNewDate, approvedCorrections);
 
     const wrongOldDate = freshSource();

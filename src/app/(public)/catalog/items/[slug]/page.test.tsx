@@ -219,7 +219,9 @@ describe("retained catalog item route", () => {
     ["mots-c", "mots-c"],
     ["nad-plus", "nad-plus"],
     ["retatrutide", "retatrutide"],
+    ["selank", "selank"],
     ["semaglutide", "semaglutide"],
+    ["semax", "semax"],
     ["sermorelin-acetate", "sermorelin-acetate"],
     ["ss-31", "ss-31"],
     ["survodutide", "survodutide"],
@@ -233,14 +235,11 @@ describe("retained catalog item route", () => {
     expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
   });
 
-  it("does not infer a bibliography for an unmapped compound or similarly named blend", async () => {
-    const canonical = testCanonicalProduct([], { slug: "tirzepatide-blend" });
-    getPublicStorefrontViewMock.mockResolvedValue({
-      catalog: { ...projectedCatalog, products: [canonical] },
-      pricing: { mode: "test", evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] },
-    });
-    render(await CatalogItemPage({ params: Promise.resolve({ slug: canonical.slug }) }));
+  it("does not infer a bibliography for the real Semax and Selank blend route", async () => {
+    render(await CatalogItemPage({ params: Promise.resolve({ slug: "semax-selank" }) }));
+    expect(detailProps[0]?.product).toMatchObject({ slug: "semax-selank", name: "Semax + Selank" });
     expect(detailProps[0]?.research).toBeNull();
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
   });
 
   it("keeps bibliography absent for a browse-only record even when its slug matches", async () => {

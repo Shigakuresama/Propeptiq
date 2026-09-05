@@ -66,6 +66,32 @@ describe("CompoundResearchSection", () => {
     }
   });
 
+  it("renders Selank as one randomized and one interventional human bibliography row", () => {
+    const { container } = render(<CompoundResearchSection research={researchFor("selank")} />);
+    const section = screen.getByRole("region", { name: "Verified research references" });
+    expect(within(section).getByText("Randomized human research included")).toBeVisible();
+    expect(container.querySelector("summary")).toHaveTextContent("2 verified references");
+    fireEvent.click(container.querySelector("summary")!);
+    expect(within(section).getAllByText("Randomized controlled trial")).toHaveLength(1);
+    expect(within(section).getAllByText("Human interventional study")).toHaveLength(1);
+    expect(within(section).getByText("PMID: 18454096")).toBeVisible();
+    expect(within(section).getByText("PMID: 25176261")).toBeVisible();
+    expect(within(section).getByText("62 participants or samples")).toBeVisible();
+    expect(within(section).getByText("60 participants or samples")).toBeVisible();
+  });
+
+  it("renders Semax as human research with two interventional bibliography rows", () => {
+    const { container } = render(<CompoundResearchSection research={researchFor("semax")} />);
+    const section = screen.getByRole("region", { name: "Verified research references" });
+    expect(within(section).getByText("Human research included")).toBeVisible();
+    expect(container.querySelector("summary")).toHaveTextContent("2 verified references");
+    fireEvent.click(container.querySelector("summary")!);
+    expect(within(section).getAllByText("Human interventional study")).toHaveLength(2);
+    expect(within(section).getByText("PMID: 11517472")).toBeVisible();
+    expect(within(section).getByText("PMID: 29798983")).toBeVisible();
+    expect(within(section).getAllByText("110 participants or samples")).toHaveLength(2);
+  });
+
   it.each([
     ["ara-290", "24136731", "28059429", "23168581"],
     ["thymosin-alpha-1", "39814420", "40447307", "35713670"],
