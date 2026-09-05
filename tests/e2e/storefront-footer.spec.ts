@@ -78,6 +78,40 @@ async function expectTouchTarget(locator: Locator) {
   expect(bounds!.height).toBeGreaterThanOrEqual(44);
 }
 
+async function footerDockGeometry(page: Page) {
+  return page.evaluate(() => {
+    const root = document.documentElement;
+    const rectangle = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (element === null) return null;
+      const bounds = element.getBoundingClientRect();
+      return {
+        bottom: bounds.bottom,
+        height: bounds.height,
+        left: bounds.left,
+        right: bounds.right,
+        top: bounds.top,
+        width: bounds.width,
+      };
+    };
+    const layout = document.querySelector<HTMLElement>(".public-layout");
+    const footer = document.querySelector<HTMLElement>(".public-layout > footer");
+    return {
+      atEnd: Math.abs(window.scrollY + root.clientHeight - root.scrollHeight),
+      clientHeight: root.clientHeight,
+      footer: rectangle(".public-layout > footer"),
+      footerBottomRow: rectangle(".footer-bottom-row"),
+      footerPaddingBottom: footer ? getComputedStyle(footer).paddingBottom : "missing",
+      purchase: rectangle('[role="region"][aria-label="Mobile purchase controls"]'),
+      purchaseVisible: document.querySelector<HTMLElement>('[role="region"][aria-label="Mobile purchase controls"]')?.dataset.visible ?? "missing",
+      reservation: layout?.style.getPropertyValue("--public-action-dock-reserved-height") || "missing",
+      scrollHeight: root.scrollHeight,
+      scrollY: window.scrollY,
+      search: rectangle('button[aria-label="Search PropeptIQ"]'),
+    };
+  });
+}
+
 async function expectFooterColumns(
   page: Page,
   width: 375 | 768 | 1440,
@@ -217,13 +251,43 @@ test("footer FAQ native anchor reactivates when the fragment is already current"
 test("footer clears fixed public controls and passes Axe under reduced motion", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   const footer = await openFooter(page, "/catalog/items/tirzepatide", 375);
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   const search = page.getByRole("button", { name: "Search PropeptIQ" });
   const purchase = page.getByRole("region", { name: "Mobile purchase controls" });
   const bottomRow = footer.locator(".footer-bottom-row");
   await expect(bottomRow).toBeVisible();
   await expect(purchase).toBeVisible();
   await expect(search).toBeVisible();
+  await expect.poll(async () => {
+    const geometry = await footerDockGeometry(page);
+    const purchaseHeight = geometry.purchase?.height ?? 0;
+    const searchHeight = geometry.search?.height ?? 0;
+    const searchBottom = geometry.search?.bottom ?? geometry.clientHeight;
+    const occupiedHeight = Math.ceil(
+      purchaseHeight + 8 + searchHeight + geometry.clientHeight - searchBottom,
+    );
+    const reservation = Number.parseFloat(geometry.reservation);
+    const footerPadding = Number.parseFloat(geometry.footerPaddingBottom);
+    return {
+      footerPaddingCommitted: footerPadding >= reservation + 16,
+      purchaseVisible: geometry.purchaseVisible === "true",
+      reservationCommitted: reservation >= occupiedHeight,
+    };
+  }).toEqual({
+    footerPaddingCommitted: true,
+    purchaseVisible: true,
+    reservationCommitted: true,
+  });
+  const reservedGeometry = await footerDockGeometry(page);
+  console.info(`Task 18C reserved footer geometry: ${JSON.stringify(reservedGeometry)}`);
+
+  await page.evaluate(() => {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+  });
+  await expect.poll(async () => (await footerDockGeometry(page)).atEnd).toBeLessThanOrEqual(1);
+  const settledGeometry = await footerDockGeometry(page);
+  expect(Math.abs(settledGeometry.footer!.bottom - settledGeometry.clientHeight))
+    .toBeLessThanOrEqual(1);
+  console.info(`Task 18C settled footer geometry: ${JSON.stringify(settledGeometry)}`);
   const [searchBounds, purchaseBounds, rowBounds] = await Promise.all([
     search.boundingBox(),
     purchase.boundingBox(),
