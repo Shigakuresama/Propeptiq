@@ -1,5 +1,7 @@
 "use client";
 
+import { PublicActionDock } from "@/components/site/public-action-dock";
+
 import {
   type ChangeEvent,
   type KeyboardEvent,
@@ -204,7 +206,7 @@ export function SiteSearchSheet({
 
   return (
     <Sheet open={open} onOpenChange={handleOpenChange}>
-      <div className="site-search-launcher-lane">
+      <PublicActionDock>
         <SheetTrigger asChild>
           <button
             aria-label="Search PropeptIQ"
@@ -215,7 +217,7 @@ export function SiteSearchSheet({
             <span className="sr-only md:not-sr-only">SEARCH</span>
           </button>
         </SheetTrigger>
-      </div>
+      </PublicActionDock>
       <SheetContent className="site-search-sheet w-full gap-0" side="bottom">
         <SheetHeader>
           <SheetTitle>Search PropeptIQ</SheetTitle>

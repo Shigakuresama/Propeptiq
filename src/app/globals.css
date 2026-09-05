@@ -1544,7 +1544,7 @@ footer a {
 }
 
 .public-layout > footer {
-  padding-bottom: calc(var(--site-search-reserved-height) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: max(calc(var(--site-search-reserved-height) + env(safe-area-inset-bottom, 0px)), calc(var(--public-action-dock-reserved-height, 0px) + 1rem));
 }
 
 .public-layout main {
@@ -1575,6 +1575,72 @@ footer a {
   min-height: 44px;
   max-width: 100%;
   pointer-events: auto;
+}
+
+.public-action-dock__purchase-slot {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(100% + 0.5rem);
+  pointer-events: none;
+}
+
+.mobile-purchase-bar {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 0.875rem;
+  background: var(--canvas);
+  color: var(--ink);
+  box-shadow: var(--shadow-float);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+  animation: none;
+  transition: none;
+}
+
+.mobile-purchase-bar[data-visible="false"] {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.mobile-purchase-bar__summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.mobile-purchase-bar__name { font-weight: 600; }
+.mobile-purchase-bar__price { text-align: right; }
+.mobile-purchase-bar__price strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
+
+.mobile-purchase-bar__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.25rem 0.5rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.mobile-purchase-bar__actions > :is(a, button) {
+  min-width: 0;
+  min-height: 44px;
+  height: auto;
+  padding-inline: 0.5rem;
+  white-space: normal;
+  text-align: center;
+}
+
+.mobile-purchase-bar__actions > a { display: inline-flex; align-items: center; justify-content: center; }
+.mobile-purchase-bar__actions > p { grid-column: 1 / -1; margin-top: 0.25rem; }
+.mobile-purchase-bar :is(a, button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.product-purchase-heading { scroll-margin-top: calc(var(--public-purchase-header-height, 8rem) + 1rem); }
+.product-purchase-heading:focus-visible { outline: 2px solid var(--moss); outline-offset: 4px; }
+
+.public-layout main :is(a, button, input, summary, [tabindex]),
+.public-layout > footer a {
+  scroll-margin-bottom: calc(var(--public-action-dock-reserved-height, 0px) + 1rem);
 }
 
 .site-search-sheet[data-side="bottom"] {

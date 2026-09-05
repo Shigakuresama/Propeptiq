@@ -415,7 +415,7 @@ describe("SiteSearchLauncher accessible Sheet behavior", () => {
       cssRuleBody(globalsCss, ".public-layout > footer"),
     );
     expect(footer.get("padding-bottom")).toBe(
-      "calc(var(--site-search-reserved-height) + env(safe-area-inset-bottom, 0px))",
+      "max(calc(var(--site-search-reserved-height) + env(safe-area-inset-bottom, 0px)), calc(var(--public-action-dock-reserved-height, 0px) + 1rem))",
     );
 
     for (const selector of ["body", "main", "footer"]) {

@@ -26,6 +26,8 @@ const clientEntries = [
   "src/components/commerce/laboratory-concentration-calculator.tsx",
   "src/components/commerce/quick-add-variant-sheet.tsx",
   "src/components/commerce/product-purchase-panel.tsx",
+  "src/components/commerce/mobile-purchase-bar.tsx",
+  "src/components/site/public-action-dock.tsx",
   checkoutFormPath,
   promotionBarPath,
   newsletterClientPath,
@@ -167,6 +169,7 @@ function searchClientAuthorityViolation(from: string, specifier: string): boolea
   return !(
     /^src\/components\/search\/site-search-(?:launcher|sheet)\.tsx$/u.test(resolvedPath) ||
     /^src\/components\/ui\//u.test(resolvedPath) ||
+    resolvedPath === "src/components/site/public-action-dock.tsx" ||
     resolvedPath === "src/lib/utils.ts" ||
     resolvedPath === "src/search/storefront-search.ts" ||
     resolvedPath === "src/content/public-information.ts"
@@ -436,6 +439,8 @@ describe("storefront client boundary", () => {
     );
     expect(directRuntimeImports).not.toContain("@/content/storefront-content");
     expect(visited.size).toBeGreaterThan(searchClientPaths.length);
+    expect(visited).toContain("src/components/site/public-action-dock.tsx");
+    expect(runtimeLocalImports("src/components/site/public-action-dock.tsx")).toEqual([]);
   });
 
   it.each([
