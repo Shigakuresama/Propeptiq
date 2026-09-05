@@ -10,6 +10,19 @@
 
 **Spec:** Owner requirements in the September 4, 2026 task thread, plus [`docs/runbooks/storefront-configuration.md`](../../runbooks/storefront-configuration.md), [`docs/superpowers/plans/2026-08-30-propeptiq-commerce-foundation.md`](./2026-08-30-propeptiq-commerce-foundation.md), [`docs/superpowers/plans/2026-08-30-propeptiq-public-content.md`](./2026-08-30-propeptiq-public-content.md), and [`docs/superpowers/plans/2026-08-30-propeptiq-search-discovery.md`](./2026-08-30-propeptiq-search-discovery.md).
 
+## Remaining customer-visible work
+
+The storefront is **not finished**. This is the working checklist; the detailed tasks and evidence follow below.
+
+- [ ] **New images, product research, Why Choose, FAQ, and logo — locally verified, awaiting release.** Merge/deploy UI candidate `f91ea55` and check the real pages. The full browser run passed 109/109 after the gallery/search overlap and ultra-narrow wrapping corrections. The six gallery scenes are disclosed illustrations, not actual product photographs. No extra approval is needed simply to ship truthful UI under the owner's existing instruction.
+- [ ] **Prices — 40 of 103 exact matches, 63 still pending.** Keep the 40 reviewed ordinary Amino-equivalent reference prices and resolve the other rows from exact equivalents or owner amounts. Show WINTER30 consistently without stacking; do not label all pricing complete.
+- [ ] **Product pages — information still incomplete.** Ship the 17-compound/27-study neutral bibliography already prepared, then complete justified coverage and product-specific technical/storage information. Do not fill the remaining 39 products with unrelated papers or generic protocols.
+- [ ] **Mobile purchase/cart controls — unfinished.** Complete the sticky add-to-cart/cart experience without hiding the permanent search or other controls; preserve exact variant selection, quantity changes, and cart persistence.
+- [ ] **Footer and newsletter — unfinished.** Finish the requested footer layout/links and privacy content, confirm the existing Resend setup, and activate signup only when it can genuinely subscribe with consent and a working provider. Social `/` placeholders are already authorized.
+- [ ] **Subscriptions and Stripe TEST catalog — unfinished.** Confirm the requested recurring discounts and 1/3/6 pack behavior alongside the existing quantity tiers, then build and verify only TEST-mode mappings. No live charge, subscription, or checkout activation is part of this test preparation.
+- [ ] **Placeholder cleanup — inventory before removal.** Show the exact replace/delete list and obtain the requested itemized approval before removing existing content or assets.
+- [ ] **Final live proof — not done.** Complete the full browser rerun and final candidate review/checks, merge and deploy the accepted candidate, and verify the real storefront at phone, tablet, and desktop sizes. Record the exact release and any still-missing items instead of calling the whole plan complete.
+
 ## Completion rule
 
 Every top-level task needs these three facts before `- [ ]` may become `- [x]`:
@@ -24,20 +37,47 @@ Authority-bound/private work also uses task-specific proof: Task 1 requires the 
 
 “Implemented,” “merged,” “deployed,” and “verified live” are different states. A component that exists only in code, a fixture, a test, a preview flag, or a local screenshot is not a completed customer-facing feature.
 
-## Current evidence snapshot — September 4, 2026
+## Current evidence snapshot — September 5, 2026
 
 | Area | Confirmed state | Completion state |
 | --- | --- | --- |
 | Initial visible refresh | Commit `638beac59254e9459e5b017727b93aede5eec37d` is on `origin/main`. | Merged; production result must be rechecked. |
-| Corrective visible-storefront work | The current working branch contains uncommitted follow-up fixes for product visuals, logo behavior, product content projection, variant/quantity badge synchronization, related products, tests, and this ledger. | In progress; not merged or deployed. |
+| Corrective visible-storefront work | Commit `f91ea55937df4a524fbceccb8cec4edd91412fc5` contains the six-scene gallery/data plate, product bibliography projection, related-card corrections, Why Choose presentation, native grouped FAQ/JSON-LD, and regression tests. The prior illustrative composite and earlier fixes have their historical commit evidence below. | Final local gate passed; candidate not yet merged or deployed. |
 | Product prices | The exhaustive current official-source audit covers all 103 local variants: 40 `matched`, 41 `no_exact_equivalent`, and 22 `unresolved`. The 40 matched rows reproduce the existing manifest list prices, so the audit changes no price; the other 63 rows remain pending at zero. The older 34/40/29 snapshot was historical and is superseded by the deterministic row register in `docs/reference/2026-09-04-amino-equivalent-price-audit.md`. | Open. No “all prices complete” claim is permitted, and unresolved/no-equivalent rows remain pending at zero. |
-| Product imagery | A new original blank-vial layer exists and the corrective candidate composes it with each product's mapped backdrop and live label. | In progress; live result not verified. |
-| Product information | Neutral per-product overview, catalog information, and exact-name PubMed discovery links exist in the corrective candidate. Product-specific technical facts, storage copy, and curated study summaries have not been supplied or approved. | Partial. |
-| Related products | Candidate renders deterministic same-category catalog neighbors with an honest `Related Products` label. There is no evidence for “Frequently Researched Together.” | Partial placeholder; curated relationships remain open. |
-| Why Choose and FAQ | Neutral data-driven components and records exist. Requested testing, cGMP, sourcing, clinical-dose, shipping, return, and subscription claims lack approved evidence/copy. | Partial. |
+| Product imagery | Six shared original 1,254 × 1,254 WebP scenes, live per-product name/variant data plates, and a manually controlled PDP gallery replace the earlier composite in the current candidate. The visible disclosure identifies them as AI-generated illustrations, not actual product photography; the scenes are not 56 separate photo sets. | Gallery/search collision corrected; focused browser 4/4 and Turbopack build reported passing. Full browser rerun, review, and deployed proof remain pending. |
+| Product information | Neutral per-product overview, catalog information, and exact-name PubMed discovery links exist. The current candidate joins 17 compounds/27 verified study PMIDs to their exact PDPs and renders only neutral bibliographic metadata; the other 39 products omit that bibliography. | Partial; not deployed. Product-specific technical facts, storage copy, study summaries, missing mappings, and claim approval remain open. |
+| Related products | All 56 configured products have one to four surviving same-category peers sorted by immutable slug/ID. Candidate cards use the current visual/pricing components, preview-only states, exact-variant quick add, and honest scroll controls. There is no evidence for “Frequently Researched Together.” | Local data/component/real-composition checks pass; browser/build checks pending, not deployed. Curated relationships remain open. |
+| Why Choose and FAQ | Six truthful operational cards now have icons and responsive 1/2/3-column presentation. Eight native single-open FAQs and matching safely escaped JSON-LD use the same source array. Requested testing, cGMP, sourcing, clinical-dose, shipping, return, and subscription claims still lack approved evidence/copy. | Local content browser checkpoint reported 15/15 passed; current final browser/build and deployed proof remain pending. Requested business claims/policies remain open. |
 | Attachments | No study attachment or footer reference asset is present in the repository/workspace evidence reviewed for this plan. | Blocked on re-upload. |
 | Newsletter/Resend | Code boundary exists. Vercel metadata confirms a sensitive Production variable named `NEWSLETTER_RESEND_API_KEY` is already installed, separate from transactional `RESEND_API_KEY`; its value/provider ownership was not inspected. Public collection remains closed because privacy/content/attempt-gate activation is incomplete and Preview newsletter configuration is absent. | Open; do not create a duplicate key. |
 | Stripe catalog/subscriptions | Existing checkout is server-authoritative and uses canonical variants. The proposed six saved Prices per SKU and subscriptions are not implemented. | Open; architecture decision required. |
+
+### Final local release gate — source commit `f91ea55937df4a524fbceccb8cec4edd91412fc5`
+
+This final local gate supersedes the intermediate browser/build-pending checkpoints in the component ledger below. It does not mark the full storefront plan complete or claim production verification.
+
+- Full browser: `npm run test:e2e`, 109/109 passed, zero skipped/unexpected/flaky, exit 0; 504.217 seconds, report `blob-report/run-DDM4Ci/merged-results.json`.
+- Independent final pricing/tier/cart browser rerun: 1/1 passed, 7.5 seconds. One stale test-only locator was narrowed during an earlier batch before that case ran; all production source stayed fixed throughout the full run.
+- Full unit: 229 files / 3,446 tests passed, 33.44 seconds; lint, typecheck, workspace boundary and artifact-scanner self-tests 11/11 passed.
+- Integration: 33 files / 551 tests passed, 946.90 seconds; one guarded PostgreSQL-auth file / 3 tests skipped. No real PostgreSQL or provider verification is inferred.
+- Final Turbopack production build and artifact scan passed: 1,260 files / 70,755,659 bytes / zero forbidden matches.
+- Reviewed fixes preserve disclosure readability, 195px no-JavaScript wrapping, legacy-route restriction/Axe coverage, exact pricing/cart assertions, and source boundaries. No unresolved runtime defect remains from the component reviews.
+- Pending: push/merge, exact READY deployment and live phone/tablet/desktop evidence. Dev screenshot caret-style hydration warnings and LCP hints are recorded rather than called zero-error evidence; production logs must be checked separately.
+
+### Component checkpoint ledger, not production completion
+
+This ledger does not turn code presence into production acceptance. The owner has already authorized implementation, merge, and deployment; the remaining release gate is evidence for the exact accepted candidate, not a new blanket permission request. The release coordinator owns the pending browser/build results and final merge/deployment record.
+
+| Candidate work | Exact edit locations | Evidence recorded so far | Still needed |
+| --- | --- | --- | --- |
+| Six-scene illustrative gallery (Tasks 4/6) | `src/components/commerce/catalog-product-visual-manifest.ts`, `catalog-product-visual.tsx`, `catalog-product-gallery.tsx`; `public/catalog/visual-masters/`; `src/app/globals.css` | Source includes hashed dimensions, scene/caption/disclosure metadata, manual tabs/arrows, explicit image dimensions and `sizes`, current variant label/badge, and no autoplay. Focused tests are present beside the visual/manifest/gallery. | Current-candidate browser/build results, accepted asset scope, exact commit/review, deployment/live verification; actual product photography is not delivered by these illustrations. |
+| Related cards (Task 7) | `src/catalog/storefront-merchandising.ts`; `src/components/commerce/related-products-carousel.tsx`; `related-products-composition.test.tsx`; `related-products-carousel-flow.test.tsx` | Standard runner: merchandising/catalog/carousel/composition 4 files / 26 tests pass; subsequent composition/flow 2 files / 6 tests pass. Focused ESLint, repository typecheck, scoped diff checks pass. All 56 real configured products have surviving peers; actual canonical single/multi-variant quick add is covered. | Browser/build and final release proof; owner-curated relationship/reason table. |
+| Verified bibliography/PDP join (Tasks 8/9) | `content/compounds.json`, `content/studies.json`, `content/claims-audit.json`; `src/content/compound-research.ts`, `compound-research-public.ts`; `src/components/commerce/compound-research-section.tsx`; `src/app/(public)/catalog/items/[slug]/page.tsx` | Source register contains 17 mappings and 27 unique verified primary-source PMIDs with canonical PubMed URLs and September 4 review dates. Server projection limits public fields, checks exact identity/design/context, and omits unmapped products. This documentation task verified local counts/joins, not a fresh external DOI/PMID resolution run. | Preserve the source-verification report in final Task 8 evidence; current browser/build and deployment proof; remaining 39-product bibliography gaps, technical/storage copy, and claims review. |
+| Why Choose and FAQ (Tasks 11/12) | `src/content/storefront-content.ts`; `src/components/site/why-choose-propeptiq.tsx`, `faq-section.tsx`, `faq-json-ld.tsx`, `public-home.tsx`; `tests/e2e/storefront-content.spec.ts`, `storefront-faq.spec.ts` | Source has six operational cards, eight same-source visible/schema questions, native `details` grouping, escaped JSON-LD, and focused component/browser tests. Test-file existence is not a claim that the current browser run passed. | Current-candidate native keyboard/JS-disabled, responsive/Axe/console, build and deployed-live evidence; approved replacement business/policy copy where requested. |
+
+The two related composition suites were previously named `related-products-composition.integration.test.tsx` and `related-products-carousel.integration.test.tsx`. Those names were excluded by both existing Vitest configurations. They are now `related-products-composition.test.tsx` and `related-products-carousel-flow.test.tsx`, respectively, and both ran through the normal command. The flow suite preserves real UI/cart assertions with explicitly labelled synthetic input fixtures, not provider or production records. Do not count historical commands that silently excluded the old paths as coverage.
+
+**Release-coordinator checkpoint, September 5 (reported, not rerun by this documentation task):** full unit 229 files / 3,446 tests, content browser 15/15, lint, typecheck, workspace boundary, and artifact-scanner 11/11 passed. The gallery/search collision is fixed by moving the disclosure into the gallery header inside the unchanged 4:3 panel. Focused browser 4/4 passes include ten mobile/desktop/scrolled-ADD positions, all six scenes, JavaScript-disabled, reduced motion, and long-label coverage. Turbopack production build passed, followed by an artifact scan of 1,260 files / 70,755,590 bytes with zero forbidden artifacts. Integration passed 33 files / 551 tests in 946.90 seconds; one guarded `better-auth-postgres.integration.test.ts` file / 3 tests was skipped. The full 109-case E2E rerun is running, not yet a pass. These are intermediate results, not the final exact-commit gate or proof that the storefront is deployed.
 
 ## Binding business decisions
 
@@ -75,7 +115,7 @@ These are not arbitrary engineering limits; they prevent the site from publishin
 
 #### Task 1 acceptance inventory — September 4, 2026
 
-The source recovery result is recorded in [`docs/reference/storefront-study-source-register.md`](../../reference/storefront-study-source-register.md). No owner-provided study set, approved claim/legal copy, product-image approval set, or footer reference was found. Repository visual files are catalogued as repository provenance only; they are not approval evidence. One re-upload containing the study set and footer reference is required before Tasks 8, 9, 11, 12, and 13 can be completed.
+The source recovery result is recorded in [`docs/reference/storefront-study-source-register.md`](../../reference/storefront-study-source-register.md). No owner-provided study set, approved claim/legal copy, product-image approval set, or footer reference was found. Repository visual files are catalogued as repository provenance only; they are not approval evidence. The missing attachments are still needed to match the owner's specific study/image/footer references. Independently verified neutral bibliography and truthful operational content can be implemented while that source recovery remains open, but cannot be represented as the recovered attachments or as approved product claims/legal copy.
 
 | Requested feature | Top-level task | Accountable owner | Required acceptance evidence |
 | --- | ---: | --- | --- |
@@ -124,7 +164,7 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - [x] Run `npm test -- src/catalog/storefront-catalog-manifest.test.ts src/catalog/storefront-catalog-data.test.ts src/catalog/storefront-price-presentation.test.ts src/domain/storefront-pricing.test.ts`.
 - [x] Have a reviewer reproduce a representative single-variant, multi-variant, blend, and unmatched row from the official source before committing.
 
-**Accepted evidence:** Task 2A commits `5a1e5d9..e2b2afb` established the 103-row primary-source audit (`40 matched`, `41 no_exact_equivalent`, `22 unresolved`) with 137 focused tests and independent source reproduction. Task 2B commit `f96fa53338c05c233f976c1ee98c44e868d32c4b` made all 56 defaults explicit; 152 focused tests, lint, typecheck, workspace-boundary, and diff checks passed. Fresh adversarial review reported zero findings and approved the exact Task 2B range. The two branch-wide unit failures remain the documented unrelated visible-UI expectations and are not represented as a clean full-suite result.
+**Accepted evidence:** Task 2A commits `5a1e5d9..e2b2afb` established the 103-row primary-source audit (`40 matched`, `41 no_exact_equivalent`, `22 unresolved`) with 137 focused tests and independent source reproduction. Task 2B commit `f96fa53338c05c233f976c1ee98c44e868d32c4b` made all 56 defaults explicit; 152 focused tests, lint, typecheck, workspace-boundary, and diff checks passed. Fresh adversarial review reported zero findings and approved the exact Task 2B range. Two branch-wide visible-UI expectation failures were recorded at that historical boundary; this is not a claim that they persist in the current candidate or that a current full-suite gate is complete. The final candidate report must supply its own exact count/result.
 
 ### Task 3: Preserve canonical product, variant, promotion, and checkout authority
 
@@ -149,6 +189,10 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 
 **Files:**
 - Modify: `src/components/commerce/catalog-product-visual.tsx`
+- Create: `src/components/commerce/catalog-product-visual-manifest.ts`
+- Create: `src/components/commerce/catalog-product-visual-manifest.test.ts`
+- Create: `src/components/commerce/catalog-product-gallery.tsx`
+- Create: `src/components/commerce/catalog-product-gallery.test.tsx`
 - Modify: `src/app/globals.css`
 - Modify: `src/catalog/storefront-catalog-data.ts` only for reviewed asset mappings
 - Modify: `src/components/commerce/catalog-listing-card.test.tsx`
@@ -167,6 +211,10 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - [ ] Replace the composite placeholder product-by-product only after the owner approves that product's images; keep image dimensions and `sizes` explicit and lazy-load below the fold.
 - [ ] Add Playwright checks for distinct product mappings, image load success, long-label geometry, no material layout shift, and no horizontal overflow.
 - [ ] Do not check this task complete until every published product either has approved individual imagery or is intentionally hidden from the public catalog.
+
+**Accepted Task 4A evidence:** Commit `c5430e3f169e045f702f3d5a6668aea56843d5f7` ships the truthfully disclosed illustrative composite for all 56 canonical products. A new browser geometry test passes the longest real blend and a representative single-name product at 320px, 375px, 768px, and 1440px, including reserved 4:3 dimensions, label/RUO/badge/disclosure separation, hover containment, and no catalog-visual overflow. Component tests passed 26/26; lint, typecheck, workspace-boundary, and diff checks passed. Fresh adversarial review found no Task 4A defect and approved the exact commit. The broader held-image case still identifies only the pre-existing negative-position header-logo crop assigned to Task 5. Task 4 remains open for the original multi-shot asset system and final deployed proof.
+
+**September 5 Task 4B candidate:** The current `illustration_with_catalog_data_plate` visual replaces that historical composite with six original shared square WebP scenes: Front, Three-quarter, Multi-vial study, Copy-space detail, Overhead, and Ambient studio. `catalog-product-visual-manifest.ts` owns the order, captions, hashes, 1,254 × 1,254 dimensions, and exact `AI-generated catalog illustration — not actual product photography.` disclosure. Multi-vial count is explicitly not package quantity; Overhead explicitly is not a scale reference. No capsule/ingredient/human-use props were invented. `catalog-product-gallery.tsx` owns manual scene tabs/previous/next and Arrow/Home/End keyboard behavior without autoplay; `catalog-product-visual.tsx` owns the live name/variant/research-use/badge plate and decorative product accent/signature. This is a shared illustration system, not a claim that 336 product-specific photographs or the originally requested per-product approval set were delivered. The gallery disclosure now sits in the header of the unchanged 4:3 panel after a measured search-launcher collision was corrected. The focused browser/build checkpoint is above; full E2E, final review, and deployment proof remain pending.
 
 ### Task 5: Complete the transparent nav logo and contained scientific identity motion
 
@@ -209,12 +257,19 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - [ ] Keep multi-variant `ADD` behind an explicit variant chooser and merge repeated exact-variant additions in cart state.
 - [ ] Add mobile sticky add-to-cart only after its interaction with the permanent bottom search, cookie/consent surface, and checkout controls has a non-overlap design and browser tests.
 
+**Current candidate:** The gallery is composed into `catalog-item-detail.tsx` using the existing selected variant, quantity, and pricing context; listing/related cards continue using the shared visual and canonical quick-add interface. This source integration does not complete the separate mobile sticky purchase-bar work or authorize a change to the volume/subscription contract.
+
 ### Task 7: Deliver honest related-product recommendations
 
 **Files:**
 - Modify: `src/catalog/storefront-merchandising.ts`
+- Modify: `src/catalog/storefront-merchandising.test.ts`
+- Modify: `src/catalog/storefront-catalog-data.test.ts`
 - Modify: `src/components/commerce/related-products-carousel.tsx`
-- Modify: corresponding tests and `tests/e2e/public-storefront.spec.ts`
+- Modify: `src/components/commerce/related-products-carousel.test.tsx`
+- Rename/update: `src/components/commerce/related-products-composition.test.tsx`
+- Rename/update: `src/components/commerce/related-products-carousel-flow.test.tsx`
+- Modify: `tests/e2e/public-storefront.spec.ts`
 
 **Interfaces:**
 - Consumes: explicit owner-approved related product IDs when supplied; until then, deterministic same-category placeholder IDs.
@@ -226,16 +281,19 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - [ ] Rename to `Frequently Researched Together` only if evidence or explicit approved merchandising language supports that claim.
 - [ ] Verify keyboard/touch scroll, focus, reduced motion, quick-add variant selection, announcement, dimensions, and no layout shift.
 
+**September 5 candidate evidence:** The merchandising input is snapshotted/validated and sorted by immutable slug then ID before same-category peers are selected. Exact supported categories, duplicate/self exclusion, reorder stability, caller immutability, and malformed/hostile-array rejection are tested. All 56 actual configured products project one to four surviving peers. Preview-only cards are intentionally visible with reference prices and `Cart preview only`; pending/unavailable states retain their existing safeguards. The introduction is `Explore more products in this category.` One item has no arrows; larger rows measure scroll extent and disable arrows with nowhere to go, updating on scroll/resize. Keyboard/touch, reduced motion, real single-variant add, explicit multi-variant chooser, focus/announcement, repeat merge, and full-cart rejection have local coverage. Focused results and both corrected test filenames are recorded in the candidate table above. Owner-curated relationships/reasons and current browser/build/deployment proof remain open.
+
 ## Phase C — Product information, research, and homepage content
 
 ### Task 8: Build the verified compound/study data pipeline
 
 **Files:**
-- Create after source recovery: `content/compounds.json`
-- Create after source recovery: `content/studies.json`
-- Create after source recovery: `content/claims-audit.json`
-- Create: `src/content/compound-research.ts`
-- Create: `src/content/compound-research.test.ts`
+- Modify: `content/compounds.json`
+- Modify: `content/studies.json`
+- Modify: `content/claims-audit.json`
+- Modify: `src/content/compound-research.ts`
+- Modify: `src/content/compound-research.test.ts`
+- Create: `src/content/compound-research-public.ts`
 - Modify: `src/content/storefront-content.ts`
 - Modify: `src/catalog/storefront-public.ts`
 
@@ -254,14 +312,19 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - [ ] Require a business-review status before records enter the public DTO or search index; draft data remains server-private.
 - [ ] Add hostile-shape, duplicate-ID, invalid-link, draft-leak, copied-private-field, and deterministic-order tests.
 
+**Current data/projection status:** The existing files contain 17 exact compound-to-catalog-slug mappings and 27 unique study PMIDs flagged `verified_primary_source`/`public_neutral_metadata` with September 4 review dates. The server validates strict identities, design/context compatibility, canonical links, and approved-record correspondence before projecting a frozen public bibliography. Public types and neutral wording are isolated in `compound-research-public.ts`. Mechanisms/benefit claims are null and `claims-audit.json` has no claims; studied amounts/routes/outcomes and private approval metadata are not included in the public DTO. This implements a neutral bibliography subset, not all compound research fields, product substantiation, or the missing owner attachments. Thirty-nine products remain unmapped; no citation count is padded. Exact primary-source resolver evidence must accompany final Task 8 acceptance.
+
 ### Task 9: Complete every product information page
 
 **Files:**
 - Modify: `src/content/storefront-product-content.ts`
 - Modify: `src/components/commerce/product-information-sections.tsx`
+- Create: `src/content/public-literature.ts`
 - Create: `src/components/commerce/compound-research-section.tsx`
+- Create: `src/components/commerce/compound-research-section.test.tsx`
 - Modify: `src/components/commerce/catalog-item-detail.tsx`
-- Test: co-located tests plus `tests/e2e/public-storefront.spec.ts`
+- Modify: `src/app/(public)/catalog/items/[slug]/page.tsx` and its route test
+- Test: co-located tests plus `tests/e2e/public-storefront.spec.ts` and `tests/e2e/storefront-content.spec.ts`
 
 **Interfaces:**
 - Consumes: approved product overview, technical information, storage information, and Task 8 research DTO.
@@ -272,6 +335,8 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - [ ] Render approved compound research as native disclosure rows with verified citation links opened with `target="_blank" rel="noopener noreferrer"`; render a neutral evidence-class label only after Task 8's deterministic rubric and exact public wording are owner/scientific-approved.
 - [ ] Render the exact approved legal/FDA/RUO notice once at the bottom; do not call generated wording regulator- or attorney-approved.
 - [ ] Prove every published product has the required section set or is intentionally unpublished; a PubMed search alone does not complete technical, storage, or curated research requirements.
+
+**September 5 candidate:** The canonical product route loads the bibliography on the server and passes only the entry whose `productSlug` matches the resolved canonical product. `CompoundResearchSection` adds `#research-references` with native disclosure, exact study title/author/year/journal, neutral design/context, available sample/population/duration metadata, PMID/DOI, and verified PubMed links. Missing fields are omitted. Unmapped products omit the section instead of receiving inferred compound matches. Existing exact-name PubMed discovery links remain separately allowlisted by `public-literature.ts`; they are explicitly discovery, not a curated study or product claim. Product-specific technical/storage facts and the complete approved notice/content set are still unfinished. Current browser/build and deployed route proof remain pending.
 
 ### Task 10: Complete the gated laboratory concentration calculator
 
@@ -299,6 +364,7 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - Modify: `src/content/storefront-content.ts`
 - Modify: `src/components/site/why-choose-propeptiq.tsx`
 - Modify: co-located tests and `tests/e2e/public-storefront.spec.ts`
+- Create: `tests/e2e/storefront-content.spec.ts`
 
 **Interfaces:**
 - Consumes: approved claim records and their business evidence.
@@ -309,13 +375,17 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - [ ] Replace a neutral card only after its exact headline/body is supported and approved; otherwise leave the neutral card rather than inventing a claim.
 - [ ] Verify 3-column desktop, 2-column tablet, 1-column phone layout; headings, icons, focus/contrast, and no horizontal overflow.
 
+**September 5 candidate:** The six current headlines are `Catalog clarity`, `Clear availability`, `Exact variant selection`, `Transparent quantity pricing`, `Search from anywhere`, and `Research-use focus`. Their body copy in `homepageContentRecords` describes verifiable storefront operations; the existing owner-authorized neutral-placeholder note remains and no reviewer timestamp was invented. The component maps their stable IDs to icons and uses one column on phone, two from `md`, and three from `xl`. This does not fulfill the separate requested third-party-testing, clinical-dose, sourcing, cGMP, or guarantee claim themes without evidence. Current browser/build and production results remain pending.
+
 ### Task 12: Complete FAQ and structured data without human-use advice
 
 **Files:**
 - Modify: `src/content/storefront-content.ts`
 - Modify: `src/components/site/faq-section.tsx`
 - Create: `src/components/site/faq-json-ld.tsx`
+- Create: `src/components/site/faq-json-ld.test.tsx`
 - Modify: `src/components/site/public-home.tsx`
+- Create: `tests/e2e/storefront-faq.spec.ts`
 - Test: co-located tests and Playwright browser semantics
 
 **Interfaces:**
@@ -328,6 +398,8 @@ The source recovery result is recorded in [`docs/reference/storefront-study-sour
 - [ ] Preserve progressive disclosure while enforcing the requested single-open behavior with a native browser-supported disclosure group; add a Playwright test proving opening one FAQ closes the previously open item and Enter/Space remain functional.
 - [ ] Generate FAQ JSON-LD from the exact same approved question/answer strings, escape it safely, and prove visible/schema parity.
 - [ ] Verify native Enter/Space behavior, focus, expanded state, JavaScript-delayed readability, Axe, and schema validation.
+
+**September 5 candidate:** `FaqSection` uses native `details/summary` with `name="propeptiq-home-faq"`, leaving single-open and keyboard behavior to the browser without custom accordion JavaScript. `PublicHome` supplies the same eight projected FAQ entries to both the visible section and `FaqJsonLd`; JSON serialization escapes `<` and omits empty content. The new browser tests explicitly cover Enter/Space, single-open focus, visible/schema parity, and JavaScript-disabled disclosure. They remain pending current-candidate browser evidence in this ledger, not checked off merely because the test code exists. Additional shipping/returns/testing/subscription answers require the corresponding approved policies and feature behavior.
 
 ### Task 13: Finish the footer, legal routes, newsletter, and Resend preparation
 
