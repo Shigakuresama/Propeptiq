@@ -2,12 +2,14 @@ import "server-only";
 
 import claimsAuditJson from "../../content/claims-audit.json";
 import compoundsJson from "../../content/compounds.json";
+import studyCorrectionsJson from "../../content/study-corrections.json";
 import studiesJson from "../../content/studies.json";
 import type {
   EvidenceContext,
   PublicCompoundResearch,
   PublicCompoundResearchEntry,
   PublicCompoundStudy,
+  PublicStudyCorrection,
   StrongestEvidence,
   StudyDesign,
 } from "./compound-research-public";
@@ -16,11 +18,11 @@ export type {
   PublicCompoundResearch,
   PublicCompoundResearchEntry,
   PublicCompoundStudy,
+  PublicStudyCorrection,
   StrongestEvidence,
 } from "./compound-research-public";
 
 const INVALID_RESEARCH_DATA = "Invalid compound research data.";
-const REVIEWED_ON = "2026-09-04";
 const ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const PMID_PATTERN = /^[1-9][0-9]{6,8}$/u;
 const DOI_PATTERN = /^10\.[0-9]{4,9}\/\S+$/u;
@@ -54,14 +56,20 @@ const strongestEvidenceValues = Object.freeze([
   "in_vitro_only",
 ] as const);
 
-type ParsedStudy = PublicCompoundStudy & Readonly<{
+type ParsedStudy = Omit<PublicCompoundStudy, "corrections"> & Readonly<{
   compoundId: string;
   studiedAmount: string | null;
   route: string | null;
   outcomeSummary: string | null;
   verificationStatus: "verified_primary_source";
   publicationStatus: "public_neutral_metadata";
-  reviewedOn: "2026-09-04";
+  reviewedOn: AuthorizedStudy["reviewedOn"];
+}>;
+
+type ParsedCorrection = Readonly<{
+  recordType: "correction";
+  correctionPmid: string;
+  parentPmid: string;
 }>;
 
 type ParsedCompound = Readonly<{
@@ -79,6 +87,7 @@ type ParsedCompound = Readonly<{
 type ParsedResearch = Readonly<{
   compounds: readonly ParsedCompound[];
   studies: readonly ParsedStudy[];
+  corrections: readonly ParsedCorrection[];
 }>;
 
 const compatibleEvidenceContexts: Readonly<Record<StudyDesign, EvidenceContext>> =
@@ -99,6 +108,7 @@ const compatibleEvidenceContexts: Readonly<Record<StudyDesign, EvidenceContext>>
 const authorizedCompoundSlugs = Object.freeze({
   "5-amino-1mq": "5-amino-1mq",
   "aod-9604": "aod-9604",
+  "ara-290": "ara-290",
   "bpc-157": "bpc-157",
   cagrilintide: "cargrilintide",
   "cjc-1295-with-dac": "cjc-1295-with-dac",
@@ -111,39 +121,54 @@ const authorizedCompoundSlugs = Object.freeze({
   retatrutide: "retatrutide",
   semaglutide: "semaglutide",
   "sermorelin-acetate": "sermorelin-acetate",
+  "ss-31": "ss-31",
   survodutide: "survodutide",
   tesamorelin: "tesmorelin",
+  "thymosin-alpha-1": "thymosin-alpha-1",
   tirzepatide: "tirzepatide",
 } as const);
 
-const authorizedPmidCompounds = Object.freeze({
-  "10496658": "ipamorelin",
-  "11146367": "aod-9604",
-  "11713213": "aod-9604",
-  "12107212": "hcg",
-  "16352683": "cjc-1295-with-dac",
-  "16847171": "ghk-cu",
-  "17018654": "cjc-1295-with-dac",
-  "20554713": "tesamorelin",
-  "21030672": "bpc-157",
-  "25331030": "ipamorelin",
-  "29593067": "mots-c",
-  "31572171": "nad-plus",
-  "33567185": "semaglutide",
-  "33667417": "semaglutide",
-  "34798060": "cagrilintide",
-  "35013352": "5-amino-1mq",
-  "35658024": "tirzepatide",
-  "37366315": "retatrutide",
-  "37385275": "tirzepatide",
-  "38330987": "survodutide",
-  "39161060": "5-amino-1mq",
-  "40131143": "bpc-157",
-  "41704678": "nad-plus",
-  "42253238": "survodutide",
-  "7561636": "igf-1-lr3",
-  "8772599": "sermorelin-acetate",
-  "9488001": "igf-1-lr3",
+const authorizedStudies = Object.freeze({
+  "10496658": { compoundId: "ipamorelin", reviewedOn: "2026-09-04" },
+  "11146367": { compoundId: "aod-9604", reviewedOn: "2026-09-04" },
+  "11713213": { compoundId: "aod-9604", reviewedOn: "2026-09-04" },
+  "12107212": { compoundId: "hcg", reviewedOn: "2026-09-04" },
+  "16352683": { compoundId: "cjc-1295-with-dac", reviewedOn: "2026-09-04" },
+  "16847171": { compoundId: "ghk-cu", reviewedOn: "2026-09-04" },
+  "17018654": { compoundId: "cjc-1295-with-dac", reviewedOn: "2026-09-04" },
+  "20554713": { compoundId: "tesamorelin", reviewedOn: "2026-09-04" },
+  "21030672": { compoundId: "bpc-157", reviewedOn: "2026-09-04" },
+  "23168581": { compoundId: "ara-290", reviewedOn: "2026-09-05" },
+  "24136731": { compoundId: "ara-290", reviewedOn: "2026-09-05" },
+  "25331030": { compoundId: "ipamorelin", reviewedOn: "2026-09-04" },
+  "29593067": { compoundId: "mots-c", reviewedOn: "2026-09-04" },
+  "31572171": { compoundId: "nad-plus", reviewedOn: "2026-09-04" },
+  "33077895": { compoundId: "ss-31", reviewedOn: "2026-09-05" },
+  "33567185": { compoundId: "semaglutide", reviewedOn: "2026-09-04" },
+  "33667417": { compoundId: "semaglutide", reviewedOn: "2026-09-04" },
+  "34798060": { compoundId: "cagrilintide", reviewedOn: "2026-09-04" },
+  "35013352": { compoundId: "5-amino-1mq", reviewedOn: "2026-09-04" },
+  "35658024": { compoundId: "tirzepatide", reviewedOn: "2026-09-04" },
+  "35713670": { compoundId: "thymosin-alpha-1", reviewedOn: "2026-09-05" },
+  "37268435": { compoundId: "ss-31", reviewedOn: "2026-09-05" },
+  "37366315": { compoundId: "retatrutide", reviewedOn: "2026-09-04" },
+  "37385275": { compoundId: "tirzepatide", reviewedOn: "2026-09-04" },
+  "38330987": { compoundId: "survodutide", reviewedOn: "2026-09-04" },
+  "39161060": { compoundId: "5-amino-1mq", reviewedOn: "2026-09-04" },
+  "39814420": { compoundId: "thymosin-alpha-1", reviewedOn: "2026-09-05" },
+  "40131143": { compoundId: "bpc-157", reviewedOn: "2026-09-04" },
+  "41704678": { compoundId: "nad-plus", reviewedOn: "2026-09-04" },
+  "42253238": { compoundId: "survodutide", reviewedOn: "2026-09-04" },
+  "7561636": { compoundId: "igf-1-lr3", reviewedOn: "2026-09-04" },
+  "8772599": { compoundId: "sermorelin-acetate", reviewedOn: "2026-09-04" },
+  "9488001": { compoundId: "igf-1-lr3", reviewedOn: "2026-09-04" },
+} as const);
+
+type AuthorizedStudy = (typeof authorizedStudies)[keyof typeof authorizedStudies];
+
+const authorizedCorrections = Object.freeze({
+  "28059429": "24136731",
+  "40447307": "39814420",
 } as const);
 
 const compoundKeys = Object.freeze([
@@ -179,6 +204,12 @@ const studyKeys = Object.freeze([
   "verificationStatus",
   "publicationStatus",
   "reviewedOn",
+] as const);
+
+const correctionKeys = Object.freeze([
+  "recordType",
+  "correctionPmid",
+  "parentPmid",
 ] as const);
 
 function invalid(): never {
@@ -391,19 +422,15 @@ function parseStudy(value: unknown): ParsedStudy {
   const pmid = readString(record.pmid, 20);
   if (!ID_PATTERN.test(id) || !ID_PATTERN.test(compoundId)) return invalid();
   if (!PMID_PATTERN.test(pmid) || id !== `pmid-${pmid}`) return invalid();
-  if (!Object.hasOwn(authorizedPmidCompounds, pmid)) return invalid();
-  if (
-    compoundId !==
-      authorizedPmidCompounds[pmid as keyof typeof authorizedPmidCompounds]
-  ) {
-    return invalid();
-  }
+  if (!Object.hasOwn(authorizedStudies, pmid)) return invalid();
+  const authorization = authorizedStudies[pmid as keyof typeof authorizedStudies];
+  if (compoundId !== authorization.compoundId) return invalid();
 
   const url = readString(record.url, 200);
   if (url !== `https://pubmed.ncbi.nlm.nih.gov/${pmid}/`) return invalid();
   if (record.verificationStatus !== "verified_primary_source") return invalid();
   if (record.publicationStatus !== "public_neutral_metadata") return invalid();
-  if (record.reviewedOn !== REVIEWED_ON) return invalid();
+  if (record.reviewedOn !== authorization.reviewedOn) return invalid();
 
   const design = readEnum(record.design, studyDesigns);
   const evidenceContext = readEnum(record.evidenceContext, evidenceContexts);
@@ -429,8 +456,53 @@ function parseStudy(value: unknown): ParsedStudy {
     outcomeSummary: readOutcomeSummary(record.outcomeSummary),
     verificationStatus: "verified_primary_source",
     publicationStatus: "public_neutral_metadata",
-    reviewedOn: REVIEWED_ON,
+    reviewedOn: authorization.reviewedOn,
   };
+}
+
+function parseCorrections(
+  input: unknown,
+  studies: readonly ParsedStudy[],
+): readonly ParsedCorrection[] {
+  const correctionsFile = readExactObject(input, ["schemaVersion", "corrections"]);
+  if (correctionsFile.schemaVersion !== 1) return invalid();
+  const candidates = readDenseArray(
+    correctionsFile.corrections,
+    Object.keys(authorizedCorrections).length,
+  );
+  if (candidates.length !== Object.keys(authorizedCorrections).length) {
+    return invalid();
+  }
+
+  const studyPmids = new Set(studies.map((study) => study.pmid));
+  const corrections: ParsedCorrection[] = [];
+  const correctionPmids = new Set<string>();
+  for (const candidate of candidates) {
+    const record = readExactObject(candidate, correctionKeys);
+    if (record.recordType !== "correction") return invalid();
+    const correctionPmid = readString(record.correctionPmid, 20);
+    const parentPmid = readString(record.parentPmid, 20);
+    if (
+      !PMID_PATTERN.test(correctionPmid) ||
+      !PMID_PATTERN.test(parentPmid) ||
+      correctionPmid === parentPmid ||
+      !Object.hasOwn(authorizedCorrections, correctionPmid) ||
+      authorizedCorrections[
+        correctionPmid as keyof typeof authorizedCorrections
+      ] !== parentPmid ||
+      correctionPmids.has(correctionPmid) ||
+      studyPmids.has(correctionPmid) ||
+      !studyPmids.has(parentPmid)
+    ) {
+      return invalid();
+    }
+    correctionPmids.add(correctionPmid);
+    corrections.push({ recordType: "correction", correctionPmid, parentPmid });
+  }
+  for (const correctionPmid of Object.keys(authorizedCorrections)) {
+    if (!correctionPmids.has(correctionPmid)) return invalid();
+  }
+  return corrections;
 }
 
 function expectedStrongestEvidence(
@@ -452,7 +524,7 @@ function expectedStrongestEvidence(
   return "in_vitro_only";
 }
 
-function parseResearch(input: unknown): ParsedResearch {
+function parseResearch(input: unknown, correctionInput: unknown): ParsedResearch {
   const root = readExactObject(input, ["compounds", "studies", "claimsAudit"]);
   const compoundsFile = readExactObject(root.compounds, [
     "schemaVersion",
@@ -478,11 +550,11 @@ function parseResearch(input: unknown): ParsedResearch {
   );
   const studyCandidates = readDenseArray(
     studiesFile.studies,
-    Object.keys(authorizedPmidCompounds).length,
+    Object.keys(authorizedStudies).length,
   );
   if (
     compoundCandidates.length !== Object.keys(authorizedCompoundSlugs).length ||
-    studyCandidates.length !== Object.keys(authorizedPmidCompounds).length
+    studyCandidates.length !== Object.keys(authorizedStudies).length
   ) {
     return invalid();
   }
@@ -524,7 +596,7 @@ function parseResearch(input: unknown): ParsedResearch {
   }
   if (referencedStudies.size !== studies.length) return invalid();
 
-  return { compounds, studies };
+  return { compounds, studies, corrections: parseCorrections(correctionInput, studies) };
 }
 
 function approvedComparableResearch(parsed: ParsedResearch): string {
@@ -538,7 +610,10 @@ function approvedComparableResearch(parsed: ParsedResearch): string {
   const studies = [...parsed.studies]
     .sort((left, right) => compareText(left.id, right.id))
     .map((study) => ({ ...study }));
-  return JSON.stringify({ compounds, studies });
+  const corrections = [...parsed.corrections]
+    .sort((left, right) => compareText(left.correctionPmid, right.correctionPmid))
+    .map((correction) => ({ ...correction }));
+  return JSON.stringify({ compounds, studies, corrections });
 }
 
 function assertApprovedResearch(parsed: ParsedResearch): void {
@@ -555,7 +630,7 @@ const approvedParsedResearch = deepFreeze(
     compounds: compoundsJson,
     studies: studiesJson,
     claimsAudit: claimsAuditJson,
-  }),
+  }, studyCorrectionsJson),
 );
 
 function compareText(left: string, right: string): number {
@@ -579,13 +654,21 @@ function deepFreeze<Value>(value: Value): Value {
 
 function projectParsedResearch(parsed: ParsedResearch): PublicCompoundResearch {
   const studyById = new Map(parsed.studies.map((study) => [study.id, study]));
+  const correctionsByParent = new Map<string, ParsedCorrection[]>();
+  for (const correction of [...parsed.corrections].sort((left, right) =>
+    compareText(left.correctionPmid, right.correctionPmid)
+  )) {
+    const parentCorrections = correctionsByParent.get(correction.parentPmid) ?? [];
+    parentCorrections.push(correction);
+    correctionsByParent.set(correction.parentPmid, parentCorrections);
+  }
   const compounds = [...parsed.compounds]
     .sort((left, right) => compareText(left.id, right.id))
     .map((compound) => {
       const studies = compound.studyIds.map((studyId) => {
         const study = studyById.get(studyId);
         if (study === undefined) return invalid();
-        return {
+        const publicStudy = {
           id: study.id,
           pmid: study.pmid,
           url: study.url,
@@ -599,6 +682,19 @@ function projectParsedResearch(parsed: ParsedResearch): PublicCompoundResearch {
           population: study.population,
           duration: study.duration,
           doi: study.doi,
+        };
+        const corrections = correctionsByParent.get(study.pmid);
+        if (corrections === undefined) {
+          return publicStudy satisfies PublicCompoundStudy;
+        }
+        return {
+          ...publicStudy,
+          corrections: corrections.map((correction) => ({
+            recordType: "correction",
+            correctionPmid: correction.correctionPmid,
+            parentPmid: correction.parentPmid,
+            url: `https://pubmed.ncbi.nlm.nih.gov/${correction.correctionPmid}/`,
+          }) satisfies PublicStudyCorrection),
         } satisfies PublicCompoundStudy;
       }).sort((left, right) => compareText(left.id, right.id));
 
@@ -622,9 +718,10 @@ function projectParsedResearch(parsed: ParsedResearch): PublicCompoundResearch {
  */
 export function projectPublicCompoundResearch(
   input: unknown,
+  correctionInput: unknown = studyCorrectionsJson,
 ): PublicCompoundResearch {
   try {
-    const parsed = parseResearch(input);
+    const parsed = parseResearch(input, correctionInput);
     assertApprovedResearch(parsed);
     return projectParsedResearch(parsed);
   } catch {

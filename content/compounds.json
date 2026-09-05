@@ -187,6 +187,39 @@
       "identityCaveat": null,
       "mechanism": null,
       "benefitClaim": null
+    },
+    {
+      "id": "ara-290",
+      "productSlug": "ara-290",
+      "displayName": "ARA-290",
+      "alternateNames": ["ARA 290"],
+      "studyIds": ["pmid-23168581", "pmid-24136731"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": "The cited papers use \"ARA 290\"; \"ARA-290\" is a punctuation-normalized catalog label only, and the name match does not establish that the catalog material is the study material.",
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "ss-31",
+      "productSlug": "ss-31",
+      "displayName": "SS-31",
+      "alternateNames": ["Elamipretide"],
+      "studyIds": ["pmid-33077895", "pmid-37268435"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": "The cited literature identifies SS-31 as elamipretide; this literature alias relationship does not establish catalog-product identity, composition, or formulation.",
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "thymosin-alpha-1",
+      "productSlug": "thymosin-alpha-1",
+      "displayName": "Thymosin Alpha-1",
+      "alternateNames": ["Thymosin alpha 1", "Thymosin α1", "Tα1"],
+      "studyIds": ["pmid-35713670", "pmid-39814420"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": "The cited papers use Thymosin alpha 1, thymosin α1, and Tα1; these source spelling and typography variants do not establish catalog-item equivalence.",
+      "mechanism": null,
+      "benefitClaim": null
     }
   ]
 }
