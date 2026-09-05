@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { SiteFooter } from "@/components/site/site-footer";
 import type { ControlledContentRecord } from "@/content/storefront-content";
 import * as siteContent from "@/lib/site-content";
+import { projectApprovedNewsletterPrivacyHref } from "@/lib/site-content";
 
 type ExpectedFooterLink = Readonly<{
   label: string;
@@ -60,6 +61,11 @@ function controlledRecord(
   };
 }
 
+const fictionalPrivacyHref = projectApprovedNewsletterPrivacyHref(
+  "/test-only-fictional-privacy",
+  Object.freeze(["/test-only-fictional-privacy"]),
+)!;
+
 describe("footer configuration", () => {
   it("keeps the exact route and missing-destination matrix in one immutable group configuration", () => {
     expect(footerContent.footerNavigationGroups).toEqual([
@@ -68,12 +74,6 @@ describe("footer configuration", () => {
         links: [
           { label: "Catalog", href: "/catalog" },
           { label: "Cart", href: "/cart" },
-        ],
-      },
-      {
-        label: "Resources",
-        links: [
-          { label: "Quality Records", href: "/quality-records" },
           { label: "Rewards", href: "/rewards" },
           { label: "Partner Program", href: "/partners" },
         ],
@@ -81,6 +81,7 @@ describe("footer configuration", () => {
       {
         label: "Support",
         links: [
+          { label: "Quality Records", href: "/quality-records" },
           { label: "Order tracking", href: "/account/orders" },
           { label: "FAQ", href: "/#faq" },
           { label: "Contact or Support", href: null },
@@ -209,7 +210,7 @@ describe("SiteFooter", () => {
     expect(
       within(footerNavigation).getAllByRole("heading", { level: 2 }).map((heading) =>
         heading.textContent),
-    ).toEqual(["Shop", "Resources", "Support", "Legal"]);
+    ).toEqual(["Shop", "Support", "Legal"]);
     expect(
       within(footerNavigation).getAllByRole("link").map((link) => ({
         label: link.textContent,
@@ -218,9 +219,9 @@ describe("SiteFooter", () => {
     ).toEqual([
       { label: "Catalog", href: "/catalog" },
       { label: "Cart", href: "/cart" },
-      { label: "Quality Records", href: "/quality-records" },
       { label: "Rewards", href: "/rewards" },
       { label: "Partner Program", href: "/partners" },
+      { label: "Quality Records", href: "/quality-records" },
       { label: "Order tracking", href: "/account/orders" },
       { label: "FAQ", href: "/#faq" },
       { label: "Research Use Only", href: "/research-use-policy" },
@@ -249,6 +250,50 @@ describe("SiteFooter", () => {
     expect(
       within(footerNavigation).queryByRole("link", { name: /terms/iu }),
     ).toBeNull();
+  });
+
+  it("uses one native, default-open disclosure for every navigation group", () => {
+    render(<SiteFooter />);
+
+    const footerNavigation = screen.getByRole("navigation", { name: "Footer" });
+    const disclosures = [...footerNavigation.querySelectorAll("details")];
+    const summaries = disclosures.map((details) => details.querySelector("summary"));
+    const headings = within(footerNavigation).getAllByRole("heading", { level: 2 });
+
+    expect(disclosures).toHaveLength(3);
+    expect(disclosures.every((details) => details.open)).toBe(true);
+    expect(summaries.every((summary) => summary !== null)).toBe(true);
+    expect(new Set(summaries.map((summary) => summary?.id))).toHaveProperty("size", 3);
+    expect(new Set(headings.map((heading) => heading.id)).size).toBe(3);
+    expect(summaries.map((summary) => summary?.textContent)).toEqual(["Shop", "Support", "Legal"]);
+  });
+
+  it("owns exactly one disabled newsletter and projects only an approved privacy destination", () => {
+    render(<SiteFooter newsletterPrivacyHref={fictionalPrivacyHref} />);
+
+    expect(screen.getAllByRole("heading", { name: "PropeptIQ newsletter" })).toHaveLength(1);
+    expect(screen.getAllByRole("form", { name: "Newsletter signup" })).toHaveLength(1);
+    expect(screen.getAllByRole("textbox", { name: "Email address" })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute(
+      "href",
+      fictionalPrivacyHref.href,
+    );
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Newsletter signup is temporarily unavailable.",
+    );
+  });
+
+  it("rejects an unapproved serialized privacy clone at the footer boundary", () => {
+    const clonedPrivacyHref = JSON.parse(
+      JSON.stringify(fictionalPrivacyHref),
+    ) as typeof fictionalPrivacyHref;
+
+    render(<SiteFooter newsletterPrivacyHref={clonedPrivacyHref} />);
+
+    expect(screen.queryByRole("link", { name: "Privacy Policy" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
   });
 
   it("omits an injected group whose destinations are all unavailable", () => {
@@ -366,6 +411,18 @@ describe("SiteFooter", () => {
     expect(screen.queryByText(/FDA-approved|attorney-approved|regulator-approved/iu)).toBeNull();
   });
 
+  it("adds only the current-year site attribution to the separated bottom row", () => {
+    render(<SiteFooter />);
+
+    const noticeRegion = screen.getByRole("region", {
+      name: "Research use and legal notices",
+    });
+    expect(noticeRegion).toHaveTextContent(
+      `© ${new Date().getFullYear()} ${siteContent.siteName}`,
+    );
+    expect(noticeRegion).not.toHaveTextContent(/founded|inc\.|llc|certified|approved/iu);
+  });
+
   it("uses responsive layout, contrast, focus, and touch-target classes without adding motion", () => {
     render(<SiteFooter />);
 
@@ -373,7 +430,8 @@ describe("SiteFooter", () => {
     const footerNavigation = screen.getByRole("navigation", { name: "Footer" });
     const home = screen.getByRole("link", { name: "PROPEPTIQ LABS home" });
     expect(footer).toHaveClass("bg-ink", "text-canvas");
-    expect(footerNavigation).toHaveClass("grid", "sm:grid-cols-2", "lg:grid-cols-4");
+    expect(footerNavigation).toHaveClass("footer-navigation");
+    expect(footerNavigation.parentElement).toHaveClass("footer-primary-grid");
     expect(home.querySelector(".brand-logo")).not.toHaveClass("w-56", "sm:w-56", "max-w-full");
     expect(home.querySelector(".brand-logo__wordmark")).toHaveClass("text-canvas");
 

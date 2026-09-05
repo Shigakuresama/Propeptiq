@@ -1647,6 +1647,38 @@ footer a {
   align-items: center;
 }
 
+.footer-primary-grid,
+.footer-primary-grid > *,
+.footer-navigation,
+.footer-navigation > *,
+.newsletter-form--footer,
+.newsletter-form--footer > *,
+.newsletter-form__fields--footer,
+.footer-bottom-row {
+  min-width: 0;
+}
+
+.footer-navigation summary {
+  overflow-wrap: anywhere;
+}
+
+.footer-navigation summary::marker {
+  color: color-mix(in srgb, var(--canvas) 70%, transparent);
+}
+
+.footer-navigation__group:not([open]) > summary {
+  margin-bottom: 0;
+}
+
+.newsletter-form--footer :is(label, p, span),
+.footer-bottom-row :is(h2, h3, p, li) {
+  overflow-wrap: anywhere;
+}
+
+.newsletter-form--footer .eyebrow {
+  color: var(--canvas);
+}
+
 ::view-transition {
   pointer-events: none;
 }
@@ -1751,7 +1783,7 @@ footer a {
 .product-purchase-heading:focus-visible { outline: 2px solid var(--moss); outline-offset: 4px; }
 
 .public-layout main :is(a, button, input, summary, [tabindex]),
-.public-layout > footer a {
+.public-layout > footer :is(a, button, input, summary) {
   scroll-margin-bottom: calc(var(--public-action-dock-reserved-height, 0px) + 1rem);
 }
 

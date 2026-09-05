@@ -244,13 +244,11 @@ export const footerNavigationGroups: readonly FooterNavigationGroup[] =
     footerNavigationGroup("Shop", [
       { label: "Catalog", href: "/catalog" },
       { label: "Cart", href: "/cart" },
-    ]),
-    footerNavigationGroup("Resources", [
-      { label: "Quality Records", href: "/quality-records" },
       { label: "Rewards", href: "/rewards" },
       { label: "Partner Program", href: "/partners" },
     ]),
     footerNavigationGroup("Support", [
+      { label: "Quality Records", href: "/quality-records" },
       { label: "Order tracking", href: "/account/orders" },
       { label: "FAQ", href: "/#faq" },
       { label: "Contact or Support", href: null },
