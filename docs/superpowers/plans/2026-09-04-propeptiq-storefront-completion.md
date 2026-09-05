@@ -14,14 +14,14 @@
 
 The storefront is **not finished**. This is the working checklist; the detailed tasks and evidence follow below.
 
-- [ ] **New images, product research, Why Choose, FAQ, and logo — locally verified, awaiting release.** Merge/deploy UI candidate `f91ea55` and check the real pages. The full browser run passed 109/109 after the gallery/search overlap and ultra-narrow wrapping corrections. The six gallery scenes are disclosed illustrations, not actual product photographs. No extra approval is needed simply to ship truthful UI under the owner's existing instruction.
+- [x] **Visible content release — merged, deployed, and inspected live.** PR #17 merged as `365b2acc673063643607b4aae1695e22bad49bab`; production deployment `dpl_gSy5LMPTunhaifMUuJ4d3BgfA6fw` is READY and serves `propeptiq.com`. Live phone/tablet/desktop checks confirm the new six-scene gallery, 17-compound bibliography, related-product cards, six Why Choose cards, eight FAQs, and transparent logo. The six shared scenes are disclosed illustrations, not actual product photographs. This checkmark covers that delivered release, not the missing information or integrations below.
 - [ ] **Prices — 40 of 103 exact matches, 63 still pending.** Keep the 40 reviewed ordinary Amino-equivalent reference prices and resolve the other rows from exact equivalents or owner amounts. Show WINTER30 consistently without stacking; do not label all pricing complete.
-- [ ] **Product pages — information still incomplete.** Ship the 17-compound/27-study neutral bibliography already prepared, then complete justified coverage and product-specific technical/storage information. Do not fill the remaining 39 products with unrelated papers or generic protocols.
+- [ ] **Product pages — information still incomplete.** The 17-compound/27-study neutral bibliography is now live. Complete justified coverage and product-specific technical/storage information. Do not fill the remaining 39 products with unrelated papers or generic protocols.
 - [ ] **Mobile purchase/cart controls — unfinished.** Complete the sticky add-to-cart/cart experience without hiding the permanent search or other controls; preserve exact variant selection, quantity changes, and cart persistence.
 - [ ] **Footer and newsletter — unfinished.** Finish the requested footer layout/links and privacy content, confirm the existing Resend setup, and activate signup only when it can genuinely subscribe with consent and a working provider. Social `/` placeholders are already authorized.
 - [ ] **Subscriptions and Stripe TEST catalog — unfinished.** Confirm the requested recurring discounts and 1/3/6 pack behavior alongside the existing quantity tiers, then build and verify only TEST-mode mappings. No live charge, subscription, or checkout activation is part of this test preparation.
 - [ ] **Placeholder cleanup — inventory before removal.** Show the exact replace/delete list and obtain the requested itemized approval before removing existing content or assets.
-- [ ] **Final live proof — not done.** Complete the full browser rerun and final candidate review/checks, merge and deploy the accepted candidate, and verify the real storefront at phone, tablet, and desktop sizes. Record the exact release and any still-missing items instead of calling the whole plan complete.
+- [ ] **Final acceptance — not done.** The visible-content release passed its full 109-case browser run and is deployed. Live verification exposed an existing empty-legacy-cart persistence bug; its separate repair is under verification. Continue the remaining tasks and record their exact releases instead of calling the whole plan complete.
 
 ## Completion rule
 
@@ -39,7 +39,26 @@ Authority-bound/private work also uses task-specific proof: Task 1 requires the 
 
 ## Current evidence snapshot — September 5, 2026
 
-| Area | Confirmed state | Completion state |
+### Production checkpoint after PR #17
+
+Commit `365b2acc673063643607b4aae1695e22bad49bab` is the merged equivalent of the locally tested source candidate `f91ea55` (documentation-only head `6b3b5df`). READY deployment: <https://propeptiq-nt9s80pg6-sergiosteam.vercel.app>, aliased to <https://propeptiq.com/>. The source, public assets, tests, package, and configuration tree was compared after merging and is unchanged from the tested candidate.
+
+Live checks on this release confirmed:
+
+- WINTER30 and consistent reviewed prices, including Tirzepatide 30mg `$59.99` → `$41.99` and BPC-157 10mg `$39.99` → `$27.99`.
+- Six Why Choose cards in one/two/three columns at 375/768/1440px; eight native single-open FAQs, keyboard Enter/Space behavior, matching eight-entry JSON-LD, and no measured horizontal overflow on the inspected home/catalog/PDP layouts.
+- All six BPC-157 gallery scenes load; keyboard Home returns to the front scene. Neutral references link to the verified PMIDs. Related products scroll, open the multi-variant selector, add the selected exact variant, and restore focus.
+- Site-search navigation to the Why Choose anchor; catalog typo `tirzepatde` resolves to Tirzepatide while changing the sort preserves the query and result.
+
+Live cart testing exposed a preexisting migration defect: a valid empty v1 cart was treated as requiring reselection, so additions changed the header without persisting. Acknowledging the empty cart through the existing UI proved normal v2 persistence works. A separate fix preserves nonempty legacy carts until explicit acknowledgement, treats empty v1 as ready, and rejects misleading additions while reselection is required. This issue prevents a blanket final-cart acceptance claim until the corrective deployment is verified.
+
+The historical component checkpoints below are retained as an audit trail; their “not deployed” wording describes their earlier checkpoint, not the production state above. Missing prices, business content, newsletter activation, footer completion, sticky purchase controls, and recurring-commerce decisions remain open.
+
+### Historical candidate snapshot before PR #17
+
+The following table preserves the pre-release assessment. The production checkpoint above supersedes its release-status cells; its missing-business-input findings remain open.
+
+| Area | Confirmed state at that checkpoint | Completion state at that checkpoint |
 | --- | --- | --- |
 | Initial visible refresh | Commit `638beac59254e9459e5b017727b93aede5eec37d` is on `origin/main`. | Merged; production result must be rechecked. |
 | Corrective visible-storefront work | Commit `f91ea55937df4a524fbceccb8cec4edd91412fc5` contains the six-scene gallery/data plate, product bibliography projection, related-card corrections, Why Choose presentation, native grouped FAQ/JSON-LD, and regression tests. The prior illustrative composite and earlier fixes have their historical commit evidence below. | Final local gate passed; candidate not yet merged or deployed. |
@@ -62,11 +81,11 @@ This final local gate supersedes the intermediate browser/build-pending checkpoi
 - Integration: 33 files / 551 tests passed, 946.90 seconds; one guarded PostgreSQL-auth file / 3 tests skipped. No real PostgreSQL or provider verification is inferred.
 - Final Turbopack production build and artifact scan passed: 1,260 files / 70,755,659 bytes / zero forbidden matches.
 - Reviewed fixes preserve disclosure readability, 195px no-JavaScript wrapping, legacy-route restriction/Axe coverage, exact pricing/cart assertions, and source boundaries. No unresolved runtime defect remains from the component reviews.
-- Pending: push/merge, exact READY deployment and live phone/tablet/desktop evidence. Dev screenshot caret-style hydration warnings and LCP hints are recorded rather than called zero-error evidence; production logs must be checked separately.
+- At this local checkpoint, push/merge and production proof were pending. PR #17 and the production checkpoint above now supply that release evidence. Dev screenshot caret-style hydration warnings and LCP hints remain distinct from the empty production warning/error log observed during the live checks.
 
-### Component checkpoint ledger, not production completion
+### Historical component checkpoint ledger, before the final PR #17 gate
 
-This ledger does not turn code presence into production acceptance. The owner has already authorized implementation, merge, and deployment; the remaining release gate is evidence for the exact accepted candidate, not a new blanket permission request. The release coordinator owns the pending browser/build results and final merge/deployment record.
+This ledger preserves the intermediate component-stage evidence and what was still needed at that time. The final local gate and production checkpoint above supersede its pending browser/build/merge/deployment statuses. Missing business content and actual product photography remain open. The owner has already authorized implementation, merge, and deployment; no new blanket permission request is needed.
 
 | Candidate work | Exact edit locations | Evidence recorded so far | Still needed |
 | --- | --- | --- | --- |
@@ -77,7 +96,7 @@ This ledger does not turn code presence into production acceptance. The owner ha
 
 The two related composition suites were previously named `related-products-composition.integration.test.tsx` and `related-products-carousel.integration.test.tsx`. Those names were excluded by both existing Vitest configurations. They are now `related-products-composition.test.tsx` and `related-products-carousel-flow.test.tsx`, respectively, and both ran through the normal command. The flow suite preserves real UI/cart assertions with explicitly labelled synthetic input fixtures, not provider or production records. Do not count historical commands that silently excluded the old paths as coverage.
 
-**Release-coordinator checkpoint, September 5 (reported, not rerun by this documentation task):** full unit 229 files / 3,446 tests, content browser 15/15, lint, typecheck, workspace boundary, and artifact-scanner 11/11 passed. The gallery/search collision is fixed by moving the disclosure into the gallery header inside the unchanged 4:3 panel. Focused browser 4/4 passes include ten mobile/desktop/scrolled-ADD positions, all six scenes, JavaScript-disabled, reduced motion, and long-label coverage. Turbopack production build passed, followed by an artifact scan of 1,260 files / 70,755,590 bytes with zero forbidden artifacts. Integration passed 33 files / 551 tests in 946.90 seconds; one guarded `better-auth-postgres.integration.test.ts` file / 3 tests was skipped. The full 109-case E2E rerun is running, not yet a pass. These are intermediate results, not the final exact-commit gate or proof that the storefront is deployed.
+**Historical release-coordinator checkpoint, September 5, before the full browser run finished:** full unit 229 files / 3,446 tests, content browser 15/15, lint, typecheck, workspace boundary, and artifact-scanner 11/11 passed. The gallery/search collision was fixed by moving the disclosure into the gallery header inside the unchanged 4:3 panel. Focused browser 4/4 passes included ten mobile/desktop/scrolled-ADD positions, all six scenes, JavaScript-disabled, reduced motion, and long-label coverage. Turbopack production build passed, followed by an artifact scan of 1,260 files / 70,755,590 bytes with zero forbidden artifacts. Integration passed 33 files / 551 tests in 946.90 seconds; one guarded `better-auth-postgres.integration.test.ts` file / 3 tests was skipped. At that checkpoint the full 109-case E2E rerun was still running. It subsequently passed 109/109, and PR #17 was merged and deployed as recorded above. This paragraph is retained only as intermediate history, not a current pending-test status.
 
 ## Binding business decisions
 

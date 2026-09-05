@@ -68,6 +68,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [announcement, setAnnouncement] = useState("");
   const itemsRef = useRef<CartLine[]>([]);
   const hydratedRef = useRef(false);
+  // Addition can run before React commits hydration or a cross-tab update.
+  const legacyItemCountRef = useRef<number | null>(null);
   const pendingAddAnnouncement = useRef<
     Readonly<{
       variantId: string;
@@ -85,8 +87,10 @@ export function CartProvider({ children }: { children: ReactNode }) {
     itemsRef.current = nextItems;
     setItems(nextItems);
     if (loaded.status === "ready") {
+      legacyItemCountRef.current = null;
       setLegacyItemCount(null);
     } else {
+      legacyItemCountRef.current = loaded.legacyItemCount;
       setLegacyItemCount(loaded.legacyItemCount);
     }
     setHydrated(true);
@@ -101,7 +105,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [hydrateCart]);
 
   useEffect(() => {
-    if (hydrated && legacyItemCount === null) persistCart(window.localStorage, items);
+    if (hydrated && legacyItemCount === null && legacyItemCountRef.current === null) {
+      persistCart(window.localStorage, items);
+    }
   }, [hydrated, items, legacyItemCount]);
 
   useEffect(() => {
@@ -118,10 +124,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
           const nextItems = [...loaded.items];
           itemsRef.current = nextItems;
           setItems(nextItems);
+          legacyItemCountRef.current = null;
           setLegacyItemCount(null);
         } else {
           itemsRef.current = [];
           setItems([]);
+          legacyItemCountRef.current = loaded.legacyItemCount;
           setLegacyItemCount(loaded.legacyItemCount);
         }
         hydratedRef.current = true;
@@ -139,6 +147,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
       announcementLabels: CartAnnouncementLabels = {},
     ) => {
       const current = hydrateCart();
+      if (legacyItemCountRef.current !== null) {
+        pendingAddAnnouncement.current = null;
+        setAnnouncement(
+          "Open your cart and clear the old cart before choosing variants again. Your saved items have not been changed.",
+        );
+        return false;
+      }
       const previousQuantity = current.find(
         (item) => item.variantId === variantId,
       )?.quantity ?? 0;
@@ -219,6 +234,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     pendingAddAnnouncement.current = null;
     hydrateCart();
     acknowledgeLegacyCartReselection(window.localStorage);
+    legacyItemCountRef.current = null;
     setLegacyItemCount(null);
     itemsRef.current = [];
     setItems([]);

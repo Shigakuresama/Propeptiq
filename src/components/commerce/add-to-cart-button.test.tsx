@@ -3,12 +3,14 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
-const { addVariantMock } = vi.hoisted(() => ({
+const { addVariantMock, cartState } = vi.hoisted(() => ({
   addVariantMock: vi.fn(),
+  // Minimal cart context test double; legacy authority remains in CartProvider.
+  cartState: { legacyItemCount: null as number | null },
 }));
 
 vi.mock("@/cart/cart-provider", () => ({
-  useCart: () => ({ addVariant: addVariantMock }),
+  useCart: () => ({ addVariant: addVariantMock, legacyItemCount: cartState.legacyItemCount }),
 }));
 
 import { AddToCartButton } from "./add-to-cart-button";
@@ -17,6 +19,44 @@ describe("AddToCartButton", () => {
   beforeEach(() => {
     addVariantMock.mockReset();
     addVariantMock.mockReturnValue(true);
+    cartState.legacyItemCount = null;
+  });
+
+  it("shows ordinary visible cart-reselection guidance and removes it when the cart authority clears the legacy state", async () => {
+    const user = userEvent.setup();
+    const onAdded = vi.fn();
+    cartState.legacyItemCount = 2;
+    addVariantMock.mockReturnValue(false);
+    const props = {
+      canAdd: true, onAdded, productName: "Synthetic Product Alpha", variantId: "variant-10mg",
+    };
+    const { container, rerender } = render(<AddToCartButton {...props} />);
+    const guidance = screen.getByText("Your saved cart uses an older format. Clear the old cart before adding a variant.");
+    expect(guidance).toBeVisible();
+    const link = screen.getByRole("link", { name: "Review saved cart" });
+    expect(link).toBeVisible();
+    expect(link).toHaveAttribute("href", "/cart");
+    expect(link.tagName).toBe("A");
+    expect(container.querySelectorAll('[aria-live], [role="status"], [role="alert"]')).toHaveLength(0);
+    const button = screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" });
+    expect(button).toBeEnabled();
+    await user.click(button);
+    expect(onAdded).not.toHaveBeenCalled();
+    expect(guidance).toBeVisible();
+
+    cartState.legacyItemCount = null;
+    addVariantMock.mockReturnValue(true);
+    rerender(<AddToCartButton {...props} />);
+    expect(screen.queryByRole("link", { name: "Review saved cart" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Your saved cart uses an older format/u)).not.toBeInTheDocument();
+    await user.click(button);
+    expect(onAdded).toHaveBeenCalledOnce();
+  });
+
+  it("does not show legacy guidance for a ready cart", () => {
+    render(<AddToCartButton canAdd productName="Synthetic Product Alpha" variantId="variant-10mg" />);
+    expect(screen.queryByRole("link", { name: "Review saved cart" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" })).toBeEnabled();
   });
 
   it("requires explicit add authorization in its public prop contract", () => {
