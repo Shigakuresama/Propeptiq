@@ -305,7 +305,12 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
 
   it("does not add a sticky enhancement when IntersectionObserver is unavailable", async () => {
     vi.stubGlobal("IntersectionObserver", undefined);
-    render(<Fixture />);
+    const view = render(<Fixture />);
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(intersections).toHaveLength(0);
+    expect(view.container.querySelector(".mobile-purchase-bar")).toBeNull();
     expect(screen.queryByRole("region", { name: "Mobile purchase controls" })).toBeNull();
     expect(screen.getByRole("status", { name: "Purchase summary" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Search PropeptIQ" })).toBeVisible();

@@ -88,6 +88,8 @@ Proposed exact join: compound ID `thymosin-alpha-1` → existing catalog slug `t
 - **Primary URLs:** [PubMed correction record](https://pubmed.ncbi.nlm.nih.gov/40447307/); [publisher correction](https://www.bmj.com/content/389/bmj.r1098).
 - **Verified relevance:** The publisher correction explains that survival and immunological data were updated after database-verification errors. It changes reported statistics and the data-sharing statement. The correction must accompany the source register if the parent paper is accepted; it must not be counted as a seventh independent study. No corrected statistics are proposed for public product copy here.
 
+**Future linked-record contract, not a published data change:** represent this separately from the study registry as `{ recordType: "correction", correctionPmid: "40447307", parentPmid: "39814420" }`. The content-release validator must require the parent to exist in the accepted study registry, reject unknown parents and duplicate correction identities, and exclude correction records from study counts and compound `studyIds`/evidence joins. Keep the correction linked to its parent in the internal source register; do not insert it as an independent seventh study. Add these assertions when that separate content release implements the registry.
+
 ## Requirements for a separate content release
 
 1. Preserve the existing public boundary: neutral citations and allowed study metadata only. Keep `mechanism` and `benefitClaim` null and the claims audit empty. A `human_rct` classification denotes study design, not positive findings, product substantiation, or human-use permission.
