@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CART_STORAGE_KEY,
   LEGACY_CART_STORAGE_KEY,
   acknowledgeLegacyCartReselection,
   deserializeCart,
   loadCart,
+  persistCart,
 } from "./cart-storage";
 
 class MemoryStorage implements Storage {
@@ -18,6 +20,29 @@ class MemoryStorage implements Storage {
 }
 
 describe("v1 cart migration", () => {
+  it("loads a valid empty v1 cart as ready without requiring variant inference", () => {
+    expect(deserializeCart(JSON.stringify({ version: 1, items: [] }))).toEqual({
+      status: "ready", items: [],
+    });
+  });
+
+  it("lets a canonical v2 cart replace an empty legacy cart and round-trip exactly", () => {
+    const storage = new MemoryStorage();
+    const emptyLegacy = JSON.stringify({ version: 1, items: [] });
+    storage.setItem(LEGACY_CART_STORAGE_KEY, emptyLegacy);
+    expect(loadCart(storage)).toEqual({ status: "ready", items: [] });
+    persistCart(storage, [{ variantId: "synthetic-variant-10mg", quantity: 2 }]);
+    expect(JSON.parse(storage.getItem(CART_STORAGE_KEY)!)).toEqual({
+      version: 2,
+      items: [{ variantId: "synthetic-variant-10mg", quantity: 2 }],
+    });
+    expect(loadCart(storage)).toEqual({
+      status: "ready",
+      items: [{ variantId: "synthetic-variant-10mg", quantity: 2 }],
+    });
+    expect(storage.getItem(LEGACY_CART_STORAGE_KEY)).toBe(emptyLegacy);
+  });
+
   it("requires reselection for a v1 product-only cart", () => {
     expect(deserializeCart(JSON.stringify({
       version: 1,

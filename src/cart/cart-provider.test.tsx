@@ -4,7 +4,53 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { CartProvider, useCart } from "./cart-provider";
-import { CART_STORAGE_KEY } from "./cart-storage";
+import { CART_STORAGE_KEY, LEGACY_CART_STORAGE_KEY, loadCart } from "./cart-storage";
+
+// Clearly fictional, browser-local cart fixtures; no catalog or provider authority.
+const nonemptyLegacyFixture = JSON.stringify({
+  version: 1,
+  items: [{ productId: "synthetic-legacy-product", quantity: 2 }],
+});
+const emptyLegacyFixture = JSON.stringify({ version: 1, items: [] });
+
+function LegacyCartHarness({ immediate = false }: { immediate?: boolean }) {
+  const { addVariant, acknowledgeLegacyReselection, hydrated, items, legacyItemCount } = useCart();
+  const [result, setResult] = useState("not attempted");
+  const attempted = useRef(false);
+  function add() {
+    setResult(addVariant("synthetic-canonical-10mg", 2, {
+      productName: "Synthetic Product Alpha", variantLabel: "10 mg",
+    }) ? "accepted" : "rejected");
+  }
+  useLayoutEffect(() => {
+    if (!immediate || attempted.current) return;
+    attempted.current = true;
+    setResult(addVariant("synthetic-canonical-10mg", 2, {
+      productName: "Synthetic Product Alpha", variantLabel: "10 mg",
+    }) ? "accepted" : "rejected");
+  }, [addVariant, immediate]);
+  function replaceFromOtherTab(serialized: string | null) {
+    window.localStorage.removeItem(CART_STORAGE_KEY);
+    if (serialized === null) window.localStorage.removeItem(LEGACY_CART_STORAGE_KEY);
+    else window.localStorage.setItem(LEGACY_CART_STORAGE_KEY, serialized);
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: LEGACY_CART_STORAGE_KEY,
+      storageArea: window.localStorage,
+    }));
+    add();
+  }
+  return <>
+    <p>{hydrated ? "Legacy cart hydrated" : "Legacy cart loading"}</p>
+    <output aria-label="Legacy cart lines">{JSON.stringify(items)}</output>
+    <output aria-label="Legacy count">{legacyItemCount === null ? "none" : legacyItemCount}</output>
+    <output aria-label="Legacy add result">{result}</output>
+    <button onClick={add} type="button">Add canonical variant</button>
+    <button onClick={() => { acknowledgeLegacyReselection(); add(); }} type="button">Acknowledge then add</button>
+    <button onClick={() => replaceFromOtherTab(nonemptyLegacyFixture)} type="button">Other tab restores old cart then add</button>
+    <button onClick={() => replaceFromOtherTab(emptyLegacyFixture)} type="button">Other tab empties old cart then add</button>
+    <button onClick={() => replaceFromOtherTab(null)} type="button">Other tab acknowledges old cart then add</button>
+  </>;
+}
 
 function CartHarness() {
   const { addVariant, hydrated, items } = useCart();
@@ -192,6 +238,90 @@ function PendingAddThenUnknownStorageClearHarness() {
 describe("CartProvider exact-variant announcements", () => {
   beforeEach(() => {
     window.localStorage.clear();
+  });
+
+  it("persists an immediate canonical add over an empty legacy cart and restores it after remount", async () => {
+    window.localStorage.setItem(LEGACY_CART_STORAGE_KEY, emptyLegacyFixture);
+    const mounted = render(<CartProvider><LegacyCartHarness immediate /></CartProvider>);
+    expect(screen.getByLabelText("Legacy add result")).toHaveTextContent("accepted");
+    expect(screen.getByLabelText("Legacy count")).toHaveTextContent("none");
+    await waitFor(() => expect(loadCart(window.localStorage)).toEqual({
+      status: "ready", items: [{ variantId: "synthetic-canonical-10mg", quantity: 2 }],
+    }));
+    expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY)!)).toEqual({
+      version: 2, items: [{ variantId: "synthetic-canonical-10mg", quantity: 2 }],
+    });
+    mounted.unmount();
+    render(<CartProvider><LegacyCartHarness /></CartProvider>);
+    await screen.findByText("Legacy cart hydrated");
+    expect(screen.getByLabelText("Legacy cart lines")).toHaveTextContent(
+      '[{"variantId":"synthetic-canonical-10mg","quantity":2}]',
+    );
+    expect(screen.getByLabelText("Legacy count")).toHaveTextContent("none");
+  });
+
+  it.each([false, true])("rejects a nonempty legacy cart add without changing storage or announcing success (immediate=%s)", async (immediate) => {
+    window.localStorage.setItem(LEGACY_CART_STORAGE_KEY, nonemptyLegacyFixture);
+    render(<CartProvider><LegacyCartHarness immediate={immediate} /></CartProvider>);
+    if (!immediate) {
+      await screen.findByText("Legacy cart hydrated");
+      fireEvent.click(screen.getByRole("button", { name: "Add canonical variant" }));
+    }
+    expect(screen.getByLabelText("Legacy add result")).toHaveTextContent("rejected");
+    expect(screen.getByLabelText("Legacy cart lines")).toHaveTextContent("[]");
+    expect(screen.getByLabelText("Legacy count")).toHaveTextContent("2");
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
+      "Open your cart and clear the old cart before choosing variants again. Your saved items have not been changed.",
+    );
+    expect(screen.getByRole("status", { name: "Cart updates" })).not.toHaveTextContent("Cart updated");
+    expect(window.localStorage.getItem(LEGACY_CART_STORAGE_KEY)).toBe(nonemptyLegacyFixture);
+    expect(window.localStorage.getItem(CART_STORAGE_KEY)).toBeNull();
+  });
+
+  it("accepts and persists an add in the same event as explicit legacy acknowledgement", async () => {
+    window.localStorage.setItem(LEGACY_CART_STORAGE_KEY, nonemptyLegacyFixture);
+    render(<CartProvider><LegacyCartHarness /></CartProvider>);
+    await screen.findByText("Legacy cart hydrated");
+    fireEvent.click(screen.getByRole("button", { name: "Add canonical variant" }));
+    expect(screen.getByLabelText("Legacy add result")).toHaveTextContent("rejected");
+    fireEvent.click(screen.getByRole("button", { name: "Acknowledge then add" }));
+    expect(screen.getByLabelText("Legacy add result")).toHaveTextContent("accepted");
+    expect(window.localStorage.getItem(LEGACY_CART_STORAGE_KEY)).toBeNull();
+    expect(loadCart(window.localStorage)).toEqual({
+      status: "ready", items: [{ variantId: "synthetic-canonical-10mg", quantity: 2 }],
+    });
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
+      "Cart updated. Synthetic Product Alpha, 10 mg: 2 units in cart.",
+    );
+  });
+
+  it("blocks a synchronous add when another tab restores nonempty legacy storage", async () => {
+    render(<CartProvider><LegacyCartHarness /></CartProvider>);
+    await screen.findByText("Legacy cart hydrated");
+    fireEvent.click(screen.getByRole("button", { name: "Add canonical variant" }));
+    expect(screen.getByLabelText("Legacy add result")).toHaveTextContent("accepted");
+    fireEvent.click(screen.getByRole("button", { name: "Other tab restores old cart then add" }));
+    expect(screen.getByLabelText("Legacy add result")).toHaveTextContent("rejected");
+    expect(screen.getByLabelText("Legacy cart lines")).toHaveTextContent("[]");
+    expect(screen.getByLabelText("Legacy count")).toHaveTextContent("2");
+    expect(screen.getByRole("status", { name: "Cart updates" })).not.toHaveTextContent("Cart updated");
+    expect(window.localStorage.getItem(LEGACY_CART_STORAGE_KEY)).toBe(nonemptyLegacyFixture);
+    expect(window.localStorage.getItem(CART_STORAGE_KEY)).toBeNull();
+  });
+
+  it.each(["Other tab empties old cart then add", "Other tab acknowledges old cart then add"])("accepts a synchronous add after %s", async (action) => {
+    window.localStorage.setItem(LEGACY_CART_STORAGE_KEY, nonemptyLegacyFixture);
+    render(<CartProvider><LegacyCartHarness /></CartProvider>);
+    await screen.findByText("Legacy cart hydrated");
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    expect(screen.getByLabelText("Legacy add result")).toHaveTextContent("accepted");
+    expect(screen.getByLabelText("Legacy count")).toHaveTextContent("none");
+    expect(loadCart(window.localStorage)).toEqual({
+      status: "ready", items: [{ variantId: "synthetic-canonical-10mg", quantity: 2 }],
+    });
+    expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent(
+      "Cart updated. Synthetic Product Alpha, 10 mg: 2 units in cart.",
+    );
   });
 
   it("merges repeated exact variants, separates mg variants, and announces normalized quantity once", async () => {

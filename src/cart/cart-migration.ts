@@ -26,7 +26,7 @@ function legacyItemCount(items: unknown): number | null {
 
 export function deserializeLegacyCart(value: object): CartLoadResult {
   const count = legacyItemCount(Reflect.get(value, "items"));
-  return count === null || Reflect.get(value, "version") !== 1
+  return count === null || count === 0 || Reflect.get(value, "version") !== 1
     ? { status: "ready", items: [] }
     : { status: "variant_reselection_required", legacyItemCount: count };
 }

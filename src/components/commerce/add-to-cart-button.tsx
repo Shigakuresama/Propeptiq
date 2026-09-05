@@ -31,7 +31,7 @@ export function AddToCartButton({
   className?: string;
   onAdded?: () => void;
 }) {
-  const { addVariant } = useCart();
+  const { addVariant, legacyItemCount } = useCart();
   const validIdentity = isValidCartVariantId(variantId);
   const validQuantity =
     Number.isInteger(quantity) && quantity >= 1 && quantity <= MAX_CART_ITEM_QUANTITY;
@@ -49,6 +49,7 @@ export function AddToCartButton({
     : "Add to cart";
 
   return (
+    <>
     <Button
       type="button"
       className={cn("action-primary whitespace-normal text-center", className)}
@@ -75,5 +76,14 @@ export function AddToCartButton({
       <ShoppingBag aria-hidden="true" />
       {unavailable ? resolvedDisabledReason : actionText}
     </Button>
+    {legacyItemCount != null ? (
+      <p className="mt-3 min-w-0 basis-full text-sm leading-6 text-muted-ink">
+        <span>Your saved cart uses an older format. Clear the old cart before adding a variant.</span>{" "}
+        <a className="record-link inline-flex min-h-11 items-center" href="/cart">
+          Review saved cart
+        </a>
+      </p>
+    ) : null}
+    </>
   );
 }
