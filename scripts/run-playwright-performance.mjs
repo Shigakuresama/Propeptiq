@@ -134,16 +134,110 @@ export function calculateCls(shifts) {
   return { allShiftSum, maximumSessionWindow };
 }
 
+export function calculateLcpBreakdown(raw) {
+  const lcp = raw.lcp ?? null;
+  const navigation = raw.navigation ?? null;
+  const resource = lcp?.url
+    ? [...(raw.resources ?? [])].findLast((candidate) => candidate.name === lcp.url) ?? null
+    : null;
+  const ttfb = navigation
+    ? Math.max(0, navigation.responseStart - navigation.startTime)
+    : null;
+  if (!lcp || !navigation) {
+    return { classification: "missing", elementRenderDelay: null, resource: null, resourceLoadDelay: null, resourceLoadDuration: null, ttfb };
+  }
+  if (!lcp.url) {
+    return { classification: "text-lcp-empty-url", elementRenderDelay: null, resource: null, resourceLoadDelay: null, resourceLoadDuration: null, ttfb };
+  }
+  if (!resource) {
+    return { classification: "unmatched-lcp-resource", elementRenderDelay: null, resource: null, resourceLoadDelay: null, resourceLoadDuration: null, ttfb };
+  }
+  const navigationStart = navigation.startTime;
+  const lcpTime = Math.max(0, lcp.startTime - navigationStart);
+  const requestStart = resource.requestStart || resource.startTime;
+  const lcpRequestStart = Math.max(ttfb, requestStart - navigationStart);
+  const lcpResponseEnd = Math.min(
+    lcpTime,
+    Math.max(lcpRequestStart, resource.responseEnd - navigationStart),
+  );
+  return {
+    classification: "matched-lcp-resource",
+    elementRenderDelay: lcpTime - lcpResponseEnd,
+    resource,
+    resourceLoadDelay: lcpRequestStart - ttfb,
+    resourceLoadDuration: lcpResponseEnd - lcpRequestStart,
+    ttfb,
+  };
+}
+
+export function buildBrowserContextOptions(options) {
+  return { ...options, serviceWorkers: "block" };
+}
+
+export function classifyBrowserRequest({ baseURL, method, url }) {
+  const requestURL = new URL(url);
+  const base = new URL(baseURL);
+  const normalizedMethod = method.toUpperCase();
+  const local = requestURL.origin === base.origin;
+  const read = normalizedMethod === "GET" || normalizedMethod === "HEAD";
+  if (!local) return { classification: read ? "blocked-external-read" : "blocked-external-mutation", local, read };
+  if (!read) return { classification: "mutating-local-request", local, read };
+  if (/^\/api\/auth(?:\/|$)/iu.test(requestURL.pathname)) {
+    return { classification: "unexpected-auth-read", local, read };
+  }
+  if (
+    /^\/(?:a|r)\/[^/]+\/?$/iu.test(requestURL.pathname) ||
+    /(?:__local|%5f_local|synthetic_local_checkout|checkout\/session|session-creation|webhook|newsletter)/iu.test(requestURL.pathname)
+  ) {
+    return { classification: "effectful-local-read", local, read };
+  }
+  return { classification: "allowed-local-read", local, read };
+}
+
+export function selectWindowLongtasks(longtasks, window) {
+  return {
+    wholeContextLongtasks: longtasks.map((entry) => ({ ...entry })),
+    windowLongtasks: longtasks
+      .filter((entry) => entry.startTime < window.endTime && entry.startTime + entry.duration > window.startTime)
+      .map((entry) => ({
+        ...entry,
+        windowOverlapMs: Math.max(0, Math.min(entry.startTime + entry.duration, window.endTime) - Math.max(entry.startTime, window.startTime)),
+      })),
+  };
+}
+
+export function serializeError(error) {
+  if (!error) return null;
+  const normalized = error instanceof Error ? error : new Error(String(error));
+  return {
+    message: normalized.message,
+    name: normalized.name,
+    ...(normalized instanceof AggregateError
+      ? { errors: normalized.errors.map((constituent) => serializeError(constituent)) }
+      : {}),
+  };
+}
+
+export function sortStagesChronologically(stages) {
+  const sequence = (stage) => Number.parseInt(/^([0-9]+)/u.exec(stage.name)?.[1] ?? "999", 10);
+  return [...stages].sort((left, right) => (
+    sequence(left) - sequence(right) ||
+    String(left.startedAt ?? "").localeCompare(String(right.startedAt ?? ""))
+  ));
+}
+
 const KNOWN_CONTINUING_ANIMATION = Object.freeze({
   animationName: "header-brand-molecular-drift",
   targetSelector: "svg.header-brand-motion__field",
 });
 
-export function classifyContinuingAnimations(animations) {
+export function classifyContinuingAnimations(animations, options = {}) {
+  const allowKnownHeaderLogo = options.allowKnownHeaderLogo !== false;
   const known = [];
   const errors = [];
   for (const animation of animations) {
     if (
+      allowKnownHeaderLogo &&
       animation.animationName === KNOWN_CONTINUING_ANIMATION.animationName &&
       animation.targetSelector === KNOWN_CONTINUING_ANIMATION.targetSelector
     ) {
@@ -162,15 +256,18 @@ export function rectanglesIntersect(left, right) {
 
 export function evaluateImagePolicy(images, options) {
   const expectedHidden = new Set(options.expectedHiddenAltTexts);
-  const hidden = images.filter((image) => image.layoutExclusion !== null);
-  const visible = images.filter((image) => image.layoutExclusion === null);
+  const beforeState = (image) => image.before ?? image;
+  const afterState = (image) => image.after ?? image;
+  const hidden = images.filter((image) => beforeState(image).layoutExclusion !== null);
+  const visible = images.filter((image) => beforeState(image).layoutExclusion === null);
   const errors = [];
   for (const image of hidden) {
+    const exclusion = beforeState(image).layoutExclusion;
     if (
-      !["own-display-none", "ancestor-display-none"].includes(image.layoutExclusion?.reason) ||
-      typeof image.layoutExclusion?.selector !== "string" ||
-      image.layoutExclusion.selector.length === 0 ||
-      image.layoutExclusion.selector.length > 120
+      !["own-display-none", "ancestor-display-none"].includes(exclusion?.reason) ||
+      typeof exclusion?.selector !== "string" ||
+      exclusion.selector.length === 0 ||
+      exclusion.selector.length > 120
     ) {
       errors.push(`invalid layout exclusion evidence: ${image.alt || image.src}`);
     }
@@ -181,14 +278,32 @@ export function evaluateImagePolicy(images, options) {
   for (const missing of expectedHidden) errors.push(`expected layout-excluded image was not recorded: ${missing}`);
   if (options.requireVisible && visible.length === 0) errors.push("rendered image coverage is empty");
   for (const image of visible) {
-    if (!image.rect || image.rect.width <= 0 || image.rect.height <= 0) {
-      errors.push(`rendered image lacks reserved dimensions: ${image.alt || image.src}`);
+    const before = beforeState(image);
+    const after = afterState(image);
+    if (!before.rect || before.rect.width <= 0 || before.rect.height <= 0) {
+      errors.push(`rendered image lacks reserved dimensions before activation: ${image.alt || image.src}`);
     }
-    if (!image.complete || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
-      errors.push(`rendered image is broken or undecoded: ${image.alt || image.src}`);
+    if (!after.complete || after.naturalWidth <= 0 || after.naturalHeight <= 0) {
+      errors.push(`rendered image is broken or undecoded after activation: ${image.alt || image.src}`);
     }
   }
   return { errors, hidden, visible };
+}
+
+export function evaluateClippingPolicy(records) {
+  const errors = [];
+  const skippedOffscreen = [];
+  for (const record of records) {
+    if (!record.requiredInViewport && !record.viewportRelevant) {
+      skippedOffscreen.push(record);
+      continue;
+    }
+    if (record.viewportClipped) errors.push(`relevant target is viewport-clipped: ${record.label}`);
+    for (const ancestor of record.ancestorClips) {
+      errors.push(`relevant target is ancestor-clipped: ${record.label} by ${ancestor}`);
+    }
+  }
+  return { errors, skippedOffscreen };
 }
 
 export function evaluateControlPolicy(input) {
@@ -211,6 +326,11 @@ export function evaluateControlPolicy(input) {
     }
   }
   return { collisions, errors };
+}
+
+function combineErrors(current, next, message = "Task 18F encountered multiple failures") {
+  const normalized = next instanceof Error ? next : new Error(String(next));
+  return current ? new AggregateError([current, normalized], message) : normalized;
 }
 
 export async function orchestratePerformanceLab(dependencies) {
@@ -238,25 +358,56 @@ export async function orchestratePerformanceLab(dependencies) {
     await dependencies.checkServerAlive(server);
   } catch (error) {
     primaryError = error;
-    if (browserStarted) await dependencies.stopBrowser().catch(() => {});
+    if (browserStarted) {
+      try {
+        await dependencies.stopBrowser();
+      } catch (cleanupError) {
+        primaryError = combineErrors(primaryError, cleanupError, "Browser run and browser cleanup both failed");
+      }
+    }
   } finally {
     if (browserAttempted && before) {
       try {
         const after = await dependencies.captureCandidate();
         dependencies.compareCandidate(before, after);
       } catch (bindingError) {
-        primaryError = primaryError
-          ? new AggregateError([primaryError, bindingError], "Playwright run and candidate binding both failed")
-          : bindingError;
+        primaryError = combineErrors(primaryError, bindingError, "Playwright run and candidate binding both failed");
       }
     }
-    if (server) await dependencies.stopServer(server).catch(() => {});
-    await dependencies.writeReport(primaryError).catch((reportError) => {
-      if (!primaryError) primaryError = reportError;
-    });
-    if (lock) await dependencies.releaseLock(lock).catch((lockError) => {
-      if (!primaryError) primaryError = lockError;
-    });
+    if (server) {
+      try {
+        await dependencies.stopServer(server);
+      } catch (cleanupError) {
+        primaryError = combineErrors(primaryError, cleanupError, "Lab work and server cleanup both failed");
+      }
+    }
+    let ownedChildrenAlive = false;
+    if (lock) {
+      try {
+        ownedChildrenAlive = await dependencies.ownedChildrenAlive();
+      } catch (inspectionError) {
+        ownedChildrenAlive = true;
+        primaryError = combineErrors(primaryError, inspectionError, "Owned-child cleanup state could not be verified");
+      }
+      if (ownedChildrenAlive) {
+        primaryError = combineErrors(
+          primaryError,
+          new Error("Owned child remains alive; preserving the lab ownership lock"),
+          "Cleanup did not prove all owned children exited",
+        );
+      } else {
+        try {
+          await dependencies.releaseLock(lock);
+        } catch (lockError) {
+          primaryError = combineErrors(primaryError, lockError, "Lab work and lock release both failed");
+        }
+      }
+    }
+    try {
+      await dependencies.writeReport(primaryError);
+    } catch (reportError) {
+      primaryError = combineErrors(primaryError, reportError, "Lab work and report writing both failed");
+    }
   }
   if (primaryError) throw primaryError;
 }
@@ -377,13 +528,22 @@ async function terminateOwnedProcessTree(handle) {
     const taskkill = spawnCaptured("taskkill.exe", ["/PID", String(handle.child.pid), "/T", "/F"], {
       env: buildChildEnvironment(process.env),
     });
-    await taskkill.completed;
+    const taskkillOutcome = await taskkill.completed;
+    if (taskkillOutcome.code !== 0) {
+      throw new Error(`Owned process tree termination failed for PID ${handle.child.pid}: taskkill exit ${taskkillOutcome.code}${taskkillOutcome.signal ? ` (${taskkillOutcome.signal})` : ""}`);
+    }
   } else {
-    handle.child.kill("SIGTERM");
+    if (!handle.child.kill("SIGTERM")) throw new Error(`Owned process ${handle.child.pid ?? "unknown"} rejected SIGTERM`);
     const graceful = await Promise.race([handle.completed.then(() => true), delay(5_000).then(() => false)]);
-    if (!graceful) handle.child.kill("SIGKILL");
+    if (!graceful && !handle.child.kill("SIGKILL")) throw new Error(`Owned process ${handle.child.pid ?? "unknown"} rejected SIGKILL`);
   }
-  await Promise.race([handle.completed, delay(5_000)]);
+  const exited = await Promise.race([
+    handle.completed.then(() => true, () => handle.child.exitCode !== null || handle.child.signalCode !== null),
+    delay(5_000).then(() => false),
+  ]);
+  if (!exited || (handle.child.exitCode === null && handle.child.signalCode === null)) {
+    throw new Error(`Owned process ${handle.child.pid ?? "unknown"} did not confirm exit after bounded termination`);
+  }
 }
 
 function createRuntimeDependencies() {
@@ -407,6 +567,7 @@ function createRuntimeDependencies() {
     server: null,
     browser: null,
     activeStage: null,
+    serverStageRecorded: false,
     stages: [],
     startTime: new Date().toISOString(),
   };
@@ -486,6 +647,11 @@ function createRuntimeDependencies() {
       validatePreflightSnapshot(snapshot);
       console.log(`Preflight PASS: root dotenv names=${snapshot.dotenvFiles.join(",") || "none"}; ports ${UNUSED_CONTROL_PORT}/${SERVER_PORT}=free; build/lab locks=absent`);
     },
+    async ownedChildrenAlive() {
+      return [state.browser, state.activeStage, state.server].some((handle) => (
+        handle && handle.child.exitCode === null && handle.child.signalCode === null
+      ));
+    },
     async readBuildId() {
       ensureNotInterrupted();
       const buildIdPath = join(ROOT, ".next", "BUILD_ID");
@@ -501,38 +667,51 @@ function createRuntimeDependencies() {
       const started = performance.now();
       const startedAt = new Date().toISOString();
       let lastError = "server not ready";
-      while (Date.now() < deadline) {
-        if (server.child.exitCode !== null || server.child.signalCode !== null) {
-          throw new Error(`Owned Next server exited during readiness (code ${server.child.exitCode}, signal ${server.child.signalCode})`);
-        }
-        try {
-          const healthResponse = await fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(5_000) });
-          const healthText = await healthResponse.text();
-          const health = JSON.parse(healthText);
-          if (healthResponse.status !== 200 || JSON.stringify(health) !== JSON.stringify({ status: "ok" })) {
-            throw new Error(`health response was ${healthResponse.status} ${healthText.slice(0, 120)}`);
+      let readinessError = null;
+      try {
+        while (Date.now() < deadline) {
+          if (server.child.exitCode !== null || server.child.signalCode !== null) {
+            throw new Error(`Owned Next server exited during readiness (code ${server.child.exitCode}, signal ${server.child.signalCode})`);
           }
-          const homeResponse = await fetch(`${BASE_URL}/`, { signal: AbortSignal.timeout(10_000) });
-          const homeText = await homeResponse.text();
-          if (homeResponse.status !== 200 || !/<main[^>]+id=["']main-content["']/iu.test(homeText) || !/PROPEPTIQ LABS/iu.test(homeText)) {
-            throw new Error(`homepage marker check failed with status ${homeResponse.status}`);
+          try {
+            const healthResponse = await fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(5_000) });
+            const healthText = await healthResponse.text();
+            const health = JSON.parse(healthText);
+            if (healthResponse.status !== 200 || JSON.stringify(health) !== JSON.stringify({ status: "ok" })) {
+              throw new Error(`health response was ${healthResponse.status} ${healthText.slice(0, 120)}`);
+            }
+            const homeResponse = await fetch(`${BASE_URL}/`, { signal: AbortSignal.timeout(10_000) });
+            const homeText = await homeResponse.text();
+            if (homeResponse.status !== 200 || !/<main[^>]+id=["']main-content["']/iu.test(homeText) || !/PROPEPTIQ LABS/iu.test(homeText)) {
+              throw new Error(`homepage marker check failed with status ${homeResponse.status}`);
+            }
+            const currentBuildId = readFileSync(join(ROOT, ".next", "BUILD_ID"), "utf8").trim();
+            if (currentBuildId !== buildId) throw new Error("BUILD_ID changed during readiness");
+            return;
+          } catch (error) {
+            lastError = error instanceof Error ? error.message : String(error);
+            await delay(250);
           }
-          const currentBuildId = readFileSync(join(ROOT, ".next", "BUILD_ID"), "utf8").trim();
-          if (currentBuildId !== buildId) throw new Error("BUILD_ID changed during readiness");
-          state.stages.push({
-            durationMs: Math.round(performance.now() - started),
-            exitCode: 0,
-            name: "04-readiness",
-            signal: null,
-            startedAt,
-          });
-          return;
-        } catch (error) {
-          lastError = error instanceof Error ? error.message : String(error);
-          await delay(250);
         }
+        throw new Error(`Production server readiness timed out: ${lastError}`);
+      } catch (error) {
+        readinessError = error;
+        throw error;
+      } finally {
+        state.stages.push({
+          arguments: [],
+          durationMs: Math.round(performance.now() - started),
+          error: serializeError(readinessError),
+          executable: "runner readiness polling",
+          exitCode: readinessError ? null : 0,
+          name: "04-readiness",
+          outcome: readinessError ? "failed" : "passed",
+          signal: null,
+          startedAt,
+          stderrPath: relative(ROOT, server.stderrPath).replaceAll("\\", "/"),
+          stdoutPath: relative(ROOT, server.stdoutPath).replaceAll("\\", "/"),
+        });
       }
-      throw new Error(`Production server readiness timed out: ${lastError}`);
     },
     async releaseLock(lock) {
       if (!lock.owned || lock.path !== LAB_LOCK || lock.runId !== runId) throw new Error("Refusing to release an unowned lab lock");
@@ -564,30 +743,51 @@ function createRuntimeDependencies() {
       browser.child.stderr.pipe(process.stderr);
       browser.child.stdout.pipe(stdoutStream);
       browser.child.stderr.pipe(stderrStream);
-      const outcome = await Promise.race([
-        browser.completed.then((result) => ({ kind: "browser", result })),
-        server.completed.then((result) => ({ kind: "server", result })),
-      ]);
-      if (outcome.kind === "server") {
-        await terminateOwnedProcessTree(browser);
-        await Promise.all([finished(stdoutStream), finished(stderrStream)]);
-        state.browser = null;
-        throw new Error(`Owned Next server exited during Playwright (code ${outcome.result.code}, signal ${outcome.result.signal})`);
+      let outcome = null;
+      let browserError = null;
+      try {
+        outcome = await Promise.race([
+          browser.completed.then((result) => ({ kind: "browser", result })),
+          server.completed.then((result) => ({ kind: "server", result })),
+        ]);
+        if (outcome.kind === "server") {
+          const serverError = new Error(`Owned Next server exited during Playwright (code ${outcome.result.code}, signal ${outcome.result.signal})`);
+          try {
+            await terminateOwnedProcessTree(browser);
+          } catch (cleanupError) {
+            browserError = combineErrors(serverError, cleanupError, "Server exit and browser cleanup both failed");
+          }
+          if (browser.child.exitCode !== null || browser.child.signalCode !== null) state.browser = null;
+          if (!browserError) browserError = serverError;
+        } else {
+          state.browser = null;
+          if (outcome.result.code !== 0) browserError = new Error(`Playwright measurement failed with exit code ${outcome.result.code}`);
+        }
+      } catch (error) {
+        browserError = combineErrors(browserError, error, "Playwright execution and stage observation both failed");
+      } finally {
+        if (browser.child.exitCode !== null || browser.child.signalCode !== null) {
+          try {
+            await Promise.all([finished(stdoutStream), finished(stderrStream)]);
+          } catch (streamError) {
+            browserError = combineErrors(browserError, streamError, "Playwright execution and log finalization both failed");
+          }
+        }
+        state.stages.push({
+          arguments: ["node_modules/@playwright/test/cli.js", "test", "--config=playwright.performance.config.ts"],
+          durationMs: Math.round(performance.now() - started),
+          error: serializeError(browserError),
+          executable: process.execPath,
+          exitCode: outcome?.kind === "browser" ? outcome.result.code : browser.child.exitCode,
+          name: "05-playwright",
+          outcome: browserError ? "failed" : "passed",
+          signal: outcome?.kind === "browser" ? outcome.result.signal : browser.child.signalCode,
+          startedAt,
+          stderrPath: relative(ROOT, stderrPath).replaceAll("\\", "/"),
+          stdoutPath: relative(ROOT, stdoutPath).replaceAll("\\", "/"),
+        });
       }
-      state.browser = null;
-      await Promise.all([finished(stdoutStream), finished(stderrStream)]);
-      state.stages.push({
-        arguments: ["node_modules/@playwright/test/cli.js", "test", "--config=playwright.performance.config.ts"],
-        durationMs: Math.round(performance.now() - started),
-        executable: process.execPath,
-        exitCode: outcome.result.code,
-        name: "05-playwright",
-        signal: outcome.result.signal,
-        startedAt,
-        stderrPath: relative(ROOT, stderrPath).replaceAll("\\", "/"),
-        stdoutPath: relative(ROOT, stdoutPath).replaceAll("\\", "/"),
-      });
-      if (outcome.result.code !== 0) throw new Error(`Playwright measurement failed with exit code ${outcome.result.code}`);
+      if (browserError) throw browserError;
     },
     async scan() {
       ensureNotInterrupted();
@@ -616,25 +816,65 @@ function createRuntimeDependencies() {
       state.browser = null;
     },
     async stopServer(server) {
-      await terminateOwnedProcessTree(server);
-      const outcome = await server.completed.catch(() => ({ code: null, signal: "spawn-error" }));
-      await server.outputFinished.catch(() => {});
-      state.stages.push({
-        arguments: ["node_modules/next/dist/bin/next", "start", "--hostname", HOST, "--port", String(SERVER_PORT)],
-        durationMs: Math.round(performance.now() - server.startedPerformance),
-        executable: process.execPath,
-        exitCode: outcome.code,
-        name: "03-next-start",
-        signal: outcome.signal,
-        startedAt: server.startedAt,
-        stderrPath: relative(ROOT, server.stderrPath).replaceAll("\\", "/"),
-        stdoutPath: relative(ROOT, server.stdoutPath).replaceAll("\\", "/"),
-      });
-      state.server = null;
+      const exitedBeforeCleanup = server.child.exitCode !== null || server.child.signalCode !== null;
+      let stopError = null;
+      let outcome = null;
+      try {
+        await terminateOwnedProcessTree(server);
+        state.server = null;
+      } catch (error) {
+        stopError = combineErrors(stopError, error, "Owned server termination failed");
+      } finally {
+        if (!state.server && !state.serverStageRecorded) {
+          try {
+            outcome = await server.completed;
+          } catch (completionError) {
+            stopError = combineErrors(stopError, completionError, "Owned server completion failed");
+            outcome = { code: null, signal: "spawn-error" };
+          }
+          try {
+            await server.outputFinished;
+          } catch (streamError) {
+            stopError = combineErrors(stopError, streamError, "Owned server log finalization failed");
+          }
+          state.stages.push({
+            arguments: ["node_modules/next/dist/bin/next", "start", "--hostname", HOST, "--port", String(SERVER_PORT)],
+            durationMs: Math.round(performance.now() - server.startedPerformance),
+            error: serializeError(stopError),
+            executable: process.execPath,
+            exitCode: outcome.code,
+            name: "03-next-start",
+            outcome: stopError ? "failed" : exitedBeforeCleanup ? "exited-before-cleanup" : "stopped-after-lab",
+            signal: outcome.signal,
+            startedAt: server.startedAt,
+            stderrPath: relative(ROOT, server.stderrPath).replaceAll("\\", "/"),
+            stdoutPath: relative(ROOT, server.stdoutPath).replaceAll("\\", "/"),
+          });
+          state.serverStageRecorded = true;
+        } else if (stopError && !state.serverStageRecorded) {
+          state.stages.push({
+            arguments: ["node_modules/next/dist/bin/next", "start", "--hostname", HOST, "--port", String(SERVER_PORT)],
+            durationMs: Math.round(performance.now() - server.startedPerformance),
+            error: serializeError(stopError),
+            executable: process.execPath,
+            exitCode: server.child.exitCode,
+            name: "03-next-start",
+            outcome: "cleanup-failed-child-alive",
+            signal: server.child.signalCode,
+            startedAt: server.startedAt,
+            stderrPath: relative(ROOT, server.stderrPath).replaceAll("\\", "/"),
+            stdoutPath: relative(ROOT, server.stdoutPath).replaceAll("\\", "/"),
+          });
+          state.serverStageRecorded = true;
+        }
+      }
+      if (stopError) throw stopError;
     },
     async writeReport(error) {
       state.endTime = new Date().toISOString();
       state.error = error instanceof Error ? error.message : error ? String(error) : null;
+      const errorEvidence = serializeError(error);
+      const orderedStages = sortStagesChronologically(state.stages);
       const manifest = {
         baseUrl: BASE_URL,
         buildId: state.buildId,
@@ -646,16 +886,17 @@ function createRuntimeDependencies() {
           explicitKeys: Object.keys(CLOSED_PRODUCTION_ENVIRONMENT),
           valuesRecorded: false,
         },
-        error: state.error,
+        error: errorEvidence,
+        errorSummary: state.error,
         networkMethod: "unthrottled localhost",
         nodeVersion: process.version,
         nextVersion: JSON.parse(readFileSync(join(ROOT, "node_modules", "next", "package.json"), "utf8")).version,
         playwrightVersion: JSON.parse(readFileSync(join(ROOT, "node_modules", "@playwright", "test", "package.json"), "utf8")).version,
         runId,
         observedSourceHead: state.candidateBefore?.head ?? null,
-        stages: state.stages,
+        stages: orderedStages,
         startTime: state.startTime,
-        status: state.error ? "FAIL" : "PASS",
+        status: errorEvidence ? "FAIL" : "PASS",
       };
       writeFileSync(join(runDirectory, "run-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { flag: "wx" });
       let measurements = null;
@@ -674,10 +915,11 @@ function createRuntimeDependencies() {
         `- Candidate fingerprint stable: ${state.candidateAfter ? state.candidateAfter.fingerprint === state.candidateBefore?.fingerprint : "not reached"}\n` +
         `- CPU/network: CDP 4x CPU; unthrottled localhost (not field, CrUX, PageSpeed, mobile-network, or Vercel data).\n` +
         `- Error: ${state.error ?? "none"}\n` +
+        `- Error evidence: \`${JSON.stringify(errorEvidence)}\`\n` +
         `- Evidence: \`${relative(ROOT, runDirectory).replaceAll("\\", "/")}\`\n` +
         `- Operator boundary: only run when no other worker owns ordinary \`.next\`, ports ${UNUSED_CONTROL_PORT}/${SERVER_PORT}, or the lab lock.\n\n` +
-        `## Stage results and actual commands\n\n| Stage | Command | Exit | Signal | Duration ms |\n|---|---|---:|---|---:|\n` +
-        state.stages.map((stage) => `| ${stage.name} | \`${[stage.executable, ...(stage.arguments ?? [])].filter(Boolean).join(" ")}\` | ${stage.exitCode ?? "n/a"} | ${stage.signal ?? "none"} | ${stage.durationMs ?? "n/a"} |`).join("\n") +
+        `## Stage results and actual commands\n\n| Stage | Outcome | Command | Exit | Signal | Duration ms | Stdout | Stderr |\n|---|---|---|---:|---|---:|---|---|\n` +
+        orderedStages.map((stage) => `| ${stage.name} | ${stage.outcome ?? (stage.exitCode === 0 ? "passed" : "failed")} | \`${[stage.executable, ...(stage.arguments ?? [])].filter(Boolean).join(" ")}\` | ${stage.exitCode ?? "n/a"} | ${stage.signal ?? "none"} | ${stage.durationMs ?? "n/a"} | \`${stage.stdoutPath ?? "n/a"}\` | \`${stage.stderrPath ?? "n/a"}\` |`).join("\n") +
         `\n\n## Cold samples\n\n| Route | Viewport | Iteration | LCP ms | CLS max window | Longtasks | Integrity errors |\n|---|---|---:|---:|---:|---:|---:|\n` +
         (sampleLines.length > 0 ? sampleLines.join("\n") : "| no sample evidence | n/a | n/a | n/a | n/a | n/a | n/a |") +
         `\n\n## Counts and limitations\n\n` +
@@ -686,14 +928,22 @@ function createRuntimeDependencies() {
         `- Geometry checks: ${measurements?.geometry?.length ?? 0}/28 JavaScript contexts, ${measurements?.noJavaScriptGeometry?.length ?? 0}/14 no-JavaScript contexts, ${measurements?.reducedMotionGeometry?.length ?? 0}/4 reduced-motion route contexts.\n` +
         `- No accepted LCP budget exists. Every CLS sample must be strictly below 0.1; medians do not replace individual samples.\n` +
         `- Known LCP hints: ${measurements?.knownLcpHints?.length ?? 0}. Colour warnings: ${measurements?.colourWarnings?.length ?? 0}. Other diagnostic warnings: ${measurements?.diagnosticWarnings?.length ?? 0}. These are separate arrays in \`performance-data.json\` and are not silently treated as measurement success.\n` +
+        `- Manual contexts block service workers and use snapshot tracing retained only on failure; this instrumentation can affect the local timing observations and is recorded in \`performance-data.json\`.\n` +
         `- This local closed production-build lane does not cover populated-cart loading, unsampled routes, a deployed production artifact, provider integrations, auth, payments, form submission, cart writes, or owner inputs.\n`;
       writeFileSync(runReportPath, report, { flag: "wx" });
     },
     async interrupt(signal) {
       state.interrupted = signal;
-      if (state.browser) await terminateOwnedProcessTree(state.browser).catch(() => {});
-      if (state.activeStage) await terminateOwnedProcessTree(state.activeStage).catch(() => {});
-      if (state.server) await terminateOwnedProcessTree(state.server).catch(() => {});
+      let interruptError;
+      for (const [label, handle] of [["browser", state.browser], ["active stage", state.activeStage], ["server", state.server]]) {
+        if (!handle) continue;
+        try {
+          await terminateOwnedProcessTree(handle);
+        } catch (error) {
+          interruptError = combineErrors(interruptError, error, `Interrupt cleanup failed for owned ${label}`);
+        }
+      }
+      if (interruptError) throw interruptError;
     },
   };
 }
@@ -719,7 +969,12 @@ async function main() {
     if (interrupting) return;
     interrupting = true;
     console.error(`Received ${signal}; stopping only this invocation's owned children.`);
-    await dependencies.interrupt(signal).catch(() => {});
+    try {
+      await dependencies.interrupt(signal);
+    } catch (error) {
+      console.error(`Owned-child interrupt cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
   };
   process.once("SIGINT", () => { void interrupt("SIGINT"); });
   process.once("SIGTERM", () => { void interrupt("SIGTERM"); });

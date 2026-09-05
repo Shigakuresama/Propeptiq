@@ -1,14 +1,19 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Chromium performance entry extensions and retained JSON evidence are intentionally runtime-shaped. */
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 // @ts-expect-error The owned Node ESM harness intentionally has no separate declaration file.
-import { classifyContinuingAnimations, evaluateControlPolicy, evaluateImagePolicy } from "../../scripts/run-playwright-performance.mjs";
+import { buildBrowserContextOptions, calculateCls, calculateLcpBreakdown, classifyBrowserRequest, classifyContinuingAnimations, evaluateClippingPolicy, evaluateControlPolicy, evaluateImagePolicy, selectWindowLongtasks } from "../../scripts/run-playwright-performance.mjs";
 
 test.describe.configure({ mode: "serial" });
 
 const baseURL = "http://127.0.0.1:4641";
 const observationWindowMs = 6_000;
 const frameWindowMs = 30_000;
+const allowedLocalReadLimit = 250;
+const performanceOutputDirectory = resolve(process.env.PERFORMANCE_OUTPUT_DIR ?? ".");
+const contextArtifactDirectory = join(performanceOutputDirectory, "playwright-artifacts");
+let contextSequence = 0;
 const viewports = [
   { width: 195, height: 520 },
   { width: 320, height: 812 },
@@ -24,11 +29,16 @@ const coldViewports = [
 ] as const;
 
 type BoundaryRecord = {
+  allowedLocalReadOverflow: number;
+  allowedLocalReads: Array<{ method: string; url: string }>;
   authRequests: string[];
   consoleErrors: string[];
   consoleWarnings: string[];
   externalRequests: string[];
   failedResponses: Array<{ status: number; url: string }>;
+  intentionalBoundaryAborts: Array<{ classification: string; method: string; url: string }>;
+  intentionalExternalAborts: string[];
+  localRequestFailures: Array<{ errorText: string | null; method: string; url: string }>;
   mutatingRequests: Array<{ method: string; url: string }>;
   syntheticOrProviderRequests: string[];
 };
@@ -44,26 +54,6 @@ type Shift = {
   value: number;
 };
 
-function calculateCls(shifts: Array<{ hadRecentInput: boolean; startTime: number; value: number }>) {
-  const allShiftSum = shifts.reduce((total, shift) => total + shift.value, 0);
-  const eligible = shifts.filter((shift) => !shift.hadRecentInput).sort((left, right) => left.startTime - right.startTime);
-  let maximumSessionWindow = 0;
-  let windowFirstTime: number | null = null;
-  let windowLastTime = 0;
-  let windowValue = 0;
-  for (const shift of eligible) {
-    const joinsWindow = windowFirstTime !== null && shift.startTime - windowLastTime < 1_000 && shift.startTime - windowFirstTime < 5_000;
-    if (!joinsWindow) {
-      windowFirstTime = shift.startTime;
-      windowValue = 0;
-    }
-    windowLastTime = shift.startTime;
-    windowValue += shift.value;
-    maximumSessionWindow = Math.max(maximumSessionWindow, windowValue);
-  }
-  return { allShiftSum, maximumSessionWindow };
-}
-
 const evidence: Record<string, any> = {
   browserVersion: null,
   buildId: process.env.PERFORMANCE_BUILD_ID,
@@ -78,6 +68,15 @@ const evidence: Record<string, any> = {
   frames: [],
   geometry: [],
   knownLcpHints: [],
+  manualContextPolicy: {
+    serviceWorkers: "block",
+    tracing: {
+      note: "Every manual context is traced with DOM snapshots and no trace screenshots or sources; traces are exported only for failed contexts. This instrumentation can affect local timing.",
+      screenshots: false,
+      snapshots: true,
+      sources: false,
+    },
+  },
   mathSelfChecks: [],
   noJavaScriptGeometry: [],
   reducedMotionGeometry: [],
@@ -156,34 +155,121 @@ test("CLS self-check: recent-input shifts are excluded from windows but retained
 
 function emptyBoundaryRecord(): BoundaryRecord {
   return {
+    allowedLocalReadOverflow: 0,
+    allowedLocalReads: [],
     authRequests: [],
     consoleErrors: [],
     consoleWarnings: [],
     externalRequests: [],
     failedResponses: [],
+    intentionalBoundaryAborts: [],
+    intentionalExternalAborts: [],
+    localRequestFailures: [],
     mutatingRequests: [],
     syntheticOrProviderRequests: [],
   };
 }
 
+function safeArtifactLabel(label: string) {
+  return label.toLowerCase().replace(/[^a-z0-9-]+/gu, "-").replace(/^-|-$/gu, "").slice(0, 80) || "context";
+}
+
+async function createLabContext(browser: Browser, label: string, options: Record<string, any>) {
+  contextSequence += 1;
+  const artifactStem = `${String(contextSequence).padStart(3, "0")}-${safeArtifactLabel(label)}`;
+  const context = await browser.newContext(buildBrowserContextOptions(options));
+  try {
+    await context.tracing.start({ screenshots: false, snapshots: true, sources: false });
+    const page = await context.newPage();
+    return { artifactStem, context, page };
+  } catch (error) {
+    try {
+      await context.close();
+    } catch (closeError) {
+      throw new AggregateError([error, closeError], "Manual browser context initialization and cleanup both failed");
+    }
+    throw error;
+  }
+}
+
+async function closeLabContext(
+  shell: { artifactStem: string; context: BrowserContext; page: Page },
+  failed: boolean,
+) {
+  const artifacts: string[] = [];
+  const errors: string[] = [];
+  if (failed) {
+    mkdirSync(contextArtifactDirectory, { recursive: true });
+    const screenshotPath = join(contextArtifactDirectory, `${shell.artifactStem}-failure.png`);
+    try {
+      await shell.page.screenshot({ animations: "allow", caret: "initial", fullPage: true, path: screenshotPath });
+      artifacts.push(relative(performanceOutputDirectory, screenshotPath).replaceAll("\\", "/"));
+    } catch (error) {
+      errors.push(`failure screenshot capture failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  try {
+    if (failed) {
+      const tracePath = join(contextArtifactDirectory, `${shell.artifactStem}-failure-trace.zip`);
+      await shell.context.tracing.stop({ path: tracePath });
+      artifacts.push(relative(performanceOutputDirectory, tracePath).replaceAll("\\", "/"));
+    } else {
+      await shell.context.tracing.stop();
+    }
+  } catch (error) {
+    errors.push(`context trace finalization failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    await shell.context.close();
+  } catch (error) {
+    errors.push(`browser context close failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return { artifacts, errors };
+}
+
 async function installBoundary(context: BrowserContext, page: Page, record: BoundaryRecord) {
   await context.route("**/*", async (route) => {
-    const requestURL = new URL(route.request().url());
-    if (["http:", "https:"].includes(requestURL.protocol) && requestURL.origin !== baseURL) {
+    const request = route.request();
+    const classification = classifyBrowserRequest({ baseURL, method: request.method(), url: request.url() });
+    if (classification.classification.startsWith("blocked-external-")) {
       record.externalRequests.push(route.request().url());
+      record.intentionalExternalAborts.push(route.request().url());
+      await route.abort("blockedbyclient");
+      return;
+    }
+    if (["effectful-local-read", "mutating-local-request"].includes(classification.classification)) {
+      record.intentionalBoundaryAborts.push({
+        classification: classification.classification,
+        method: request.method().toUpperCase(),
+        url: request.url(),
+      });
       await route.abort("blockedbyclient");
       return;
     }
     await route.continue();
   });
   page.on("request", (request) => {
-    const url = new URL(request.url());
     const method = request.method().toUpperCase();
-    if (!["GET", "HEAD"].includes(method)) record.mutatingRequests.push({ method, url: request.url() });
-    if (/^\/api\/auth(?:\/|$)/iu.test(url.pathname)) record.authRequests.push(request.url());
-    if (
-      /(?:__local|%5f_local|synthetic_local_checkout|checkout\/session|session-creation|webhook|newsletter)/iu.test(url.pathname)
-    ) record.syntheticOrProviderRequests.push(request.url());
+    const classification = classifyBrowserRequest({ baseURL, method, url: request.url() });
+    if (classification.classification === "allowed-local-read") {
+      if (record.allowedLocalReads.length < allowedLocalReadLimit) record.allowedLocalReads.push({ method, url: request.url() });
+      else record.allowedLocalReadOverflow += 1;
+    }
+    if (classification.classification === "mutating-local-request" || classification.classification === "blocked-external-mutation") {
+      record.mutatingRequests.push({ method, url: request.url() });
+    }
+    if (classification.classification === "unexpected-auth-read") record.authRequests.push(request.url());
+    if (classification.classification === "effectful-local-read") record.syntheticOrProviderRequests.push(request.url());
+  });
+  page.on("requestfailed", (request) => {
+    const classification = classifyBrowserRequest({ baseURL, method: request.method(), url: request.url() });
+    if (!classification.local) return;
+    if (["effectful-local-read", "mutating-local-request"].includes(classification.classification)) return;
+    record.localRequestFailures.push({
+      errorText: request.failure()?.errorText ?? null,
+      method: request.method().toUpperCase(),
+      url: request.url(),
+    });
   });
   page.on("response", (response) => {
     if (response.status() >= 400) record.failedResponses.push({ status: response.status(), url: response.url() });
@@ -307,9 +393,12 @@ async function collectPerformance(page: Page) {
   });
 }
 
-async function newObservedContext(browser: Browser, viewport: { width: number; height: number }) {
-  const context = await browser.newContext({ reducedMotion: "no-preference", viewport });
-  const page = await context.newPage();
+async function newObservedContext(browser: Browser, label: string, viewport: { width: number; height: number }) {
+  const shell = await createLabContext(browser, label, {
+    reducedMotion: "no-preference",
+    viewport,
+  });
+  const { context, page } = shell;
   const boundary = emptyBoundaryRecord();
   await installBoundary(context, page, boundary);
   await installPerformanceObservers(page);
@@ -317,14 +406,15 @@ async function newObservedContext(browser: Browser, viewport: { width: number; h
   await cdp.send("Network.enable");
   await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-  return { boundary, cdp, context, page };
+  return { ...shell, boundary, cdp };
 }
 
 async function discoverCanonicalPdp(browser: Browser) {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await context.newPage();
+  const shell = await createLabContext(browser, "catalog-discovery", { viewport: { width: 1440, height: 900 } });
+  const { context, page } = shell;
   const boundary = emptyBoundaryRecord();
   await installBoundary(context, page, boundary);
+  let failure: unknown = null;
   try {
     const response = await page.goto(`${baseURL}/catalog`, { waitUntil: "load" });
     if (response?.status() !== 200) throw new Error(`Catalog discovery returned ${response?.status() ?? "no response"}`);
@@ -333,33 +423,22 @@ async function discoverCanonicalPdp(browser: Browser) {
     ));
     const href = hrefs.find((value) => /^\/catalog\/items\/[a-z0-9-]+$/u.test(value!));
     if (!href) throw new Error("Rendered catalog exposed no canonical PDP href.");
-    if (
-      boundary.externalRequests.length > 0 || boundary.mutatingRequests.length > 0 ||
-      boundary.authRequests.length > 0 || boundary.syntheticOrProviderRequests.length > 0
-    ) throw new Error(`Catalog discovery crossed the browser no-effects boundary: ${JSON.stringify(boundary)}`);
+    const discoveryBoundaryErrors = boundaryErrors(boundary);
+    if (discoveryBoundaryErrors.length > 0) {
+      throw new Error(`Catalog discovery crossed the browser no-effects boundary: ${discoveryBoundaryErrors.join("; ")}`);
+    }
     evidence.discovery = { boundary, href };
     return href;
+  } catch (error) {
+    failure = error;
+    throw error;
   } finally {
-    await context.close();
+    const closure = await closeLabContext(shell, failure !== null);
+    if (failure !== null || closure.errors.length > 0) {
+      evidence.discoveryFailure = { artifacts: closure.artifacts, boundary, closureErrors: closure.errors };
+    }
+    if (failure === null && closure.errors.length > 0) throw new Error(closure.errors.join("; "));
   }
-}
-
-function performanceBreakdown(raw: any) {
-  const lcp = raw.lcp.at(-1) ?? null;
-  const navigation = raw.navigation;
-  const resource = lcp?.url ? raw.resources.find((candidate: any) => candidate.name === lcp.url) ?? null : null;
-  const ttfb = navigation ? navigation.responseStart - navigation.startTime : null;
-  if (!lcp || !navigation) return { classification: "missing", elementRenderDelay: null, resource: null, resourceLoadDelay: null, resourceLoadDuration: null, ttfb };
-  if (!lcp.url) return { classification: "text-lcp-empty-url", elementRenderDelay: null, resource: null, resourceLoadDelay: null, resourceLoadDuration: null, ttfb };
-  if (!resource) return { classification: "unmatched-lcp-resource", elementRenderDelay: null, resource: null, resourceLoadDelay: null, resourceLoadDuration: null, ttfb };
-  return {
-    classification: "matched-lcp-resource",
-    elementRenderDelay: lcp.startTime - resource.responseEnd,
-    resource,
-    resourceLoadDelay: resource.startTime - navigation.responseStart,
-    resourceLoadDuration: resource.responseEnd - resource.startTime,
-    ttfb,
-  };
 }
 
 function boundaryErrors(boundary: BoundaryRecord) {
@@ -369,12 +448,13 @@ function boundaryErrors(boundary: BoundaryRecord) {
   if (boundary.authRequests.length > 0) errors.push(`unexpected auth requests: ${boundary.authRequests.length}`);
   if (boundary.syntheticOrProviderRequests.length > 0) errors.push(`synthetic/provider-effect requests: ${boundary.syntheticOrProviderRequests.length}`);
   if (boundary.failedResponses.length > 0) errors.push(`failed responses: ${boundary.failedResponses.length}`);
+  if (boundary.localRequestFailures.length > 0) errors.push(`local transport failures: ${boundary.localRequestFailures.length}`);
   if (boundary.consoleErrors.length > 0) errors.push(`browser console/page errors: ${boundary.consoleErrors.length}`);
   return errors;
 }
 
 async function coldSample(browser: Browser, routeLabel: string, path: string, viewport: { width: number; height: number }, iteration: number) {
-  const shell = await newObservedContext(browser, viewport);
+  const shell = await newObservedContext(browser, `cold-${routeLabel}-${viewport.width}-iteration-${iteration}`, viewport);
   const sample: Record<string, any> = { boundary: shell.boundary, integrityErrors: [], iteration, routeLabel, path, viewport };
   try {
     const response = await shell.page.goto(`${baseURL}${path}`, { waitUntil: "load", timeout: 60_000 });
@@ -387,7 +467,7 @@ async function coldSample(browser: Browser, routeLabel: string, path: string, vi
     sample.cls = calculateCls(raw.shifts);
     sample.longtasks = raw.longtasks;
     sample.navigation = raw.navigation;
-    sample.breakdown = performanceBreakdown(raw);
+    sample.breakdown = calculateLcpBreakdown({ lcp: sample.lcp, navigation: raw.navigation, resources: raw.resources });
     sample.integrityErrors.push(...boundaryErrors(shell.boundary));
     if (sample.status !== 200) sample.integrityErrors.push(`document status ${sample.status}`);
     if (!raw.supported.includes("largest-contentful-paint") || !sample.lcp) sample.integrityErrors.push("missing LCP observer/result");
@@ -408,8 +488,14 @@ async function coldSample(browser: Browser, routeLabel: string, path: string, vi
     sample.integrityErrors.push(error instanceof Error ? error.message : String(error));
   } finally {
     evidence.samples.push(sample);
-    await shell.cdp.detach().catch(() => {});
-    await shell.context.close();
+    try {
+      await shell.cdp.detach();
+    } catch (error) {
+      sample.integrityErrors.push(`CDP detach failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const closure = await closeLabContext(shell, sample.integrityErrors.length > 0);
+    sample.failureArtifacts = closure.artifacts;
+    sample.integrityErrors.push(...closure.errors);
   }
 }
 
@@ -420,35 +506,57 @@ function percentile(values: number[], percentileValue: number) {
 }
 
 async function frameObservation(browser: Browser, viewport: { width: number; height: number }) {
-  const shell = await newObservedContext(browser, viewport);
+  const shell = await newObservedContext(browser, `frames-${viewport.width}`, viewport);
   const result: Record<string, any> = { boundary: shell.boundary, integrityErrors: [], viewport, windowMs: frameWindowMs };
   try {
     const response = await shell.page.goto(`${baseURL}/`, { waitUntil: "load" });
     if (response?.status() !== 200) result.integrityErrors.push(`document status ${response?.status() ?? "missing"}`);
-    await shell.page.evaluate(async () => { await document.fonts.ready; });
-    await shell.page.waitForTimeout(1_000);
+    result.initialStability = await waitForGeometryStable(shell.page, { allowKnownHeaderLogo: true });
+    const animationPolicy = classifyContinuingAnimations(result.initialStability.continuingAnimations);
+    result.knownContinuingAnimations = animationPolicy.known;
+    result.integrityErrors.push(...animationPolicy.errors);
+    if (!result.initialStability.settled) throw new Error("frame-observation homepage geometry did not settle within 5 seconds");
+    if (animationPolicy.errors.length > 0) throw new Error("unexpected continuing animation before frame observation");
     const observation = await shell.page.evaluate(async (windowMs) => {
       const intervals: number[] = [];
-      const visibility: string[] = [];
+      const visibility: string[] = [document.visibilityState];
       let previous: number | null = null;
       const started = performance.now();
-      await new Promise<void>((resolvePromise) => {
+      const exactEnd = started + windowMs;
+      const captureEndedAt = await new Promise<number>((resolvePromise) => {
         const capture = (now: number) => {
+          if (now >= exactEnd) {
+            resolvePromise(now);
+            return;
+          }
           if (previous !== null) intervals.push(now - previous);
           previous = now;
           visibility.push(document.visibilityState);
-          if (now - started >= windowMs) resolvePromise();
-          else requestAnimationFrame(capture);
+          requestAnimationFrame(capture);
         };
         requestAnimationFrame(capture);
       });
       const activeAnimations = document.getAnimations().filter((animation) => animation.playState === "running").map((animation) => {
         const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
-        return target instanceof Element ? `${target.tagName.toLowerCase()}.${[...target.classList].slice(0, 3).join(".")}` : "unknown";
+        const selector = target instanceof Element ? `${target.tagName.toLowerCase()}.${[...target.classList].slice(0, 3).join(".")}` : "unknown";
+        return {
+          animationName: animation instanceof CSSAnimation
+            ? animation.animationName
+            : target instanceof Element ? getComputedStyle(target).animationName : "unknown",
+          targetSelector: selector,
+        };
       }).slice(0, 20);
-      return { activeAnimations, intervals, visibility };
+      visibility.push(document.visibilityState);
+      return { activeAnimations, captureEndedAt, endTime: exactEnd, intervals, startTime: started, visibility };
     }, frameWindowMs);
     const raw = await collectPerformance(shell.page);
+    const longtaskWindow = selectWindowLongtasks(raw.longtasks, {
+      endTime: observation.endTime,
+      startTime: observation.startTime,
+    });
+    result.actualWindowMs = observation.endTime - observation.startTime;
+    result.captureOverrunMs = observation.captureEndedAt - observation.endTime;
+    result.endTime = observation.endTime;
     result.intervalCount = observation.intervals.length;
     result.intervals = observation.intervals;
     result.p50 = percentile(observation.intervals, 0.5);
@@ -458,22 +566,31 @@ async function frameObservation(browser: Browser, viewport: { width: number; hei
     result.above20ms = observation.intervals.filter((value) => value > 20).length;
     result.above33_4ms = observation.intervals.filter((value) => value > 33.4).length;
     result.above50ms = observation.intervals.filter((value) => value > 50).length;
-    result.longtasks = raw.longtasks;
+    result.longtasks = longtaskWindow.windowLongtasks;
+    result.wholeContextLongtasks = longtaskWindow.wholeContextLongtasks;
+    result.startTime = observation.startTime;
     result.visibility = [...new Set(observation.visibility)];
     result.activeAnimations = observation.activeAnimations;
+    if (result.actualWindowMs < frameWindowMs) result.integrityErrors.push(`frame observation was shorter than ${frameWindowMs}ms: ${result.actualWindowMs}`);
     result.integrityErrors.push(...boundaryErrors(shell.boundary));
     if (result.visibility.length !== 1 || result.visibility[0] !== "visible") result.integrityErrors.push(`visibility changed: ${result.visibility.join(",")}`);
   } catch (error) {
     result.integrityErrors.push(error instanceof Error ? error.message : String(error));
   } finally {
     evidence.frames.push(result);
-    await shell.cdp.detach().catch(() => {});
-    await shell.context.close();
+    try {
+      await shell.cdp.detach();
+    } catch (error) {
+      result.integrityErrors.push(`CDP detach failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const closure = await closeLabContext(shell, result.integrityErrors.length > 0);
+    result.failureArtifacts = closure.artifacts;
+    result.integrityErrors.push(...closure.errors);
   }
 }
 
-async function waitForGeometryStable(page: Page) {
-  return page.evaluate(async () => {
+async function waitForGeometryStable(page: Page, options = { allowKnownHeaderLogo: true }) {
+  return page.evaluate(async ({ allowKnownHeaderLogo }) => {
     await document.fonts.ready;
     let prior: number[] | undefined;
     let stable = 0;
@@ -515,6 +632,7 @@ async function waitForGeometryStable(page: Page) {
         }];
       });
       const blocking = lastContinuing.filter(({ animationName, targetSelector }) => !(
+        allowKnownHeaderLogo &&
         animationName === "header-brand-molecular-drift" &&
         targetSelector === "svg.header-brand-motion__field"
       ));
@@ -528,17 +646,19 @@ async function waitForGeometryStable(page: Page) {
       prior = geometry;
     }
     return { continuingAnimations: lastContinuing, settled: false };
-  });
+  }, options);
 }
 
 async function prepareRenderedImages(page: Page) {
   const images = page.locator("main img");
   const errors: string[] = [];
+  const records: Array<Record<string, any>> = [];
   const visited: string[] = [];
   for (let index = 0; index < await images.count(); index += 1) {
     const image = images.nth(index);
-    const state = await image.evaluate((element) => {
+    const before = await image.evaluate((element) => {
       const imageElement = element as HTMLImageElement;
+      const bounds = imageElement.getBoundingClientRect();
       const describe = (node: Element) => {
         const classes = [...node.classList].slice(0, 3).join(".");
         return `${node.tagName.toLowerCase()}${node.id ? `#${node.id}` : ""}${classes ? `.${classes}` : ""}`.slice(0, 120);
@@ -548,35 +668,64 @@ async function prepareRenderedImages(page: Page) {
         if (getComputedStyle(node).display === "none") {
           return {
             alt: imageElement.alt,
+            complete: imageElement.complete,
             layoutExclusion: {
               reason: node === element ? "own-display-none" : "ancestor-display-none",
               selector: describe(node),
             },
+            naturalHeight: imageElement.naturalHeight,
+            naturalWidth: imageElement.naturalWidth,
+            rect: { bottom: bounds.bottom, height: bounds.height, left: bounds.left, right: bounds.right, top: bounds.top, width: bounds.width },
+            src: imageElement.currentSrc || imageElement.src,
           };
         }
         node = node.parentElement;
       }
-      return { alt: imageElement.alt, layoutExclusion: null };
+      return {
+        alt: imageElement.alt,
+        complete: imageElement.complete,
+        layoutExclusion: null,
+        naturalHeight: imageElement.naturalHeight,
+        naturalWidth: imageElement.naturalWidth,
+        rect: { bottom: bounds.bottom, height: bounds.height, left: bounds.left, right: bounds.right, top: bounds.top, width: bounds.width },
+        src: imageElement.currentSrc || imageElement.src,
+      };
     });
-    if (state.layoutExclusion) continue;
+    const record: Record<string, any> = { alt: before.alt, after: null, before, src: before.src };
+    records.push(record);
+    if (before.layoutExclusion) {
+      record.after = before;
+      continue;
+    }
     try {
       await image.scrollIntoViewIfNeeded();
       await expect.poll(() => image.evaluate((element) => {
         const imageElement = element as HTMLImageElement;
         return imageElement.complete && imageElement.naturalWidth > 0 && imageElement.naturalHeight > 0;
       }
-      ), { message: `load rendered image ${state.alt}` }).toBe(true);
+      ), { message: `load rendered image ${before.alt}` }).toBe(true);
       await image.evaluate(async (element) => { await (element as HTMLImageElement).decode(); });
-      visited.push(state.alt);
+      visited.push(before.alt);
     } catch (error) {
-      errors.push(`rendered image readiness failed: ${state.alt}: ${error instanceof Error ? error.message : String(error)}`);
+      errors.push(`rendered image readiness failed: ${before.alt}: ${error instanceof Error ? error.message : String(error)}`);
     }
+    record.after = await image.evaluate((element) => {
+      const imageElement = element as HTMLImageElement;
+      const bounds = imageElement.getBoundingClientRect();
+      return {
+        complete: imageElement.complete,
+        naturalHeight: imageElement.naturalHeight,
+        naturalWidth: imageElement.naturalWidth,
+        rect: { bottom: bounds.bottom, height: bounds.height, left: bounds.left, right: bounds.right, top: bounds.top, width: bounds.width },
+        src: imageElement.currentSrc || imageElement.src,
+      };
+    });
   }
-  return { errors, visited };
+  return { errors, images: records, visited };
 }
 
-async function inspectGeometry(page: Page, width: number) {
-  return page.evaluate((viewportWidth) => {
+async function inspectGeometry(page: Page, width: number, requireFooterControlsInViewport = true) {
+  return page.evaluate(({ requireFooterControlsInViewport, viewportWidth }) => {
     const rect = (element: Element | null) => {
       if (!element) return null;
       const bounds = element.getBoundingClientRect();
@@ -612,9 +761,38 @@ async function inspectGeometry(page: Page, width: number) {
       }
       return null;
     };
-    const touchTargets = [...document.querySelectorAll<HTMLElement>(
+    const clippingRecord = (element: Element, label: string, requiredInViewport: boolean) => {
+      const bounds = element.getBoundingClientRect();
+      const viewportRelevant = bounds.right > 0 && bounds.left < innerWidth && bounds.bottom > 0 && bounds.top < innerHeight;
+      const ancestorClips: string[] = [];
+      if (requiredInViewport || viewportRelevant) {
+        let ancestor = element.parentElement;
+        while (ancestor) {
+          const ancestorBounds = ancestor.getBoundingClientRect();
+          const style = getComputedStyle(ancestor);
+          const clipsX = ["auto", "clip", "hidden", "scroll"].includes(style.overflowX) &&
+            (bounds.left < ancestorBounds.left - 1 || bounds.right > ancestorBounds.right + 1);
+          const clipsY = ["auto", "clip", "hidden", "scroll"].includes(style.overflowY) &&
+            (bounds.top < ancestorBounds.top - 1 || bounds.bottom > ancestorBounds.bottom + 1);
+          if (clipsX || clipsY) ancestorClips.push(describe(ancestor));
+          ancestor = ancestor.parentElement;
+        }
+      }
+      return {
+        ancestorClips: [...new Set(ancestorClips)].slice(0, 8),
+        label,
+        rect: rect(element),
+        requiredInViewport,
+        viewportClipped: requiredInViewport && (
+          bounds.left < -1 || bounds.right > innerWidth + 1 || bounds.top < -1 || bounds.bottom > innerHeight + 1
+        ),
+        viewportRelevant,
+      };
+    };
+    const touchTargetElements = [...document.querySelectorAll<HTMLElement>(
       'header a, header button, button[aria-label="Search PropeptIQ"], [aria-label="Purchase summary"] button, [aria-label="Purchase summary"] input',
-    )].filter(visible).map((element) => ({
+    )].filter(visible);
+    const touchTargets = touchTargetElements.map((element) => ({
       label: element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 80) ?? element.tagName,
       rect: rect(element),
     }));
@@ -628,23 +806,41 @@ async function inspectGeometry(page: Page, width: number) {
       src: image.currentSrc || image.src,
     }));
     const footer = document.querySelector("footer");
-    const footerControls = footer ? [...footer.querySelectorAll<HTMLElement>("a, button, input, summary")].filter(visible).map((element) => ({
+    const footerControlElements = footer ? [...footer.querySelectorAll<HTMLElement>("a, button, input, summary")].filter(visible) : [];
+    const footerControls = footerControlElements.map((element) => ({
       label: element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 80) ?? element.tagName,
       rect: rect(element),
-    })) : [];
-    const searchControls = [...document.querySelectorAll<HTMLElement>('button[aria-label="Search PropeptIQ"]')].filter(visible).map((element) => ({
+    }));
+    const searchControlElements = [...document.querySelectorAll<HTMLElement>('button[aria-label="Search PropeptIQ"]')].filter(visible);
+    const searchControls = searchControlElements.map((element) => ({
       fixedAncestor: fixedAncestor(element),
       label: element.getAttribute("aria-label") ?? "Search PropeptIQ",
       rect: rect(element),
     }));
-    const purchaseControls = [...document.querySelectorAll<HTMLElement>('[role="region"][aria-label="Mobile purchase controls"]')].filter(visible).map((element) => ({
+    const purchaseControlElements = [...document.querySelectorAll<HTMLElement>('[role="region"][aria-label="Mobile purchase controls"]')].filter(visible);
+    const purchaseControls = purchaseControlElements.map((element) => ({
       fixedAncestor: fixedAncestor(element),
       label: element.getAttribute("aria-label") ?? "Mobile purchase controls",
       rect: rect(element),
     }));
+    const clippingRecords = [
+      ...footerControlElements.map((element) => clippingRecord(element, element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 80) ?? "footer control", requireFooterControlsInViewport)),
+      ...searchControlElements.map((element) => clippingRecord(element, element.getAttribute("aria-label") ?? "Search PropeptIQ", true)),
+      ...purchaseControlElements.map((element) => clippingRecord(element, element.getAttribute("aria-label") ?? "Mobile purchase controls", true)),
+      ...touchTargetElements.map((element) => {
+        const bounds = element.getBoundingClientRect();
+        const intersectsViewport = bounds.right > 0 && bounds.left < innerWidth && bounds.bottom > 0 && bounds.top < innerHeight;
+        return clippingRecord(element, element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 80) ?? element.tagName, intersectsViewport);
+      }),
+      ...[...document.querySelectorAll<HTMLElement>("main#main-content h1, main#main-content h2, main#main-content img")]
+        .filter(visible)
+        .slice(0, 40)
+        .map((element) => clippingRecord(element, element.getAttribute("alt") ?? element.textContent?.trim().slice(0, 80) ?? element.tagName, false)),
+    ];
     const search = rect(document.querySelector('button[aria-label="Search PropeptIQ"]'));
     return {
       documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      clippingRecords,
       footer: rect(footer),
       footerControls,
       images,
@@ -656,7 +852,7 @@ async function inspectGeometry(page: Page, width: number) {
       searchCenterDelta: search ? Math.abs(search.left + search.width / 2 - viewportWidth / 2) : null,
       touchTargets,
     };
-  }, width);
+  }, { requireFooterControlsInViewport, viewportWidth: width });
 }
 
 function geometryErrors(snapshot: any) {
@@ -669,6 +865,7 @@ function geometryErrors(snapshot: any) {
   for (const target of snapshot.touchTargets) {
     if (!target.rect || target.rect.width < 44 || target.rect.height < 44) errors.push(`touch target below 44px: ${target.label} ${JSON.stringify(target.rect)}`);
   }
+  errors.push(...evaluateClippingPolicy(snapshot.clippingRecords).errors);
   return errors;
 }
 
@@ -741,21 +938,23 @@ function expectedHiddenImages(routeLabel: string, width: number) {
 }
 
 async function geometryCase(browser: Browser, path: string, routeLabel: string, viewport: { width: number; height: number }) {
-  const context = await browser.newContext({ reducedMotion: "no-preference", viewport });
-  const page = await context.newPage();
+  const shell = await createLabContext(browser, `geometry-${routeLabel}-${viewport.width}`, { reducedMotion: "no-preference", viewport });
+  const { context, page } = shell;
   const boundary = emptyBoundaryRecord();
   const result: Record<string, any> = { boundary, errors: [], path, routeLabel, viewport };
   await installBoundary(context, page, boundary);
   try {
     const response = await page.goto(`${baseURL}${path}`, { waitUntil: "load" });
     result.status = response?.status() ?? null;
-    result.imageReadiness = await prepareRenderedImages(page);
-    result.errors.push(...result.imageReadiness.errors);
     result.initialStability = await waitForGeometryStable(page);
     const initialAnimationPolicy = classifyContinuingAnimations(result.initialStability.continuingAnimations);
     result.knownContinuingAnimations = initialAnimationPolicy.known;
     result.errors.push(...initialAnimationPolicy.errors);
     if (!result.initialStability.settled) result.errors.push("relevant initial geometry did not settle within 5 seconds");
+    result.initialClipping = await inspectGeometry(page, viewport.width, false);
+    result.errors.push(...evaluateClippingPolicy(result.initialClipping.clippingRecords).errors);
+    result.imageReadiness = await prepareRenderedImages(page);
+    result.errors.push(...result.imageReadiness.errors);
     let expectedDockVisible = false;
     if (routeLabel === "pdp") {
       await positionPurchaseSummaryPastViewport(page);
@@ -776,12 +975,12 @@ async function geometryCase(browser: Browser, path: string, routeLabel: string, 
     }
     result.footerReadiness = await waitForFooterReadiness(page, expectedDockVisible);
     result.snapshot = await inspectGeometry(page, viewport.width);
-    result.imagePolicy = evaluateImagePolicy(result.snapshot.images, {
+    result.imagePolicy = evaluateImagePolicy(result.imageReadiness.images, {
       expectedHiddenAltTexts: expectedHiddenImages(routeLabel, viewport.width),
       requireVisible: routeLabel !== "empty-cart",
     });
     for (const hiddenImage of result.imagePolicy.hidden) {
-      if (hiddenImage.layoutExclusion.reason !== "ancestor-display-none") {
+      if (hiddenImage.before.layoutExclusion.reason !== "ancestor-display-none") {
         result.errors.push(`expected narrow-home exclusion is not ancestor display:none: ${hiddenImage.alt}`);
       }
     }
@@ -801,14 +1000,20 @@ async function geometryCase(browser: Browser, path: string, routeLabel: string, 
   } catch (error) {
     result.errors.push(error instanceof Error ? error.message : String(error));
   } finally {
+    const closure = await closeLabContext(shell, result.errors.length > 0);
+    result.failureArtifacts = closure.artifacts;
+    result.errors.push(...closure.errors);
     evidence.geometry.push(result);
-    await context.close();
   }
 }
 
 async function noJavaScriptCase(browser: Browser, path: string, routeLabel: string, viewport: { width: number; height: number }) {
-  const context = await browser.newContext({ javaScriptEnabled: false, reducedMotion: "reduce", viewport });
-  const page = await context.newPage();
+  const shell = await createLabContext(browser, `no-js-${routeLabel}-${viewport.width}`, {
+    javaScriptEnabled: false,
+    reducedMotion: "no-preference",
+    viewport,
+  });
+  const { context, page } = shell;
   const boundary = emptyBoundaryRecord();
   const result: Record<string, any> = { boundary, errors: [], path, routeLabel, viewport };
   await installBoundary(context, page, boundary);
@@ -830,21 +1035,44 @@ async function noJavaScriptCase(browser: Browser, path: string, routeLabel: stri
     if (result.mobileDockCount !== 0) result.errors.push("client-only mobile dock rendered without JavaScript");
     result.searchRenderedOnly = await page.getByRole("button", { name: "Search PropeptIQ" }).count() === 1;
     if (!result.searchRenderedOnly) result.errors.push("search launcher missing without JavaScript");
-    result.imageReadiness = await prepareRenderedImages(page);
-    result.errors.push(...result.imageReadiness.errors);
     result.initialStability = await waitForGeometryStable(page);
     const animationPolicy = classifyContinuingAnimations(result.initialStability.continuingAnimations);
     result.knownContinuingAnimations = animationPolicy.known;
     result.errors.push(...animationPolicy.errors);
     if (!result.initialStability.settled) result.errors.push("no-JavaScript relevant geometry did not settle within 5 seconds");
+    result.initialClipping = await inspectGeometry(page, viewport.width, false);
+    result.errors.push(...evaluateClippingPolicy(result.initialClipping.clippingRecords).errors);
+    result.imageReadiness = await prepareRenderedImages(page);
+    result.errors.push(...result.imageReadiness.errors);
+    result.essentials = await page.evaluate((label) => {
+      const main = document.querySelector<HTMLElement>("main#main-content");
+      const heading = main?.querySelector<HTMLElement>("h1");
+      const purchaseSummary = document.querySelector<HTMLElement>('[role="status"][aria-label="Purchase summary"]');
+      const positive = (element: HTMLElement | null | undefined) => {
+        if (!element) return false;
+        const bounds = element.getBoundingClientRect();
+        return bounds.width > 0 && bounds.height > 0;
+      };
+      return {
+        headingCount: main?.querySelectorAll("h1").length ?? 0,
+        headingText: heading?.textContent?.replace(/\s+/gu, " ").trim().slice(0, 120) ?? "",
+        homeHeroPresent: label === "home" ? positive(document.querySelector<HTMLElement>("#home-hero-heading")) : null,
+        mainPresent: positive(main),
+        purchaseSummaryPresent: label === "pdp" ? positive(purchaseSummary) : null,
+      };
+    }, routeLabel);
+    if (!result.essentials.mainPresent) result.errors.push("server-rendered main content is missing without JavaScript");
+    if (result.essentials.headingCount !== 1 || result.essentials.headingText.length === 0) result.errors.push("server-rendered primary heading is missing without JavaScript");
+    if (routeLabel === "home" && !result.essentials.homeHeroPresent) result.errors.push("server-rendered home hero is missing without JavaScript");
+    if (routeLabel === "pdp" && !result.essentials.purchaseSummaryPresent) result.errors.push("server-rendered PDP purchase summary is missing without JavaScript");
     result.footerReadiness = await waitForFooterReadiness(page, false);
     result.snapshot = await inspectGeometry(page, viewport.width);
-    result.imagePolicy = evaluateImagePolicy(result.snapshot.images, {
+    result.imagePolicy = evaluateImagePolicy(result.imageReadiness.images, {
       expectedHiddenAltTexts: expectedHiddenImages(routeLabel, viewport.width),
       requireVisible: true,
     });
     for (const hiddenImage of result.imagePolicy.hidden) {
-      if (hiddenImage.layoutExclusion.reason !== "ancestor-display-none") {
+      if (hiddenImage.before.layoutExclusion.reason !== "ancestor-display-none") {
         result.errors.push(`expected narrow-home exclusion is not ancestor display:none: ${hiddenImage.alt}`);
       }
     }
@@ -864,27 +1092,29 @@ async function noJavaScriptCase(browser: Browser, path: string, routeLabel: stri
   } catch (error) {
     result.errors.push(error instanceof Error ? error.message : String(error));
   } finally {
+    const closure = await closeLabContext(shell, result.errors.length > 0);
+    result.failureArtifacts = closure.artifacts;
+    result.errors.push(...closure.errors);
     evidence.noJavaScriptGeometry.push(result);
-    await context.close();
   }
 }
 
 async function reducedMotionCase(browser: Browser, path: string, routeLabel: string, viewport: { width: number; height: number }) {
-  const context = await browser.newContext({ reducedMotion: "reduce", viewport });
-  const page = await context.newPage();
+  const shell = await createLabContext(browser, `reduced-${routeLabel}-${viewport.width}`, { reducedMotion: "reduce", viewport });
+  const { context, page } = shell;
   const boundary = emptyBoundaryRecord();
   const result: Record<string, any> = { boundary, errors: [], path, routeLabel, viewport };
   await installBoundary(context, page, boundary);
   try {
     const response = await page.goto(`${baseURL}${path}`, { waitUntil: "load" });
     result.status = response?.status() ?? null;
-    result.initialStability = await waitForGeometryStable(page);
-    const animationPolicy = classifyContinuingAnimations(result.initialStability.continuingAnimations);
+    result.initialStability = await waitForGeometryStable(page, { allowKnownHeaderLogo: false });
+    const animationPolicy = classifyContinuingAnimations(result.initialStability.continuingAnimations, { allowKnownHeaderLogo: false });
     result.knownContinuingAnimations = animationPolicy.known;
     result.errors.push(...animationPolicy.errors);
     if (!result.initialStability.settled) result.errors.push("reduced-motion relevant geometry did not settle within 5 seconds");
     result.styles = await page.evaluate(() => ({
-      decorative: [...document.querySelectorAll<HTMLElement>('[data-motion-surface], [data-motion-step], [data-science-field] .science-field__signal')].slice(0, 30).map((element) => {
+      decorative: [...document.querySelectorAll<HTMLElement>('[data-motion-surface], [data-motion-step], [data-science-field] .science-field__signal, svg.header-brand-motion__field')].slice(0, 30).map((element) => {
         const style = getComputedStyle(element);
         return {
           animationDuration: style.animationDuration,
@@ -907,7 +1137,7 @@ async function reducedMotionCase(browser: Browser, path: string, routeLabel: str
       if (style.scale !== "none") result.errors.push(`decorative scale ${style.scale}`);
     }
     if (result.styles.scrollBehavior === "smooth") result.errors.push("smooth scroll remains enabled under reduced motion");
-    const search = await inspectGeometry(page, viewport.width);
+    const search = await inspectGeometry(page, viewport.width, false);
     result.search = search.search;
     result.searchCenterDelta = search.searchCenterDelta;
     if (!search.search || search.searchCenterDelta === null || search.searchCenterDelta > 1) result.errors.push(`fixed search centering changed: ${search.searchCenterDelta}`);
@@ -916,8 +1146,10 @@ async function reducedMotionCase(browser: Browser, path: string, routeLabel: str
   } catch (error) {
     result.errors.push(error instanceof Error ? error.message : String(error));
   } finally {
+    const closure = await closeLabContext(shell, result.errors.length > 0);
+    result.failureArtifacts = closure.artifacts;
+    result.errors.push(...closure.errors);
     evidence.reducedMotionGeometry.push(result);
-    await context.close();
   }
 }
 

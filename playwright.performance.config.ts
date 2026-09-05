@@ -52,9 +52,10 @@ export default defineConfig({
   timeout: 900_000,
   use: {
     baseURL: exactBaseURL,
-    screenshot: "only-on-failure",
+    // The spec owns each manual context trace and post-failure screenshot so caught case failures retain distinct artifacts.
+    screenshot: "off",
     serviceWorkers: "block",
-    trace: "retain-on-failure",
+    trace: "off",
     video: "off",
   },
   workers: 1,

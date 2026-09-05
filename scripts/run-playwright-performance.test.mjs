@@ -3,15 +3,22 @@ import { test } from "node:test";
 import { join } from "node:path";
 
 import {
+  buildBrowserContextOptions,
   buildChildEnvironment,
+  calculateLcpBreakdown,
   calculateCls,
+  classifyBrowserRequest,
   classifyContinuingAnimations,
   computeCandidateFingerprint,
+  evaluateClippingPolicy,
   evaluateControlPolicy,
   evaluateImagePolicy,
   orchestratePerformanceLab,
   rectanglesIntersect,
   resolveRunReportPath,
+  selectWindowLongtasks,
+  serializeError,
+  sortStagesChronologically,
   validatePreflightSnapshot,
 } from "./run-playwright-performance.mjs";
 
@@ -36,6 +43,22 @@ test("geometry policy records only the exact continuing header logo animation", 
   ]), {
     errors: ["unexpected continuing animation: unexpected-loop on div.other"],
     known: [known],
+  });
+  assert.deepEqual(classifyContinuingAnimations([known], { allowKnownHeaderLogo: false }), {
+    errors: ["unexpected continuing animation: header-brand-molecular-drift on svg.header-brand-motion__field"],
+    known: [],
+  });
+});
+
+test("every manual browser context blocks service workers without allowing an override", () => {
+  assert.deepEqual(buildBrowserContextOptions({
+    reducedMotion: "no-preference",
+    serviceWorkers: "allow",
+    viewport: { height: 812, width: 375 },
+  }), {
+    reducedMotion: "no-preference",
+    serviceWorkers: "block",
+    viewport: { height: 812, width: 375 },
   });
 });
 
@@ -68,9 +91,30 @@ test("image policy fails rendered zero or broken images and records exact layout
     { ...visible, alt: "Broken", complete: false, naturalHeight: 0, naturalWidth: 0 },
     { ...excluded, alt: "Unexpected hidden" },
   ], { expectedHiddenAltTexts: [], requireVisible: true });
-  assert.ok(failed.errors.some((error) => /rendered image lacks reserved dimensions: Zero/u.test(error)));
-  assert.ok(failed.errors.some((error) => /rendered image is broken or undecoded: Broken/u.test(error)));
+  assert.ok(failed.errors.some((error) => /rendered image lacks reserved dimensions before activation: Zero/u.test(error)));
+  assert.ok(failed.errors.some((error) => /rendered image is broken or undecoded after activation: Broken/u.test(error)));
   assert.ok(failed.errors.some((error) => /unexpected layout-excluded image: Unexpected hidden/u.test(error)));
+});
+
+test("image policy gates pre-activation reservation and post-activation decode evidence", () => {
+  const healthy = {
+    alt: "Lazy product",
+    after: { complete: true, naturalHeight: 600, naturalWidth: 800, rect: rect(0, 0, 320, 240) },
+    before: { complete: false, layoutExclusion: null, naturalHeight: 0, naturalWidth: 0, rect: rect(0, 900, 320, 240) },
+    src: "/lazy.webp",
+  };
+  assert.deepEqual(evaluateImagePolicy([healthy], {
+    expectedHiddenAltTexts: [],
+    requireVisible: true,
+  }).errors, []);
+  assert.ok(evaluateImagePolicy([{ ...healthy, before: { ...healthy.before, rect: rect(0, 900, 0, 0) } }], {
+    expectedHiddenAltTexts: [],
+    requireVisible: true,
+  }).errors.some((error) => /before activation/u.test(error)));
+  assert.ok(evaluateImagePolicy([{ ...healthy, after: { ...healthy.after, complete: false, naturalWidth: 0 } }], {
+    expectedHiddenAltTexts: [],
+    requireVisible: true,
+  }).errors.some((error) => /after activation/u.test(error)));
 });
 
 test("control policy requires inherited-fixed coverage and detects real rectangle overlap", () => {
@@ -101,6 +145,84 @@ test("control policy requires inherited-fixed coverage and detects real rectangl
     purchaseControls: [],
     searchControls: [],
   }).errors.some((error) => /visible search control set is empty/u.test(error)));
+});
+
+test("clipping policy rejects relevant clipped targets but records intentional offscreen scroll content", () => {
+  const result = evaluateClippingPolicy([
+    { ancestorClips: [], label: "Search", requiredInViewport: true, viewportClipped: false, viewportRelevant: true },
+    { ancestorClips: ["div.card"], label: "Visible heading", requiredInViewport: false, viewportClipped: false, viewportRelevant: true },
+    { ancestorClips: ["div.intentional-scroll"], label: "Offscreen result", requiredInViewport: false, viewportClipped: true, viewportRelevant: false },
+  ]);
+  assert.deepEqual(result.errors, ["relevant target is ancestor-clipped: Visible heading by div.card"]);
+  assert.equal(result.skippedOffscreen.length, 1);
+  assert.ok(evaluateClippingPolicy([
+    { ancestorClips: [], label: "Purchase", requiredInViewport: true, viewportClipped: true, viewportRelevant: true },
+  ]).errors.some((error) => /viewport-clipped: Purchase/u.test(error)));
+});
+
+test("LCP phases prefer requestStart and clamp early or continuing resources without negative phases", () => {
+  const navigation = { responseStart: 80, startTime: 0 };
+  const lcp = { startTime: 600, url: "http://127.0.0.1:4641/front.webp" };
+  assert.deepEqual(calculateLcpBreakdown({
+    lcp,
+    navigation,
+    resources: [{ name: lcp.url, requestStart: 220, responseEnd: 400, startTime: 100 }],
+  }), {
+    classification: "matched-lcp-resource",
+    elementRenderDelay: 200,
+    resource: { name: lcp.url, requestStart: 220, responseEnd: 400, startTime: 100 },
+    resourceLoadDelay: 140,
+    resourceLoadDuration: 180,
+    ttfb: 80,
+  });
+  const fallback = calculateLcpBreakdown({
+    lcp: { ...lcp, startTime: 300 },
+    navigation,
+    resources: [{ name: lcp.url, requestStart: 0, responseEnd: 500, startTime: 20 }],
+  });
+  assert.deepEqual({
+    elementRenderDelay: fallback.elementRenderDelay,
+    resourceLoadDelay: fallback.resourceLoadDelay,
+    resourceLoadDuration: fallback.resourceLoadDuration,
+  }, { elementRenderDelay: 0, resourceLoadDelay: 0, resourceLoadDuration: 220 });
+  assert.ok([fallback.elementRenderDelay, fallback.resourceLoadDelay, fallback.resourceLoadDuration].every((value) => value >= 0));
+  assert.equal(calculateLcpBreakdown({ lcp: { startTime: 200, url: "" }, navigation, resources: [] }).classification, "text-lcp-empty-url");
+  assert.equal(calculateLcpBreakdown({ lcp, navigation, resources: [] }).resourceLoadDuration, null);
+});
+
+test("network policy records safe local reads and rejects exact attribution, auth, mutation, and external routes", () => {
+  const local = "http://127.0.0.1:4641";
+  assert.equal(classifyBrowserRequest({ baseURL: local, method: "GET", url: `${local}/sign-in?next=%2Fcatalog` }).classification, "allowed-local-read");
+  assert.equal(classifyBrowserRequest({ baseURL: local, method: "GET", url: `${local}/a/research-code` }).classification, "effectful-local-read");
+  assert.equal(classifyBrowserRequest({ baseURL: local, method: "HEAD", url: `${local}/r/referral-code/` }).classification, "effectful-local-read");
+  assert.equal(classifyBrowserRequest({ baseURL: local, method: "GET", url: `${local}/api/auth/session` }).classification, "unexpected-auth-read");
+  assert.equal(classifyBrowserRequest({ baseURL: local, method: "POST", url: `${local}/catalog` }).classification, "mutating-local-request");
+  assert.equal(classifyBrowserRequest({ baseURL: local, method: "GET", url: "https://example.com/pixel" }).classification, "blocked-external-read");
+});
+
+test("frame longtasks are tagged against the exact observation interval and whole-context records remain separate", () => {
+  const selected = selectWindowLongtasks([
+    { duration: 20, startTime: 90 },
+    { duration: 30, startTime: 190 },
+    { duration: 5, startTime: 220 },
+  ], { endTime: 220, startTime: 100 });
+  assert.deepEqual(selected.windowLongtasks.map((entry) => entry.startTime), [90, 190]);
+  assert.equal(selected.wholeContextLongtasks.length, 3);
+  assert.deepEqual(selected.windowLongtasks.map((entry) => entry.windowOverlapMs), [10, 30]);
+});
+
+test("serialized aggregate evidence retains constituent errors and stage presentation is chronological", () => {
+  const serialized = serializeError(new AggregateError([
+    new Error("browser failed"),
+    new AggregateError([new Error("binding changed"), new Error("cleanup failed")], "binding and cleanup"),
+  ], "lab failed"));
+  assert.deepEqual(serialized.errors.map((error) => error.message), ["browser failed", "binding and cleanup"]);
+  assert.deepEqual(serialized.errors[1].errors.map((error) => error.message), ["binding changed", "cleanup failed"]);
+  assert.deepEqual(sortStagesChronologically([
+    { name: "05-playwright", startedAt: "2026-09-05T00:00:05.000Z" },
+    { name: "03-next-start", startedAt: "2026-09-05T00:00:03.000Z" },
+    { name: "04-readiness", startedAt: "2026-09-05T00:00:04.000Z" },
+  ]).map((stage) => stage.name), ["03-next-start", "04-readiness", "05-playwright"]);
 });
 
 test("CLS math joins only contiguous sub-1000ms gaps through 4999ms", () => {
@@ -271,8 +393,9 @@ test("candidate fingerprint is order-independent and binds HEAD, status, and har
   }));
 });
 
-function labDouble({ failStage } = {}) {
+function labDouble({ aliveAfterStop = false, bindingError = false, failStage, stopServerError = false } = {}) {
   const events = [];
+  const reportedErrors = [];
   let serverAlive = false;
   const candidate = {
     fingerprint: "candidate-1",
@@ -291,9 +414,14 @@ function labDouble({ failStage } = {}) {
       build: async () => { events.push("build"); fail("build"); },
       captureCandidate: async () => { events.push("candidate:capture"); return candidate; },
       checkServerAlive: async () => { events.push("server:alive"); if (!serverAlive) throw new Error("server exited"); },
-      compareCandidate: (before, after) => { events.push("candidate:compare"); assert.equal(before.fingerprint, after.fingerprint); },
+      compareCandidate: (before, after) => {
+        events.push("candidate:compare");
+        assert.equal(before.fingerprint, after.fingerprint);
+        if (bindingError) throw new Error("binding changed");
+      },
       createRun: async () => { events.push("run:create"); },
       preflight: async () => { events.push("preflight"); fail("preflight"); },
+      ownedChildrenAlive: async () => { events.push("children:alive"); return serverAlive; },
       readBuildId: async () => { events.push("build-id:read"); return "build-1"; },
       readiness: async () => { events.push("readiness"); fail("readiness"); },
       releaseLock: async () => { events.push("lock:release"); },
@@ -305,9 +433,14 @@ function labDouble({ failStage } = {}) {
         return { owned: true };
       },
       stopBrowser: async () => { events.push("browser:stop"); },
-      stopServer: async () => { events.push("server:stop"); serverAlive = false; },
-      writeReport: async () => { events.push("report:write"); },
+      stopServer: async () => {
+        events.push("server:stop");
+        serverAlive = aliveAfterStop;
+        if (stopServerError) throw new Error("server cleanup failed");
+      },
+      writeReport: async (error) => { events.push("report:write"); reportedErrors.push(serializeError(error)); },
     },
+    reportedErrors,
   };
 }
 
@@ -318,7 +451,7 @@ test("normal lab ordering keeps the owned server alive through browser completio
     "preflight", "lock:acquire", "run:create", "candidate:capture", "build", "scan",
     "build-id:read", "server:start", "readiness", "server:alive", "browser",
     "server:alive", "candidate:capture", "candidate:compare", "server:stop",
-    "report:write", "lock:release",
+    "children:alive", "lock:release", "report:write",
   ]);
 });
 
@@ -334,7 +467,8 @@ for (const failure of [
     for (const event of failure.forbidden) assert.equal(events.includes(event), false, event);
     if (events.includes("server:start")) assert.equal(events.includes("server:stop"), true);
     assert.equal(events.includes("browser:stop"), failure.stage === "browser");
-    assert.equal(events.at(-1), "lock:release");
+    assert.equal(events.at(-1), "report:write");
+    assert.ok(events.includes("lock:release"));
     assert.equal(events.includes("report:write"), true);
     if (failure.stage === "browser") {
       assert.equal(events.filter((event) => event === "candidate:capture").length, 2);
@@ -342,3 +476,26 @@ for (const failure of [
     }
   });
 }
+
+test("cleanup failure with a live owned child retains every error and preserves the ownership lock", async () => {
+  const { dependencies, events, reportedErrors } = labDouble({
+    aliveAfterStop: true,
+    bindingError: true,
+    failStage: "browser",
+    stopServerError: true,
+  });
+  await assert.rejects(orchestratePerformanceLab(dependencies), AggregateError);
+  assert.equal(events.includes("lock:release"), false);
+  assert.equal(events.at(-1), "report:write");
+  const messages = [];
+  const visit = (error) => {
+    if (!error) return;
+    messages.push(error.message);
+    for (const constituent of error.errors ?? []) visit(constituent);
+  };
+  visit(reportedErrors[0]);
+  assert.ok(messages.includes("browser failed"));
+  assert.ok(messages.includes("binding changed"));
+  assert.ok(messages.includes("server cleanup failed"));
+  assert.ok(messages.includes("Owned child remains alive; preserving the lab ownership lock"));
+});
