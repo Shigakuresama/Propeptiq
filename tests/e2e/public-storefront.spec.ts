@@ -2489,6 +2489,10 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(pricing).toContainText("$33.00");
   await addToPreviewCart.click();
   await page.getByRole("link", { name: /Cart, \d+ requested units/iu }).click();
+  const drawer = page.getByRole("dialog", { name: "Your cart" });
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("link", { name: "View cart" }).click();
+  await expect(page).toHaveURL(/\/cart$/u);
   const persisted = await page.evaluate(() => JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"));
   expect(persisted.items).toHaveLength(2);
   expect(persisted.items.map((item: { quantity: number }) => item.quantity).sort()).toEqual([1, 2]);

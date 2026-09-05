@@ -5,16 +5,20 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Winter30PromotionView } from "@/catalog/storefront-promotion-banner";
 
-const { getStorefrontPromotionBannerViewMock, scrollRevealControllerMock } = vi.hoisted(() => ({
+const { getStorefrontPromotionBannerViewMock, scrollRevealControllerMock, siteHeaderMock } = vi.hoisted(() => ({
   getStorefrontPromotionBannerViewMock: vi.fn(),
   scrollRevealControllerMock: vi.fn(() => null),
+  siteHeaderMock: vi.fn((props: Readonly<{ cartDrawer?: boolean }>) => {
+    void props;
+    return <header>Site header</header>;
+  }),
 }));
 
 vi.mock("@/catalog/storefront-promotion-banner-server", () => ({
   getStorefrontPromotionBannerView: getStorefrontPromotionBannerViewMock,
 }));
 vi.mock("@/components/site/site-header", () => ({
-  SiteHeader: () => <header>Site header</header>,
+  SiteHeader: siteHeaderMock,
 }));
 vi.mock("@/components/site/site-footer", () => ({
   SiteFooter: () => <footer>Site footer</footer>,
@@ -36,6 +40,7 @@ describe("public layout promotion composition", () => {
   beforeEach(() => {
     getStorefrontPromotionBannerViewMock.mockReset();
     scrollRevealControllerMock.mockClear();
+    siteHeaderMock.mockClear();
   });
 
   it("loads the safe view once and places the banner after the header and before main", async () => {
@@ -63,6 +68,7 @@ describe("public layout promotion composition", () => {
       "#main-content",
     );
     expect(screen.getByRole("banner")).toHaveTextContent("Site header");
+    expect(siteHeaderMock.mock.calls[0]?.[0]).toEqual({ cartDrawer: true });
     expect(screen.getByRole("complementary", { name: "Promotion" })).toHaveTextContent(
       "WINTER SALE: 30% OFF SITEWIDE — USE CODE WINTER30",
     );

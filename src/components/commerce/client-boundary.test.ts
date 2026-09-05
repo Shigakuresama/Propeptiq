@@ -18,6 +18,8 @@ const checkoutFormPath = "src/components/commerce/checkout-form.tsx";
 
 const clientEntries = [
   "src/components/commerce/add-to-cart-button.tsx",
+  "src/components/commerce/cart-drawer.tsx",
+  "src/components/commerce/cart-view.tsx",
   "src/components/commerce/catalog-explorer.tsx",
   "src/components/commerce/catalog-item-detail.tsx",
   "src/components/commerce/catalog-product-gallery.tsx",
@@ -34,6 +36,11 @@ const clientEntries = [
   scrollRevealClientPath,
   ...searchClientPaths,
   "src/cart/cart-provider.tsx",
+] as const;
+
+const cartDrawerClientPaths = [
+  "src/components/commerce/cart-drawer.tsx",
+  "src/components/commerce/cart-view.tsx",
 ] as const;
 
 const clientSafeDependencies = [
@@ -203,6 +210,31 @@ describe("storefront client boundary", () => {
         ).toBe(false);
       }
     }
+  });
+
+  it("keeps the cart drawer browser graph on canonical cart state and the one preview endpoint", () => {
+    const pending: string[] = [...cartDrawerClientPaths];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const contents = source(current);
+      expect(contents, `${current} environment`).not.toMatch(/\bprocess\.env\b/u);
+      expect(contents, `${current} provider authority`).not.toMatch(
+        /stripe|payment-provider|provider-repositor|checkout-service|storefront-public-server/iu,
+      );
+      for (const specifier of runtimeLocalImports(current)) {
+        expect(genericClientAuthorityViolation(specifier), `${current} -> ${specifier}`).toBe(false);
+        pending.push(resolveRuntimeLocalImportForTest(current, specifier));
+      }
+    }
+
+    const drawerGraph = [...visited].map(source).join("\n");
+    expect(drawerGraph.match(/\/api\/catalog\/preview/gu)).toHaveLength(1);
+    expect(drawerGraph).not.toMatch(/\/api\/(?:catalog|data)(?:\?|["'])/gu);
+    expect(visited).toContain("src/cart/cart-provider.tsx");
+    expect(visited).toContain("src/cart/preview-presentation.ts");
   });
 
   it.each([

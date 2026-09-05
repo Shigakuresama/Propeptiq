@@ -15,7 +15,7 @@ export default async function PublicLayout({ children }: { children: ReactNode }
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <SiteHeader />
+      <SiteHeader cartDrawer />
       <PromotionBar promotion={promotion} />
       <main id="main-content" tabIndex={-1}>
         {children}
