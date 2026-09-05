@@ -8,6 +8,7 @@ import {
   buildPublicStorefrontCatalog,
   storefrontImageMetadata,
 } from "@/catalog/storefront-public";
+import { publicCompoundResearch } from "@/content/compound-research";
 
 const {
   getPublicBrowseCatalogMock,
@@ -24,7 +25,7 @@ const {
     throw new Error("NEXT_NOT_FOUND");
   }),
   requestCacheState: { generation: 0 },
-  detailProps: [] as Array<{ product: unknown; pricing: unknown; relatedProducts: unknown; calculator: unknown }>,
+  detailProps: [] as Array<{ product: unknown; pricing: unknown; relatedProducts: unknown; calculator: unknown; research: unknown }>,
 }));
 
 vi.mock("react", async (importOriginal) => {
@@ -62,7 +63,7 @@ vi.mock("@/components/site/page-transition", () => ({
   PageTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 vi.mock("@/components/commerce/catalog-item-detail", () => ({
-  CatalogItemDetail: (props: { product: { name: string }; pricing: unknown; relatedProducts: unknown; calculator: unknown }) => { detailProps.push(props); return <h1>{props.product.name}</h1>; },
+  CatalogItemDetail: (props: { product: { name: string }; pricing: unknown; relatedProducts: unknown; calculator: unknown; research: unknown }) => { detailProps.push(props); return <h1>{props.product.name}</h1>; },
 }));
 
 import CatalogItemPage, { generateMetadata } from "./page";
@@ -186,5 +187,74 @@ describe("retained catalog item route", () => {
     expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
     expect(getCalculatorMock).toHaveBeenCalledOnce();
     expect(detailProps[0]?.calculator).toBe(calculator);
+  });
+
+  it("passes one exact verified bibliography entry and never the entire registry", async () => {
+    const params = Promise.resolve({ slug: "tirzepatide" });
+    await generateMetadata({ params });
+    render(await CatalogItemPage({ params }));
+
+    const research = detailProps[0]?.research;
+    expect(research).toBe(publicCompoundResearch.compounds.find((entry) => entry.productSlug === "tirzepatide"));
+    expect(research).toMatchObject({
+      productSlug: "tirzepatide",
+      studies: [{ pmid: "35658024" }, { pmid: "37385275" }],
+    });
+    expect(research).not.toHaveProperty("compounds");
+    expect(JSON.stringify(research)).not.toMatch(/studiedAmount|outcomeSummary|verificationStatus|reviewedOn|benefitClaim|mechanism/u);
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["5-amino-1mq", "5-amino-1mq"],
+    ["aod-9604", "aod-9604"],
+    ["bpc-157", "bpc-157"],
+    ["cargrilintide", "cagrilintide"],
+    ["cjc-1295-with-dac", "cjc-1295-with-dac"],
+    ["ghk-cu", "ghk-cu"],
+    ["hcg", "hcg"],
+    ["igf-1-lr3", "igf-1-lr3"],
+    ["ipamorelin", "ipamorelin"],
+    ["mots-c", "mots-c"],
+    ["nad-plus", "nad-plus"],
+    ["retatrutide", "retatrutide"],
+    ["semaglutide", "semaglutide"],
+    ["sermorelin-acetate", "sermorelin-acetate"],
+    ["survodutide", "survodutide"],
+    ["tesmorelin", "tesamorelin"],
+    ["tirzepatide", "tirzepatide"],
+  ])("joins the exact approved compound on the %s product route", async (slug, compoundId) => {
+    render(await CatalogItemPage({ params: Promise.resolve({ slug }) }));
+    expect(detailProps[0]?.research).toMatchObject({ id: compoundId, productSlug: slug });
+    expect(detailProps[0]?.research).not.toHaveProperty("compounds");
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
+  });
+
+  it("does not infer a bibliography for an unmapped compound or similarly named blend", async () => {
+    const canonical = testCanonicalProduct([], { slug: "tirzepatide-blend" });
+    getPublicStorefrontViewMock.mockResolvedValue({
+      catalog: { ...projectedCatalog, products: [canonical] },
+      pricing: { mode: "test", evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] },
+    });
+    render(await CatalogItemPage({ params: Promise.resolve({ slug: canonical.slug }) }));
+    expect(detailProps[0]?.research).toBeNull();
+  });
+
+  it("keeps bibliography absent for a browse-only record even when its slug matches", async () => {
+    const browseCatalog = buildPublicStorefrontCatalog({
+      configuredPublicationId: browseCatalogPublicationId,
+      catalogData: { products: [], bindings: { products: [], variants: [] } },
+      runtimeVariantFacts: [],
+      controlledContent: [],
+      verifiedImageMetadata: storefrontImageMetadata,
+    });
+    getPublicStorefrontViewMock.mockResolvedValue({
+      catalog: browseCatalog,
+      pricing: { mode: "test", evaluatedAt: "2026-08-31T12:00:00.000Z", automaticPromotions: [] },
+    });
+    render(await CatalogItemPage({ params: Promise.resolve({ slug: "tirzepatide" }) }));
+    expect(detailProps[0]?.product).toMatchObject({ kind: "browse_only", slug: "tirzepatide" });
+    expect(detailProps[0]?.research).toBeNull();
+    expect(getPublicStorefrontViewMock).toHaveBeenCalledOnce();
   });
 });

@@ -10,13 +10,15 @@ import {
   type PublicStorefrontPricingContext,
 } from "@/catalog/storefront-price-presentation";
 import type { PublicConcentrationCalculatorConfiguration } from "@/domain/concentration";
-import { CatalogProductVisual } from "./catalog-product-visual";
+import type { PublicCompoundResearchEntry } from "@/content/compound-research-public";
+import { CompoundResearchSection } from "./compound-research-section";
+import { CatalogProductGallery } from "./catalog-product-gallery";
 import { LaboratoryConcentrationCalculator } from "./laboratory-concentration-calculator";
 import { ProductInformationSections } from "./product-information-sections";
 import { ProductPurchasePanel } from "./product-purchase-panel";
 import { RelatedProductsCarousel } from "./related-products-carousel";
 
-export function CatalogItemDetail({ calculator, product, pricing, relatedProducts }: { calculator: PublicConcentrationCalculatorConfiguration | null; product: PublicStorefrontProduct; pricing: PublicStorefrontPricingContext; relatedProducts: readonly Extract<PublicStorefrontProduct, { kind: "canonical" }>[] }) {
+export function CatalogItemDetail({ calculator, product, pricing, relatedProducts, research = null }: { calculator: PublicConcentrationCalculatorConfiguration | null; product: PublicStorefrontProduct; pricing: PublicStorefrontPricingContext; relatedProducts: readonly Extract<PublicStorefrontProduct, { kind: "canonical" }>[]; research?: PublicCompoundResearchEntry | null }) {
   const canonical = product.kind === "canonical";
   const configuredDefaultVariantId = product.kind === "canonical" && product.variants.some(
     (variant) => variant.id === product.defaultVariantId,
@@ -103,10 +105,8 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
         <div
           className="catalog-detail-image lg:col-start-1 lg:row-span-2 lg:row-start-1"
         >
-          <CatalogProductVisual
+          <CatalogProductGallery
             product={product}
-            priority
-            sizes="(min-width: 1024px) 55vw, calc(100vw - 2rem)"
             variantLabel={visualVariantLabel}
             discountPercent={visualDiscountPercent}
           />
@@ -163,6 +163,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
         </div>
       </div>
       {canonical ? <ProductInformationSections records={product.content} /> : null}
+      {canonical ? <CompoundResearchSection research={research} /> : null}
       {canonical && calculator ? (
         <LaboratoryConcentrationCalculator calculator={calculator} />
       ) : null}

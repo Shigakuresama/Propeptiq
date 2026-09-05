@@ -6,6 +6,7 @@ export type ControlledContentRecord = Readonly<{
     | "why_choose"
     | "faq"
     | "legal_notice"
+    | "product_description"
     | "product_information"
     | "calculator_copy";
   status: "draft" | "approved" | "retired";
@@ -38,8 +39,8 @@ export type ApprovedHomepageContent = Readonly<{
   faqs: readonly ApprovedFaqEntry[];
 }>;
 
-const APPROVAL_NOTE = "Owner-approved neutral storefront content.";
-const REVIEWED_AT = "2026-09-04T00:00:00.000-07:00";
+const APPROVAL_NOTE =
+  "Owner-authorized neutral placeholder copy; replace with final business-reviewed content.";
 
 function homepageRecord(
   id: string,
@@ -56,7 +57,7 @@ function homepageRecord(
     body,
     sourceReferences: Object.freeze([...sourceReferences]),
     approvalNote: APPROVAL_NOTE,
-    reviewedAt: REVIEWED_AT,
+    reviewedAt: null,
     effectiveAt: null,
   });
 }
@@ -66,42 +67,42 @@ const homepageContentRecords: readonly ControlledContentRecord[] = Object.freeze
     "owner-supplied-records",
     "why_choose",
     "Catalog clarity",
-    "Product names, categories, and supplied configurations follow one consistent record format, separate from price, inventory, and checkout status.",
+    "Find product names and configurations in a consistent, easy-to-compare format.",
     ["/catalog"],
   ),
   homepageRecord(
     "clear-purchase-states",
     "why_choose",
-    "Honest purchase states",
-    "Every catalog entry states whether pricing is active, pending, or unavailable, while checkout readiness remains a separate verified state.",
+    "Clear availability",
+    "See current pricing and purchase availability alongside each listed configuration.",
     ["/catalog", "/cart"],
   ),
   homepageRecord(
     "exact-variant-identity",
     "why_choose",
     "Exact variant selection",
-    "The cart tracks the exact selected configuration, and different variants remain clearly separated.",
+    "Choose the configuration you need, with each variant kept separate in your cart.",
     ["/cart"],
   ),
   homepageRecord(
     "visible-quantity-pricing",
     "why_choose",
-    "Pricing that updates",
-    "Quantity, discount, savings, and subtotal update together as the selected configuration or quantity changes.",
+    "Transparent quantity pricing",
+    "Compare per-bottle prices, discounts, savings, and totals as you adjust quantity.",
     ["/catalog"],
   ),
   homepageRecord(
     "shared-search-index",
     "why_choose",
     "Search from anywhere",
-    "Catalog search and the permanent site search share the same approved product and information index.",
+    "Find products and catalog information through search on every public page.",
     ["/catalog"],
   ),
   homepageRecord(
     "research-use-boundary",
     "why_choose",
-    "A visible research-use boundary",
-    "The catalog is limited to legitimate laboratory, analytical, educational, and other nonclinical research contexts under the site's current policy.",
+    "Research-use focus",
+    "Browse materials listed for nonclinical laboratory and research contexts under our Research-Use Policy.",
     ["/research-use-policy"],
   ),
   homepageRecord(
@@ -174,6 +175,7 @@ function isControlledContentKind(
   return value === "why_choose" ||
     value === "faq" ||
     value === "legal_notice" ||
+    value === "product_description" ||
     value === "product_information" ||
     value === "calculator_copy";
 }

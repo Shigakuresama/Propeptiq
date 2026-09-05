@@ -3,6 +3,21 @@ import "server-only";
 import claimsAuditJson from "../../content/claims-audit.json";
 import compoundsJson from "../../content/compounds.json";
 import studiesJson from "../../content/studies.json";
+import type {
+  EvidenceContext,
+  PublicCompoundResearch,
+  PublicCompoundResearchEntry,
+  PublicCompoundStudy,
+  StrongestEvidence,
+  StudyDesign,
+} from "./compound-research-public";
+
+export type {
+  PublicCompoundResearch,
+  PublicCompoundResearchEntry,
+  PublicCompoundStudy,
+  StrongestEvidence,
+} from "./compound-research-public";
 
 const INVALID_RESEARCH_DATA = "Invalid compound research data.";
 const REVIEWED_ON = "2026-09-04";
@@ -38,41 +53,6 @@ const strongestEvidenceValues = Object.freeze([
   "human_rct",
   "in_vitro_only",
 ] as const);
-
-type StudyDesign = (typeof studyDesigns)[number];
-type EvidenceContext = (typeof evidenceContexts)[number];
-export type StrongestEvidence = (typeof strongestEvidenceValues)[number];
-
-export type PublicCompoundStudy = Readonly<{
-  id: string;
-  pmid: string;
-  url: string;
-  title: string;
-  firstAuthor: string;
-  year: number;
-  journal: string;
-  design: StudyDesign;
-  evidenceContext: EvidenceContext;
-  sampleSize: number | null;
-  population: string | null;
-  duration: string | null;
-  doi: string | null;
-}>;
-
-export type PublicCompoundResearchEntry = Readonly<{
-  id: string;
-  productSlug: string;
-  displayName: string;
-  alternateNames: readonly string[];
-  strongestEvidence: StrongestEvidence;
-  identityCaveat: string | null;
-  studies: readonly PublicCompoundStudy[];
-}>;
-
-export type PublicCompoundResearch = Readonly<{
-  schemaVersion: 1;
-  compounds: readonly PublicCompoundResearchEntry[];
-}>;
 
 type ParsedStudy = PublicCompoundStudy & Readonly<{
   compoundId: string;

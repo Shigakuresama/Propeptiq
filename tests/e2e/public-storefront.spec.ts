@@ -53,10 +53,82 @@ type PublicRoute =
   | "/"
   | "/catalog"
   | "/catalog/items/tirzepatide"
-  | "/catalog/synthetic-reference-alpha"
+  | "/catalog/tirzepatide"
   | "/cart"
   | "/quality-records"
   | "/research-use-policy";
+
+test("six-view product gallery loads all scenes and keeps keyboard, focus, and geometry stable", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  const scenes = ["Front", "Three-quarter", "Multi-vial study", "Copy-space detail", "Overhead", "Ambient studio"];
+
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/catalog/items/tirzepatide");
+    const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
+    const panel = gallery.getByRole("tabpanel");
+    const before = await panel.boundingBox();
+    expect(before).not.toBeNull();
+    expect(before!.width / before!.height).toBeCloseTo(4 / 3, 2);
+    const sources = new Set<string>();
+    for (let index = 0; index < scenes.length; index++) {
+      await gallery.getByRole("tab", { name: scenes[index]!, exact: true }).click();
+      const image = gallery.getByRole("img");
+      await expect(image).toHaveCount(1);
+      await expect(image).toHaveAttribute("alt", `${scenes[index]} AI-generated catalog illustration for Tirzepatide`);
+      await expect.poll(() => image.evaluate((node) => (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0)).toBe(true);
+      sources.add(await image.getAttribute("src") ?? "");
+      await expect(gallery.getByRole("status")).toHaveText(`View ${index + 1} of 6: ${scenes[index]}`);
+      expect((await panel.boundingBox())!.height).toBeCloseTo(before!.height, 1);
+      await expect(gallery.locator(".catalog-product-visual__discount")).toHaveCount(1);
+      await expect(gallery.getByText("AI-generated catalog illustration — not actual product photography.", { exact: true })).toHaveCount(1);
+    }
+    expect(sources.size).toBe(6);
+    const front = gallery.getByRole("tab", { name: "Front", exact: true });
+    await front.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(gallery.getByRole("tab", { name: "Three-quarter", exact: true })).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(gallery.getByRole("tab", { name: "Ambient studio", exact: true })).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(front).toBeFocused();
+    const next = gallery.getByRole("button", { name: "Next product illustration" });
+    await next.click();
+    await expect(next).toBeFocused();
+    await expect(gallery.getByRole("status")).toHaveText("View 2 of 6: Three-quarter");
+    for (const control of await gallery.getByRole("button").all()) {
+      const rect = await control.boundingBox();
+      expect(rect!.width).toBeGreaterThanOrEqual(44);
+      expect(rect!.height).toBeGreaterThanOrEqual(44);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    expect((await new AxeBuilder({ page }).include(".catalog-product-gallery").analyze()).violations).toEqual([]);
+    await gallery.screenshot({ path: path.resolve(process.cwd(), `.superpowers/sdd/2026-09-04-propeptiq-storefront-completion/gallery-${width}.png`) });
+  }
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const gallery = page.locator(".catalog-product-gallery");
+  await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transition-duration", "0s");
+  await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transform", "none");
+  expect(errors).toEqual([]);
+});
+
+test("six-view product gallery keeps a visible front image with JavaScript disabled", async ({ browser }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false, reducedMotion: "reduce", viewport: { width: 375, height: 1000 } });
+  try {
+    const page = await context.newPage();
+    await page.goto("http://127.0.0.1:4631/catalog/items/tirzepatide");
+    const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
+    await expect(gallery.getByRole("img")).toBeVisible();
+    await expect(gallery.getByRole("status")).toHaveText("View 1 of 6: Front");
+    await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transform", "none");
+    await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transition-duration", "0s");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  } finally {
+    await context.close();
+  }
+});
 
 const screenshotDirectory = path.resolve(
   process.cwd(),
@@ -784,7 +856,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
     rectanglesIntersect(desktopTriggerBounds, desktopDisclosureBounds),
     `1440x900 search/image disclosure collision: ${JSON.stringify({ desktopDisclosureBounds, desktopTriggerBounds })}`,
   ).toBe(false);
-  const desktopImageBounds = await clientRect(page.locator(".catalog-detail-image"));
+  const desktopImageBounds = await clientRect(page.locator(".catalog-product-gallery__panel"));
   const desktopTitleBounds = await clientRect(
     page.getByRole("heading", { level: 1, name: "Tirzepatide" }),
   );
@@ -1188,7 +1260,8 @@ test("site search launcher does not obscure the visible primary cart action", as
 }) => {
   await page.setViewportSize({ width: 390, height: 520 });
   const requests = await interceptFictionalSearch(page);
-  await page.goto("/catalog/synthetic-reference-alpha");
+  await page.goto("/cart");
+  await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
   await seedLocalTestCart(page);
   await page.goto("/cart");
 
@@ -1231,8 +1304,10 @@ test("public route /catalog/items/tirzepatide renders the shared restriction and
   await expectPublicRouteRestrictionAndAccessibility(page, "/catalog/items/tirzepatide");
 });
 
-test("public route /catalog/synthetic-reference-alpha renders the shared restriction and passes axe", async ({ page }) => {
-  await expectPublicRouteRestrictionAndAccessibility(page, "/catalog/synthetic-reference-alpha");
+test("public legacy product route redirects to its canonical page with the shared restriction and passes axe", async ({ page }) => {
+  await expectPublicRouteRestrictionAndAccessibility(page, "/catalog/tirzepatide");
+  await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide$/u);
+  await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
 });
 
 test("public route /cart renders the shared restriction and passes axe", async ({ page }) => {
@@ -1247,7 +1322,7 @@ test("public route /research-use-policy renders the shared restriction and passe
   await expectPublicRouteRestrictionAndAccessibility(page, "/research-use-policy");
 });
 
-test("synthetic commerce pages still identify every displayed record as fictional demo data", async ({
+test("synthetic records stay out of canonical product routes and quality records identify fictional demo data", async ({
   page,
 }) => {
   await page.goto("/catalog/synthetic-reference-alpha");
@@ -1256,9 +1331,16 @@ test("synthetic commerce pages still identify every displayed record as fictiona
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "Synthetic Reference Alpha — Demo Only",
+      name: "Catalog record unavailable.",
     }),
   ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Synthetic Reference Alpha — Demo Only" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(0);
+  await expect(page.locator("main#main-content")).toBeVisible();
+  await expect(page.getByText("For legitimate laboratory and research use only.").first()).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations, "legacy unknown-product accessibility").toEqual([]);
+  await page.goto("/quality-records");
+  await expect(page.getByRole("heading", { level: 1, name: "Released-lot records with approved public evidence." })).toBeVisible();
 
   const notice = page.getByRole("note");
   await expect(
@@ -1270,26 +1352,41 @@ test("synthetic commerce pages still identify every displayed record as fictiona
       { exact: true },
     ),
   ).toBeVisible();
+
+  // This existing local demo surface, not the canonical product route, owns the fictional records.
+  const records = page.getByRole("list", { name: "Public quality record index" }).locator(":scope > li");
+  expect(await records.count()).toBeGreaterThan(0);
+  for (const record of await records.all()) {
+    await expect(record.getByText("Synthetic demo quality record", { exact: true })).toBeVisible();
+    await expect(record.getByRole("heading", { level: 3 })).toContainText("Demo Only");
+    await expect(record.getByText("Public synthetic demo record", { exact: true })).toBeVisible();
+  }
 });
 
 test("anonymous canonical local/test cart survives reload and preserves only variant IDs and quantities", async ({
   page,
 }) => {
-  await page.goto("/catalog/synthetic-reference-alpha");
+  await page.goto("/cart");
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "Synthetic Reference Alpha — Demo Only",
+      name: "Requested IDs, reconciled with server facts.",
     }),
   ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
 
   await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(0);
+  // The guarded local driver resolves this explicitly synthetic variant through /api/catalog/preview.
   await seedLocalTestCart(page);
   await expect(page.getByRole("link", { name: /Cart, 1 requested unit/ })).toBeVisible();
   await page.getByRole("link", { name: /Cart, 1 requested unit/ }).click();
 
-  await expect(page.getByText("Synthetic Reference Alpha — Demo Only").first()).toBeVisible();
-  await expect(page.getByText("$24.00", { exact: true })).toBeVisible();
+  const syntheticLine = page.getByRole("list", { name: "Cart lines" }).getByRole("listitem");
+  await expect(syntheticLine).toHaveCount(1);
+  await expect(syntheticLine.getByRole("heading", { name: "Synthetic Reference Alpha — Demo Only", exact: true })).toBeVisible();
+  await expect(syntheticLine.getByRole("strong")).toHaveText("$24.00");
+  await expect(syntheticLine.getByRole("definition").filter({ hasText: /^\$24\.00$/u })).toBeVisible();
+  await expect(page.getByLabel("Order summary").getByText("$24.00", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to sign in" })).toBeEnabled();
 
   const persisted = await page.evaluate(() =>
@@ -1323,7 +1420,8 @@ test("anonymous canonical local/test cart survives reload and preserves only var
 });
 
 test("cart quantity controls are keyboard operable", async ({ page }) => {
-  await page.goto("/catalog/synthetic-reference-alpha");
+  await page.goto("/cart");
+  await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
   await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(0);
   await seedLocalTestCart(page);
   await page.goto("/cart");
@@ -1395,7 +1493,8 @@ test("responsive widths and the 512px 200%-zoom reflow proxy have no horizontal 
 }) => {
   for (const width of [375, 768, 1024, 1440, 512]) {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
-    await page.goto("/catalog/synthetic-reference-alpha");
+    await page.goto("/catalog/items/tirzepatide");
+    await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -1826,24 +1925,28 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
         return url.searchParams.get("url") ?? url.pathname;
       };
       return {
-        backdrop: pathFor(".catalog-product-visual__backdrop"),
+        signature: visual.getAttribute("data-visual-signature"),
         base: pathFor(".catalog-product-visual__base"),
         mode: visual.getAttribute("data-visual-presentation"),
       };
     }),
   );
   expect(visualSources).toHaveLength(56);
-  expect(new Set(visualSources.map(({ backdrop }) => backdrop)).size).toBe(56);
-  expect(visualSources.every(({ backdrop, base, mode }) =>
-    typeof backdrop === "string" &&
-    backdrop.endsWith(".webp") &&
-    base === "/catalog/vial-base-v2.png" &&
-    mode === "composite_data_label_overlay"
+  expect(new Set(visualSources.map(({ signature }) => signature)).size).toBe(56);
+  expect(visualSources.every(({ signature, base, mode }) =>
+    typeof signature === "string" &&
+    signature.startsWith("PQ-") &&
+    base === "/catalog/visual-masters/front.webp" &&
+    mode === "illustration_with_catalog_data_plate"
   )).toBe(true);
 
   for (const imagePath of [
-    "/catalog/vial-base-v2.png",
-    ...visualSources.slice(0, 3).map(({ backdrop }) => backdrop!),
+    "/catalog/visual-masters/front.webp",
+    "/catalog/visual-masters/three-quarter.webp",
+    "/catalog/visual-masters/multi-vial-study.webp",
+    "/catalog/visual-masters/copy-space-detail.webp",
+    "/catalog/visual-masters/overhead.webp",
+    "/catalog/visual-masters/ambient-studio.webp",
   ]) {
     const response = await request.get(imagePath);
     expect(response.ok(), `${imagePath} illustration response`).toBe(true);
@@ -1860,16 +1963,13 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
   await expect(page.locator("main")).toContainText("Local cart preview");
 
   const imageLoaded = await page.getByRole("img", {
-    name: "Illustrative laboratory vial presentation for Tirzepatide",
+    name: "Front AI-generated catalog illustration for Tirzepatide",
   }).evaluate((image) => {
     const element = image as HTMLImageElement;
     return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0;
   });
   expect(imageLoaded).toBe(true);
-  const heroBackdrop = page.locator(
-    '.catalog-detail-image .catalog-product-visual[data-category="metabolic"] .catalog-product-visual__backdrop',
-  );
-  await expect(heroBackdrop).toHaveCSS("object-position", "50% 48%");
+  await expect(page.locator(".catalog-detail-image .catalog-product-visual__base")).toHaveCSS("object-fit", "contain");
   await expect(page.locator(".catalog-detail-image .catalog-product-visual__base")).toHaveCSS(
     "object-position",
     "50% 50%",
@@ -1895,14 +1995,13 @@ test("catalog product hierarchy keeps visual layers and longest labels inside re
       const card = page.getByRole("article", { name, exact: true });
       const frame = card.locator(".catalog-image-frame");
       const visual = frame.locator(".catalog-product-visual");
-      const backdrop = visual.locator(".catalog-product-visual__backdrop");
       const base = visual.getByRole("img", {
-        name: `Illustrative laboratory vial presentation for ${name}`,
+        name: `Front AI-generated catalog illustration for ${name}`,
       });
       const labelName = visual.locator(".catalog-product-visual__name");
       const variant = visual.locator(".catalog-product-visual__variant");
       const notice = visual.getByText("RESEARCH USE ONLY", { exact: true });
-      const disclosure = visual.getByText("Illustrative product presentation", {
+      const disclosure = visual.getByText("AI-generated catalog illustration — not actual product photography.", {
         exact: true,
       });
       const sale = visual.getByLabel(/^-[1-9]\d*%$/u);
@@ -1911,7 +2010,7 @@ test("catalog product hierarchy keeps visual layers and longest labels inside re
       await expect(card.getByRole("heading", { name, exact: true })).toBeVisible();
       await expect(base).toBeVisible();
       await expect(disclosure).toBeVisible();
-      await expect(backdrop).toHaveAttribute("aria-hidden", "true");
+      await expect(visual.getByRole("img")).toHaveCount(1);
       await expect(variant).toBeVisible();
       await expect(notice).toBeVisible();
       await expect(sale).toHaveCount(expectsSale ? 1 : 0);
@@ -1919,8 +2018,7 @@ test("catalog product hierarchy keeps visual layers and longest labels inside re
       const frameRect = await clientRect(frame);
       expect(frameRect.width / frameRect.height, `${width}px ${name} reserved ratio`).toBeCloseTo(4 / 3, 2);
       for (const [layerName, layer] of [
-        ["backdrop", backdrop],
-        ["base", base],
+        ["image frame", base.locator("..")],
         ["name", labelName],
         ["variant", variant],
         ["RUO notice", notice],
@@ -1956,10 +2054,7 @@ test("catalog product hierarchy keeps visual layers and longest labels inside re
       }
       if (width <= 375) {
         await card.hover();
-        expect(
-          rectangleFitsInside(await clientRect(frame), await clientRect(base)),
-          `${width}px ${name} hovered base containment`,
-        ).toBe(true);
+        await expect(base.locator("..")).toHaveCSS("overflow", "hidden");
       }
     }
 
@@ -1969,6 +2064,14 @@ test("catalog product hierarchy keeps visual layers and longest labels inside re
       layout.offenders.filter(({ className }) => className.includes("catalog-product-visual")),
       `${width}px catalog visual overflow offenders`,
     ).toEqual([]);
+    if (width === 375 || width === 1440) {
+      await page.locator("article.catalog-listing-card").first().scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.resolve(process.cwd(), `.superpowers/sdd/2026-09-04-propeptiq-storefront-completion/catalog-gallery-${width}.png`) });
+      await page.goto("/catalog/items/tirzepatide");
+      const imagePanel = page.locator(".catalog-product-gallery");
+      await imagePanel.evaluate((element) => window.scrollTo({ top: element.getBoundingClientRect().top + window.scrollY - 190, behavior: "instant" }));
+      await page.screenshot({ path: path.resolve(process.cwd(), `.superpowers/sdd/2026-09-04-propeptiq-storefront-completion/pdp-gallery-${width}.png`) });
+    }
   }
 });
 
@@ -1990,27 +2093,27 @@ test("navigation, homepage trust content, product research, and related records 
 
   await page.goto("/catalog/items/bpc-157");
   const heroImage = page.getByRole("img", {
-    name: "Illustrative laboratory vial presentation for BPC-157",
+    name: "Front AI-generated catalog illustration for BPC-157",
   });
   await expect(heroImage).toBeVisible();
   expect(await heroImage.evaluate((image) => {
     const url = new URL((image as HTMLImageElement).src);
     return url.searchParams.get("url") ?? url.pathname;
-  })).toBe("/catalog/vial-base-v2.png");
+  })).toBe("/catalog/visual-masters/front.webp");
   await expect(page.getByText(/BPC-157 is an owner-supplied catalog identity/u)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Product information" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Search PubMed for BPC-157" })).toHaveAttribute(
     "href",
     "https://pubmed.ncbi.nlm.nih.gov/?term=BPC-157",
   );
-  await expect(page.getByRole("region", { name: "Frequently Researched Together" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Related Products" })).toBeVisible();
   await expect(page.getByRole("list", { name: "Related products, 4 items" }).locator(":scope > li")).toHaveCount(4);
 
   const productVisuals = page.locator("main .catalog-product-visual");
   await expect(productVisuals).toHaveCount(5);
   expect(await productVisuals.evaluateAll((visuals) => visuals.every((visual) =>
-    visual.querySelectorAll("img").length === 2 &&
-    visual.getAttribute("data-visual-presentation") === "composite_data_label_overlay"
+    visual.querySelectorAll("img").length === 1 &&
+    visual.getAttribute("data-visual-presentation") === "illustration_with_catalog_data_plate"
   ))).toBe(true);
 });
 
@@ -2029,7 +2132,7 @@ test("preview item keeps the calculator gated while product information and rela
     "href",
     "https://pubmed.ncbi.nlm.nih.gov/?term=Tirzepatide",
   );
-  await expect(page.getByRole("heading", { name: "Frequently Researched Together", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Related Products", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Previous related products" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Next related products" })).toBeVisible();
   await expect(page.getByRole("list", { name: "Related products, 4 items" }).locator(":scope > li")).toHaveCount(4);
@@ -2047,7 +2150,7 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
     { amount: "10 mg · 1 bottle", base: "$69.99", name: "Retatrutide", sale: "$48.99" },
     { amount: "500 mg · 1 bottle", base: "$69.99", name: "NAD+", sale: "$48.99" },
   ] as const;
-  const targetImagePaths = new Set<string>(["/catalog/vial-base-v2.png"]);
+  const targetImagePaths = new Set<string>(["/catalog/visual-masters/front.webp"]);
   const nextImageRequest = /\/_next\/image(?:\?.*)?$/u;
 
   for (const width of [375, 1440]) {
@@ -2117,7 +2220,7 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
         expect(decodedState.complete).toBe(true);
         expect(decodedState.naturalHeight).toBeGreaterThan(0);
         expect(decodedState.naturalWidth).toBeGreaterThan(0);
-        const afterImageCompletion = await clientRect(image.locator("xpath=.."));
+        const afterImageCompletion = await clientRect(image.locator("xpath=ancestor::*[contains(@class, 'catalog-image-frame')]"));
         expect(Math.abs(afterImageCompletion.width - before.width)).toBeLessThanOrEqual(1);
         expect(Math.abs(afterImageCompletion.height - before.height)).toBeLessThanOrEqual(1);
       }
@@ -2206,7 +2309,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(radios).toHaveCount(9);
   await expect(page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`)).toBeVisible();
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`).check();
-  const pricing = page.locator("main dl");
+  const pricing = page.getByRole("status", { name: "Purchase summary" }).locator("dl");
   const tr5Pricing = await pricing.evaluate((element) => {
     const values = new Map<string, string>();
     const terms = [...element.querySelectorAll("dt")];

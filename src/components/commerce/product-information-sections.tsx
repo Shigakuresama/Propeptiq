@@ -1,44 +1,12 @@
 import { ExternalLink } from "lucide-react";
 
-import type { ApprovedStorefrontContent } from "@/content/storefront-content";
-
-type PublicLiteratureReference = Readonly<{
-  href: string;
-  term: string;
-}>;
-
-function toPublicLiteratureReference(
-  value: string,
-): PublicLiteratureReference | null {
-  try {
-    const url = new URL(value);
-    const terms = url.searchParams.getAll("term");
-    const parameterNames = [...url.searchParams.keys()];
-    if (
-      url.protocol !== "https:" ||
-      url.hostname !== "pubmed.ncbi.nlm.nih.gov" ||
-      url.port !== "" ||
-      url.username !== "" ||
-      url.password !== "" ||
-      url.pathname !== "/" ||
-      url.hash !== "" ||
-      parameterNames.length !== 1 ||
-      parameterNames[0] !== "term" ||
-      terms.length !== 1 ||
-      terms[0]!.trim().length === 0
-    ) {
-      return null;
-    }
-    return Object.freeze({ href: url.href, term: terms[0]! });
-  } catch {
-    return null;
-  }
-}
+import type { PublicStorefrontContent } from "@/catalog/storefront-public";
+import { projectPublicLiteratureReference } from "@/content/public-literature";
 
 export function ProductInformationSections({
   records,
 }: {
-  records: readonly ApprovedStorefrontContent[];
+  records: readonly PublicStorefrontContent[];
 }) {
   const visibleRecords = records.filter(
     (record) =>
@@ -64,8 +32,8 @@ export function ProductInformationSections({
 
       <div className="mt-7 grid gap-5">
         {visibleRecords.map((record) => {
-          const references = record.sourceReferences.flatMap((reference) => {
-            const projected = toPublicLiteratureReference(reference);
+          const references = record.literatureReferences.flatMap((reference) => {
+            const projected = projectPublicLiteratureReference(reference.href);
             return projected === null ? [] : [projected];
           });
           return (

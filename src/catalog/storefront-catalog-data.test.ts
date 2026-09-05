@@ -73,16 +73,19 @@ describe("canonical storefront catalog data", () => {
     ))).toBe(true);
   });
 
-  it("joins approved descriptions, controlled content, and explicit related products for every product", () => {
+  it("joins approved descriptions, controlled content, and same-category related products for every product", () => {
     const knownProductIds = new Set(
       storefrontCatalogData.products.map((product) => product.id),
+    );
+    const categoryById = new Map(
+      storefrontCatalogData.products.map((product) => [product.id, product.category]),
     );
 
     for (const product of storefrontCatalogData.products) {
       expect(product.description).toContain(product.name);
-      expect(product.contentIds).toHaveLength(2);
-      expect(new Set(product.contentIds).size).toBe(2);
-      expect(product.relatedProductIds.length).toBeGreaterThanOrEqual(2);
+      expect(product.contentIds).toHaveLength(3);
+      expect(new Set(product.contentIds).size).toBe(3);
+      expect(product.relatedProductIds.length).toBeGreaterThanOrEqual(1);
       expect(product.relatedProductIds.length).toBeLessThanOrEqual(4);
       expect(new Set(product.relatedProductIds).size).toBe(
         product.relatedProductIds.length,
@@ -90,7 +93,7 @@ describe("canonical storefront catalog data", () => {
       expect(product.relatedProductIds).not.toContain(product.id);
       expect(
         product.relatedProductIds.every((relatedId) =>
-          knownProductIds.has(relatedId)
+          knownProductIds.has(relatedId) && categoryById.get(relatedId) === product.category
         ),
       ).toBe(true);
     }

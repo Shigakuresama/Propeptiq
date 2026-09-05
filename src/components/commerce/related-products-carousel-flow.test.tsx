@@ -7,6 +7,7 @@ import { CART_STORAGE_KEY, MAX_CART_DISTINCT_ITEMS } from "@/cart/cart-storage";
 import { RelatedProductsCarousel } from "./related-products-carousel";
 import { testCanonicalProduct, testPricingContext, testPublicVariant } from "./storefront-test-fixtures";
 
+// Synthetic catalog fixtures exercise the real UI/cart components, never provider or production data.
 describe("RelatedProductsCarousel real commerce integration", () => {
   beforeEach(() => window.localStorage.clear());
 

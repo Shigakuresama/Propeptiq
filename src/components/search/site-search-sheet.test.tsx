@@ -431,10 +431,15 @@ describe("SiteSearchLauncher accessible Sheet behavior", () => {
   });
 
   it("constrains the semantic footer home brand at the ultra-narrow breakpoint", () => {
-    const ultraNarrowCss = cssAtRuleBody(globalsCss, "@media (max-width: 17rem)");
-
     const brandSelector =
       '.public-layout > footer .site-container a[href="/"][aria-label$=" home"]';
+    const brandRuleStart = globalsCss.indexOf(`${brandSelector} {`);
+    expect(brandRuleStart).toBeGreaterThanOrEqual(0);
+    const containingMediaStart = globalsCss.lastIndexOf("@media", brandRuleStart);
+    const ultraNarrowCss = cssAtRuleBody(
+      globalsCss.slice(containingMediaStart),
+      "@media (max-width: 17rem)",
+    );
     const brand = cssDeclarations(
       cssRuleBody(ultraNarrowCss, brandSelector),
     );
@@ -473,7 +478,7 @@ describe("SiteSearchLauncher accessible Sheet behavior", () => {
     expect(lane.get("left")).toBe("50%");
     expect(lane.get("transform")).toBe("translateX(-50%)");
     expect(lane.get("bottom")).toBe(
-      "calc(0.75rem + env(safe-area-inset-bottom, 0px))",
+        "calc(2rem + env(safe-area-inset-bottom, 0px))",
     );
     expect(lane.get("width")).toBe("min(24rem, calc(100vw - 1rem))");
     expect(lane.get("max-width")).toBe("calc(100vw - 1rem)");

@@ -26,10 +26,12 @@ export function CatalogListingCard({
   product,
   priority = false,
   pricing,
+  headingLevel = 2,
 }: {
   product: PublicStorefrontProduct;
   priority?: boolean;
   pricing: PublicStorefrontPricingContext;
+  headingLevel?: 2 | 3;
 }) {
   const selectedVariant =
     product.kind === "canonical"
@@ -54,6 +56,7 @@ export function CatalogListingCard({
   );
   const remainingConfigurationCount =
     product.displayConfigurations.length - visibleConfigurations.length;
+  const Heading = headingLevel === 3 ? "h3" : "h2";
   const discountPercent = selectedPresentation?.state === "priced"
     ? selectedPresentation.price.effectiveDiscountBps / 100
     : undefined;
@@ -73,9 +76,9 @@ export function CatalogListingCard({
       </div>
 
       <div className="flex flex-1 flex-col p-6 sm:p-7">
-        <h2 id={headingId} className="font-heading text-3xl leading-tight text-ink">
+        <Heading id={headingId} className="font-heading text-3xl leading-tight text-ink">
           {product.name}
-        </h2>
+        </Heading>
 
         <ul
           aria-label={`${product.name} catalog variants`}
