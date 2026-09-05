@@ -286,12 +286,19 @@ export function evaluateImagePolicy(images, options) {
     if (!after.complete || after.naturalWidth <= 0 || after.naturalHeight <= 0) {
       errors.push(`rendered image is broken or undecoded after activation: ${image.alt || image.src}`);
     }
+    if (!after.rect || after.rect.width <= 0 || after.rect.height <= 0) {
+      errors.push(`rendered image lacks positive dimensions after activation: ${image.alt || image.src}`);
+    }
+    if (after.layoutExclusion !== null && after.layoutExclusion !== undefined) {
+      errors.push(`rendered image became layout-excluded after activation: ${image.alt || image.src}`);
+    }
   }
   return { errors, hidden, visible };
 }
 
 export function evaluateClippingPolicy(records) {
   const errors = [];
+  const intentionalScrollClips = [];
   const skippedOffscreen = [];
   for (const record of records) {
     if (!record.requiredInViewport && !record.viewportRelevant) {
@@ -300,10 +307,14 @@ export function evaluateClippingPolicy(records) {
     }
     if (record.viewportClipped) errors.push(`relevant target is viewport-clipped: ${record.label}`);
     for (const ancestor of record.ancestorClips) {
-      errors.push(`relevant target is ancestor-clipped: ${record.label} by ${ancestor}`);
+      if (ancestor.intentionalScroll === true && ancestor.axis === "x") {
+        intentionalScrollClips.push({ ...ancestor, label: record.label });
+        continue;
+      }
+      errors.push(`relevant target is ancestor-clipped: ${record.label} by ${ancestor.selector}`);
     }
   }
-  return { errors, skippedOffscreen };
+  return { errors, intentionalScrollClips, skippedOffscreen };
 }
 
 export function evaluateControlPolicy(input) {
@@ -522,13 +533,103 @@ function delay(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
 
-async function terminateOwnedProcessTree(handle) {
+export async function awaitOwnedTerminationHelper(helper, options = {}) {
+  const timeout = options.timeout ?? delay;
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  const settled = await Promise.race([
+    helper.completed.then(
+      (result) => ({ kind: "completed", result }),
+      (error) => ({ error, kind: "failed" }),
+    ),
+    timeout(timeoutMs).then(() => ({ kind: "timeout" })),
+  ]);
+  if (settled.kind === "timeout") {
+    throw new Error(`Owned taskkill helper PID ${helper.child.pid ?? "unknown"} did not complete within ${timeoutMs}ms`);
+  }
+  if (settled.kind === "failed") {
+    throw new AggregateError(
+      [settled.error instanceof Error ? settled.error : new Error(String(settled.error))],
+      `Owned taskkill helper PID ${helper.child.pid ?? "unknown"} failed`,
+    );
+  }
+  return settled.result;
+}
+
+export async function finalizeOwnedBrowserCase(shell, failed, options, operations = {}) {
+  if (shell.finalized) return shell.finalization;
+  const makeDirectory = operations.makeDirectory ?? mkdirSync;
+  const artifacts = [];
+  const errors = [];
+  let artifactDirectoryReady = !failed;
+  if (failed) {
+    try {
+      makeDirectory(options.artifactDirectory, { recursive: true });
+      artifactDirectoryReady = true;
+    } catch (error) {
+      errors.push(`failure artifact directory creation failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (artifactDirectoryReady && shell.page) {
+      const screenshotPath = join(options.artifactDirectory, `${shell.artifactStem}-failure.png`);
+      try {
+        await shell.page.screenshot({ animations: "allow", caret: "initial", fullPage: true, path: screenshotPath });
+        artifacts.push(relative(options.outputDirectory, screenshotPath).replaceAll("\\", "/"));
+      } catch (error) {
+        errors.push(`failure screenshot capture failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } else if (artifactDirectoryReady) {
+      errors.push("failure screenshot unavailable before page creation");
+    }
+  }
+  if (shell.traceStarted) {
+    try {
+      if (failed && artifactDirectoryReady) {
+        const tracePath = join(options.artifactDirectory, `${shell.artifactStem}-failure-trace.zip`);
+        await shell.context.tracing.stop({ path: tracePath });
+        artifacts.push(relative(options.outputDirectory, tracePath).replaceAll("\\", "/"));
+      } else {
+        await shell.context.tracing.stop();
+      }
+    } catch (error) {
+      errors.push(`context trace finalization failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  try {
+    await shell.context.close();
+  } catch (error) {
+    errors.push(`browser context close failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  shell.finalized = true;
+  shell.finalization = { artifacts, errors };
+  return shell.finalization;
+}
+
+export async function setupOwnedBrowserCase(shell, setup, finalizationOptions, operations = {}) {
+  try {
+    await setup(shell);
+    return shell;
+  } catch (setupError) {
+    const closure = await finalizeOwnedBrowserCase(shell, true, finalizationOptions, operations);
+    if (closure.errors.length > 0) {
+      throw new AggregateError(
+        [
+          setupError instanceof Error ? setupError : new Error(String(setupError)),
+          ...closure.errors.map((message) => new Error(message)),
+        ],
+        "Browser case setup and evidence finalization both failed",
+      );
+    }
+    throw setupError;
+  }
+}
+
+async function terminateOwnedProcessTree(handle, options = {}) {
   if (!handle || handle.child.exitCode !== null || handle.child.signalCode !== null) return;
   if (process.platform === "win32" && Number.isSafeInteger(handle.child.pid)) {
     const taskkill = spawnCaptured("taskkill.exe", ["/PID", String(handle.child.pid), "/T", "/F"], {
       env: buildChildEnvironment(process.env),
     });
-    const taskkillOutcome = await taskkill.completed;
+    options.registerHelper?.(taskkill);
+    const taskkillOutcome = await awaitOwnedTerminationHelper(taskkill);
     if (taskkillOutcome.code !== 0) {
       throw new Error(`Owned process tree termination failed for PID ${handle.child.pid}: taskkill exit ${taskkillOutcome.code}${taskkillOutcome.signal ? ` (${taskkillOutcome.signal})` : ""}`);
     }
@@ -570,7 +671,14 @@ function createRuntimeDependencies() {
     serverStageRecorded: false,
     stages: [],
     startTime: new Date().toISOString(),
+    terminationHelpers: [],
   };
+
+  const terminateOwned = (handle) => terminateOwnedProcessTree(handle, {
+    registerHelper(helper) {
+      state.terminationHelpers.push(helper);
+    },
+  });
 
   function ensureNotInterrupted() {
     if (state.interrupted) throw new Error(`Task 18F was interrupted by ${state.interrupted}`);
@@ -648,7 +756,7 @@ function createRuntimeDependencies() {
       console.log(`Preflight PASS: root dotenv names=${snapshot.dotenvFiles.join(",") || "none"}; ports ${UNUSED_CONTROL_PORT}/${SERVER_PORT}=free; build/lab locks=absent`);
     },
     async ownedChildrenAlive() {
-      return [state.browser, state.activeStage, state.server].some((handle) => (
+      return [state.browser, state.activeStage, state.server, ...state.terminationHelpers].some((handle) => (
         handle && handle.child.exitCode === null && handle.child.signalCode === null
       ));
     },
@@ -753,7 +861,7 @@ function createRuntimeDependencies() {
         if (outcome.kind === "server") {
           const serverError = new Error(`Owned Next server exited during Playwright (code ${outcome.result.code}, signal ${outcome.result.signal})`);
           try {
-            await terminateOwnedProcessTree(browser);
+            await terminateOwned(browser);
           } catch (cleanupError) {
             browserError = combineErrors(serverError, cleanupError, "Server exit and browser cleanup both failed");
           }
@@ -812,7 +920,7 @@ function createRuntimeDependencies() {
       return server;
     },
     async stopBrowser() {
-      if (state.browser) await terminateOwnedProcessTree(state.browser);
+      if (state.browser) await terminateOwned(state.browser);
       state.browser = null;
     },
     async stopServer(server) {
@@ -820,7 +928,7 @@ function createRuntimeDependencies() {
       let stopError = null;
       let outcome = null;
       try {
-        await terminateOwnedProcessTree(server);
+        await terminateOwned(server);
         state.server = null;
       } catch (error) {
         stopError = combineErrors(stopError, error, "Owned server termination failed");
@@ -938,7 +1046,7 @@ function createRuntimeDependencies() {
       for (const [label, handle] of [["browser", state.browser], ["active stage", state.activeStage], ["server", state.server]]) {
         if (!handle) continue;
         try {
-          await terminateOwnedProcessTree(handle);
+          await terminateOwned(handle);
         } catch (error) {
           interruptError = combineErrors(interruptError, error, `Interrupt cleanup failed for owned ${label}`);
         }

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join } from "node:path";
 
+import * as performanceHarness from "./run-playwright-performance.mjs";
+
 import {
   buildBrowserContextOptions,
   buildChildEnvironment,
@@ -99,7 +101,7 @@ test("image policy fails rendered zero or broken images and records exact layout
 test("image policy gates pre-activation reservation and post-activation decode evidence", () => {
   const healthy = {
     alt: "Lazy product",
-    after: { complete: true, naturalHeight: 600, naturalWidth: 800, rect: rect(0, 0, 320, 240) },
+    after: { complete: true, layoutExclusion: null, naturalHeight: 600, naturalWidth: 800, rect: rect(0, 0, 320, 240) },
     before: { complete: false, layoutExclusion: null, naturalHeight: 0, naturalWidth: 0, rect: rect(0, 900, 320, 240) },
     src: "/lazy.webp",
   };
@@ -115,6 +117,20 @@ test("image policy gates pre-activation reservation and post-activation decode e
     expectedHiddenAltTexts: [],
     requireVisible: true,
   }).errors.some((error) => /after activation/u.test(error)));
+  assert.ok(evaluateImagePolicy([{ ...healthy, after: { ...healthy.after, rect: rect(0, 0, 0, 0) } }], {
+    expectedHiddenAltTexts: [],
+    requireVisible: true,
+  }).errors.some((error) => /lacks positive dimensions after activation/u.test(error)));
+  assert.ok(evaluateImagePolicy([{
+    ...healthy,
+    after: {
+      ...healthy.after,
+      layoutExclusion: { reason: "ancestor-display-none", selector: "div.collapsed" },
+    },
+  }], {
+    expectedHiddenAltTexts: [],
+    requireVisible: true,
+  }).errors.some((error) => /became layout-excluded after activation/u.test(error)));
 });
 
 test("control policy requires inherited-fixed coverage and detects real rectangle overlap", () => {
@@ -147,17 +163,113 @@ test("control policy requires inherited-fixed coverage and detects real rectangl
   }).errors.some((error) => /visible search control set is empty/u.test(error)));
 });
 
-test("clipping policy rejects relevant clipped targets but records intentional offscreen scroll content", () => {
+test("clipping policy rejects genuine clipping but records intentional horizontal carousel clipping", () => {
   const result = evaluateClippingPolicy([
     { ancestorClips: [], label: "Search", requiredInViewport: true, viewportClipped: false, viewportRelevant: true },
-    { ancestorClips: ["div.card"], label: "Visible heading", requiredInViewport: false, viewportClipped: false, viewportRelevant: true },
-    { ancestorClips: ["div.intentional-scroll"], label: "Offscreen result", requiredInViewport: false, viewportClipped: true, viewportRelevant: false },
+    {
+      ancestorClips: [{ axis: "x", intentionalScroll: false, selector: "div.card" }],
+      label: "Visible heading",
+      requiredInViewport: false,
+      viewportClipped: false,
+      viewportRelevant: true,
+    },
+    {
+      ancestorClips: [{
+        axis: "x",
+        intentionalScroll: true,
+        selector: 'ul[role="list"][aria-label^="Related products,"]',
+      }],
+      label: "Partially visible related product",
+      requiredInViewport: false,
+      viewportClipped: false,
+      viewportRelevant: true,
+    },
+    { ancestorClips: [], label: "Earlier footer link", requiredInViewport: false, viewportClipped: true, viewportRelevant: false },
   ]);
   assert.deepEqual(result.errors, ["relevant target is ancestor-clipped: Visible heading by div.card"]);
   assert.equal(result.skippedOffscreen.length, 1);
+  assert.equal(result.intentionalScrollClips.length, 1);
   assert.ok(evaluateClippingPolicy([
     { ancestorClips: [], label: "Purchase", requiredInViewport: true, viewportClipped: true, viewportRelevant: true },
   ]).errors.some((error) => /viewport-clipped: Purchase/u.test(error)));
+});
+
+test("owned termination helper timeout is retained while an owned child keeps the lock", async () => {
+  assert.equal(typeof performanceHarness.awaitOwnedTerminationHelper, "function");
+  let helperTimeout;
+  await assert.rejects(async () => {
+    try {
+      await performanceHarness.awaitOwnedTerminationHelper({
+        child: { exitCode: null, pid: 8123, signalCode: null },
+        completed: new Promise(() => {}),
+      }, { timeout: async () => undefined, timeoutMs: 5_000 });
+    } catch (error) {
+      helperTimeout = error;
+      throw error;
+    }
+  },
+    /taskkill helper PID 8123 did not complete within 5000ms/u,
+  );
+  const { dependencies, events, reportedErrors } = labDouble({
+    aliveAfterStop: true,
+    failStage: "browser",
+    stopServerError: helperTimeout,
+  });
+  await assert.rejects(performanceHarness.orchestratePerformanceLab(dependencies), AggregateError);
+  assert.equal(events.includes("lock:release"), false);
+  const serialized = JSON.stringify(reportedErrors[0]);
+  assert.match(serialized, /taskkill helper PID 8123 did not complete within 5000ms/u);
+  assert.match(serialized, /Owned child remains alive; preserving the lab ownership lock/u);
+});
+
+test("context setup failure is retained and finalizes the created context", async () => {
+  assert.equal(typeof performanceHarness.setupOwnedBrowserCase, "function");
+  const events = [];
+  const shell = {
+    artifactStem: "001-setup",
+    context: {
+      close: async () => { events.push("context:close"); },
+      tracing: { stop: async () => { events.push("trace:stop"); } },
+    },
+    page: {
+      screenshot: async () => { events.push("screenshot"); },
+    },
+    traceStarted: true,
+  };
+  await assert.rejects(performanceHarness.setupOwnedBrowserCase(
+    shell,
+    async () => { events.push("setup"); throw new Error("observer setup failed"); },
+    { artifactDirectory: "artifacts", outputDirectory: "." },
+    { makeDirectory: () => { events.push("mkdir"); } },
+  ), /observer setup failed/u);
+  assert.deepEqual(events, ["setup", "mkdir", "screenshot", "trace:stop", "context:close"]);
+  assert.equal(shell.finalized, true);
+  assert.deepEqual(shell.finalization.errors, []);
+});
+
+test("artifact directory failure cannot prevent trace finalization or context close", async () => {
+  assert.equal(typeof performanceHarness.finalizeOwnedBrowserCase, "function");
+  const events = [];
+  const shell = {
+    artifactStem: "002-artifact-output",
+    context: {
+      close: async () => { events.push("context:close"); },
+      tracing: {
+        stop: async (options) => { events.push(options ? "trace:path" : "trace:discard"); },
+      },
+    },
+    page: { screenshot: async () => { events.push("screenshot"); } },
+    traceStarted: true,
+  };
+  const closure = await performanceHarness.finalizeOwnedBrowserCase(
+    shell,
+    true,
+    { artifactDirectory: "artifacts", outputDirectory: "." },
+    { makeDirectory: () => { events.push("mkdir"); throw new Error("disk denied"); } },
+  );
+  assert.deepEqual(events, ["mkdir", "trace:discard", "context:close"]);
+  assert.deepEqual(closure.artifacts, []);
+  assert.deepEqual(closure.errors, ["failure artifact directory creation failed: disk denied"]);
 });
 
 test("LCP phases prefer requestStart and clamp early or continuing resources without negative phases", () => {
@@ -393,7 +505,7 @@ test("candidate fingerprint is order-independent and binds HEAD, status, and har
   }));
 });
 
-function labDouble({ aliveAfterStop = false, bindingError = false, failStage, stopServerError = false } = {}) {
+function labDouble({ aliveAfterStop = false, bindingError = false, failStage, stopServerError = null } = {}) {
   const events = [];
   const reportedErrors = [];
   let serverAlive = false;
@@ -436,7 +548,7 @@ function labDouble({ aliveAfterStop = false, bindingError = false, failStage, st
       stopServer: async () => {
         events.push("server:stop");
         serverAlive = aliveAfterStop;
-        if (stopServerError) throw new Error("server cleanup failed");
+        if (stopServerError) throw stopServerError === true ? new Error("server cleanup failed") : stopServerError;
       },
       writeReport: async (error) => { events.push("report:write"); reportedErrors.push(serializeError(error)); },
     },

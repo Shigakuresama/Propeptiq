@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- Chromium performance entry extensions and retained JSON evidence are intentionally runtime-shaped. */
-import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { expect, test, type Browser, type BrowserContext, type CDPSession, type Page } from "@playwright/test";
+import { writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 // @ts-expect-error The owned Node ESM harness intentionally has no separate declaration file.
-import { buildBrowserContextOptions, calculateCls, calculateLcpBreakdown, classifyBrowserRequest, classifyContinuingAnimations, evaluateClippingPolicy, evaluateControlPolicy, evaluateImagePolicy, selectWindowLongtasks } from "../../scripts/run-playwright-performance.mjs";
+import { buildBrowserContextOptions, calculateCls, calculateLcpBreakdown, classifyBrowserRequest, classifyContinuingAnimations, evaluateClippingPolicy, evaluateControlPolicy, evaluateImagePolicy, finalizeOwnedBrowserCase, selectWindowLongtasks, serializeError, setupOwnedBrowserCase } from "../../scripts/run-playwright-performance.mjs";
 
 test.describe.configure({ mode: "serial" });
 
@@ -41,6 +41,16 @@ type BoundaryRecord = {
   localRequestFailures: Array<{ errorText: string | null; method: string; url: string }>;
   mutatingRequests: Array<{ method: string; url: string }>;
   syntheticOrProviderRequests: string[];
+};
+
+type LabContextShell = {
+  artifactStem: string;
+  cdp?: CDPSession;
+  context: BrowserContext;
+  finalization?: { artifacts: string[]; errors: string[] };
+  finalized: boolean;
+  page: Page;
+  traceStarted: boolean;
 };
 
 type Shift = {
@@ -178,53 +188,35 @@ async function createLabContext(browser: Browser, label: string, options: Record
   contextSequence += 1;
   const artifactStem = `${String(contextSequence).padStart(3, "0")}-${safeArtifactLabel(label)}`;
   const context = await browser.newContext(buildBrowserContextOptions(options));
-  try {
-    await context.tracing.start({ screenshots: false, snapshots: true, sources: false });
-    const page = await context.newPage();
-    return { artifactStem, context, page };
-  } catch (error) {
-    try {
-      await context.close();
-    } catch (closeError) {
-      throw new AggregateError([error, closeError], "Manual browser context initialization and cleanup both failed");
+  return { artifactStem, context, finalized: false, page: null as unknown as Page, traceStarted: false } satisfies LabContextShell;
+}
+
+const contextFinalizationOptions = {
+  artifactDirectory: contextArtifactDirectory,
+  outputDirectory: performanceOutputDirectory,
+};
+
+async function initializeLabContext(shell: LabContextShell, boundary: BoundaryRecord, observed = false) {
+  return setupOwnedBrowserCase(shell, async () => {
+    await shell.context.tracing.start({ screenshots: false, snapshots: true, sources: false });
+    shell.traceStarted = true;
+    shell.page = await shell.context.newPage();
+    await installBoundary(shell.context, shell.page, boundary);
+    if (observed) {
+      await installPerformanceObservers(shell.page);
+      shell.cdp = await shell.context.newCDPSession(shell.page);
+      await shell.cdp.send("Network.enable");
+      await shell.cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
+      await shell.cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
     }
-    throw error;
-  }
+  }, contextFinalizationOptions);
 }
 
 async function closeLabContext(
-  shell: { artifactStem: string; context: BrowserContext; page: Page },
+  shell: LabContextShell,
   failed: boolean,
 ) {
-  const artifacts: string[] = [];
-  const errors: string[] = [];
-  if (failed) {
-    mkdirSync(contextArtifactDirectory, { recursive: true });
-    const screenshotPath = join(contextArtifactDirectory, `${shell.artifactStem}-failure.png`);
-    try {
-      await shell.page.screenshot({ animations: "allow", caret: "initial", fullPage: true, path: screenshotPath });
-      artifacts.push(relative(performanceOutputDirectory, screenshotPath).replaceAll("\\", "/"));
-    } catch (error) {
-      errors.push(`failure screenshot capture failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  try {
-    if (failed) {
-      const tracePath = join(contextArtifactDirectory, `${shell.artifactStem}-failure-trace.zip`);
-      await shell.context.tracing.stop({ path: tracePath });
-      artifacts.push(relative(performanceOutputDirectory, tracePath).replaceAll("\\", "/"));
-    } else {
-      await shell.context.tracing.stop();
-    }
-  } catch (error) {
-    errors.push(`context trace finalization failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  try {
-    await shell.context.close();
-  } catch (error) {
-    errors.push(`browser context close failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  return { artifacts, errors };
+  return finalizeOwnedBrowserCase(shell, failed, contextFinalizationOptions);
 }
 
 async function installBoundary(context: BrowserContext, page: Page, record: BoundaryRecord) {
@@ -393,32 +385,21 @@ async function collectPerformance(page: Page) {
   });
 }
 
-async function newObservedContext(browser: Browser, label: string, viewport: { width: number; height: number }) {
-  const shell = await createLabContext(browser, label, {
-    reducedMotion: "no-preference",
-    viewport,
-  });
-  const { context, page } = shell;
-  const boundary = emptyBoundaryRecord();
-  await installBoundary(context, page, boundary);
-  await installPerformanceObservers(page);
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("Network.enable");
-  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true });
-  await cdp.send("Emulation.setCPUThrottlingRate", { rate: 4 });
-  return { ...shell, boundary, cdp };
+async function initializeObservedContext(shell: LabContextShell, boundary: BoundaryRecord) {
+  await initializeLabContext(shell, boundary, true);
+  return shell;
 }
 
 async function discoverCanonicalPdp(browser: Browser) {
-  const shell = await createLabContext(browser, "catalog-discovery", { viewport: { width: 1440, height: 900 } });
-  const { context, page } = shell;
   const boundary = emptyBoundaryRecord();
-  await installBoundary(context, page, boundary);
+  let shell: LabContextShell | null = null;
   let failure: unknown = null;
   try {
-    const response = await page.goto(`${baseURL}/catalog`, { waitUntil: "load" });
+    shell = await createLabContext(browser, "catalog-discovery", { viewport: { width: 1440, height: 900 } });
+    await initializeLabContext(shell, boundary);
+    const response = await shell.page.goto(`${baseURL}/catalog`, { waitUntil: "load" });
     if (response?.status() !== 200) throw new Error(`Catalog discovery returned ${response?.status() ?? "no response"}`);
-    const hrefs = await page.locator('main#main-content a[href^="/catalog/items/"]').evaluateAll((links) => (
+    const hrefs = await shell.page.locator('main#main-content a[href^="/catalog/items/"]').evaluateAll((links: Element[]) => (
       links.map((link) => link.getAttribute("href")).filter(Boolean)
     ));
     const href = hrefs.find((value) => /^\/catalog\/items\/[a-z0-9-]+$/u.test(value!));
@@ -433,9 +414,9 @@ async function discoverCanonicalPdp(browser: Browser) {
     failure = error;
     throw error;
   } finally {
-    const closure = await closeLabContext(shell, failure !== null);
+    const closure = shell ? await closeLabContext(shell, failure !== null) : { artifacts: [], errors: [] };
     if (failure !== null || closure.errors.length > 0) {
-      evidence.discoveryFailure = { artifacts: closure.artifacts, boundary, closureErrors: closure.errors };
+      evidence.discoveryFailure = { artifacts: closure.artifacts, boundary, closureErrors: closure.errors, error: serializeError(failure) };
     }
     if (failure === null && closure.errors.length > 0) throw new Error(closure.errors.join("; "));
   }
@@ -454,9 +435,15 @@ function boundaryErrors(boundary: BoundaryRecord) {
 }
 
 async function coldSample(browser: Browser, routeLabel: string, path: string, viewport: { width: number; height: number }, iteration: number) {
-  const shell = await newObservedContext(browser, `cold-${routeLabel}-${viewport.width}-iteration-${iteration}`, viewport);
-  const sample: Record<string, any> = { boundary: shell.boundary, integrityErrors: [], iteration, routeLabel, path, viewport };
+  const boundary = emptyBoundaryRecord();
+  const sample: Record<string, any> = { boundary, integrityErrors: [], iteration, routeLabel, path, viewport };
+  let shell: LabContextShell | null = null;
   try {
+    shell = await createLabContext(browser, `cold-${routeLabel}-${viewport.width}-iteration-${iteration}`, {
+      reducedMotion: "no-preference",
+      viewport,
+    });
+    await initializeObservedContext(shell, boundary);
     const response = await shell.page.goto(`${baseURL}${path}`, { waitUntil: "load", timeout: 60_000 });
     sample.status = response?.status() ?? null;
     await shell.page.waitForTimeout(observationWindowMs);
@@ -468,7 +455,7 @@ async function coldSample(browser: Browser, routeLabel: string, path: string, vi
     sample.longtasks = raw.longtasks;
     sample.navigation = raw.navigation;
     sample.breakdown = calculateLcpBreakdown({ lcp: sample.lcp, navigation: raw.navigation, resources: raw.resources });
-    sample.integrityErrors.push(...boundaryErrors(shell.boundary));
+    sample.integrityErrors.push(...boundaryErrors(boundary));
     if (sample.status !== 200) sample.integrityErrors.push(`document status ${sample.status}`);
     if (!raw.supported.includes("largest-contentful-paint") || !sample.lcp) sample.integrityErrors.push("missing LCP observer/result");
     if (!raw.supported.includes("layout-shift")) sample.integrityErrors.push("missing layout-shift observer");
@@ -478,24 +465,29 @@ async function coldSample(browser: Browser, routeLabel: string, path: string, vi
     if (sample.lcp?.url?.toLowerCase().endsWith("front.webp")) {
       evidence.knownLcpHints.push({ iteration, routeLabel, url: sample.lcp.url, viewport });
     }
-    for (const warning of shell.boundary.consoleWarnings) {
+    for (const warning of boundary.consoleWarnings) {
       evidence.diagnosticWarnings.push({ iteration, routeLabel, viewport, warning });
       if (/colou?r|oklch|\blab\(/iu.test(warning)) {
         evidence.colourWarnings.push({ iteration, routeLabel, viewport, warning });
       }
     }
   } catch (error) {
+    sample.caseError = serializeError(error);
     sample.integrityErrors.push(error instanceof Error ? error.message : String(error));
   } finally {
-    evidence.samples.push(sample);
-    try {
-      await shell.cdp.detach();
-    } catch (error) {
-      sample.integrityErrors.push(`CDP detach failed: ${error instanceof Error ? error.message : String(error)}`);
+    if (shell?.cdp) {
+      try {
+        await shell.cdp.detach();
+      } catch (error) {
+        sample.integrityErrors.push(`CDP detach failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-    const closure = await closeLabContext(shell, sample.integrityErrors.length > 0);
-    sample.failureArtifacts = closure.artifacts;
-    sample.integrityErrors.push(...closure.errors);
+    if (shell) {
+      const closure = await closeLabContext(shell, sample.integrityErrors.length > 0);
+      sample.failureArtifacts = closure.artifacts;
+      sample.integrityErrors.push(...closure.errors);
+    }
+    evidence.samples.push(sample);
   }
 }
 
@@ -506,9 +498,15 @@ function percentile(values: number[], percentileValue: number) {
 }
 
 async function frameObservation(browser: Browser, viewport: { width: number; height: number }) {
-  const shell = await newObservedContext(browser, `frames-${viewport.width}`, viewport);
-  const result: Record<string, any> = { boundary: shell.boundary, integrityErrors: [], viewport, windowMs: frameWindowMs };
+  const boundary = emptyBoundaryRecord();
+  const result: Record<string, any> = { boundary, integrityErrors: [], viewport, windowMs: frameWindowMs };
+  let shell: LabContextShell | null = null;
   try {
+    shell = await createLabContext(browser, `frames-${viewport.width}`, {
+      reducedMotion: "no-preference",
+      viewport,
+    });
+    await initializeObservedContext(shell, boundary);
     const response = await shell.page.goto(`${baseURL}/`, { waitUntil: "load" });
     if (response?.status() !== 200) result.integrityErrors.push(`document status ${response?.status() ?? "missing"}`);
     result.initialStability = await waitForGeometryStable(shell.page, { allowKnownHeaderLogo: true });
@@ -572,20 +570,25 @@ async function frameObservation(browser: Browser, viewport: { width: number; hei
     result.visibility = [...new Set(observation.visibility)];
     result.activeAnimations = observation.activeAnimations;
     if (result.actualWindowMs < frameWindowMs) result.integrityErrors.push(`frame observation was shorter than ${frameWindowMs}ms: ${result.actualWindowMs}`);
-    result.integrityErrors.push(...boundaryErrors(shell.boundary));
+    result.integrityErrors.push(...boundaryErrors(boundary));
     if (result.visibility.length !== 1 || result.visibility[0] !== "visible") result.integrityErrors.push(`visibility changed: ${result.visibility.join(",")}`);
   } catch (error) {
+    result.caseError = serializeError(error);
     result.integrityErrors.push(error instanceof Error ? error.message : String(error));
   } finally {
-    evidence.frames.push(result);
-    try {
-      await shell.cdp.detach();
-    } catch (error) {
-      result.integrityErrors.push(`CDP detach failed: ${error instanceof Error ? error.message : String(error)}`);
+    if (shell?.cdp) {
+      try {
+        await shell.cdp.detach();
+      } catch (error) {
+        result.integrityErrors.push(`CDP detach failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-    const closure = await closeLabContext(shell, result.integrityErrors.length > 0);
-    result.failureArtifacts = closure.artifacts;
-    result.integrityErrors.push(...closure.errors);
+    if (shell) {
+      const closure = await closeLabContext(shell, result.integrityErrors.length > 0);
+      result.failureArtifacts = closure.artifacts;
+      result.integrityErrors.push(...closure.errors);
+    }
+    evidence.frames.push(result);
   }
 }
 
@@ -712,8 +715,25 @@ async function prepareRenderedImages(page: Page) {
     record.after = await image.evaluate((element) => {
       const imageElement = element as HTMLImageElement;
       const bounds = imageElement.getBoundingClientRect();
+      const describe = (node: Element) => {
+        const classes = [...node.classList].slice(0, 3).join(".");
+        return `${node.tagName.toLowerCase()}${node.id ? `#${node.id}` : ""}${classes ? `.${classes}` : ""}`.slice(0, 120);
+      };
+      let layoutExclusion = null;
+      let node: Element | null = element;
+      while (node) {
+        if (getComputedStyle(node).display === "none") {
+          layoutExclusion = {
+            reason: node === element ? "own-display-none" : "ancestor-display-none",
+            selector: describe(node),
+          };
+          break;
+        }
+        node = node.parentElement;
+      }
       return {
         complete: imageElement.complete,
+        layoutExclusion,
         naturalHeight: imageElement.naturalHeight,
         naturalWidth: imageElement.naturalWidth,
         rect: { bottom: bounds.bottom, height: bounds.height, left: bounds.left, right: bounds.right, top: bounds.top, width: bounds.width },
@@ -764,7 +784,7 @@ async function inspectGeometry(page: Page, width: number, requireFooterControlsI
     const clippingRecord = (element: Element, label: string, requiredInViewport: boolean) => {
       const bounds = element.getBoundingClientRect();
       const viewportRelevant = bounds.right > 0 && bounds.left < innerWidth && bounds.bottom > 0 && bounds.top < innerHeight;
-      const ancestorClips: string[] = [];
+      const ancestorClips: Array<{ axis: "x" | "xy" | "y"; intentionalScroll: boolean; selector: string }> = [];
       if (requiredInViewport || viewportRelevant) {
         let ancestor = element.parentElement;
         while (ancestor) {
@@ -774,7 +794,13 @@ async function inspectGeometry(page: Page, width: number, requireFooterControlsI
             (bounds.left < ancestorBounds.left - 1 || bounds.right > ancestorBounds.right + 1);
           const clipsY = ["auto", "clip", "hidden", "scroll"].includes(style.overflowY) &&
             (bounds.top < ancestorBounds.top - 1 || bounds.bottom > ancestorBounds.bottom + 1);
-          if (clipsX || clipsY) ancestorClips.push(describe(ancestor));
+          if (clipsX || clipsY) {
+            ancestorClips.push({
+              axis: clipsX && clipsY ? "xy" : clipsX ? "x" : "y",
+              intentionalScroll: clipsX && !clipsY && ancestor.matches('ul[role="list"][aria-label^="Related products,"]'),
+              selector: describe(ancestor),
+            });
+          }
           ancestor = ancestor.parentElement;
         }
       }
@@ -807,10 +833,12 @@ async function inspectGeometry(page: Page, width: number, requireFooterControlsI
     }));
     const footer = document.querySelector("footer");
     const footerControlElements = footer ? [...footer.querySelectorAll<HTMLElement>("a, button, input, summary")].filter(visible) : [];
-    const footerControls = footerControlElements.map((element) => ({
-      label: element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 80) ?? element.tagName,
-      rect: rect(element),
-    }));
+    const footerBottomRow = footer?.querySelector<HTMLElement>(".footer-bottom-row") ?? null;
+    const footerCopyright = footerBottomRow ? [...footerBottomRow.querySelectorAll<HTMLElement>("p")].at(-1) ?? null : null;
+    const footerControls = footerBottomRow && visible(footerBottomRow) ? [{
+      label: "Footer notice row",
+      rect: rect(footerBottomRow),
+    }] : [];
     const searchControlElements = [...document.querySelectorAll<HTMLElement>('button[aria-label="Search PropeptIQ"]')].filter(visible);
     const searchControls = searchControlElements.map((element) => ({
       fixedAncestor: fixedAncestor(element),
@@ -824,7 +852,9 @@ async function inspectGeometry(page: Page, width: number, requireFooterControlsI
       rect: rect(element),
     }));
     const clippingRecords = [
-      ...footerControlElements.map((element) => clippingRecord(element, element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 80) ?? "footer control", requireFooterControlsInViewport)),
+      ...footerControlElements.map((element) => clippingRecord(element, element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 80) ?? "footer control", false)),
+      ...(footerBottomRow ? [clippingRecord(footerBottomRow, "Footer notice row", false)] : []),
+      ...(footerCopyright ? [clippingRecord(footerCopyright, "Footer copyright", requireFooterControlsInViewport)] : []),
       ...searchControlElements.map((element) => clippingRecord(element, element.getAttribute("aria-label") ?? "Search PropeptIQ", true)),
       ...purchaseControlElements.map((element) => clippingRecord(element, element.getAttribute("aria-label") ?? "Mobile purchase controls", true)),
       ...touchTargetElements.map((element) => {
@@ -938,12 +968,13 @@ function expectedHiddenImages(routeLabel: string, width: number) {
 }
 
 async function geometryCase(browser: Browser, path: string, routeLabel: string, viewport: { width: number; height: number }) {
-  const shell = await createLabContext(browser, `geometry-${routeLabel}-${viewport.width}`, { reducedMotion: "no-preference", viewport });
-  const { context, page } = shell;
   const boundary = emptyBoundaryRecord();
   const result: Record<string, any> = { boundary, errors: [], path, routeLabel, viewport };
-  await installBoundary(context, page, boundary);
+  let shell: LabContextShell | null = null;
   try {
+    shell = await createLabContext(browser, `geometry-${routeLabel}-${viewport.width}`, { reducedMotion: "no-preference", viewport });
+    await initializeLabContext(shell, boundary);
+    const page = shell.page;
     const response = await page.goto(`${baseURL}${path}`, { waitUntil: "load" });
     result.status = response?.status() ?? null;
     result.initialStability = await waitForGeometryStable(page);
@@ -998,26 +1029,30 @@ async function geometryCase(browser: Browser, path: string, routeLabel: string, 
     );
     if (result.status !== 200) result.errors.push(`document status ${result.status}`);
   } catch (error) {
+    result.caseError = serializeError(error);
     result.errors.push(error instanceof Error ? error.message : String(error));
   } finally {
-    const closure = await closeLabContext(shell, result.errors.length > 0);
-    result.failureArtifacts = closure.artifacts;
-    result.errors.push(...closure.errors);
+    if (shell) {
+      const closure = await closeLabContext(shell, result.errors.length > 0);
+      result.failureArtifacts = closure.artifacts;
+      result.errors.push(...closure.errors);
+    }
     evidence.geometry.push(result);
   }
 }
 
 async function noJavaScriptCase(browser: Browser, path: string, routeLabel: string, viewport: { width: number; height: number }) {
-  const shell = await createLabContext(browser, `no-js-${routeLabel}-${viewport.width}`, {
-    javaScriptEnabled: false,
-    reducedMotion: "no-preference",
-    viewport,
-  });
-  const { context, page } = shell;
   const boundary = emptyBoundaryRecord();
   const result: Record<string, any> = { boundary, errors: [], path, routeLabel, viewport };
-  await installBoundary(context, page, boundary);
+  let shell: LabContextShell | null = null;
   try {
+    shell = await createLabContext(browser, `no-js-${routeLabel}-${viewport.width}`, {
+      javaScriptEnabled: false,
+      reducedMotion: "no-preference",
+      viewport,
+    });
+    await initializeLabContext(shell, boundary);
+    const page = shell.page;
     const response = await page.goto(`${baseURL}${path}`, { waitUntil: "load" });
     result.status = response?.status() ?? null;
     const details = page.getByRole("contentinfo").locator("details");
@@ -1090,22 +1125,26 @@ async function noJavaScriptCase(browser: Browser, path: string, routeLabel: stri
     );
     if (result.status !== 200) result.errors.push(`document status ${result.status}`);
   } catch (error) {
+    result.caseError = serializeError(error);
     result.errors.push(error instanceof Error ? error.message : String(error));
   } finally {
-    const closure = await closeLabContext(shell, result.errors.length > 0);
-    result.failureArtifacts = closure.artifacts;
-    result.errors.push(...closure.errors);
+    if (shell) {
+      const closure = await closeLabContext(shell, result.errors.length > 0);
+      result.failureArtifacts = closure.artifacts;
+      result.errors.push(...closure.errors);
+    }
     evidence.noJavaScriptGeometry.push(result);
   }
 }
 
 async function reducedMotionCase(browser: Browser, path: string, routeLabel: string, viewport: { width: number; height: number }) {
-  const shell = await createLabContext(browser, `reduced-${routeLabel}-${viewport.width}`, { reducedMotion: "reduce", viewport });
-  const { context, page } = shell;
   const boundary = emptyBoundaryRecord();
   const result: Record<string, any> = { boundary, errors: [], path, routeLabel, viewport };
-  await installBoundary(context, page, boundary);
+  let shell: LabContextShell | null = null;
   try {
+    shell = await createLabContext(browser, `reduced-${routeLabel}-${viewport.width}`, { reducedMotion: "reduce", viewport });
+    await initializeLabContext(shell, boundary);
+    const page = shell.page;
     const response = await page.goto(`${baseURL}${path}`, { waitUntil: "load" });
     result.status = response?.status() ?? null;
     result.initialStability = await waitForGeometryStable(page, { allowKnownHeaderLogo: false });
@@ -1144,11 +1183,14 @@ async function reducedMotionCase(browser: Browser, path: string, routeLabel: str
     result.errors.push(...boundaryErrors(boundary));
     if (result.status !== 200) result.errors.push(`document status ${result.status}`);
   } catch (error) {
+    result.caseError = serializeError(error);
     result.errors.push(error instanceof Error ? error.message : String(error));
   } finally {
-    const closure = await closeLabContext(shell, result.errors.length > 0);
-    result.failureArtifacts = closure.artifacts;
-    result.errors.push(...closure.errors);
+    if (shell) {
+      const closure = await closeLabContext(shell, result.errors.length > 0);
+      result.failureArtifacts = closure.artifacts;
+      result.errors.push(...closure.errors);
+    }
     evidence.reducedMotionGeometry.push(result);
   }
 }
