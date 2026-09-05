@@ -44,7 +44,7 @@ export function CompoundResearchSection({
           {research.identityCaveat ? (
             <div className="info-record mb-6 break-words">
               <h3 className="text-sm font-semibold text-ink">Identity note</h3>
-              <p className="mt-2 leading-7 text-muted-ink">{research.identityCaveat}</p>
+              <p className="mt-2 leading-7 text-ink">{research.identityCaveat}</p>
             </div>
           ) : null}
 
@@ -96,6 +96,22 @@ export function CompoundResearchSection({
                 <p className="mt-4 text-sm tabular-nums text-muted-ink">PMID: {study.pmid}</p>
                 {study.doi ? (
                   <p className="mt-1 text-sm text-muted-ink [overflow-wrap:anywhere]">DOI: {study.doi}</p>
+                ) : null}
+                {study.corrections ? (
+                  <div className="mt-4 min-w-0 border-l border-border pl-4">
+                    <h4 className="text-sm font-semibold text-ink">Correction notice</h4>
+                    {study.corrections.map((correction) => (
+                      <a
+                        className="record-link mt-1 inline-flex min-h-11 min-w-11 items-center break-words py-2 text-sm [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-moss"
+                        href={correction.url}
+                        key={correction.correctionPmid}
+                        rel="noopener noreferrer"
+                        target="_blank"
+                      >
+                        Correction notice · PMID {correction.correctionPmid}
+                      </a>
+                    ))}
+                  </div>
                 ) : null}
               </li>
             ))}

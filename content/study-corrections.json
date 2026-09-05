@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "corrections": [
+    {
+      "recordType": "correction",
+      "correctionPmid": "40447307",
+      "parentPmid": "39814420"
+    },
+    {
+      "recordType": "correction",
+      "correctionPmid": "28059429",
+      "parentPmid": "24136731"
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 
 const browserErrors = new WeakMap<Page, string[]>();
 
@@ -55,6 +55,8 @@ async function verifyResearch(
   const section = page.getByRole("region", { name: "Verified research references", exact: true });
   await section.scrollIntoViewIfNeeded();
   await expect(section).toBeVisible();
+  await expect(section).toHaveCSS("opacity", "1");
+  await expect(section).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
   await expect(section.getByText(
     "Primary-source bibliography for the named compound. These studies did not test this catalog item.",
     { exact: true },
@@ -108,6 +110,96 @@ async function verifyUnmappedProduct(page: Page, width: number) {
   await expect(page.getByRole("region", { name: "Verified research references", exact: true })).toHaveCount(0);
   await expect(page.locator("#research-references")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
+}
+
+type CorrectionResearchCase = Readonly<{
+  slug: "ara-290" | "ss-31" | "thymosin-alpha-1";
+  parentPmid: string | null;
+  correctionPmid: string | null;
+  siblingPmid: string;
+}>;
+
+async function verifyCorrectionResearch(
+  page: Page,
+  width: number,
+  researchCase: CorrectionResearchCase,
+) {
+  await openPublicPage(page, `/catalog/items/${researchCase.slug}`, width);
+  const section = page.getByRole("region", { name: "Verified research references", exact: true });
+  await section.scrollIntoViewIfNeeded();
+  await expect(section).toBeVisible();
+  await expect(section).toHaveCSS("opacity", "1");
+  await expect(section).toHaveCSS("transform", "matrix(1, 0, 0, 1, 0, 0)");
+  const disclosure = section.locator("details");
+  const summary = disclosure.locator("summary");
+  await expect(summary).toContainText("2 verified references");
+  await expect(disclosure.locator("ol > li")).toHaveCount(2);
+  await expectTouchTarget(summary);
+
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  await expect(disclosure).toHaveAttribute("open", "");
+  await expectVisibleFocus(summary);
+
+  if (researchCase.parentPmid && researchCase.correctionPmid) {
+    const parentRow = disclosure.locator("ol > li").filter({ hasText: `PMID: ${researchCase.parentPmid}` });
+    const siblingRow = disclosure.locator("ol > li").filter({ hasText: `PMID: ${researchCase.siblingPmid}` });
+    await expect(parentRow).toHaveCount(1);
+    await expect(siblingRow).toHaveCount(1);
+    const correctionLink = parentRow.getByRole("link", {
+      name: `Correction notice · PMID ${researchCase.correctionPmid}`,
+      exact: true,
+    });
+    await expect(correctionLink).toHaveAttribute(
+      "href",
+      `https://pubmed.ncbi.nlm.nih.gov/${researchCase.correctionPmid}/`,
+    );
+    await expect(correctionLink).toHaveAttribute("target", "_blank");
+    await expect(correctionLink).toHaveAttribute("rel", "noopener noreferrer");
+    await expectTouchTarget(correctionLink);
+    await correctionLink.focus();
+    await expectVisibleFocus(correctionLink);
+    await expect(correctionLink).toHaveCSS("white-space", "normal");
+    await expect(siblingRow.getByText("Correction notice", { exact: true })).toHaveCount(0);
+    await expect(siblingRow.getByText(researchCase.correctionPmid, { exact: false })).toHaveCount(0);
+  } else {
+    await expect(disclosure.getByText("Correction notice", { exact: true })).toHaveCount(0);
+  }
+
+  await summary.focus();
+  await page.keyboard.press("Space");
+  await expect(disclosure).not.toHaveAttribute("open");
+  await page.keyboard.press("Space");
+  await expect(disclosure).toHaveAttribute("open", "");
+  await expectNoHorizontalOverflow(page);
+  expect((await new AxeBuilder({ page }).include("#research-references").analyze()).violations).toEqual([]);
+}
+
+async function verifyCorrectionWithoutJavaScript(
+  browser: Browser,
+  researchCase: CorrectionResearchCase,
+) {
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 375, height: 1000 },
+  });
+  const page = await context.newPage();
+  try {
+    const response = await page.goto(`/catalog/items/${researchCase.slug}`);
+    expect(response?.status()).toBe(200);
+    const disclosure = page.locator("#research-references details");
+    const summary = disclosure.locator("summary");
+    await expect(summary).toContainText("2 verified references");
+    await expect(disclosure.locator(`a[href="https://pubmed.ncbi.nlm.nih.gov/${researchCase.correctionPmid}/"]`)).toHaveCount(1);
+    await expect(summary).not.toHaveAttribute("role");
+    await expect(summary).not.toHaveAttribute("onclick");
+    await summary.focus();
+    await page.keyboard.press("Enter");
+    await expect(disclosure).toHaveAttribute("open", "");
+    await expectNoHorizontalOverflow(page);
+  } finally {
+    await context.close();
+  }
 }
 
 async function verifyWhyChoose(page: Page, width: number, columns: number) {
@@ -173,6 +265,10 @@ test("verified human bibliography is keyboard usable at 1440px", async ({ page }
 test("animal-only bibliography is keyboard usable at 375px", async ({ page }) => { await verifyResearch(page, 375, "aod-9604"); });
 test("animal-only bibliography is keyboard usable at 768px", async ({ page }) => { await verifyResearch(page, 768, "aod-9604"); });
 test("animal-only bibliography is keyboard usable at 1440px", async ({ page }) => { await verifyResearch(page, 1440, "aod-9604"); });
+test("ARA-290 route keeps its correction with the exact parent at all widths", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyCorrectionResearch(page, width, { slug: "ara-290", parentPmid: "24136731", correctionPmid: "28059429", siblingPmid: "23168581" }); });
+test("SS-31 route has two studies and no correction notice at all widths", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyCorrectionResearch(page, width, { slug: "ss-31", parentPmid: null, correctionPmid: null, siblingPmid: "33077895" }); });
+test("Thymosin Alpha-1 route keeps its correction with the exact parent at all widths", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyCorrectionResearch(page, width, { slug: "thymosin-alpha-1", parentPmid: "39814420", correctionPmid: "40447307", siblingPmid: "35713670" }); });
+test("server HTML keeps a native corrected bibliography disclosure without JavaScript", async ({ browser }) => { await verifyCorrectionWithoutJavaScript(browser, { slug: "thymosin-alpha-1", parentPmid: "39814420", correctionPmid: "40447307", siblingPmid: "35713670" }); });
 test("unmapped Pinealon has no inferred bibliography at 375px", async ({ page }) => { await verifyUnmappedProduct(page, 375); });
 test("unmapped Pinealon has no inferred bibliography at 768px", async ({ page }) => { await verifyUnmappedProduct(page, 768); });
 test("unmapped Pinealon has no inferred bibliography at 1440px", async ({ page }) => { await verifyUnmappedProduct(page, 1440); });

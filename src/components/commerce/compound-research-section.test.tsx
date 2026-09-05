@@ -11,8 +11,8 @@ function researchFor(slug: string): PublicCompoundResearchEntry {
   const research = publicCompoundResearch.compounds.find(
     (compound) => compound.productSlug === slug,
   );
-  if (!research) throw new Error(`Missing approved test source: ${slug}`);
-  return research;
+  expect(research, `Missing approved test source: ${slug}`).toBeDefined();
+  return research!;
 }
 
 describe("CompoundResearchSection", () => {
@@ -56,10 +56,40 @@ describe("CompoundResearchSection", () => {
     const { container } = render(<CompoundResearchSection research={research} />);
     expect(container.querySelectorAll("details")).toHaveLength(1);
     expect(container.querySelector("summary")).toHaveTextContent(research.displayName);
-    expect(container.querySelectorAll("a")).toHaveLength(research.studies.length);
+    const correctionCount = research.studies.reduce((count, study) => {
+      if (!("corrections" in study) || !Array.isArray(study.corrections)) return count;
+      return count + study.corrections.length;
+    }, 0);
+    expect(container.querySelectorAll("a")).toHaveLength(research.studies.length + correctionCount);
     for (const link of container.querySelectorAll("a")) {
       expect(link.getAttribute("href")).toMatch(/^https:\/\/pubmed\.ncbi\.nlm\.nih\.gov\/[1-9][0-9]{6,8}\/$/u);
     }
+  });
+
+  it.each([
+    ["ara-290", "24136731", "28059429", "23168581"],
+    ["thymosin-alpha-1", "39814420", "40447307", "35713670"],
+  ])("nests the approved correction only beneath its parent for %s", (slug, parentPmid, correctionPmid, siblingPmid) => {
+    const research = researchFor(slug);
+    const { container } = render(<CompoundResearchSection research={research} />);
+    const summary = container.querySelector("summary");
+    expect(summary).toHaveTextContent("2 verified references");
+    fireEvent.click(summary!);
+
+    const parentRow = screen.getByText(`PMID: ${parentPmid}`).closest("li");
+    const siblingRow = screen.getByText(`PMID: ${siblingPmid}`).closest("li");
+    expect(parentRow).not.toBeNull();
+    expect(siblingRow).not.toBeNull();
+    expect(within(parentRow!).getByRole("heading", { level: 4, name: "Correction notice" })).toBeVisible();
+    const correctionLink = within(parentRow!).getByRole("link", {
+      name: `Correction notice · PMID ${correctionPmid}`,
+    });
+    expect(correctionLink).toHaveAttribute("href", `https://pubmed.ncbi.nlm.nih.gov/${correctionPmid}/`);
+    expect(correctionLink).toHaveAttribute("target", "_blank");
+    expect(correctionLink).toHaveAttribute("rel", "noopener noreferrer");
+    expect(correctionLink).toHaveClass("min-h-11");
+    expect(within(siblingRow!).queryByText("Correction notice")).toBeNull();
+    expect(within(siblingRow!).queryByText(correctionPmid)).toBeNull();
   });
 
   it.each([
@@ -121,6 +151,13 @@ describe("CompoundResearchSection", () => {
     expect(html).toContain("AOD-9604");
     expect(html).toContain("https://pubmed.ncbi.nlm.nih.gov/11146367/");
     expect(html).not.toContain("onclick");
+  });
+
+  it("keeps linked correction metadata in server HTML without changing the study count", () => {
+    const html = renderToStaticMarkup(<CompoundResearchSection research={researchFor("thymosin-alpha-1")} />);
+    expect(html).toContain("2 verified references");
+    expect(html).toContain("Correction notice · PMID 40447307");
+    expect(html).toContain("https://pubmed.ncbi.nlm.nih.gov/40447307/");
   });
 
   it("omits a section for absent or empty references", () => {

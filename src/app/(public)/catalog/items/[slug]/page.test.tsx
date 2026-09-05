@@ -208,6 +208,7 @@ describe("retained catalog item route", () => {
   it.each([
     ["5-amino-1mq", "5-amino-1mq"],
     ["aod-9604", "aod-9604"],
+    ["ara-290", "ara-290"],
     ["bpc-157", "bpc-157"],
     ["cargrilintide", "cagrilintide"],
     ["cjc-1295-with-dac", "cjc-1295-with-dac"],
@@ -220,8 +221,10 @@ describe("retained catalog item route", () => {
     ["retatrutide", "retatrutide"],
     ["semaglutide", "semaglutide"],
     ["sermorelin-acetate", "sermorelin-acetate"],
+    ["ss-31", "ss-31"],
     ["survodutide", "survodutide"],
     ["tesmorelin", "tesamorelin"],
+    ["thymosin-alpha-1", "thymosin-alpha-1"],
     ["tirzepatide", "tirzepatide"],
   ])("joins the exact approved compound on the %s product route", async (slug, compoundId) => {
     render(await CatalogItemPage({ params: Promise.resolve({ slug }) }));

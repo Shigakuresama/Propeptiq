@@ -31,6 +31,13 @@ export type StudyDesign = keyof typeof compoundStudyDesignLabels;
 export type EvidenceContext = keyof typeof compoundEvidenceContextLabels;
 export type StrongestEvidence = keyof typeof compoundEvidenceLabels;
 
+export type PublicStudyCorrection = Readonly<{
+  recordType: "correction";
+  correctionPmid: string;
+  parentPmid: string;
+  url: string;
+}>;
+
 export type PublicCompoundStudy = Readonly<{
   id: string;
   pmid: string;
@@ -45,6 +52,7 @@ export type PublicCompoundStudy = Readonly<{
   population: string | null;
   duration: string | null;
   doi: string | null;
+  corrections?: readonly PublicStudyCorrection[];
 }>;
 
 export type PublicCompoundResearchEntry = Readonly<{
