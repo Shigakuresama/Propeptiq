@@ -1493,18 +1493,10 @@ footer a,
 }
 
 .rewards-science-visual__orbit {
-  transform-box: fill-box;
-  transform-origin: center;
   stroke-width: 1;
-  will-change: transform;
-}
-
-.rewards-science-visual__orbit--outer {
-  animation: rewards-orbit 18s linear infinite;
 }
 
 .rewards-science-visual__orbit--inner {
-  animation: rewards-orbit 24s linear infinite reverse;
   opacity: 0.7;
 }
 
@@ -2258,12 +2250,6 @@ footer a {
   }
 }
 
-@keyframes rewards-orbit {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 ::view-transition-old(.nav-forward) {
   --slide-offset: -30px;
 
@@ -2387,8 +2373,7 @@ footer a {
 
   .rewards-hero__copy,
   .rewards-science-scene,
-  .rewards-records,
-  .rewards-science-visual__orbit {
+  .rewards-records {
     animation: none !important;
     transform: none;
   }
