@@ -1,4 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
+import Link from "next/link";
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 
 import { SiteFooter } from "@/components/site/site-footer";
@@ -30,6 +32,16 @@ const footerContent = siteContent as typeof siteContent & {
     values?: Readonly<Partial<Record<ExpectedSocialPlatform, unknown>>>,
   ) => readonly ExpectedSocialLink[];
 };
+
+function findLinkElement(node: ReactNode, href: string): ReactElement | undefined {
+  if (!isValidElement<{ children?: ReactNode; href?: string }>(node)) return undefined;
+  if (node.props.href === href) return node;
+  for (const child of Children.toArray(node.props.children)) {
+    const match = findLinkElement(child, href);
+    if (match !== undefined) return match;
+  }
+  return undefined;
+}
 
 function controlledRecord(
   overrides: Partial<ControlledContentRecord> = {},
@@ -180,6 +192,14 @@ describe("footer configuration", () => {
 });
 
 describe("SiteFooter", () => {
+  it("leaves fragment activation to the browser while keeping client routing for ordinary destinations", () => {
+    // Repeating an unchanged hash with Next Link can skip scrolling. The browser
+    // regression exercises that interaction; this checks the footer's boundary.
+    const footer = SiteFooter();
+    expect(findLinkElement(footer, "/#faq")?.type).toBe("a");
+    expect(findLinkElement(footer, "/catalog")?.type).toBe(Link);
+  });
+
   it("renders one grouped Footer navigation with only configured destinations", () => {
     render(<SiteFooter />);
 

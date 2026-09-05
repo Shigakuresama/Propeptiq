@@ -153,9 +153,15 @@ export function SiteFooter({
                   <ul className="mt-3 space-y-1">
                     {group.links.map((item) => (
                       <li key={`${item.label}-${item.href}`}>
-                        <Link href={item.href} className={footerLinkClassName}>
-                          {item.label}
-                        </Link>
+                        {item.href.includes("#") ? (
+                          <a href={item.href} className={footerLinkClassName}>
+                            {item.label}
+                          </a>
+                        ) : (
+                          <Link href={item.href} className={footerLinkClassName}>
+                            {item.label}
+                          </Link>
+                        )}
                       </li>
                     ))}
                   </ul>
