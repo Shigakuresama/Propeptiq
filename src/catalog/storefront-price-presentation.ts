@@ -199,18 +199,9 @@ export function resolveVariantPricePresentation(input: Readonly<{
 }
 
 export function selectCardVariant(input: Readonly<{ product: { kind: "canonical"; id: string; variants: readonly PublicStorefrontVariant[]; defaultVariantId: string }; pricing: PublicStorefrontPricingContext }>): PublicStorefrontVariant | null {
-  const candidates = input.product.variants.flatMap((variant) => {
-    if (variant.availability === "unavailable") return [];
-    const presentation = resolvePublicVariantPrice({ variant, productId: input.product.id, quantity: 1, pricing: input.pricing });
-    return presentation.state === "priced" && presentation.price.baseUnitMinor > 0
-      ? [{ variant, amount: presentation.price.effectiveUnitMinor }]
-      : [];
-  });
-  const explicitDefault = candidates.find(
-    (candidate) => candidate.variant.id === input.product.defaultVariantId,
-  );
-  if (explicitDefault) return explicitDefault.variant;
-  return [...candidates].sort((a, b) => a.amount - b.amount || a.variant.label.localeCompare(b.variant.label, "en-US") || a.variant.id.localeCompare(b.variant.id))[0]?.variant ?? input.product.variants.find((variant) => variant.id === input.product.defaultVariantId) ?? null;
+  return input.product.variants.find(
+    (variant) => variant.id === input.product.defaultVariantId,
+  ) ?? null;
 }
 
 export function summarizePublicStorefrontVariants(

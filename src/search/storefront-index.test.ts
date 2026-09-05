@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ApprovedStorefrontContent } from "@/content/storefront-content";
 import {
   getApprovedPublicInformation,
   type ApprovedPublicInformation,
@@ -8,6 +7,7 @@ import {
 import type {
   BrowseOnlyPublicStorefrontProduct,
   CanonicalPublicStorefrontProduct,
+  PublicStorefrontContent,
   PublicStorefrontProduct,
   PublicStorefrontVariant,
 } from "@/catalog/storefront-public";
@@ -16,18 +16,18 @@ import { buildStorefrontSearchIndex } from "./storefront-index";
 import { searchEntries } from "./storefront-search";
 
 function approvedContent(
-  overrides: Partial<ApprovedStorefrontContent> = {},
-): ApprovedStorefrontContent {
+  overrides: Partial<PublicStorefrontContent> = {},
+): PublicStorefrontContent {
   return {
     id: "synthetic-content-id",
     kind: "product_information",
     status: "approved",
     title: "Synthetic approved overview",
     body: "Synthetic approved body.",
-    sourceReferences: ["synthetic-source-reference-must-not-leak"],
-    approvalNote: "synthetic-approval-note-must-not-leak",
-    reviewedAt: "2026-08-31T00:00:00.000Z",
-    effectiveAt: null,
+    literatureReferences: [{
+      href: "https://pubmed.ncbi.nlm.nih.gov/?term=synthetic",
+      term: "synthetic",
+    }],
     ...overrides,
   };
 }

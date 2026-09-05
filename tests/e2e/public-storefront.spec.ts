@@ -53,10 +53,82 @@ type PublicRoute =
   | "/"
   | "/catalog"
   | "/catalog/items/tirzepatide"
-  | "/catalog/synthetic-reference-alpha"
+  | "/catalog/tirzepatide"
   | "/cart"
   | "/quality-records"
   | "/research-use-policy";
+
+test("six-view product gallery loads all scenes and keeps keyboard, focus, and geometry stable", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  const scenes = ["Front", "Three-quarter", "Multi-vial study", "Copy-space detail", "Overhead", "Ambient studio"];
+
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/catalog/items/tirzepatide");
+    const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
+    const panel = gallery.getByRole("tabpanel");
+    const before = await panel.boundingBox();
+    expect(before).not.toBeNull();
+    expect(before!.width / before!.height).toBeCloseTo(4 / 3, 2);
+    const sources = new Set<string>();
+    for (let index = 0; index < scenes.length; index++) {
+      await gallery.getByRole("tab", { name: scenes[index]!, exact: true }).click();
+      const image = gallery.getByRole("img");
+      await expect(image).toHaveCount(1);
+      await expect(image).toHaveAttribute("alt", `${scenes[index]} AI-generated catalog illustration for Tirzepatide`);
+      await expect.poll(() => image.evaluate((node) => (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0)).toBe(true);
+      sources.add(await image.getAttribute("src") ?? "");
+      await expect(gallery.getByRole("status")).toHaveText(`View ${index + 1} of 6: ${scenes[index]}`);
+      expect((await panel.boundingBox())!.height).toBeCloseTo(before!.height, 1);
+      await expect(gallery.locator(".catalog-product-visual__discount")).toHaveCount(1);
+      await expect(gallery.getByText("AI-generated catalog illustration — not actual product photography.", { exact: true })).toHaveCount(1);
+    }
+    expect(sources.size).toBe(6);
+    const front = gallery.getByRole("tab", { name: "Front", exact: true });
+    await front.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(gallery.getByRole("tab", { name: "Three-quarter", exact: true })).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(gallery.getByRole("tab", { name: "Ambient studio", exact: true })).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(front).toBeFocused();
+    const next = gallery.getByRole("button", { name: "Next product illustration" });
+    await next.click();
+    await expect(next).toBeFocused();
+    await expect(gallery.getByRole("status")).toHaveText("View 2 of 6: Three-quarter");
+    for (const control of await gallery.getByRole("button").all()) {
+      const rect = await control.boundingBox();
+      expect(rect!.width).toBeGreaterThanOrEqual(44);
+      expect(rect!.height).toBeGreaterThanOrEqual(44);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    expect((await new AxeBuilder({ page }).include(".catalog-product-gallery").analyze()).violations).toEqual([]);
+    await gallery.screenshot({ path: path.resolve(process.cwd(), `.superpowers/sdd/2026-09-04-propeptiq-storefront-completion/gallery-${width}.png`) });
+  }
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const gallery = page.locator(".catalog-product-gallery");
+  await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transition-duration", "0s");
+  await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transform", "none");
+  expect(errors).toEqual([]);
+});
+
+test("six-view product gallery keeps a visible front image with JavaScript disabled", async ({ browser }) => {
+  const context = await browser.newContext({ javaScriptEnabled: false, reducedMotion: "reduce", viewport: { width: 375, height: 1000 } });
+  try {
+    const page = await context.newPage();
+    await page.goto("http://127.0.0.1:4631/catalog/items/tirzepatide");
+    const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
+    await expect(gallery.getByRole("img")).toBeVisible();
+    await expect(gallery.getByRole("status")).toHaveText("View 1 of 6: Front");
+    await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transform", "none");
+    await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transition-duration", "0s");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+  } finally {
+    await context.close();
+  }
+});
 
 const screenshotDirectory = path.resolve(
   process.cwd(),
@@ -212,6 +284,17 @@ function rectanglesIntersect(
     left.right > right.left &&
     left.top < right.bottom &&
     left.bottom > right.top;
+}
+
+function rectangleFitsInside(
+  outer: Awaited<ReturnType<typeof clientRect>>,
+  inner: Awaited<ReturnType<typeof clientRect>>,
+  tolerance = 1,
+): boolean {
+  return inner.left >= outer.left - tolerance &&
+    inner.right <= outer.right + tolerance &&
+    inner.top >= outer.top - tolerance &&
+    inner.bottom <= outer.bottom + tolerance;
 }
 
 async function horizontalLayout(page: Page) {
@@ -773,7 +856,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
     rectanglesIntersect(desktopTriggerBounds, desktopDisclosureBounds),
     `1440x900 search/image disclosure collision: ${JSON.stringify({ desktopDisclosureBounds, desktopTriggerBounds })}`,
   ).toBe(false);
-  const desktopImageBounds = await clientRect(page.locator(".catalog-detail-image"));
+  const desktopImageBounds = await clientRect(page.locator(".catalog-product-gallery__panel"));
   const desktopTitleBounds = await clientRect(
     page.getByRole("heading", { level: 1, name: "Tirzepatide" }),
   );
@@ -1177,7 +1260,8 @@ test("site search launcher does not obscure the visible primary cart action", as
 }) => {
   await page.setViewportSize({ width: 390, height: 520 });
   const requests = await interceptFictionalSearch(page);
-  await page.goto("/catalog/synthetic-reference-alpha");
+  await page.goto("/cart");
+  await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
   await seedLocalTestCart(page);
   await page.goto("/cart");
 
@@ -1220,8 +1304,10 @@ test("public route /catalog/items/tirzepatide renders the shared restriction and
   await expectPublicRouteRestrictionAndAccessibility(page, "/catalog/items/tirzepatide");
 });
 
-test("public route /catalog/synthetic-reference-alpha renders the shared restriction and passes axe", async ({ page }) => {
-  await expectPublicRouteRestrictionAndAccessibility(page, "/catalog/synthetic-reference-alpha");
+test("public legacy product route redirects to its canonical page with the shared restriction and passes axe", async ({ page }) => {
+  await expectPublicRouteRestrictionAndAccessibility(page, "/catalog/tirzepatide");
+  await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide$/u);
+  await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
 });
 
 test("public route /cart renders the shared restriction and passes axe", async ({ page }) => {
@@ -1236,7 +1322,7 @@ test("public route /research-use-policy renders the shared restriction and passe
   await expectPublicRouteRestrictionAndAccessibility(page, "/research-use-policy");
 });
 
-test("synthetic commerce pages still identify every displayed record as fictional demo data", async ({
+test("synthetic records stay out of canonical product routes and quality records identify fictional demo data", async ({
   page,
 }) => {
   await page.goto("/catalog/synthetic-reference-alpha");
@@ -1245,9 +1331,16 @@ test("synthetic commerce pages still identify every displayed record as fictiona
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "Synthetic Reference Alpha — Demo Only",
+      name: "Catalog record unavailable.",
     }),
   ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Synthetic Reference Alpha — Demo Only" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(0);
+  await expect(page.locator("main#main-content")).toBeVisible();
+  await expect(page.getByText("For legitimate laboratory and research use only.").first()).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations, "legacy unknown-product accessibility").toEqual([]);
+  await page.goto("/quality-records");
+  await expect(page.getByRole("heading", { level: 1, name: "Released-lot records with approved public evidence." })).toBeVisible();
 
   const notice = page.getByRole("note");
   await expect(
@@ -1259,26 +1352,41 @@ test("synthetic commerce pages still identify every displayed record as fictiona
       { exact: true },
     ),
   ).toBeVisible();
+
+  // This existing local demo surface, not the canonical product route, owns the fictional records.
+  const records = page.getByRole("list", { name: "Public quality record index" }).locator(":scope > li");
+  expect(await records.count()).toBeGreaterThan(0);
+  for (const record of await records.all()) {
+    await expect(record.getByText("Synthetic demo quality record", { exact: true })).toBeVisible();
+    await expect(record.getByRole("heading", { level: 3 })).toContainText("Demo Only");
+    await expect(record.getByText("Public synthetic demo record", { exact: true })).toBeVisible();
+  }
 });
 
 test("anonymous canonical local/test cart survives reload and preserves only variant IDs and quantities", async ({
   page,
 }) => {
-  await page.goto("/catalog/synthetic-reference-alpha");
+  await page.goto("/cart");
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "Synthetic Reference Alpha — Demo Only",
+      name: "Requested IDs, reconciled with server facts.",
     }),
   ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
 
   await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(0);
+  // The guarded local driver resolves this explicitly synthetic variant through /api/catalog/preview.
   await seedLocalTestCart(page);
   await expect(page.getByRole("link", { name: /Cart, 1 requested unit/ })).toBeVisible();
   await page.getByRole("link", { name: /Cart, 1 requested unit/ }).click();
 
-  await expect(page.getByText("Synthetic Reference Alpha — Demo Only").first()).toBeVisible();
-  await expect(page.getByText("$24.00", { exact: true })).toBeVisible();
+  const syntheticLine = page.getByRole("list", { name: "Cart lines" }).getByRole("listitem");
+  await expect(syntheticLine).toHaveCount(1);
+  await expect(syntheticLine.getByRole("heading", { name: "Synthetic Reference Alpha — Demo Only", exact: true })).toBeVisible();
+  await expect(syntheticLine.getByRole("strong")).toHaveText("$24.00");
+  await expect(syntheticLine.getByRole("definition").filter({ hasText: /^\$24\.00$/u })).toBeVisible();
+  await expect(page.getByLabel("Order summary").getByText("$24.00", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to sign in" })).toBeEnabled();
 
   const persisted = await page.evaluate(() =>
@@ -1312,7 +1420,8 @@ test("anonymous canonical local/test cart survives reload and preserves only var
 });
 
 test("cart quantity controls are keyboard operable", async ({ page }) => {
-  await page.goto("/catalog/synthetic-reference-alpha");
+  await page.goto("/cart");
+  await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
   await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(0);
   await seedLocalTestCart(page);
   await page.goto("/cart");
@@ -1384,7 +1493,8 @@ test("responsive widths and the 512px 200%-zoom reflow proxy have no horizontal 
 }) => {
   for (const width of [375, 768, 1024, 1440, 512]) {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 900 });
-    await page.goto("/catalog/synthetic-reference-alpha");
+    await page.goto("/catalog/items/tirzepatide");
+    await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
@@ -1418,7 +1528,14 @@ test("mobile explanatory copy meets the 16px body minimum", async ({ page }) => 
   }
 });
 
-test("header logo remains uncropped while brand and footer targets stay accessible", async ({ page }) => {
+test("header brand uses a contained alpha mark and motion field while navigation targets stay accessible", async ({ page }) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
   for (const width of [375, 1440]) {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
     await page.goto("/");
@@ -1435,7 +1552,11 @@ test("header logo remains uncropped while brand and footer targets stay accessib
           borderRadius: wrapperStyles.borderRadius,
           objectFit: imageStyles.objectFit,
           overflow: wrapperStyles.overflow,
+          position: imageStyles.position,
           transform: imageStyles.transform,
+          left: image.style.left,
+          top: image.style.top,
+          width: image.style.width,
         };
       });
 
@@ -1444,25 +1565,89 @@ test("header logo remains uncropped while brand and footer targets stay accessib
       borderRadius: "0px",
       objectFit: "contain",
       overflow: "visible",
+      position: "absolute",
       transform: "none",
+      left: "0px",
+      top: "0px",
+      width: "100%",
     });
+  }
+
+  for (const width of [195, 320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 812 });
+    await page.goto("/");
+    const brandLink = page
+      .getByRole("banner")
+      .getByRole("link", { name: "PROPEPTIQ LABS home" });
+    const mark = brandLink.locator(".brand-logo__mark");
+    const markImage = mark.locator("img");
+    const motionField = brandLink.locator(".header-brand-motion__field");
+    const brandTarget = await brandLink.evaluate((link) => {
+      const bounds = link.getBoundingClientRect();
+      const mark = link.querySelector<HTMLElement>(".brand-logo__mark");
+      const wordmark = link.querySelector<HTMLElement>(".brand-logo__wordmark");
+      return {
+        height: bounds.height,
+        markDisplay: mark ? getComputedStyle(mark).display : "missing",
+        width: bounds.width,
+        wordmarkDisplay: wordmark ? getComputedStyle(wordmark).display : "missing",
+      };
+    });
+
+    console.info(`Header brand target size at ${width}px: ${JSON.stringify(brandTarget)}`);
+    expect(brandTarget.height).toBeGreaterThanOrEqual(44);
+    expect(brandTarget.width).toBeGreaterThanOrEqual(44);
+    expect(brandTarget.markDisplay).not.toBe("none");
+    if (width === 195) expect(brandTarget.wordmarkDisplay).toBe("none");
+    expect(await markImage.getAttribute("src")).toContain("%2Fbrand%2Fpropeptiq-mark.png");
+    expect(
+      rectangleFitsInside(await clientRect(mark), await clientRect(markImage)),
+      `${width}px logo image must stay inside its one-to-one mark box`,
+    ).toBe(true);
+    expect(
+      rectangleFitsInside(await clientRect(brandLink), await clientRect(markImage)),
+      `${width}px logo image must stay inside the home link`,
+    ).toBe(true);
+    await expect(motionField).toHaveAttribute("aria-hidden", "true");
+    expect(await motionField.evaluate((element) => getComputedStyle(element).pointerEvents)).toBe("none");
+    const brandLinkBounds = await clientRect(brandLink);
+    const motionFieldBounds = await clientRect(motionField);
+    expect(
+      rectangleFitsInside(brandLinkBounds, motionFieldBounds),
+      `${width}px motion field must stay inside the padded home link: ${JSON.stringify({ brandLinkBounds, motionFieldBounds })}`,
+    ).toBe(true);
+    const headerLayout = await page.getByRole("banner").evaluate((header) => {
+      const bounds = header.getBoundingClientRect();
+      return {
+        clientWidth: header.clientWidth,
+        left: bounds.left,
+        right: bounds.right,
+        scrollWidth: header.scrollWidth,
+      };
+    });
+    expect(
+      headerLayout.scrollWidth - headerLayout.clientWidth,
+      `${width}px persistent header overflow: ${JSON.stringify(headerLayout)}`,
+    ).toBeLessThanOrEqual(1);
+    expect(headerLayout.left).toBeGreaterThanOrEqual(-0.5);
+    expect(headerLayout.right).toBeLessThanOrEqual(width + 0.5);
+
+    if (width === 195) {
+      await page.evaluate(() => document.fonts.ready);
+      const homepageLayout = await horizontalLayout(page);
+      expect(
+        homepageLayout.scrollWidth,
+        `hydrated 195px homepage overflow: ${JSON.stringify(homepageLayout.offenders)}`,
+      ).toBe(homepageLayout.clientWidth);
+      expect(
+        homepageLayout.offenders,
+        `hydrated 195px homepage offenders: ${JSON.stringify(homepageLayout)}`,
+      ).toEqual([]);
+    }
   }
 
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/");
-
-  const brandTarget = await page
-    .getByRole("banner")
-    .getByRole("link", { name: "PROPEPTIQ LABS home" })
-    .evaluate((link) => {
-      const bounds = link.getBoundingClientRect();
-      return { height: bounds.height, width: bounds.width };
-    });
-
-  console.info(`Header brand target size at 375px: ${JSON.stringify(brandTarget)}`);
-  expect(brandTarget.height).toBeGreaterThanOrEqual(44);
-  expect(brandTarget.width).toBeGreaterThanOrEqual(44);
-
   const targetSizes = await page
     .getByRole("navigation", { name: "Footer" })
     .getByRole("link")
@@ -1476,6 +1661,165 @@ test("header logo remains uncropped while brand and footer targets stay accessib
   expect(targetSizes.length).toBeGreaterThan(0);
   console.info(`Footer target sizes at 375px: ${JSON.stringify(targetSizes)}`);
   expect(targetSizes.every(({ height, width }) => height >= 44 && width >= 44)).toBe(true);
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+  const animatedBrand = page.getByRole("banner").getByRole("link", {
+    name: "PROPEPTIQ LABS home",
+  });
+  const animatedWrapper = animatedBrand.locator(".header-brand-motion");
+  await expect(animatedWrapper).toHaveAttribute("data-motion-state", "running");
+  const beforeAnimation = await clientRect(animatedBrand);
+  await page.waitForTimeout(12_000);
+  const afterAnimation = await clientRect(animatedBrand);
+  expect(Math.abs(afterAnimation.left - beforeAnimation.left)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(afterAnimation.top - beforeAnimation.top)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(afterAnimation.width - beforeAnimation.width)).toBeLessThanOrEqual(0.5);
+  expect(Math.abs(afterAnimation.height - beforeAnimation.height)).toBeLessThanOrEqual(0.5);
+
+  await page.goto("/catalog");
+  const catalogBrand = page.getByRole("banner").getByRole("link", {
+    name: "PROPEPTIQ LABS home",
+  });
+  await catalogBrand.focus();
+  await expect(catalogBrand).toBeFocused();
+  const focusEvidence = await catalogBrand.evaluate((link) => {
+    const bounds = link.getBoundingClientRect();
+    const styles = getComputedStyle(link);
+    return {
+      focusVisible: link.matches(":focus-visible"),
+      left: bounds.left,
+      outlineOffset: Number.parseFloat(styles.outlineOffset),
+      outlineWidth: Number.parseFloat(styles.outlineWidth),
+      right: bounds.right,
+    };
+  });
+  expect(focusEvidence.focusVisible).toBe(true);
+  expect(focusEvidence.left - focusEvidence.outlineOffset - focusEvidence.outlineWidth)
+    .toBeGreaterThanOrEqual(0);
+  expect(focusEvidence.right + focusEvidence.outlineOffset + focusEvidence.outlineWidth)
+    .toBeLessThanOrEqual(375);
+  await catalogBrand.click();
+  await expect(page).toHaveURL(/\/$/u);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.reload();
+  const staticWrapper = page.locator(".header-brand-motion");
+  await expect(staticWrapper).toHaveAttribute("data-motion-state", "static");
+  const staticMotion = await staticWrapper.locator(".header-brand-motion__field").evaluate((field) => {
+    const styles = getComputedStyle(field);
+    return {
+      animationName: styles.animationName,
+      transform: styles.transform,
+    };
+  });
+  expect(staticMotion).toEqual({ animationName: "none", transform: "none" });
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("homepage stays contained and reduced-motion safe before hydration with JavaScript disabled", async ({
+  baseURL,
+  browser,
+}) => {
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    reducedMotion: "reduce",
+    viewport: { width: 195, height: 812 },
+  });
+  const page = await context.newPage();
+  try {
+    await page.goto(new URL("/", baseURL).toString());
+    await page.evaluate(() => document.fonts.ready);
+    const brandLink = page.locator('header a[href="/"]').first();
+    await expect(brandLink).toBeVisible();
+    await expect(brandLink).toContainText("PROPEPTIQ");
+    await expect(brandLink.locator('img[src*="propeptiq-mark.png"]')).toBeVisible();
+
+    const staticMotion = await brandLink.locator(".header-brand-motion__field").evaluate((field) => {
+      const styles = getComputedStyle(field);
+      return {
+        animationName: styles.animationName,
+        opacity: styles.opacity,
+        transform: styles.transform,
+      };
+    });
+    expect(staticMotion).toEqual({
+      animationName: "none",
+      opacity: "0.16",
+      transform: "none",
+    });
+
+    const publicLayout = page.locator(".public-layout");
+    const publicOverflow = await publicLayout.evaluate((element) => ({
+      overflow: getComputedStyle(element).overflow,
+      overflowX: getComputedStyle(element).overflowX,
+    }));
+    expect(["hidden", "clip"]).not.toContain(publicOverflow.overflow);
+    expect(["hidden", "clip"]).not.toContain(publicOverflow.overflowX);
+
+    const layout = await horizontalLayout(page);
+    expect(
+      layout.scrollWidth,
+      `pre-hydration homepage overflow: ${JSON.stringify(layout.offenders)}`,
+    ).toBe(layout.clientWidth);
+    expect(
+      layout.offenders,
+      `pre-hydration homepage offenders: ${JSON.stringify(layout)}`,
+    ).toEqual([]);
+
+    const internalOverflow = await page.locator("main").evaluate((main) =>
+      [...main.querySelectorAll<HTMLElement>("*")]
+        .filter((element) =>
+          element.scrollWidth > element.clientWidth + 1 &&
+          element.closest('[aria-hidden="true"]') === null &&
+          !element.classList.contains("sr-only")
+        )
+        .map((element) => ({
+          className: element.getAttribute("class") ?? "",
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth,
+          tagName: element.tagName,
+          text: element.textContent?.trim().slice(0, 80) ?? "",
+        })),
+    );
+    expect(
+      internalOverflow,
+      `pre-hydration homepage internal overflow: ${JSON.stringify(internalOverflow)}`,
+    ).toEqual([]);
+
+    const focusTargets = page.locator(
+      "main a[href]:visible, main button:not([disabled]):visible, main summary:visible",
+    );
+    expect(await focusTargets.count()).toBeGreaterThan(0);
+    for (let index = 0; index < await focusTargets.count(); index += 1) {
+      const target = focusTargets.nth(index);
+      await target.focus();
+      await expect(target).toBeFocused();
+      const focusBounds = await target.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const styles = getComputedStyle(element);
+        const focusExtent = Number.parseFloat(styles.outlineWidth) +
+          Number.parseFloat(styles.outlineOffset);
+        return {
+          focusExtent,
+          label: element.getAttribute("aria-label") ?? element.textContent?.trim() ?? "",
+          left: bounds.left,
+          right: bounds.right,
+        };
+      });
+      expect.soft(
+        focusBounds.left - focusBounds.focusExtent,
+        `${focusBounds.label} left focus ring`,
+      ).toBeGreaterThanOrEqual(-0.5);
+      expect.soft(
+        focusBounds.right + focusBounds.focusExtent,
+        `${focusBounds.label} right focus ring`,
+      ).toBeLessThanOrEqual(195.5);
+    }
+  } finally {
+    await context.close();
+  }
 });
 
 test("explicit 200% CSS rendering pass remains operable without horizontal overflow", async ({
@@ -1562,7 +1906,7 @@ test("unknown product slugs fail closed", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("owner-supplied catalog is complete, priced where reviewed, and serves the original vial presentation", async ({
+test("owner-supplied catalog is complete, priced where reviewed, and serves individual composite vial presentations", async ({
   page,
   request,
 }) => {
@@ -1572,19 +1916,41 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves the 
   await expect(page.getByRole("button", { name: /^add .+(?:: choose a variant| to (?:preview )?cart)$/iu })).toHaveCount(56);
   await expect(page.locator("main")).toContainText("$41.99");
   await expect(page.locator("main")).toContainText("-30%");
-  const imagePaths = await page.locator("article.catalog-listing-card img").evaluateAll(
-    (images) =>
-      images.map((image) => {
-        const url = new URL((image as HTMLImageElement).src);
+  const visualSources = await page.locator("article.catalog-listing-card .catalog-product-visual").evaluateAll(
+    (visuals) => visuals.map((visual) => {
+      const pathFor = (selector: string) => {
+        const image = visual.querySelector<HTMLImageElement>(selector);
+        if (!image) return null;
+        const url = new URL(image.src);
         return url.searchParams.get("url") ?? url.pathname;
-      }),
+      };
+      return {
+        signature: visual.getAttribute("data-visual-signature"),
+        base: pathFor(".catalog-product-visual__base"),
+        mode: visual.getAttribute("data-visual-presentation"),
+      };
+    }),
   );
-  expect([...new Set(imagePaths)]).toEqual(["/catalog/vial-base-v2.png"]);
+  expect(visualSources).toHaveLength(56);
+  expect(new Set(visualSources.map(({ signature }) => signature)).size).toBe(56);
+  expect(visualSources.every(({ signature, base, mode }) =>
+    typeof signature === "string" &&
+    signature.startsWith("PQ-") &&
+    base === "/catalog/visual-masters/front.webp" &&
+    mode === "illustration_with_catalog_data_plate"
+  )).toBe(true);
 
-  for (const imagePath of imagePaths) {
+  for (const imagePath of [
+    "/catalog/visual-masters/front.webp",
+    "/catalog/visual-masters/three-quarter.webp",
+    "/catalog/visual-masters/multi-vial-study.webp",
+    "/catalog/visual-masters/copy-space-detail.webp",
+    "/catalog/visual-masters/overhead.webp",
+    "/catalog/visual-masters/ambient-studio.webp",
+  ]) {
     const response = await request.get(imagePath);
     expect(response.ok(), `${imagePath} illustration response`).toBe(true);
-    expect(response.headers()["content-type"]).toContain("image/png");
+    expect(response.headers()["content-type"]).toMatch(/^image\/(?:png|webp)/u);
     expect((await response.body()).byteLength).toBeGreaterThan(1_000);
   }
 
@@ -1597,15 +1963,116 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves the 
   await expect(page.locator("main")).toContainText("Local cart preview");
 
   const imageLoaded = await page.getByRole("img", {
-    name: "Illustrative laboratory vial presentation for Tirzepatide",
+    name: "Front AI-generated catalog illustration for Tirzepatide",
   }).evaluate((image) => {
     const element = image as HTMLImageElement;
     return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0;
   });
   expect(imageLoaded).toBe(true);
+  await expect(page.locator(".catalog-detail-image .catalog-product-visual__base")).toHaveCSS("object-fit", "contain");
+  await expect(page.locator(".catalog-detail-image .catalog-product-visual__base")).toHaveCSS(
+    "object-position",
+    "50% 50%",
+  );
 
   const unknown = await page.goto("/catalog/items/not-a-real-item");
   expect(unknown?.status()).toBe(404);
+});
+
+test("catalog product hierarchy keeps visual layers and longest labels inside reserved frames", async ({
+  page,
+}) => {
+  const checkedCards = [
+    { name: "CJC-1295 NO DAC 10mg + IPA 10mg", expectsSale: true },
+    { name: "Tirzepatide", expectsSale: true },
+  ] as const;
+
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: width < 768 ? 812 : 1000 });
+    await page.goto("/catalog");
+
+    for (const { name, expectsSale } of checkedCards) {
+      const card = page.getByRole("article", { name, exact: true });
+      const frame = card.locator(".catalog-image-frame");
+      const visual = frame.locator(".catalog-product-visual");
+      const base = visual.getByRole("img", {
+        name: `Front AI-generated catalog illustration for ${name}`,
+      });
+      const labelName = visual.locator(".catalog-product-visual__name");
+      const variant = visual.locator(".catalog-product-visual__variant");
+      const notice = visual.getByText("RESEARCH USE ONLY", { exact: true });
+      const disclosure = visual.getByText("AI-generated catalog illustration — not actual product photography.", {
+        exact: true,
+      });
+      const sale = visual.getByLabel(/^-[1-9]\d*%$/u);
+
+      await frame.scrollIntoViewIfNeeded();
+      await expect(card.getByRole("heading", { name, exact: true })).toBeVisible();
+      await expect(base).toBeVisible();
+      await expect(disclosure).toBeVisible();
+      await expect(visual.getByRole("img")).toHaveCount(1);
+      await expect(variant).toBeVisible();
+      await expect(notice).toBeVisible();
+      await expect(sale).toHaveCount(expectsSale ? 1 : 0);
+
+      const frameRect = await clientRect(frame);
+      expect(frameRect.width / frameRect.height, `${width}px ${name} reserved ratio`).toBeCloseTo(4 / 3, 2);
+      for (const [layerName, layer] of [
+        ["image frame", base.locator("..")],
+        ["name", labelName],
+        ["variant", variant],
+        ["RUO notice", notice],
+        ["disclosure", disclosure],
+        ...(expectsSale ? [["sale badge", sale] as const] : []),
+      ] as const) {
+        expect(
+          rectangleFitsInside(frameRect, await clientRect(layer)),
+          `${width}px ${name} ${layerName} containment`,
+        ).toBe(true);
+      }
+
+      const nameRect = await clientRect(labelName);
+      const variantRect = await clientRect(variant);
+      const noticeRect = await clientRect(notice);
+      const disclosureRect = await clientRect(disclosure);
+      expect(rectanglesIntersect(nameRect, variantRect), `${width}px ${name} name/variant overlap`).toBe(false);
+      expect(rectanglesIntersect(nameRect, noticeRect), `${width}px ${name} name/RUO overlap`).toBe(false);
+      expect(rectanglesIntersect(nameRect, disclosureRect), `${width}px ${name} name/disclosure overlap`).toBe(false);
+      expect(rectanglesIntersect(variantRect, noticeRect), `${width}px ${name} variant/RUO overlap`).toBe(false);
+      expect(rectanglesIntersect(variantRect, disclosureRect), `${width}px ${name} variant/disclosure overlap`).toBe(false);
+      expect(rectanglesIntersect(noticeRect, disclosureRect), `${width}px ${name} RUO/disclosure overlap`).toBe(false);
+      if (expectsSale) {
+        const saleRect = await clientRect(sale);
+        for (const [label, rect] of [
+          ["name", nameRect],
+          ["variant", variantRect],
+          ["RUO notice", noticeRect],
+          ["disclosure", disclosureRect],
+        ] as const) {
+          expect(rectanglesIntersect(saleRect, rect), `${width}px ${name} sale/${label} overlap`).toBe(false);
+        }
+      }
+      if (width <= 375) {
+        await card.hover();
+        await expect(base.locator("..")).toHaveCSS("overflow", "hidden");
+      }
+    }
+
+    const layout = await horizontalLayout(page);
+    expect(layout.scrollWidth - layout.clientWidth, `${width}px visual catalog overflow`).toBeLessThanOrEqual(1);
+    expect(
+      layout.offenders.filter(({ className }) => className.includes("catalog-product-visual")),
+      `${width}px catalog visual overflow offenders`,
+    ).toEqual([]);
+    if (width === 375 || width === 1440) {
+      await page.locator("article.catalog-listing-card").first().scrollIntoViewIfNeeded();
+      await page.screenshot({ path: path.resolve(process.cwd(), `.superpowers/sdd/2026-09-04-propeptiq-storefront-completion/catalog-gallery-${width}.png`) });
+      await page.goto("/catalog/items/tirzepatide");
+      const imagePanel = page.locator(".catalog-product-gallery");
+      await imagePanel.evaluate((element) => window.scrollTo({ top: element.getBoundingClientRect().top + window.scrollY - 190, behavior: "instant" }));
+      await page.screenshot({ path: path.resolve(process.cwd(), `.superpowers/sdd/2026-09-04-propeptiq-storefront-completion/pdp-gallery-${width}.png`) });
+    }
+  }
 });
 
 test("navigation, homepage trust content, product research, and related records are visibly complete", async ({
@@ -1626,28 +2093,28 @@ test("navigation, homepage trust content, product research, and related records 
 
   await page.goto("/catalog/items/bpc-157");
   const heroImage = page.getByRole("img", {
-    name: "Illustrative laboratory vial presentation for BPC-157",
+    name: "Front AI-generated catalog illustration for BPC-157",
   });
   await expect(heroImage).toBeVisible();
   expect(await heroImage.evaluate((image) => {
     const url = new URL((image as HTMLImageElement).src);
     return url.searchParams.get("url") ?? url.pathname;
-  })).toBe("/catalog/vial-base-v2.png");
+  })).toBe("/catalog/visual-masters/front.webp");
   await expect(page.getByText(/BPC-157 is an owner-supplied catalog identity/u)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Product information" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Search PubMed for BPC-157" })).toHaveAttribute(
     "href",
     "https://pubmed.ncbi.nlm.nih.gov/?term=BPC-157",
   );
-  await expect(page.getByRole("region", { name: "Frequently Researched Together" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Related Products" })).toBeVisible();
   await expect(page.getByRole("list", { name: "Related products, 4 items" }).locator(":scope > li")).toHaveCount(4);
 
-  expect(await page.locator("main img").evaluateAll((images) =>
-    images.every((image) => {
-      const url = new URL((image as HTMLImageElement).src);
-      return (url.searchParams.get("url") ?? url.pathname) === "/catalog/vial-base-v2.png";
-    })),
-  ).toBe(true);
+  const productVisuals = page.locator("main .catalog-product-visual");
+  await expect(productVisuals).toHaveCount(5);
+  expect(await productVisuals.evaluateAll((visuals) => visuals.every((visual) =>
+    visual.querySelectorAll("img").length === 1 &&
+    visual.getAttribute("data-visual-presentation") === "illustration_with_catalog_data_plate"
+  ))).toBe(true);
 });
 
 test("preview item keeps the calculator gated while product information and related records remain visible", async ({ page }) => {
@@ -1665,7 +2132,7 @@ test("preview item keeps the calculator gated while product information and rela
     "href",
     "https://pubmed.ncbi.nlm.nih.gov/?term=Tirzepatide",
   );
-  await expect(page.getByRole("heading", { name: "Frequently Researched Together", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Related Products", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Previous related products" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Next related products" })).toBeVisible();
   await expect(page.getByRole("list", { name: "Related products, 4 items" }).locator(":scope > li")).toHaveCount(4);
@@ -1683,7 +2150,7 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
     { amount: "10 mg · 1 bottle", base: "$69.99", name: "Retatrutide", sale: "$48.99" },
     { amount: "500 mg · 1 bottle", base: "$69.99", name: "NAD+", sale: "$48.99" },
   ] as const;
-  const targetImagePaths = new Set<string>(["/catalog/vial-base-v2.png"]);
+  const targetImagePaths = new Set<string>(["/catalog/visual-masters/front.webp"]);
   const nextImageRequest = /\/_next\/image(?:\?.*)?$/u;
 
   for (const width of [375, 1440]) {
@@ -1715,7 +2182,7 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
       for (const expectedCard of expectedCards) {
         const card = page.getByRole("article", { name: expectedCard.name, exact: true });
         const imageFrame = card.locator(".catalog-image-frame");
-        const image = imageFrame.locator("img");
+        const image = imageFrame.locator(".catalog-product-visual__base");
 
         await expect(card.getByText(expectedCard.amount, { exact: true })).toBeVisible();
         await expect(card.locator("del")).toHaveText(expectedCard.base);
@@ -1753,7 +2220,7 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
         expect(decodedState.complete).toBe(true);
         expect(decodedState.naturalHeight).toBeGreaterThan(0);
         expect(decodedState.naturalWidth).toBeGreaterThan(0);
-        const afterImageCompletion = await clientRect(image.locator("xpath=.."));
+        const afterImageCompletion = await clientRect(image.locator("xpath=ancestor::*[contains(@class, 'catalog-image-frame')]"));
         expect(Math.abs(afterImageCompletion.width - before.width)).toBeLessThanOrEqual(1);
         expect(Math.abs(afterImageCompletion.height - before.height)).toBeLessThanOrEqual(1);
       }
@@ -1842,7 +2309,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(radios).toHaveCount(9);
   await expect(page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`)).toBeVisible();
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`).check();
-  const pricing = page.locator("main dl");
+  const pricing = page.getByRole("status", { name: "Purchase summary" }).locator("dl");
   const tr5Pricing = await pricing.evaluate((element) => {
     const values = new Map<string, string>();
     const terms = [...element.querySelectorAll("dt")];
@@ -2203,6 +2670,122 @@ test("scroll reveal public routes stay overflow-free and error-free on mobile an
     }
   }
 
+  expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+});
+
+test("PDP purchase choices synchronize the live hero discount badge without reload", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.route(/\/catalog\/items\/tirzepatide(?:\?.*)?$/u, async (route) => {
+    if (route.request().headers().rsc !== "1") {
+      await route.continue();
+      return;
+    }
+
+    const response = await route.fetch();
+    let body = await response.text();
+    const promotionMarker = '"automaticPromotions":[';
+    let promotionStart = body.indexOf(promotionMarker);
+    while (promotionStart >= 0) {
+      const arrayStart = promotionStart + promotionMarker.length - 1;
+      let depth = 0;
+      let arrayEnd = -1;
+      for (let index = arrayStart; index < body.length; index += 1) {
+        if (body[index] === "[") depth += 1;
+        if (body[index] === "]") depth -= 1;
+        if (depth === 0) {
+          arrayEnd = index;
+          break;
+        }
+      }
+      expect(arrayEnd, "promotion array terminator").toBeGreaterThan(arrayStart);
+      body = `${body.slice(0, arrayStart)}[]${body.slice(arrayEnd + 1)}`;
+      promotionStart = body.indexOf(promotionMarker, arrayStart + 2);
+    }
+
+    const unavailableVariantId = "b1cdf4ea-2eb6-58dc-9dd3-a8245470cadf";
+    const unavailableStart = body.indexOf(`{"id":"${unavailableVariantId}"`);
+    expect(unavailableStart, "unavailable variant fixture").toBeGreaterThanOrEqual(0);
+    const unavailableEnd = body.indexOf("},{\"id\":", unavailableStart);
+    expect(unavailableEnd, "unavailable variant fixture terminator").toBeGreaterThan(
+      unavailableStart,
+    );
+    const unavailable = body
+      .slice(unavailableStart, unavailableEnd + 1)
+      .replace('"availability":"preview_only"', '"availability":"unavailable"')
+      .replace('"priceStatus":"pending"', '"priceStatus":"unavailable"')
+      .replace('"baseUnitMinor":0', '"baseUnitMinor":null')
+      .replace('"currency":"USD"', '"currency":null');
+    body = `${body.slice(0, unavailableStart)}${unavailable}${body.slice(unavailableEnd + 1)}`;
+    await route.fulfill({ response, body });
+  });
+
+  await page.goto("/catalog");
+  await page.getByRole("link", { name: "View catalog item: Tirzepatide" }).click();
+  await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide$/u);
+  await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
+  await page.evaluate(() => {
+    (window as Window & { __task6SelectionSentinel?: string }).__task6SelectionSentinel =
+      "selection-state-survived";
+  });
+
+  const hero = page.locator(".catalog-detail-image .catalog-product-visual");
+  const heroVariant = hero.locator(".catalog-product-visual__variant");
+  const heroBadge = hero.getByLabel(/^-[1-9]\d*%$/u);
+  const exactQuantity = page.getByRole("spinbutton", { name: "Exact quantity" });
+  await expect(heroVariant).toHaveText("30mg");
+  await expect(heroBadge).toHaveCount(0);
+
+  await page.getByRole("button", { name: "2 bottles" }).click();
+  await expect(hero.getByLabel("-8%")).toBeVisible();
+  await page.getByRole("button", { name: "3 bottles" }).click();
+  await expect(hero.getByLabel("-10%")).toBeVisible();
+  await page.getByRole("button", { name: "10 or more bottles" }).click();
+  await expect(hero.getByLabel("-30%")).toBeVisible();
+  await expect(exactQuantity).toHaveAttribute("min", "10");
+
+  await page.getByRole("button", { name: "Decrease quantity" }).click();
+  await expect(exactQuantity).toHaveValue("9");
+  await expect(exactQuantity).toHaveAttribute("min", "1");
+  await expect(hero.getByLabel("-10%")).toBeVisible();
+
+  await exactQuantity.fill("");
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText(
+    "Invalid quantity",
+  );
+  await expect(heroBadge).toHaveCount(0);
+
+  await page.getByRole("button", { name: "2 bottles" }).click();
+  await expect(hero.getByLabel("-8%")).toBeVisible();
+  await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`).check();
+  await expect(heroVariant).toHaveText("5mg");
+  await expect(heroBadge).toHaveCount(0);
+
+  await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
+  await expect(heroVariant).toHaveText("30mg");
+  await expect(hero.getByLabel("-8%")).toBeVisible();
+  await page.locator('input[type="radio"][value="b1cdf4ea-2eb6-58dc-9dd3-a8245470cadf"]').check();
+  await expect(heroVariant).toHaveText("10mg");
+  await expect(heroBadge).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText(
+    "Unavailable",
+  );
+
+  expect(
+    await page.evaluate(() =>
+      (window as Window & { __task6SelectionSentinel?: string }).__task6SelectionSentinel
+    ),
+  ).toBe("selection-state-survived");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
 });

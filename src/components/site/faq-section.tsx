@@ -11,7 +11,7 @@ export function FaqSection({
     <section
       id="faq"
       aria-labelledby="faq-heading"
-      className="border-t border-border py-14 sm:py-16 lg:py-24"
+      className="scroll-mt-32 border-t border-border py-14 sm:py-16 lg:py-24"
     >
       <div className="site-container grid gap-8 lg:grid-cols-[minmax(14rem,4fr)_minmax(0,8fr)] lg:gap-14">
         <header className="max-w-md">
@@ -30,9 +30,10 @@ export function FaqSection({
         <div className="grid content-start gap-3">
           {entries.map((entry) => (
             <details
-              className="record-sheet group overflow-hidden p-0"
+              className="record-sheet group scroll-mt-32 overflow-hidden p-0"
               id={entry.anchor}
               key={entry.id}
+              name="propeptiq-home-faq"
             >
               <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-semibold text-ink marker:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-moss">
                 <span>{entry.question}</span>

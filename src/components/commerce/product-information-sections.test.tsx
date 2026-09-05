@@ -1,23 +1,20 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { ApprovedStorefrontContent } from "@/content/storefront-content";
+import type { PublicStorefrontContent } from "@/catalog/storefront-public";
 
 import { ProductInformationSections } from "./product-information-sections";
 
 function record(
-  overrides: Partial<ApprovedStorefrontContent> = {},
-): ApprovedStorefrontContent {
+  overrides: Partial<PublicStorefrontContent> = {},
+): PublicStorefrontContent {
   return {
     id: "11111111-1111-4111-8111-111111111111",
     kind: "product_information",
     status: "approved",
     title: "Catalog overview",
     body: "Neutral, approved catalog information.",
-    sourceReferences: [],
-    approvalNote: null,
-    reviewedAt: null,
-    effectiveAt: null,
+    literatureReferences: [],
     ...overrides,
   };
 }
@@ -32,9 +29,10 @@ describe("ProductInformationSections", () => {
             id: "22222222-2222-4222-8222-222222222222",
             title: "Literature discovery",
             body: "Use the external search to review indexed literature independently.",
-            sourceReferences: [
-              "https://pubmed.ncbi.nlm.nih.gov/?term=BPC-157",
-            ],
+            literatureReferences: [{
+              href: "https://pubmed.ncbi.nlm.nih.gov/?term=BPC-157",
+              term: "BPC-157",
+            }],
           }),
         ]}
       />,
@@ -67,7 +65,9 @@ describe("ProductInformationSections", () => {
   ])("does not expose an unapproved source reference: %s", (sourceReference) => {
     render(
       <ProductInformationSections
-        records={[record({ sourceReferences: [sourceReference] })]}
+        records={[record({
+          literatureReferences: [{ href: sourceReference, term: "unsafe" }],
+        })]}
       />,
     );
 
@@ -77,7 +77,6 @@ describe("ProductInformationSections", () => {
 
   it("omits drafts, unrelated content kinds, and empty content", () => {
     const records = [
-      record({ status: "draft" as "approved" }),
       record({ kind: "faq" }),
     ];
     const { container, rerender } = render(

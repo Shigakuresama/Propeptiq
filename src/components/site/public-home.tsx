@@ -13,6 +13,7 @@ import {
 } from "@/components/design-system/archive-primitives";
 import { ProgramStrip } from "@/components/growth/program-strip";
 import { FaqSection } from "@/components/site/faq-section";
+import { FaqJsonLd } from "@/components/site/faq-json-ld";
 import { NewsletterForm } from "@/components/site/newsletter-form";
 import { ProofRail } from "@/components/site/proof-rail";
 import { ScienceField } from "@/components/site/science-field";
@@ -225,7 +226,12 @@ export function PublicHome({
                   : "xl:col-span-3 [&_.catalog-image-frame]:hidden [&_.record-panel-recessed]:hidden sm:[&_.catalog-image-frame]:block sm:[&_.record-panel-recessed]:block"}
                 key={product.slug}
               >
-                <CatalogListingCard product={product} priority={index === 0} pricing={pricing} />
+                <CatalogListingCard
+                  headingLevel={3}
+                  product={product}
+                  priority={index === 0}
+                  pricing={pricing}
+                />
               </li>
             ))}
           </ul>
@@ -266,6 +272,7 @@ export function PublicHome({
 
       <WhyChoosePropeptIQ items={homepageContent.whyChoose} />
       <FaqSection entries={homepageContent.faqs} />
+      <FaqJsonLd entries={homepageContent.faqs} />
       <NewsletterForm
         available={newsletterConfiguration.enabled}
         privacyHref={newsletterPrivacyLink}

@@ -22,6 +22,8 @@ describe("Task 8A administration navigation", () => {
     expect(within(home).getByText("PROPEPTIQ")).toBeVisible();
     expect(within(home).getByText("LABS")).toBeVisible();
     expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("size-9", "sm:size-10");
+    expect(home.querySelector(".brand-logo")).not.toHaveClass("w-24", "w-28");
+    expect(home.querySelector(".brand-logo__wordmark")).toHaveClass("text-canvas");
     expect(screen.getByText("Admin operations", { exact: true })).toBeVisible();
     expect(screen.getByText("Growth administration").closest("[data-motion-surface]"))
       .toHaveAttribute("data-motion-surface", "admin");

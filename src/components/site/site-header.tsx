@@ -6,6 +6,7 @@ import Link from "next/link";
 import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { useCart } from "@/cart/cart-provider";
 import { BrandLogo } from "@/components/site/brand-mark";
+import { HeaderBrandMotion } from "@/components/site/header-brand-motion";
 import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
 import { ShellNavLink } from "@/components/site/shell-nav-link";
 import { Button } from "@/components/ui/button";
@@ -37,11 +38,13 @@ export function SiteHeader() {
             aria-label={`${siteName} home`}
             className="group flex min-h-11 shrink-0 items-center rounded-lg px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-canvas"
           >
-            <BrandLogo
-              className="w-auto transition-transform duration-200 ease-out group-hover:-translate-y-0.5 motion-reduce:transform-none"
-              decorative
-              priority
-            />
+            <HeaderBrandMotion>
+              <BrandLogo
+                className="transition-transform duration-200 ease-out group-hover:-translate-y-0.5 motion-reduce:transform-none"
+                decorative
+                priority
+              />
+            </HeaderBrandMotion>
           </Link>
 
           <nav aria-label="Primary" className="ml-auto hidden items-center gap-1 xl:flex">
@@ -92,7 +95,7 @@ export function SiteHeader() {
             >
               <SheetHeader className="border-b border-border px-6 pb-5 pt-6 text-left">
                 <div className="flex items-center pr-10">
-                  <BrandLogo className="w-auto" decorative />
+                  <BrandLogo decorative />
                   <SheetTitle className="sr-only">{siteName}</SheetTitle>
                 </div>
                 <SheetDescription className="pt-4 leading-6 text-muted-ink">

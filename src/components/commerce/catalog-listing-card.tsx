@@ -12,7 +12,6 @@ import {
   resolvePublicVariantPrice,
   selectCardVariant,
   summarizePublicStorefrontVariants,
-  type PricePresentation,
   type PublicStorefrontPricingContext,
 } from "@/catalog/storefront-price-presentation";
 
@@ -27,10 +26,12 @@ export function CatalogListingCard({
   product,
   priority = false,
   pricing,
+  headingLevel = 2,
 }: {
   product: PublicStorefrontProduct;
   priority?: boolean;
   pricing: PublicStorefrontPricingContext;
+  headingLevel?: 2 | 3;
 }) {
   const selectedVariant =
     product.kind === "canonical"
@@ -55,6 +56,10 @@ export function CatalogListingCard({
   );
   const remainingConfigurationCount =
     product.displayConfigurations.length - visibleConfigurations.length;
+  const Heading = headingLevel === 3 ? "h3" : "h2";
+  const discountPercent = selectedPresentation?.state === "priced"
+    ? selectedPresentation.price.effectiveDiscountBps / 100
+    : undefined;
 
   return (
     <article
@@ -66,17 +71,14 @@ export function CatalogListingCard({
           product={product}
           priority={priority}
           variantLabel={selectedVariant?.label}
+          discountPercent={discountPercent}
         />
-        {selectedPresentation?.state === "priced" &&
-        selectedPresentation.price.effectiveDiscountBps > 0 ? (
-          <CardDiscountBadge presentation={selectedPresentation} />
-        ) : null}
       </div>
 
       <div className="flex flex-1 flex-col p-6 sm:p-7">
-        <h2 id={headingId} className="font-heading text-3xl leading-tight text-ink">
+        <Heading id={headingId} className="font-heading text-3xl leading-tight text-ink">
           {product.name}
-        </h2>
+        </Heading>
 
         <ul
           aria-label={`${product.name} catalog variants`}
@@ -150,21 +152,5 @@ export function CatalogListingCard({
         </Link>
       </div>
     </article>
-  );
-}
-
-function CardDiscountBadge({
-  presentation,
-}: {
-  presentation: Extract<PricePresentation, { state: "priced" }>;
-}) {
-  const discountPercent = presentation.price.effectiveDiscountBps / 100;
-  return (
-    <span
-      aria-label={`-${discountPercent}%`}
-      className="absolute left-3 top-3 rounded-full bg-moss px-3 py-1 text-xs font-semibold text-white"
-    >
-      -{discountPercent}%
-    </span>
   );
 }

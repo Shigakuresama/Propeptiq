@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
@@ -11,7 +11,12 @@ import {
 } from "@/catalog/storefront-public";
 
 import { CatalogItemDetail } from "./catalog-item-detail";
-import { testPricingContext, testCanonicalProduct, testPublicVariant } from "./storefront-test-fixtures";
+import {
+  testCanonicalProduct,
+  testPricingContext,
+  testPublicVariant,
+  testWinter30,
+} from "./storefront-test-fixtures";
 
 const calculator = Object.freeze({
   title: "Synthetic approved calculator",
@@ -20,9 +25,56 @@ const calculator = Object.freeze({
 });
 
 const { capturedPricing } = vi.hoisted(() => ({ capturedPricing: [] as unknown[] }));
-vi.mock("./product-purchase-panel", () => ({ ProductPurchasePanel: ({ pricing }: { pricing: unknown }) => { capturedPricing.push(pricing); return <section aria-labelledby="purchase-heading"><h2 id="purchase-heading">Purchase</h2><div data-testid="purchase-panel" /></section>; } }));
+vi.mock("./product-purchase-panel", () => ({
+  ProductPurchasePanel: ({
+    onSelectedQuantityChange,
+    onSelectedVariantIdChange,
+    pricing,
+    product,
+  }: {
+    onSelectedQuantityChange?: (quantity: number | null) => void;
+    onSelectedVariantIdChange?: (variantId: string) => void;
+    pricing: unknown;
+    product: { variants: readonly { id: string; label: string }[] };
+  }) => {
+    capturedPricing.push(pricing);
+    return (
+      <section aria-labelledby="purchase-heading">
+        <h2 id="purchase-heading">Purchase</h2>
+        <div data-testid="purchase-panel" />
+        {product.variants.map((variant) => (
+          <button
+            aria-label={`Select visual variant ${variant.label}`}
+            key={variant.id}
+            onClick={() => onSelectedVariantIdChange?.(variant.id)}
+            type="button"
+          >
+            {variant.label}
+          </button>
+        ))}
+        {[2, 3, 10].map((quantity) => (
+          <button
+            aria-label={`Select visual quantity ${quantity}`}
+            key={quantity}
+            onClick={() => onSelectedQuantityChange?.(quantity)}
+            type="button"
+          >
+            {quantity}
+          </button>
+        ))}
+        <button
+          aria-label="Invalidate visual quantity"
+          onClick={() => onSelectedQuantityChange?.(null)}
+          type="button"
+        >
+          Invalid quantity
+        </button>
+      </section>
+    );
+  },
+}));
 const { capturedRelated } = vi.hoisted(() => ({ capturedRelated: [] as Array<{ products: unknown; pricing: unknown }> }));
-vi.mock("./related-products-carousel", () => ({ RelatedProductsCarousel: (props: { products: unknown; pricing: unknown }) => { capturedRelated.push(props); return <section aria-label="Frequently Researched Together"><h2>Frequently Researched Together</h2><ul>{(props.products as Array<{ name: string }>).map((product) => <li key={product.name}>{product.name}</li>)}</ul></section>; } }));
+vi.mock("./related-products-carousel", () => ({ RelatedProductsCarousel: (props: { products: unknown; pricing: unknown }) => { capturedRelated.push(props); return <section aria-label="Related Products"><h2>Related Products</h2><ul>{(props.products as Array<{ name: string }>).map((product) => <li key={product.name}>{product.name}</li>)}</ul></section>; } }));
 
 describe("CatalogItemDetail", () => {
   const catalog = buildPublicStorefrontCatalog({
@@ -43,10 +95,15 @@ describe("CatalogItemDetail", () => {
     const intro = heading.closest("header");
     expect(heading).toBeVisible();
     expect(intro).toHaveAttribute("data-motion-sequence", "dossier-intro");
-    expect(intro?.querySelectorAll("[data-motion-step]")).toHaveLength(4);
-    expect(screen.getByText(product.description!)).toBeVisible();
+    const motionSteps = Array.from(intro?.querySelectorAll("[data-motion-step]") ?? []);
+    const expectedMotionStepCount = 3 + (product.description ? 1 : 0);
+    expect(motionSteps).toHaveLength(expectedMotionStepCount);
+    expect(motionSteps.map((step) => step.getAttribute("data-motion-step"))).toEqual(
+      Array.from({ length: expectedMotionStepCount }, (_, index) => String(index + 1)),
+    );
+    if (product.description) expect(screen.getByText(product.description)).toBeVisible();
     const image = screen.getByRole("img", {
-      name: "Illustrative laboratory vial presentation for Pinealon",
+      name: "Front AI-generated catalog illustration for Pinealon",
     });
     const suppliedConfigurations = screen.getByRole("heading", {
       name: "Supplied configurations",
@@ -76,7 +133,7 @@ describe("CatalogItemDetail", () => {
     expect(screen.getByText("PN5")).toBeVisible();
     expect(within(suppliedConfigurations.closest("section")!).getByText("5mg")).toBeVisible();
     expect(screen.queryByText("5mg × 10 vials")).not.toBeInTheDocument();
-    expect(screen.getByText("Illustrative product presentation")).toBeVisible();
+    expect(screen.getByText("AI-generated catalog illustration — not actual product photography.")).toBeVisible();
     expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
     expect(document.body).not.toHaveTextContent(/\$|usd/i);
   });
@@ -89,10 +146,7 @@ describe("CatalogItemDetail", () => {
         status: "approved",
         title: "Approved product information",
         body: "Approved product body.",
-        sourceReferences: [],
-        approvalNote: null,
-        reviewedAt: null,
-        effectiveAt: null,
+        literatureReferences: [],
       }],
     });
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
@@ -102,6 +156,79 @@ describe("CatalogItemDetail", () => {
     const information = screen.getByRole("heading", { name: "Approved product information" });
     expect(purchase.compareDocumentPosition(configurations) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(configurations.compareDocumentPosition(information) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("keeps the hero variant label and sale badge synchronized with purchase selection", () => {
+    const priced = testPublicVariant({
+      id: "priced-variant",
+      label: "Priced 10 mg",
+      baseUnitMinor: 10_00,
+    });
+    const pending = testPublicVariant({
+      id: "pending-variant",
+      label: "Pending 20 mg",
+      availability: "preview_only",
+      baseUnitMinor: 0,
+      checkoutReady: false,
+      priceStatus: "pending",
+    });
+    const unavailable = testPublicVariant({
+      id: "unavailable-variant",
+      label: "Unavailable 30 mg",
+      availability: "unavailable",
+      checkoutReady: false,
+    });
+    const product = testCanonicalProduct([priced, pending, unavailable], {
+      defaultVariantId: priced.id,
+    });
+    const { container } = render(
+      <CatalogItemDetail
+        calculator={null}
+        pricing={testPricingContext("local", [testWinter30])}
+        product={product}
+        relatedProducts={[]}
+      />,
+    );
+    const visual = container.querySelector<HTMLElement>(".catalog-product-visual")!;
+    const visualVariant = () => visual.querySelector<HTMLElement>(".catalog-product-visual__variant");
+
+    expect(visualVariant()).toHaveTextContent("Priced 10 mg");
+    expect(within(visual).getByLabelText("-30%")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual variant Pending 20 mg" }));
+    expect(visualVariant()).toHaveTextContent("Pending 20 mg");
+    expect(within(visual).queryByLabelText("-30%")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual variant Unavailable 30 mg" }));
+    expect(visualVariant()).toHaveTextContent("Unavailable 30 mg");
+    expect(within(visual).queryByLabelText("-30%")).toBeNull();
+  });
+
+  it("keeps the hero discount badge synchronized with quantity tiers", () => {
+    const product = testCanonicalProduct([testPublicVariant({ baseUnitMinor: 10_00 })]);
+    const { container } = render(
+      <CatalogItemDetail
+        calculator={null}
+        pricing={testPricingContext("production")}
+        product={product}
+        relatedProducts={[]}
+      />,
+    );
+    const visual = container.querySelector<HTMLElement>(".catalog-product-visual")!;
+
+    expect(within(visual).queryByLabelText(/^-\d+%$/u)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 2" }));
+    expect(within(visual).getByLabelText("-8%")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 3" }));
+    expect(within(visual).getByLabelText("-10%")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 10" }));
+    expect(within(visual).getByLabelText("-30%")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Invalidate visual quantity" }));
+    expect(within(visual).queryByLabelText(/^-\d+%$/u)).toBeNull();
   });
 
   it("keeps browse-only configurations before its notice without purchase controls", () => {
@@ -139,15 +266,18 @@ describe("CatalogItemDetail", () => {
   it("renders only approved allowed content literally and forwards exact pricing", () => {
     const pricing = testPricingContext(); capturedPricing.length = 0;
     const content = [
-      { id: "info", kind: "product_information" as const, status: "approved" as const, title: "Approved info", body: "literal <em>text</em>", sourceReferences: ["secret"], approvalNote: "private", reviewedAt: "2026", effectiveAt: "2026" },
-      { id: "draft", kind: "legal_notice" as const, status: "draft" as const, title: "Draft", body: "DRAFT", sourceReferences: [], approvalNote: null, reviewedAt: null, effectiveAt: null },
-      { id: "faq", kind: "faq" as const, status: "approved" as const, title: "FAQ", body: "FAQ", sourceReferences: [], approvalNote: null, reviewedAt: null, effectiveAt: null },
-      { id: "legal", kind: "legal_notice" as const, status: "approved" as const, title: "Legal", body: "Approved legal", sourceReferences: [], approvalNote: null, reviewedAt: null, effectiveAt: null },
+      { id: "info", kind: "product_information" as const, status: "approved" as const, title: "Approved info", body: "literal <em>text</em>", literatureReferences: [{ href: "secret", term: "secret" }], approvalNote: "private", reviewedAt: "2026", effectiveAt: "2026" },
+      { id: "draft", kind: "legal_notice" as const, status: "draft" as const, title: "Draft", body: "DRAFT", literatureReferences: [], approvalNote: null, reviewedAt: null, effectiveAt: null },
+      { id: "faq", kind: "faq" as const, status: "approved" as const, title: "FAQ", body: "FAQ", literatureReferences: [], approvalNote: null, reviewedAt: null, effectiveAt: null },
+      { id: "legal", kind: "legal_notice" as const, status: "approved" as const, title: "Legal", body: "Approved legal", literatureReferences: [], approvalNote: null, reviewedAt: null, effectiveAt: null },
     ];
-    const product = testCanonicalProduct([], { content: content as never, description: "raw description" });
+    const product = testCanonicalProduct([], {
+      content: content as never,
+      description: "Approved overview text.",
+    });
     render(<CatalogItemDetail product={product} pricing={pricing} relatedProducts={[]} calculator={null} />);
-    expect(screen.getByTestId("purchase-panel")).toBeVisible(); expect(capturedPricing[0]).toBe(pricing); expect(screen.getByText("literal <em>text</em>")).toBeVisible(); expect(screen.getByText("Approved legal")).toBeVisible();
-    expect(screen.getByText("raw description")).toBeVisible(); expect(screen.queryByText("DRAFT")).toBeNull(); expect(screen.queryByText("FAQ")).toBeNull(); expect(screen.queryByText("private")).toBeNull(); expect(screen.queryByText("secret")).toBeNull(); expect(screen.queryByText("2026")).toBeNull(); expect(screen.queryByText("Browse-only catalog item")).toBeNull(); expect(screen.queryByText(/not represented/u)).toBeNull(); expect(screen.getByText("Approved info").compareDocumentPosition(screen.getByText("Legal")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId("purchase-panel")).toBeVisible(); expect(capturedPricing[0]).toBe(pricing); expect(screen.getByText("Approved overview text.")).toBeVisible(); expect(screen.getByText("literal <em>text</em>")).toBeVisible(); expect(screen.getByText("Approved legal")).toBeVisible();
+    expect(screen.queryByText("DRAFT")).toBeNull(); expect(screen.queryByText("FAQ")).toBeNull(); expect(screen.queryByText("private")).toBeNull(); expect(screen.queryByText("secret")).toBeNull(); expect(screen.queryByText("2026")).toBeNull(); expect(screen.queryByText("Browse-only catalog item")).toBeNull(); expect(screen.queryByText(/not represented/u)).toBeNull(); expect(screen.getByText("Approved info").compareDocumentPosition(screen.getByText("Legal")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("keeps a synthetic browse-only item entirely purchase-free with all configurations", () => {
@@ -175,9 +305,9 @@ describe("CatalogItemDetail", () => {
     const second = testCanonicalProduct([testPublicVariant({ id: "related-b-v" })], { id: "related-b", name: "Related B" });
     capturedRelated.length = 0;
     render(<CatalogItemDetail product={testCanonicalProduct()} pricing={pricing} relatedProducts={[first, second]} calculator={null} />);
-    expect(screen.getByRole("heading", { name: "Frequently Researched Together" })).toBeVisible();
-    expect(within(screen.getByRole("region", { name: "Frequently Researched Together" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Related A", "Related B"]);
-    expect(screen.getByRole("heading", { name: "Frequently Researched Together" }).compareDocumentPosition(screen.getByRole("heading", { level: 1, name: "Synthetic Product Alpha" })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Related Products" })).toBeVisible();
+    expect(within(screen.getByRole("region", { name: "Related Products" })).getAllByRole("listitem").map((item) => item.textContent)).toEqual(["Related A", "Related B"]);
+    expect(screen.getByRole("heading", { name: "Related Products" }).compareDocumentPosition(screen.getByRole("heading", { level: 1, name: "Synthetic Product Alpha" })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     expect(capturedRelated[0]?.products).toEqual([first, second]);
     expect(capturedRelated[0]?.pricing).toBe(pricing);
   });
@@ -189,10 +319,7 @@ describe("CatalogItemDetail", () => {
       status: "approved" as const,
       title: "Approved product information",
       body: "Approved product body.",
-      sourceReferences: [],
-      approvalNote: null,
-      reviewedAt: null,
-      effectiveAt: null,
+      literatureReferences: [],
     }];
     const related = testCanonicalProduct(
       [testPublicVariant({ id: "related-calculator-v" })],
@@ -209,7 +336,7 @@ describe("CatalogItemDetail", () => {
 
     const informationHeading = screen.getByRole("heading", { name: "Approved product information" });
     const calculatorHeading = screen.getByRole("heading", { name: calculator.title });
-    const relatedHeading = screen.getByRole("heading", { name: "Frequently Researched Together" });
+    const relatedHeading = screen.getByRole("heading", { name: "Related Products" });
     expect(
       informationHeading.compareDocumentPosition(calculatorHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING,

@@ -6,12 +6,12 @@ import type { ControlledContentRecord } from "./storefront-content";
 
 export type StorefrontProductContentProjection = Readonly<{
   description: string;
-  contentIds: readonly [string, string];
+  contentIds: readonly [string, string, string];
 }>;
 
 const DNS_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
-const APPROVAL_NOTE = "Owner-approved neutral storefront content.";
-const REVIEWED_AT = "2026-09-04T00:00:00.000-07:00";
+const APPROVAL_NOTE =
+  "Owner-authorized neutral placeholder copy; replace with final business-reviewed content.";
 
 function uuidBytes(uuid: string): Buffer {
   return Buffer.from(uuid.replaceAll("-", ""), "hex");
@@ -36,6 +36,9 @@ const projections: [string, StorefrontProductContentProjection][] = [];
 const contentRecords: ControlledContentRecord[] = [];
 
 for (const product of browseCatalogProducts) {
+  const descriptionContentId = uuidV5(
+    `propeptiq.com/storefront/content/${product.slug}/description`,
+  );
   const catalogContentId = uuidV5(
     `propeptiq.com/storefront/content/${product.slug}/catalog-record`,
   );
@@ -45,6 +48,7 @@ for (const product of browseCatalogProducts) {
   const description =
     `${product.name} is an owner-supplied catalog identity in the ${product.category} category. Review its published configurations and current purchase state separately.`;
   const contentIds = Object.freeze([
+    descriptionContentId,
     catalogContentId,
     literatureContentId,
   ] as const);
@@ -55,6 +59,17 @@ for (const product of browseCatalogProducts) {
   ]);
   contentRecords.push(
     Object.freeze({
+      id: descriptionContentId,
+      kind: "product_description",
+      status: "approved",
+      title: "Product overview",
+      body: description,
+      sourceReferences: Object.freeze(["/catalog"]),
+      approvalNote: APPROVAL_NOTE,
+      reviewedAt: null,
+      effectiveAt: null,
+    }),
+    Object.freeze({
       id: catalogContentId,
       kind: "product_information",
       status: "approved",
@@ -62,7 +77,7 @@ for (const product of browseCatalogProducts) {
       body: `This page presents the owner-supplied identity for ${product.name} and its published package configurations. Pricing, availability, and checkout readiness are separate record states and may be unavailable.`,
       sourceReferences: Object.freeze(["/catalog", "/research-use-policy"]),
       approvalNote: APPROVAL_NOTE,
-      reviewedAt: REVIEWED_AT,
+      reviewedAt: null,
       effectiveAt: null,
     }),
     Object.freeze({
@@ -73,7 +88,7 @@ for (const product of browseCatalogProducts) {
       body: `Open the linked PubMed search for the exact owner-supplied catalog name “${product.name}.” Search results are provided for literature discovery only. They are not a curated study list, endorsement, product claim, or use guidance.`,
       sourceReferences: Object.freeze([pubMedSearchUrl(product.name)]),
       approvalNote: APPROVAL_NOTE,
-      reviewedAt: REVIEWED_AT,
+      reviewedAt: null,
       effectiveAt: null,
     }),
   );

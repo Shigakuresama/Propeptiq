@@ -23,7 +23,7 @@ export function AdminShell({ children, resources }: { children: ReactNode; resou
               aria-label="PROPEPTIQ LABS administration home"
               className="flex min-h-11 shrink-0 items-center rounded-lg bg-ink px-1.5 no-underline"
             >
-              <BrandLogo className="w-24" decorative />
+              <BrandLogo decorative tone="inverse" />
             </Link>
             <span className="hidden text-xs font-semibold uppercase tracking-[0.12em] text-accent-readable sm:block">
               Admin operations

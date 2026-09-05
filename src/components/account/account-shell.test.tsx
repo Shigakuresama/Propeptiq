@@ -36,6 +36,8 @@ describe("AccountShell", () => {
     expect(within(home).getByText("PROPEPTIQ")).toBeVisible();
     expect(within(home).getByText("LABS")).toBeVisible();
     expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("size-9", "sm:size-10");
+    expect(home.querySelector(".brand-logo")).not.toHaveClass("w-24", "w-28");
+    expect(home.querySelector(".brand-logo__wordmark")).toHaveClass("text-canvas");
     expect(screen.getByText("Private records", { exact: true })).toBeVisible();
     expect(navigation.closest("aside")).toHaveClass("hidden", "xl:block");
     expect(screen.getByText("Owner content").closest("[data-motion-surface]"))

@@ -21,6 +21,10 @@ import {
   type ApprovedStorefrontContent,
   type ControlledContentRecord,
 } from "@/content/storefront-content";
+import {
+  projectPublicLiteratureReference,
+  type PublicLiteratureReference,
+} from "@/content/public-literature";
 
 export type PublicStorefrontDisplayConfiguration = Readonly<{
   displayCode: string;
@@ -56,6 +60,15 @@ export type PublicStorefrontVariant = Readonly<{
   checkoutReady: boolean;
 }>;
 
+export type PublicStorefrontContent = Readonly<{
+  id: string;
+  kind: ApprovedStorefrontContent["kind"];
+  status: "approved";
+  title: string;
+  body: string;
+  literatureReferences: readonly PublicLiteratureReference[];
+}>;
+
 export type CanonicalPublicStorefrontProduct = PublicStorefrontCommon &
   Readonly<{
     kind: "canonical";
@@ -67,7 +80,7 @@ export type CanonicalPublicStorefrontProduct = PublicStorefrontCommon &
     defaultVariantId: string;
     variants: readonly PublicStorefrontVariant[];
     relatedProductIds: readonly string[];
-    content: readonly ApprovedStorefrontContent[];
+    content: readonly PublicStorefrontContent[];
   }>;
 
 export type BrowseOnlyPublicStorefrontProduct = PublicStorefrontCommon &
@@ -622,9 +635,26 @@ function canonicalPublicProduct(input: Readonly<{
   const content = Object.freeze(
     input.canonical.contentIds.flatMap((contentId) => {
       const record = input.approvedContentById.get(contentId);
-      return record ? [record] : [];
+      if (!record) return [];
+      const literatureReferences = Object.freeze(
+        record.sourceReferences.flatMap((sourceReference) => {
+          const reference = projectPublicLiteratureReference(sourceReference);
+          return reference === null ? [] : [reference];
+        }),
+      );
+      return [Object.freeze({
+        id: record.id,
+        kind: record.kind,
+        status: "approved" as const,
+        title: record.title,
+        body: record.body,
+        literatureReferences,
+      })];
     }),
   );
+  const approvedDescription = content.find(
+    (record) => record.kind === "product_description",
+  )?.body ?? null;
 
   return Object.freeze({
     kind: "canonical",
@@ -633,7 +663,7 @@ function canonicalPublicProduct(input: Readonly<{
     name: input.canonical.name,
     sourceName: input.browseProduct.sourceName,
     category: input.canonical.category,
-    description: input.canonical.description,
+    description: approvedDescription,
     image: Object.freeze({
       src: input.canonical.image.src,
       alt: input.canonical.image.alt,

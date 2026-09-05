@@ -309,14 +309,14 @@ describe("resolvePublicVariantPrice", () => {
 });
 
 describe("card variant presentation", () => {
-  it("falls back to the lowest effective display price and breaks ties by label then stable ID when the default is missing", () => {
+  it("fails closed instead of substituting a priced variant when the explicit default is missing", () => {
     const variants = [
       variant({ id: "variant-z", label: "Zeta", baseUnitMinor: 800 }),
       variant({ id: "variant-b", label: "Alpha", baseUnitMinor: 1_000 }),
       variant({ id: "variant-a", label: "Alpha", baseUnitMinor: 1_000 }),
     ];
     const scoped = { ...winter30, discountBps: 2_000, scope: { kind: "variants" as const, variantIds: ["variant-b", "variant-a"] } };
-    expect(selectCardVariant({ product: product(variants, "missing-default"), pricing: pricing("production", [scoped]) })?.id).toBe("variant-a");
+    expect(selectCardVariant({ product: product(variants, "missing-default"), pricing: pricing("production", [scoped]) })).toBeNull();
   });
 
   it("honors an eligible explicit default even when a different positive variant is cheaper", () => {
@@ -331,7 +331,7 @@ describe("card variant presentation", () => {
     })?.id).toBe("variant-default");
   });
 
-  it("falls back from an unavailable or pending explicit default to a positive priced candidate", () => {
+  it("selects the exact explicit default even when it is unavailable, pending, or zero", () => {
     const unavailableDefault = variant({
       id: "variant-unavailable-default",
       availability: "unavailable",
@@ -346,11 +346,11 @@ describe("card variant presentation", () => {
     });
     const priced = variant({ id: "variant-priced", label: "10 mg", baseUnitMinor: 1_000 });
 
-    expect(selectCardVariant({ product: product([unavailableDefault, priced], unavailableDefault.id), pricing: pricing("preview") })?.id).toBe("variant-priced");
-    expect(selectCardVariant({ product: product([pendingDefault, priced], pendingDefault.id), pricing: pricing("preview") })?.id).toBe("variant-priced");
+    expect(selectCardVariant({ product: product([unavailableDefault, priced], unavailableDefault.id), pricing: pricing("preview") })?.id).toBe(unavailableDefault.id);
+    expect(selectCardVariant({ product: product([pendingDefault, priced], pendingDefault.id), pricing: pricing("preview") })?.id).toBe(pendingDefault.id);
   });
 
-  it("keeps a positive-base candidate eligible when a scoped 100% promotion reduces its effective amount to zero", () => {
+  it("does not substitute a promoted positive-base candidate for a missing explicit default", () => {
     const selected = variant({ id: "variant-promoted-free", baseUnitMinor: 1_000 });
     const promotion = {
       ...winter30,
@@ -361,7 +361,7 @@ describe("card variant presentation", () => {
     expect(selectCardVariant({
       product: product([selected], "missing-default"),
       pricing: pricing("production", [promotion]),
-    })?.id).toBe("variant-promoted-free");
+    })).toBeNull();
   });
 
   it("does not mutate the product or pricing inputs while selecting a card variant", () => {
@@ -387,7 +387,7 @@ describe("card variant presentation", () => {
     expect(selectCardVariant({ product: product(variants, "variant-default"), pricing: pricing("production", [winter30]) })?.id).toBe("variant-default");
   });
 
-  it("selects the lowest displayable available variant ahead of a preview-only zero", () => {
+  it("keeps a preview-only zero explicit default when another variant later receives a positive price", () => {
     const variants = [
       variant({
         id: "variant-preview-zero",
@@ -407,7 +407,7 @@ describe("card variant presentation", () => {
     expect(selectCardVariant({
       product: product(variants, "variant-preview-zero"),
       pricing: pricing("preview", [winter30]),
-    })?.id).toBe("variant-available-ten");
+    })?.id).toBe("variant-preview-zero");
   });
 
   it("builds structured same-unit summaries without parsing labels", () => {

@@ -79,19 +79,28 @@ describe("CatalogListingCard", () => {
 
     const article = screen.getByRole("article", { name: product.name });
     const image = within(article).getByRole("img", {
-      name: `Illustrative laboratory vial presentation for ${product.name}`,
+      name: `Front AI-generated catalog illustration for ${product.name}`,
     });
     expect(image).toBeVisible();
     expect(image).toHaveAttribute(
       "sizes",
       "(min-width: 1280px) 28vw, (min-width: 768px) 45vw, calc(100vw - 2rem)",
     );
+    const visual = image.closest(".catalog-product-visual");
+    expect(visual).toHaveAttribute(
+      "data-visual-presentation",
+      "illustration_with_catalog_data_plate",
+    );
+    expect(visual?.querySelectorAll("img")).toHaveLength(1);
+    expect(image.getAttribute("src")).toContain(
+      encodeURIComponent("/catalog/visual-masters/front.webp"),
+    );
     expect(image.closest(".catalog-image-frame")).not.toBeNull();
     expect(within(article).getByRole("heading", { name: product.name })).toBeVisible();
     expect(within(article).getByText("TR5")).toBeVisible();
     expect(within(article).getByText("5mg")).toBeVisible();
     expect(within(article).queryByText("5mg × 10 vials")).not.toBeInTheDocument();
-    expect(within(article).getByText("Illustrative product presentation")).toBeVisible();
+    expect(within(article).getByText("AI-generated catalog illustration — not actual product photography.")).toBeVisible();
     expect(within(article).getByText("Pricing coming soon")).toBeVisible();
     expect(
       within(article).getByRole("link", {

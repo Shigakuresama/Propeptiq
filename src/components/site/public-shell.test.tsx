@@ -38,6 +38,12 @@ describe("public shell growth navigation", () => {
       "/sign-in",
     );
 
+    const homeLinks = screen.getAllByRole("link", { name: "PROPEPTIQ LABS home" });
+    expect(homeLinks).toHaveLength(2);
+    expect(homeLinks[0]?.querySelector(".brand-logo")).not.toHaveClass("w-auto");
+    expect(homeLinks[0]?.querySelector(".brand-logo__wordmark")).toHaveClass("text-ink");
+    expect(homeLinks[1]?.querySelector(".brand-logo__wordmark")).toHaveClass("text-canvas");
+
     const footer = screen.getByRole("navigation", { name: "Footer" });
     expect(screen.getAllByRole("navigation", { name: "Footer" })).toHaveLength(1);
     const footerRestriction = screen.getByText(/Catalog names and package configurations come from owner-supplied records/iu);

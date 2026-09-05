@@ -16,7 +16,7 @@ const publicationPolicy = Object.freeze({
 });
 
 describe("storefront product controlled content", () => {
-  it("covers every owner catalog product with one description and two stable content IDs", () => {
+  it("covers every owner catalog product with one description and three stable content IDs", () => {
     expect(browseCatalogProducts).toHaveLength(56);
     expect(Object.keys(storefrontProductContentBySlug)).toEqual(
       browseCatalogProducts.map((product) => product.slug),
@@ -27,29 +27,37 @@ describe("storefront product controlled content", () => {
       const projection = getStorefrontProductContent(product.slug);
       expect(projection).not.toBeNull();
       expect(projection?.description).toContain(product.name);
-      expect(projection?.contentIds).toHaveLength(2);
+      expect(projection?.contentIds).toHaveLength(3);
       expect(projection?.contentIds.every((id) => contentId.test(id))).toBe(true);
       expect(Object.isFrozen(projection)).toBe(true);
       expect(Object.isFrozen(projection?.contentIds)).toBe(true);
       allIds.push(...(projection?.contentIds ?? []));
     }
 
-    expect(allIds).toHaveLength(112);
-    expect(new Set(allIds).size).toBe(112);
+    expect(allIds).toHaveLength(168);
+    expect(new Set(allIds).size).toBe(168);
     expect(getStorefrontProductContent("not-an-owner-product")).toBeNull();
   });
 
-  it("publishes exactly one neutral catalog record and one PubMed discovery record per product", () => {
-    expect(storefrontProductContentRecords).toHaveLength(112);
-    expect(getApprovedStorefrontContent(storefrontProductContentRecords)).toHaveLength(112);
+  it("publishes a distinct overview, catalog record, and PubMed discovery record per product", () => {
+    expect(storefrontProductContentRecords).toHaveLength(168);
+    expect(getApprovedStorefrontContent(storefrontProductContentRecords)).toHaveLength(168);
 
     const recordsById = new Map(
       storefrontProductContentRecords.map((record) => [record.id, record] as const),
     );
     for (const product of browseCatalogProducts) {
       const projection = getStorefrontProductContent(product.slug)!;
-      const catalogRecord = recordsById.get(projection.contentIds[0]);
-      const literatureRecord = recordsById.get(projection.contentIds[1]);
+      const descriptionRecord = recordsById.get(projection.contentIds[0]);
+      const catalogRecord = recordsById.get(projection.contentIds[1]);
+      const literatureRecord = recordsById.get(projection.contentIds[2]);
+
+      expect(descriptionRecord).toMatchObject({
+        kind: "product_description",
+        status: "approved",
+        title: "Product overview",
+        body: projection.description,
+      });
 
       expect(catalogRecord).toMatchObject({
         kind: "product_information",
@@ -72,6 +80,7 @@ describe("storefront product controlled content", () => {
       expect([...sourceUrl.searchParams.keys()]).toEqual(["term"]);
       expect(sourceUrl.searchParams.get("term")).toBe(product.name);
       expect(literatureRecord?.sourceReferences).toHaveLength(1);
+      expect(catalogRecord?.body).not.toBe(projection.description);
     }
   });
 

@@ -30,6 +30,7 @@ const defaultVariantId = "20000000-0000-4000-8000-000000000002";
 const approvedFirstId = "30000000-0000-4000-8000-000000000001";
 const draftId = "30000000-0000-4000-8000-000000000002";
 const approvedSecondId = "30000000-0000-4000-8000-000000000003";
+const approvedDescriptionId = "30000000-0000-4000-8000-000000000004";
 
 const canonicalProduct: StorefrontProduct = Object.freeze({
   id: productId,
@@ -49,7 +50,7 @@ const canonicalProduct: StorefrontProduct = Object.freeze({
   defaultVariantId,
   variantIds: Object.freeze([firstVariantId, defaultVariantId]),
   relatedProductIds: Object.freeze([]),
-  contentIds: Object.freeze([approvedSecondId, draftId, approvedFirstId]),
+  contentIds: Object.freeze([approvedDescriptionId, approvedSecondId, draftId, approvedFirstId]),
 });
 
 const bindings = parseStorefrontBindings({
@@ -61,7 +62,7 @@ const bindings = parseStorefrontBindings({
       releasedAt: "2026-08-30T00:00:00.000Z",
       defaultVariantId,
       relatedProductIds: [],
-      contentIds: [approvedSecondId, draftId, approvedFirstId],
+      contentIds: [approvedDescriptionId, approvedSecondId, draftId, approvedFirstId],
     },
   ],
   variants: [
@@ -104,6 +105,17 @@ const catalogData: StorefrontCatalogData = Object.freeze({
 });
 
 const controlledContent = Object.freeze([
+  {
+    id: approvedDescriptionId,
+    kind: "product_description",
+    status: "approved",
+    title: "Approved overview fixture",
+    body: "Approved public overview fixture body.",
+    sourceReferences: ["fixture-description"],
+    approvalNote: "Approved test fixture",
+    reviewedAt: "2026-08-30T00:00:00.000Z",
+    effectiveAt: null,
+  },
   {
     id: approvedFirstId,
     kind: "product_information",
@@ -297,10 +309,12 @@ describe("public storefront projection", () => {
     if (product?.kind !== "canonical") throw new Error("expected canonical fixture");
 
     expect(product.content.map((entry) => entry.id)).toEqual([
+      approvedDescriptionId,
       approvedSecondId,
       approvedFirstId,
     ]);
     expect(product.content.every((entry) => entry.status === "approved")).toBe(true);
+    expect(product.description).toBe("Approved public overview fixture body.");
   });
 
   it("recursively excludes loose provider, payment, and inventory fields from approved content", () => {
@@ -330,12 +344,19 @@ describe("public storefront projection", () => {
     if (product?.kind !== "canonical") throw new Error("expected canonical fixture");
 
     const keys = recursivelyCollectKeys(product.content);
-    expect(product.content.map((record) => record.id)).toEqual([approvedSecondId]);
+    expect(product.content.map((record) => record.id)).toEqual([
+      approvedDescriptionId,
+      approvedSecondId,
+    ]);
     expect(keys).not.toContain("stripePriceId");
     expect(keys).not.toContain("availableQuantity");
     expect(keys).not.toContain("provider");
     expect(keys).not.toContain("stripeProductId");
     expect(keys).not.toContain("providerToken");
+    expect(keys).not.toContain("sourceReferences");
+    expect(keys).not.toContain("approvalNote");
+    expect(keys).not.toContain("reviewedAt");
+    expect(keys).not.toContain("effectiveAt");
   });
 
   it("allowlist-maps variants and recursively excludes server-only mappings and inventory facts", () => {

@@ -1,0 +1,192 @@
+{
+  "schemaVersion": 1,
+  "compounds": [
+    {
+      "id": "tirzepatide",
+      "productSlug": "tirzepatide",
+      "displayName": "Tirzepatide",
+      "alternateNames": [],
+      "studyIds": ["pmid-35658024", "pmid-37385275"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "semaglutide",
+      "productSlug": "semaglutide",
+      "displayName": "Semaglutide",
+      "alternateNames": [],
+      "studyIds": ["pmid-33567185", "pmid-33667417"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "retatrutide",
+      "productSlug": "retatrutide",
+      "displayName": "Retatrutide",
+      "alternateNames": [],
+      "studyIds": ["pmid-37366315"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "survodutide",
+      "productSlug": "survodutide",
+      "displayName": "Survodutide",
+      "alternateNames": [],
+      "studyIds": ["pmid-38330987", "pmid-42253238"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "cagrilintide",
+      "productSlug": "cargrilintide",
+      "displayName": "Cagrilintide",
+      "alternateNames": ["Cargrilintide"],
+      "studyIds": ["pmid-34798060"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": "Catalog productSlug preserves the existing \"cargrilintide\" spelling; study metadata uses \"cagrilintide\".",
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "aod-9604",
+      "productSlug": "aod-9604",
+      "displayName": "AOD-9604",
+      "alternateNames": ["AOD9604"],
+      "studyIds": ["pmid-11146367", "pmid-11713213"],
+      "strongestEvidence": "animal_only",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "mots-c",
+      "productSlug": "mots-c",
+      "displayName": "MOTS-C",
+      "alternateNames": ["MOTS-c"],
+      "studyIds": ["pmid-29593067"],
+      "strongestEvidence": "human_observational",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "nad-plus",
+      "productSlug": "nad-plus",
+      "displayName": "NAD+",
+      "alternateNames": ["Nicotinamide adenine dinucleotide"],
+      "studyIds": ["pmid-31572171", "pmid-41704678"],
+      "strongestEvidence": "human_observational",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "5-amino-1mq",
+      "productSlug": "5-amino-1mq",
+      "displayName": "5-Amino-1MQ",
+      "alternateNames": ["5A1MQ", "5-amino-1-methylquinolinium"],
+      "studyIds": ["pmid-39161060", "pmid-35013352"],
+      "strongestEvidence": "animal_only",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "bpc-157",
+      "productSlug": "bpc-157",
+      "displayName": "BPC-157",
+      "alternateNames": ["BPC157", "Pentadecapeptide BPC 157"],
+      "studyIds": ["pmid-40131143", "pmid-21030672"],
+      "strongestEvidence": "human_observational",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "ghk-cu",
+      "productSlug": "ghk-cu",
+      "displayName": "GHK-Cu",
+      "alternateNames": ["Copper tripeptide complex"],
+      "studyIds": ["pmid-16847171"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "tesamorelin",
+      "productSlug": "tesmorelin",
+      "displayName": "Tesamorelin",
+      "alternateNames": ["TH9507", "Tesmorelin"],
+      "studyIds": ["pmid-20554713"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": "Catalog productSlug preserves the existing \"tesmorelin\" spelling; study metadata uses \"tesamorelin\".",
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "ipamorelin",
+      "productSlug": "ipamorelin",
+      "displayName": "Ipamorelin",
+      "alternateNames": [],
+      "studyIds": ["pmid-10496658", "pmid-25331030"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "cjc-1295-with-dac",
+      "productSlug": "cjc-1295-with-dac",
+      "displayName": "CJC-1295 with DAC",
+      "alternateNames": ["CJC-1295"],
+      "studyIds": ["pmid-16352683", "pmid-17018654"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "sermorelin-acetate",
+      "productSlug": "sermorelin-acetate",
+      "displayName": "Sermorelin Acetate",
+      "alternateNames": ["GHRH(1-29)"],
+      "studyIds": ["pmid-8772599"],
+      "strongestEvidence": "human_observational",
+      "identityCaveat": "The cited pediatric record names growth hormone-releasing hormone rather than the catalog label.",
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "igf-1-lr3",
+      "productSlug": "igf-1-lr3",
+      "displayName": "IGF-1 LR3",
+      "alternateNames": ["Long R3 IGF-I", "Long [R3] insulin-like growth factor-I"],
+      "studyIds": ["pmid-7561636", "pmid-9488001"],
+      "strongestEvidence": "animal_only",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "hcg",
+      "productSlug": "hcg",
+      "displayName": "hCG",
+      "alternateNames": ["Human chorionic gonadotropin"],
+      "studyIds": ["pmid-12107212"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": null,
+      "mechanism": null,
+      "benefitClaim": null
+    }
+  ]
+}
