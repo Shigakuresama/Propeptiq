@@ -1793,6 +1793,18 @@ test("header brand uses a contained alpha mark and motion field while navigation
   });
   const animatedWrapper = animatedBrand.locator(".header-brand-motion");
   await expect(animatedWrapper).toHaveAttribute("data-motion-state", "running");
+  expect(await animatedWrapper.locator(".header-brand-motion__field").evaluate((field) => {
+    const styles = getComputedStyle(field);
+    return {
+      duration: styles.animationDuration,
+      easing: styles.animationTimingFunction,
+      name: styles.animationName,
+    };
+  })).toEqual({
+    duration: "10s",
+    easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+    name: "header-brand-molecular-drift",
+  });
   const beforeAnimation = await clientRect(animatedBrand);
   await page.waitForTimeout(12_000);
   const afterAnimation = await clientRect(animatedBrand);

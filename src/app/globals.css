@@ -58,6 +58,7 @@
   --motion-duration-micro: 160ms;
   --motion-duration-reveal: 240ms;
   --motion-duration-signal: 680ms;
+  --motion-ease-brand-drift: cubic-bezier(0.2, 0.8, 0.2, 1);
   --motion-ease-enter: cubic-bezier(0.22, 1, 0.36, 1);
   --motion-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --motion-rise-reveal: 12px;
@@ -247,7 +248,7 @@ footer a,
   color: var(--moss);
   pointer-events: none;
   opacity: 0.12;
-  animation: header-brand-molecular-drift 10s var(--motion-ease-standard) infinite;
+  animation: header-brand-molecular-drift 10s var(--motion-ease-brand-drift) infinite;
   animation-play-state: paused;
 }
 
