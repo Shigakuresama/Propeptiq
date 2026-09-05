@@ -150,6 +150,9 @@ describe("verified compound research source", () => {
     expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(0, 27))).digest("hex")).toBe(
       "13c0d57425ffcda4e861fecb10199b0e7fd83d16d8b69063b40c0ca7a80ba44f",
     );
+    expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(27))).digest("hex")).toBe(
+      "5a3bd19d1edd1ca83615fd14c4c4cb9d186bdeb62f2a39b011d454d51e2f3cda",
+    );
 
     for (const study of studiesJson.studies.slice(0, 27)) {
       expect(study.id).toBe(`pmid-${study.pmid}`);
@@ -186,6 +189,9 @@ describe("verified compound research source", () => {
     expect(compoundsJson.compounds).toHaveLength(20);
     expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(0, 17))).digest("hex")).toBe(
       "b23f9802f40eb3d17dc01f7ff7bf614218b060e816ceaf87261f3c32cb526f0c",
+    );
+    expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(17))).digest("hex")).toBe(
+      "13128802d80682a7aef7d0065e278ee41d5abf8306e6f898efe736e6e5c8f526",
     );
     expect(compoundsJson.compounds.slice(17)).toMatchObject([
       { id: "ara-290", productSlug: "ara-290", studyIds: ["pmid-23168581", "pmid-24136731"], strongestEvidence: "human_rct", mechanism: null, benefitClaim: null },
