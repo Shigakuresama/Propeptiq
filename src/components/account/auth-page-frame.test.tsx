@@ -32,6 +32,8 @@ describe("AuthPageFrame", () => {
     expect(within(home).getByText("PROPEPTIQ")).toBeVisible();
     expect(within(home).getByText("LABS")).toBeVisible();
     expect(home.querySelector("img[alt='']")?.parentElement).toHaveClass("size-9", "sm:size-10");
+    expect(home.querySelector(".brand-logo")).not.toHaveClass("w-24", "w-28");
+    expect(home.querySelector(".brand-logo__wordmark")).toHaveClass("text-canvas");
     expect(screen.getByRole("main")).toHaveAttribute("data-motion-surface", "auth");
     const field = container.querySelector("[data-science-field='trace']");
     expect(field).toHaveAttribute("aria-hidden", "true");

@@ -58,7 +58,7 @@ export function AuthPageFrame({
               aria-label="PROPEPTIQ LABS home"
               className="relative z-10 inline-flex min-h-11 w-fit items-center rounded-xl border border-canvas/20 px-2 text-canvas no-underline transition-colors hover:border-canvas/45 hover:bg-canvas/5"
             >
-              <BrandLogo className="w-28" decorative />
+              <BrandLogo decorative tone="inverse" />
             </Link>
 
             <div className="relative z-10 my-auto py-10" data-motion-sequence="auth-intro">

@@ -123,9 +123,9 @@ export function SiteFooter({
             <Link
               href="/"
               aria-label={`${siteName} home`}
-              className="inline-flex rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
+              className="inline-flex min-h-11 items-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
             >
-              <BrandLogo className="max-w-full sm:w-56" />
+              <BrandLogo tone="inverse" />
             </Link>
             <p className="mt-6 font-heading text-3xl leading-tight text-canvas sm:text-4xl">
               Research materials,<br />documented with clarity.

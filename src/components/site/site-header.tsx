@@ -95,7 +95,7 @@ export function SiteHeader() {
             >
               <SheetHeader className="border-b border-border px-6 pb-5 pt-6 text-left">
                 <div className="flex items-center pr-10">
-                  <BrandLogo className="w-auto" decorative />
+                  <BrandLogo decorative />
                   <SheetTitle className="sr-only">{siteName}</SheetTitle>
                 </div>
                 <SheetDescription className="pt-4 leading-6 text-muted-ink">

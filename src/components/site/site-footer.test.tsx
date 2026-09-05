@@ -351,8 +351,11 @@ describe("SiteFooter", () => {
 
     const footer = screen.getByRole("contentinfo");
     const footerNavigation = screen.getByRole("navigation", { name: "Footer" });
+    const home = screen.getByRole("link", { name: "PROPEPTIQ LABS home" });
     expect(footer).toHaveClass("bg-ink", "text-canvas");
     expect(footerNavigation).toHaveClass("grid", "sm:grid-cols-2", "lg:grid-cols-4");
+    expect(home.querySelector(".brand-logo")).not.toHaveClass("w-56", "sm:w-56", "max-w-full");
+    expect(home.querySelector(".brand-logo__wordmark")).toHaveClass("text-canvas");
 
     for (const link of screen.getAllByRole("link")) {
       expect(link).toHaveClass("focus-visible:outline-none", "focus-visible:ring-2");
