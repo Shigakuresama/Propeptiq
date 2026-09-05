@@ -589,4 +589,51 @@ describe("CartView", () => {
     expect(screen.queryByText("Your saved request is ready to continue at checkout.", { exact: true })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("keeps the bounded drawer presentation display-only while preserving the full cart page handoff", async () => {
+    const navigate = vi.fn();
+    render(
+      <CartView
+        checkoutIntent="resume"
+        navigate={navigate}
+        presentation="drawer"
+      />,
+    );
+
+    const checkout = await screen.findByRole("button", { name: "Checkout — Coming Soon" });
+    expect(checkout).toBeDisabled();
+    expect(checkout).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(checkout);
+    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.getByText(/final shipping, tax, and payment are not available/iu)).toBeVisible();
+    expect(screen.getByRole("img", {
+      name: "AI-generated catalog illustration beside Synthetic local test only — Alpha, Synthetic 5 mg",
+    })).toHaveAttribute("loading", "lazy");
+  });
+
+  it("scopes every display-preview disclosure heading ID to its CartView instance", async () => {
+    const displayOnly = readyLine({
+      available: false,
+      purchaseState: "checkout_unavailable",
+    });
+    fetchMock.mockImplementation(async () => response(preview(
+      [displayOnly],
+      ["checkout_unavailable"],
+    )));
+    render(
+      <>
+        <CartView checkoutIntent={null} />
+        <CartView checkoutIntent={null} />
+      </>,
+    );
+
+    await waitFor(() => expect(screen.getAllByRole("heading", {
+      name: "Display-price cart preview",
+    })).toHaveLength(2));
+    const headings = screen.getAllByRole("heading", { name: "Display-price cart preview" });
+    expect(headings[0]?.id).toBeTruthy();
+    expect(headings[1]?.id).toBeTruthy();
+    expect(headings[0]?.id).not.toBe(headings[1]?.id);
+    expect(headings.map((heading) => heading.id)).not.toContain("display-preview-heading");
+  });
 });

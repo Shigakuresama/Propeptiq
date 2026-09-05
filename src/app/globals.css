@@ -1020,6 +1020,118 @@ footer a,
   background: var(--moss-soft);
 }
 
+.cart-drawer[data-side="right"] {
+  width: min(32rem, 100vw);
+  max-width: min(32rem, 100vw);
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  animation-duration: 300ms;
+  transition-duration: 300ms;
+  transition-property: transform, opacity;
+}
+
+.cart-drawer__header,
+.cart-drawer__footer {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.cart-drawer__scroll {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cart-drawer__footer {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+}
+
+.cart-view--drawer {
+  min-width: 0;
+  padding: 1rem;
+}
+
+.cart-drawer .cart-layout--drawer {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+}
+
+.cart-drawer .cart-layout--drawer .cart-summary {
+  position: static;
+  top: auto;
+  min-width: 0;
+  padding: 1rem;
+}
+
+.cart-layout--drawer .cart-line__visual {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+  min-width: 0;
+  margin: 0 0 1rem;
+}
+
+.cart-layout--drawer .cart-line__visual img {
+  display: block;
+  width: 7rem;
+  height: 7rem;
+  border: 1px solid var(--rule);
+  border-radius: 0.75rem;
+  object-fit: cover;
+}
+
+.cart-layout--drawer .cart-line__visual figcaption {
+  min-width: 0;
+  color: var(--muted-ink);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.cart-layout--drawer .cart-line__body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cart-layout--drawer .cart-line__controls,
+.cart-layout--drawer .cart-line__quantity {
+  width: 100%;
+  min-width: 0;
+}
+
+.cart-layout--drawer .cart-line__quantity {
+  flex: 1 1 10rem;
+}
+
+.cart-layout--drawer .quantity-control {
+  width: 100%;
+  max-width: 100%;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+}
+
+.cart-layout--drawer :is(h2, h3, p, dt, dd, a, button, label, figcaption) {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 17rem) {
+  .cart-view--drawer {
+    padding-inline: 0.75rem;
+  }
+
+  .cart-layout--drawer .cart-line__visual {
+    grid-template-columns: 5rem minmax(0, 1fr);
+  }
+
+  .cart-layout--drawer .cart-line__visual img {
+    width: 5rem;
+    height: 5rem;
+  }
+}
+
 .policy-grid {
   display: grid;
   gap: 1.5rem;
@@ -2145,6 +2257,12 @@ footer a {
     opacity: 0.16;
     animation: none;
     transform: none;
+  }
+
+  .cart-drawer {
+    animation: none;
+    transform: none;
+    transition-duration: 0s;
   }
 
   *,

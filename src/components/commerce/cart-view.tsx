@@ -1,8 +1,9 @@
 "use client";
 
 import { Minus, Plus, Trash2 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { useCart } from "@/cart/cart-provider";
 import { prepareCheckoutHandoff } from "@/cart/cart-storage";
@@ -18,6 +19,12 @@ import {
   canContinueFromPreview,
 } from "@/cart/preview-types";
 import { Button } from "@/components/ui/button";
+import {
+  catalogIllustrationDisclosure,
+  catalogProductVisualManifest,
+} from "./catalog-product-visual-manifest";
+
+const cartIllustration = catalogProductVisualManifest.find((scene) => scene.id === "front")!;
 
 const purchaseStateCopy: Readonly<Record<CartPreviewPurchaseState, string | null>> = {
   ready: null,
@@ -72,13 +79,21 @@ function unverifiedLine(
   };
 }
 
-export function CartView({
-  checkoutIntent,
-  navigate = (url) => window.location.assign(url),
-}: {
+export type CartViewProps = Readonly<{
   checkoutIntent: string | null;
   navigate?: (url: string) => void;
-}) {
+  onNavigate?: () => void;
+  presentation?: "page" | "drawer";
+}>;
+
+export function CartView(props: CartViewProps) {
+  const {
+    checkoutIntent,
+    navigate = (url) => window.location.assign(url),
+    onNavigate,
+    presentation = "page",
+  } = props;
+  const drawer = presentation === "drawer";
   const {
     items,
     hydrated,
@@ -100,6 +115,28 @@ export function CartView({
   const [handoffMessage, setHandoffMessage] = useState("");
   const previousPreviewToken = useRef<string | null>(null);
   const presentationLoaded = useRef(false);
+  const idScope = useId();
+  const cartItemsHeadingId = `${idScope}-cart-items-heading`;
+  const cartSummaryHeadingId = `${idScope}-cart-summary-heading`;
+  const reselectionHeadingId = `${idScope}-cart-reselection-heading`;
+  const displayPreviewHeadingId = `${idScope}-display-preview-heading`;
+  const fallbackFocusRef = useRef<HTMLHeadingElement>(null);
+  const quantityInputRefs = useRef(new Map<string, HTMLInputElement>());
+  const pendingFocusRef = useRef<string | "fallback" | null>(null);
+
+  useEffect(() => {
+    const pending = pendingFocusRef.current;
+    if (pending === null) return;
+    pendingFocusRef.current = null;
+    if (pending !== "fallback") {
+      const nextInput = quantityInputRefs.current.get(pending);
+      if (nextInput) {
+        nextInput.focus();
+        return;
+      }
+    }
+    fallbackFocusRef.current?.focus();
+  }, [items, legacyItemCount]);
 
   useEffect(() => {
     if (!hydrated || items.length === 0) {
@@ -193,25 +230,57 @@ export function CartView({
     navigate(handoff.returnTo);
   }
 
+  function removeAndRestoreFocus(variantId: string) {
+    const removedIndex = items.findIndex((item) => item.variantId === variantId);
+    const remaining = items.filter((item) => item.variantId !== variantId);
+    pendingFocusRef.current = remaining[removedIndex]?.variantId ??
+      remaining[removedIndex - 1]?.variantId ??
+      "fallback";
+    removeItem(variantId);
+  }
+
+  function setQuantityAndRestoreFocus(variantId: string, quantity: number) {
+    if (quantity <= 0) {
+      removeAndRestoreFocus(variantId);
+      return;
+    }
+    setQuantity(variantId, quantity);
+  }
+
+  function clearAndRestoreFocus() {
+    pendingFocusRef.current = "fallback";
+    clearCart();
+  }
+
+  function acknowledgeLegacyAndRestoreFocus() {
+    pendingFocusRef.current = "fallback";
+    acknowledgeLegacyReselection();
+  }
+
   if (!hydrated) {
     return <div className="cart-loading" aria-label="Loading saved cart" />;
   }
 
   if (legacyItemCount !== null) {
     return (
-      <section className="empty-record" aria-labelledby="cart-reselection-heading">
-        <h2 id="cart-reselection-heading" className="font-heading text-section text-ink">
+      <section className={`empty-record${drawer ? " cart-view--drawer" : ""}`} aria-labelledby={reselectionHeadingId}>
+        <h2
+          className="font-heading text-section text-ink"
+          id={reselectionHeadingId}
+          ref={fallbackFocusRef}
+          tabIndex={-1}
+        >
           Choose your variants again.
         </h2>
         <p className="mt-4 max-w-[60ch] leading-7 text-muted-ink">
           Your saved cart contains {legacyItemCount} requested unit{legacyItemCount === 1 ? "" : "s"} from an older cart format. Choose each exact variant again before continuing.
         </p>
         <div className="mt-7 flex flex-wrap gap-3">
-          <Button type="button" className="action-primary" onClick={acknowledgeLegacyReselection}>
+          <Button type="button" className="action-primary" onClick={acknowledgeLegacyAndRestoreFocus}>
             Clear old cart and choose variants
           </Button>
           <Button asChild variant="outline">
-            <Link href="/catalog">Return to catalog</Link>
+            <Link href="/catalog" {...(drawer && onNavigate ? { onClick: onNavigate } : {})}>Return to catalog</Link>
           </Button>
         </div>
       </section>
@@ -220,27 +289,31 @@ export function CartView({
 
   if (items.length === 0) {
     return (
-      <section className="empty-record">
-        <h2 className="font-heading text-section text-ink">Your cart is empty.</h2>
+      <section className={`empty-record${drawer ? " cart-view--drawer" : ""}`}>
+        <h2
+          className="font-heading text-section text-ink"
+          ref={fallbackFocusRef}
+          tabIndex={-1}
+        >Your cart is empty.</h2>
         <p className="mt-4 max-w-[60ch] leading-7 text-muted-ink">
           Add an exact eligible catalog variant to create a browser-saved request. Display prices
           and purchase state will be reloaded from the server.
         </p>
         <Button asChild className="action-primary mt-7">
-          <Link href="/catalog">Continue to catalog</Link>
+          <Link href="/catalog" {...(drawer && onNavigate ? { onClick: onNavigate } : {})}>Continue to catalog</Link>
         </Button>
       </section>
     );
   }
 
   return (
-    <div className="cart-layout">
-      <section aria-labelledby="cart-items-heading" className="min-w-0">
+    <div className={`cart-layout${drawer ? " cart-layout--drawer cart-view--drawer" : ""}`}>
+      <section aria-labelledby={cartItemsHeadingId} className="min-w-0">
         <div className="flex items-end justify-between gap-4 border-b border-border pb-5">
-          <h2 id="cart-items-heading" className="font-heading text-3xl text-ink">
-            Requested records
+          <h2 id={cartItemsHeadingId} className="font-heading text-3xl text-ink" ref={fallbackFocusRef} tabIndex={-1}>
+            {drawer ? "Items" : "Requested records"}
           </h2>
-          <Button type="button" variant="ghost" className="min-h-11" onClick={clearCart}>
+          <Button type="button" variant="ghost" className="min-h-11" onClick={clearAndRestoreFocus}>
             Clear cart
           </Button>
         </div>
@@ -278,8 +351,21 @@ export function CartView({
             const discounted = priced && item.effectiveDiscountBps > 0;
             const hasSavings = discounted && item.lineSavingsMinor > 0;
             return (
-              <li className="min-w-0 py-7" key={item.variantId}>
-                <div className="grid min-w-0 gap-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+              <li className="cart-line min-w-0 py-7" key={item.variantId}>
+                {drawer && verifiedIdentity ? (
+                  <figure className="cart-line__visual">
+                    <Image
+                      alt={`AI-generated catalog illustration beside ${item.name}, ${item.variantLabel}`}
+                      height={cartIllustration.height}
+                      loading="lazy"
+                      sizes="112px"
+                      src={cartIllustration.src}
+                      width={cartIllustration.width}
+                    />
+                    <figcaption>{catalogIllustrationDisclosure}</figcaption>
+                  </figure>
+                ) : null}
+                <div className="cart-line__body grid min-w-0 gap-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                   <div className="min-w-0">
                     {verifiedIdentity ? (
                       <>
@@ -363,11 +449,11 @@ export function CartView({
                       </p>
                     ) : null}
                   </div>
-                  <div className="flex min-w-0 flex-wrap items-end gap-2">
-                    <div>
+                  <div className="cart-line__controls flex min-w-0 flex-wrap items-end gap-2">
+                    <div className="cart-line__quantity min-w-0">
                       <label
                         className="mb-2 block text-xs font-semibold text-muted-ink"
-                        htmlFor={`quantity-${item.variantId}`}
+                        htmlFor={`${idScope}-quantity-${item.variantId}`}
                       >
                         Quantity
                       </label>
@@ -377,22 +463,26 @@ export function CartView({
                           variant="outline"
                           size="icon"
                           aria-label={`Decrease quantity for ${accessibleLabel}`}
-                          onClick={() => setQuantity(item.variantId, item.quantity - 1)}
+                          onClick={() => setQuantityAndRestoreFocus(item.variantId, item.quantity - 1)}
                         >
                           <Minus aria-hidden="true" />
                         </Button>
                         <input
-                          id={`quantity-${item.variantId}`}
+                          id={`${idScope}-quantity-${item.variantId}`}
                           aria-label={`Quantity for ${accessibleLabel}`}
                           inputMode="numeric"
                           min="1"
                           max="25"
                           type="number"
                           value={item.quantity}
+                          ref={(element) => {
+                            if (element) quantityInputRefs.current.set(item.variantId, element);
+                            else quantityInputRefs.current.delete(item.variantId);
+                          }}
                           onChange={(event) => {
                             const quantity = event.currentTarget.valueAsNumber;
                             if (Number.isFinite(quantity)) {
-                              setQuantity(item.variantId, quantity);
+                              setQuantityAndRestoreFocus(item.variantId, quantity);
                             }
                           }}
                         />
@@ -413,7 +503,7 @@ export function CartView({
                       size="icon"
                       className="min-h-11 min-w-11"
                       aria-label={`Remove ${accessibleLabel} from cart`}
-                      onClick={() => removeItem(item.variantId)}
+                      onClick={() => removeAndRestoreFocus(item.variantId)}
                     >
                       <Trash2 aria-hidden="true" />
                     </Button>
@@ -425,10 +515,10 @@ export function CartView({
         </ul>
       </section>
 
-      <aside className="cart-summary min-w-0" aria-labelledby="cart-summary-heading">
+      <aside className="cart-summary min-w-0" aria-labelledby={cartSummaryHeadingId}>
         <p className="eyebrow">Server preview</p>
-        <h2 id="cart-summary-heading" className="mt-3 font-heading text-3xl text-ink">
-          Order summary
+        <h2 id={cartSummaryHeadingId} className="mt-3 font-heading text-3xl text-ink">
+          {drawer ? "Cart preview" : "Order summary"}
         </h2>
         <dl className="mt-7 space-y-3 border-y border-border py-5 text-base">
           <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
@@ -443,31 +533,35 @@ export function CartView({
             <dt>Promotion</dt>
             <dd className="text-right">{promotionSummary}</dd>
           </div>
-          <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
-            <dt>Referral benefit</dt>
-            <dd>Not yet calculated</dd>
-          </div>
-          <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
-            <dt>Points redemption</dt>
-            <dd>Not yet calculated</dd>
-          </div>
-          <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
-            <dt>Tax</dt>
-            <dd>Not yet calculated</dd>
-          </div>
-          <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
-            <dt>Shipping</dt>
-            <dd>Not yet calculated</dd>
-          </div>
-          <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1 border-t border-border pt-3 font-semibold">
-            <dt>Final total</dt>
-            <dd>Unavailable</dd>
-          </div>
+          {!drawer ? (
+            <>
+              <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
+                <dt>Referral benefit</dt>
+                <dd>Not yet calculated</dd>
+              </div>
+              <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
+                <dt>Points redemption</dt>
+                <dd>Not yet calculated</dd>
+              </div>
+              <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
+                <dt>Tax</dt>
+                <dd>Not yet calculated</dd>
+              </div>
+              <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
+                <dt>Shipping</dt>
+                <dd>Not yet calculated</dd>
+              </div>
+              <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1 border-t border-border pt-3 font-semibold">
+                <dt>Final total</dt>
+                <dd>Unavailable</dd>
+              </div>
+            </>
+          ) : null}
         </dl>
 
         {hasDisplayOnlyLine ? (
-          <section className="warning-record mt-6 text-base leading-7" aria-labelledby="display-preview-heading">
-            <h3 id="display-preview-heading" className="font-semibold">Display-price cart preview</h3>
+          <section className="warning-record mt-6 text-base leading-7" aria-labelledby={displayPreviewHeadingId}>
+            <h3 id={displayPreviewHeadingId} className="font-semibold">Display-price cart preview</h3>
             <p className="mt-2">
               These server-calculated merchandise amounts are for display only. No order or payment can be submitted from this cart.
             </p>
@@ -505,17 +599,24 @@ export function CartView({
         ) : null}
 
         <Button
+          aria-disabled={drawer ? "true" : undefined}
           type="button"
           className="action-primary mt-7 w-full"
-          disabled={!canContinue}
-          onClick={beginCheckoutHandoff}
+          disabled={drawer || !canContinue}
+          onClick={drawer ? undefined : beginCheckoutHandoff}
         >
-          {canContinue ? "Continue to sign in" : "Checkout unavailable"}
+          {drawer ? "Checkout — Coming Soon" : canContinue ? "Continue to sign in" : "Checkout unavailable"}
         </Button>
         <p className="mt-4 text-base leading-7 text-muted-ink">
-          Displayed merchandise discounts are already included. Account verification, referral benefits, points redemption, tax, shipping, final total, and payment remain unavailable until a separately authorized checkout step.
+          {drawer
+            ? "Displayed merchandise is a server preview. Final shipping, tax, and payment are not available."
+            : "Displayed merchandise discounts are already included. Account verification, referral benefits, points redemption, tax, shipping, final total, and payment remain unavailable until a separately authorized checkout step."}
         </p>
-        <Link className="record-link mt-6 inline-block" href="/catalog">
+        <Link
+          className="record-link mt-6 inline-block"
+          href="/catalog"
+          {...(drawer && onNavigate ? { onClick: onNavigate } : {})}
+        >
           Continue shopping
         </Link>
       </aside>

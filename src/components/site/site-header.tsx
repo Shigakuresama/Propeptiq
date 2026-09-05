@@ -1,10 +1,11 @@
 "use client";
 
-import { Menu, ShoppingBag, UserRound } from "lucide-react";
+import { Menu, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { useCart } from "@/cart/cart-provider";
+import { CartDrawer } from "@/components/commerce/cart-drawer";
 import { BrandLogo } from "@/components/site/brand-mark";
 import { HeaderBrandMotion } from "@/components/site/header-brand-motion";
 import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
@@ -25,7 +26,7 @@ import {
   siteName,
 } from "@/lib/site-content";
 
-export function SiteHeader() {
+export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boolean }>) {
   const { itemCount } = useCart();
 
   return (
@@ -59,15 +60,7 @@ export function SiteHeader() {
             ))}
           </nav>
 
-          <Link
-            href="/cart"
-            aria-label={`Cart, ${itemCount} requested unit${itemCount === 1 ? "" : "s"}`}
-            className="ml-auto inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:ml-3 sm:px-3"
-          >
-            <ShoppingBag aria-hidden="true" className="size-4" />
-            <span className="hidden sm:inline">Cart</span>
-            <span className="cart-count" aria-hidden="true">{itemCount}</span>
-          </Link>
+          <CartDrawer enabled={cartDrawer} itemCount={itemCount} />
 
           <Link
             href={SIGN_IN_ROUTE}
