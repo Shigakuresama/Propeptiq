@@ -3,7 +3,7 @@ import { expect, test, type Browser, type BrowserContext, type CDPSession, type 
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 // @ts-expect-error The owned Node ESM harness intentionally has no separate declaration file.
-import { buildBrowserContextOptions, calculateCls, calculateLcpBreakdown, classifyBrowserRequest, classifyContinuingAnimations, evaluateClippingPolicy, evaluateControlPolicy, evaluateImagePolicy, finalizeOwnedBrowserCase, selectWindowLongtasks, serializeError, setupOwnedBrowserCase } from "../../scripts/run-playwright-performance.mjs";
+import { buildBrowserContextOptions, calculateCls, calculateLcpBreakdown, classifyBrowserRequest, classifyContinuingAnimations, classifyLocalNetworkFailure, evaluateClippingPolicy, evaluateControlPolicy, evaluateImagePolicy, finalizeOwnedBrowserCase, selectWindowLongtasks, serializeError, setupOwnedBrowserCase } from "../../scripts/run-playwright-performance.mjs";
 
 test.describe.configure({ mode: "serial" });
 
@@ -11,9 +11,11 @@ const baseURL = "http://127.0.0.1:4641";
 const observationWindowMs = 6_000;
 const frameWindowMs = 30_000;
 const allowedLocalReadLimit = 250;
+const resourceTimingLimit = 1_000;
 const performanceOutputDirectory = resolve(process.env.PERFORMANCE_OUTPUT_DIR ?? ".");
 const contextArtifactDirectory = join(performanceOutputDirectory, "playwright-artifacts");
 let contextSequence = 0;
+let approvedCanonicalPdpPaths: string[] = [];
 const viewports = [
   { width: 195, height: 520 },
   { width: 320, height: 812 },
@@ -29,6 +31,7 @@ const coldViewports = [
 ] as const;
 
 type BoundaryRecord = {
+  approvedCanonicalPaths: string[];
   allowedLocalReadOverflow: number;
   allowedLocalReads: Array<{ method: string; url: string }>;
   authRequests: string[];
@@ -38,7 +41,21 @@ type BoundaryRecord = {
   failedResponses: Array<{ status: number; url: string }>;
   intentionalBoundaryAborts: Array<{ classification: string; method: string; url: string }>;
   intentionalExternalAborts: string[];
-  localRequestFailures: Array<{ errorText: string | null; method: string; url: string }>;
+  localRequestFailures: Array<{
+    classification: string;
+    errorText: string | null;
+    family: string | null;
+    isNavigationRequest: boolean;
+    javaScriptEnabled: boolean;
+    lifecyclePhase: string;
+    method: string;
+    reason: string;
+    requestHeaders: Record<string, string>;
+    resourceType: string;
+    response: { contentType: string | null; status: number } | null;
+    timing: Record<string, number>;
+    url: string;
+  }>;
   mutatingRequests: Array<{ method: string; url: string }>;
   syntheticOrProviderRequests: string[];
 };
@@ -49,6 +66,7 @@ type LabContextShell = {
   context: BrowserContext;
   finalization?: { artifacts: string[]; errors: string[] };
   finalized: boolean;
+  javaScriptEnabled: boolean;
   page: Page;
   traceStarted: boolean;
 };
@@ -165,6 +183,7 @@ test("CLS self-check: recent-input shifts are excluded from windows but retained
 
 function emptyBoundaryRecord(): BoundaryRecord {
   return {
+    approvedCanonicalPaths: [...approvedCanonicalPdpPaths],
     allowedLocalReadOverflow: 0,
     allowedLocalReads: [],
     authRequests: [],
@@ -188,7 +207,14 @@ async function createLabContext(browser: Browser, label: string, options: Record
   contextSequence += 1;
   const artifactStem = `${String(contextSequence).padStart(3, "0")}-${safeArtifactLabel(label)}`;
   const context = await browser.newContext(buildBrowserContextOptions(options));
-  return { artifactStem, context, finalized: false, page: null as unknown as Page, traceStarted: false } satisfies LabContextShell;
+  return {
+    artifactStem,
+    context,
+    finalized: false,
+    javaScriptEnabled: options.javaScriptEnabled !== false,
+    page: null as unknown as Page,
+    traceStarted: false,
+  } satisfies LabContextShell;
 }
 
 const contextFinalizationOptions = {
@@ -201,7 +227,7 @@ async function initializeLabContext(shell: LabContextShell, boundary: BoundaryRe
     await shell.context.tracing.start({ screenshots: false, snapshots: true, sources: false });
     shell.traceStarted = true;
     shell.page = await shell.context.newPage();
-    await installBoundary(shell.context, shell.page, boundary);
+    await installBoundary(shell.context, shell.page, boundary, shell.javaScriptEnabled);
     if (observed) {
       await installPerformanceObservers(shell.page);
       shell.cdp = await shell.context.newCDPSession(shell.page);
@@ -219,7 +245,8 @@ async function closeLabContext(
   return finalizeOwnedBrowserCase(shell, failed, contextFinalizationOptions);
 }
 
-async function installBoundary(context: BrowserContext, page: Page, record: BoundaryRecord) {
+async function installBoundary(context: BrowserContext, page: Page, record: BoundaryRecord, javaScriptEnabled: boolean) {
+  const correlatedResponses = new WeakMap<object, { contentType: string | null; status: number }>();
   await context.route("**/*", async (route) => {
     const request = route.request();
     const classification = classifyBrowserRequest({ baseURL, method: request.method(), url: request.url() });
@@ -257,13 +284,38 @@ async function installBoundary(context: BrowserContext, page: Page, record: Boun
     const classification = classifyBrowserRequest({ baseURL, method: request.method(), url: request.url() });
     if (!classification.local) return;
     if (["effectful-local-read", "mutating-local-request"].includes(classification.classification)) return;
-    record.localRequestFailures.push({
-      errorText: request.failure()?.errorText ?? null,
+    const errorText = request.failure()?.errorText ?? null;
+    const response = correlatedResponses.get(request) ?? null;
+    const disposition = classifyLocalNetworkFailure({
+      approvedCanonicalPaths: record.approvedCanonicalPaths,
+      baseURL,
+      errorText,
+      isNavigationRequest: request.isNavigationRequest(),
+      javaScriptEnabled,
       method: request.method().toUpperCase(),
+      requestHeaders: request.headers(),
+      resourceType: request.resourceType(),
+      response,
+      url: request.url(),
+    });
+    record.localRequestFailures.push({
+      ...disposition,
+      errorText,
+      isNavigationRequest: request.isNavigationRequest(),
+      javaScriptEnabled,
+      lifecyclePhase: response ? "requestfailed-after-response" : "requestfailed-without-response",
+      method: request.method().toUpperCase(),
+      resourceType: request.resourceType(),
+      response,
+      timing: request.timing(),
       url: request.url(),
     });
   });
   page.on("response", (response) => {
+    correlatedResponses.set(response.request(), {
+      contentType: response.headers()["content-type"] ?? null,
+      status: response.status(),
+    });
     if (response.status() >= 400) record.failedResponses.push({ status: response.status(), url: response.url() });
   });
   page.on("pageerror", (error) => record.consoleErrors.push(error.message));
@@ -346,13 +398,13 @@ async function installPerformanceObservers(page: Page) {
 }
 
 async function collectPerformance(page: Page) {
-  return page.evaluate(() => {
+  return page.evaluate((limit) => {
     const state = (window as any).__task18fPerformance;
     for (const binding of state.observers) {
       binding.destination.push(...binding.observer.takeRecords().map(binding.map));
     }
     const navigation = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
-    const resources = performance.getEntriesByType("resource").map((entry) => {
+    const allResources = performance.getEntriesByType("resource").map((entry) => {
       const resource = entry as PerformanceResourceTiming;
       return {
         duration: resource.duration,
@@ -378,11 +430,17 @@ async function collectPerformance(page: Page) {
         responseStart: navigation.responseStart,
         startTime: navigation.startTime,
       } : null,
-      resources,
+      resourceTimings: {
+        entries: allResources.slice(0, limit),
+        limit,
+        overflow: Math.max(0, allResources.length - limit),
+        totalCount: allResources.length,
+        truncated: allResources.length > limit,
+      },
       shifts: state.shifts as Shift[],
       supported: state.supported as string[],
     };
-  });
+  }, resourceTimingLimit);
 }
 
 async function initializeObservedContext(shell: LabContextShell, boundary: BoundaryRecord) {
@@ -402,6 +460,10 @@ async function discoverCanonicalPdp(browser: Browser) {
     const hrefs = await shell.page.locator('main#main-content a[href^="/catalog/items/"]').evaluateAll((links: Element[]) => (
       links.map((link) => link.getAttribute("href")).filter(Boolean)
     ));
+    approvedCanonicalPdpPaths = [...new Set(hrefs.filter((value): value is string => (
+      typeof value === "string" && /^\/catalog\/items\/[a-z0-9-]+$/u.test(value)
+    )))];
+    boundary.approvedCanonicalPaths = [...approvedCanonicalPdpPaths];
     const href = hrefs.find((value) => /^\/catalog\/items\/[a-z0-9-]+$/u.test(value!));
     if (!href) throw new Error("Rendered catalog exposed no canonical PDP href.");
     const discoveryBoundaryErrors = boundaryErrors(boundary);
@@ -415,23 +477,41 @@ async function discoverCanonicalPdp(browser: Browser) {
     throw error;
   } finally {
     const closure = shell ? await closeLabContext(shell, failure !== null) : { artifacts: [], errors: [] };
+    const finalBoundaryErrors = boundaryErrors(boundary);
     if (failure !== null || closure.errors.length > 0) {
       evidence.discoveryFailure = { artifacts: closure.artifacts, boundary, closureErrors: closure.errors, error: serializeError(failure) };
     }
     if (failure === null && closure.errors.length > 0) throw new Error(closure.errors.join("; "));
+    if (failure === null && finalBoundaryErrors.length > 0) {
+      throw new Error(`Catalog discovery crossed the browser no-effects boundary during finalization: ${finalBoundaryErrors.join("; ")}`);
+    }
   }
 }
 
 function boundaryErrors(boundary: BoundaryRecord) {
+  for (const failure of boundary.localRequestFailures) {
+    Object.assign(failure, classifyLocalNetworkFailure({
+      ...failure,
+      approvedCanonicalPaths: boundary.approvedCanonicalPaths,
+      baseURL,
+    }));
+  }
   const errors: string[] = [];
   if (boundary.externalRequests.length > 0) errors.push(`external requests: ${boundary.externalRequests.length}`);
   if (boundary.mutatingRequests.length > 0) errors.push(`mutating requests: ${boundary.mutatingRequests.length}`);
   if (boundary.authRequests.length > 0) errors.push(`unexpected auth requests: ${boundary.authRequests.length}`);
   if (boundary.syntheticOrProviderRequests.length > 0) errors.push(`synthetic/provider-effect requests: ${boundary.syntheticOrProviderRequests.length}`);
   if (boundary.failedResponses.length > 0) errors.push(`failed responses: ${boundary.failedResponses.length}`);
-  if (boundary.localRequestFailures.length > 0) errors.push(`local transport failures: ${boundary.localRequestFailures.length}`);
+  const hardLocalFailures = boundary.localRequestFailures.filter(({ classification }) => classification === "hard-local-transport-failure");
+  if (hardLocalFailures.length > 0) errors.push(`hard local transport failures: ${hardLocalFailures.length}`);
   if (boundary.consoleErrors.length > 0) errors.push(`browser console/page errors: ${boundary.consoleErrors.length}`);
   return errors;
+}
+
+function refreshBoundaryErrors(errors: string[], boundary: BoundaryRecord) {
+  const retained = errors.filter((error) => !error.startsWith("browser boundary: "));
+  errors.length = 0;
+  errors.push(...retained, ...boundaryErrors(boundary).map((error) => `browser boundary: ${error}`));
 }
 
 async function coldSample(browser: Browser, routeLabel: string, path: string, viewport: { width: number; height: number }, iteration: number) {
@@ -454,8 +534,14 @@ async function coldSample(browser: Browser, routeLabel: string, path: string, vi
     sample.cls = calculateCls(raw.shifts);
     sample.longtasks = raw.longtasks;
     sample.navigation = raw.navigation;
-    sample.breakdown = calculateLcpBreakdown({ lcp: sample.lcp, navigation: raw.navigation, resources: raw.resources });
-    sample.integrityErrors.push(...boundaryErrors(boundary));
+    sample.resourceTimings = raw.resourceTimings;
+    sample.breakdown = calculateLcpBreakdown({
+      lcp: sample.lcp,
+      navigation: raw.navigation,
+      resources: raw.resourceTimings.entries,
+      resourcesTruncated: raw.resourceTimings.truncated,
+    });
+    refreshBoundaryErrors(sample.integrityErrors, boundary);
     if (sample.status !== 200) sample.integrityErrors.push(`document status ${sample.status}`);
     if (!raw.supported.includes("largest-contentful-paint") || !sample.lcp) sample.integrityErrors.push("missing LCP observer/result");
     if (!raw.supported.includes("layout-shift")) sample.integrityErrors.push("missing layout-shift observer");
@@ -475,6 +561,7 @@ async function coldSample(browser: Browser, routeLabel: string, path: string, vi
     sample.caseError = serializeError(error);
     sample.integrityErrors.push(error instanceof Error ? error.message : String(error));
   } finally {
+    refreshBoundaryErrors(sample.integrityErrors, boundary);
     if (shell?.cdp) {
       try {
         await shell.cdp.detach();
@@ -487,6 +574,7 @@ async function coldSample(browser: Browser, routeLabel: string, path: string, vi
       sample.failureArtifacts = closure.artifacts;
       sample.integrityErrors.push(...closure.errors);
     }
+    refreshBoundaryErrors(sample.integrityErrors, boundary);
     evidence.samples.push(sample);
   }
 }
@@ -570,12 +658,13 @@ async function frameObservation(browser: Browser, viewport: { width: number; hei
     result.visibility = [...new Set(observation.visibility)];
     result.activeAnimations = observation.activeAnimations;
     if (result.actualWindowMs < frameWindowMs) result.integrityErrors.push(`frame observation was shorter than ${frameWindowMs}ms: ${result.actualWindowMs}`);
-    result.integrityErrors.push(...boundaryErrors(boundary));
+    refreshBoundaryErrors(result.integrityErrors, boundary);
     if (result.visibility.length !== 1 || result.visibility[0] !== "visible") result.integrityErrors.push(`visibility changed: ${result.visibility.join(",")}`);
   } catch (error) {
     result.caseError = serializeError(error);
     result.integrityErrors.push(error instanceof Error ? error.message : String(error));
   } finally {
+    refreshBoundaryErrors(result.integrityErrors, boundary);
     if (shell?.cdp) {
       try {
         await shell.cdp.detach();
@@ -588,6 +677,7 @@ async function frameObservation(browser: Browser, viewport: { width: number; hei
       result.failureArtifacts = closure.artifacts;
       result.integrityErrors.push(...closure.errors);
     }
+    refreshBoundaryErrors(result.integrityErrors, boundary);
     evidence.frames.push(result);
   }
 }
@@ -1025,25 +1115,189 @@ async function geometryCase(browser: Browser, path: string, routeLabel: string, 
       ...geometryErrors(result.snapshot),
       ...result.imagePolicy.errors,
       ...result.controlPolicy.errors,
-      ...boundaryErrors(boundary),
     );
+    refreshBoundaryErrors(result.errors, boundary);
     if (result.status !== 200) result.errors.push(`document status ${result.status}`);
   } catch (error) {
     result.caseError = serializeError(error);
     result.errors.push(error instanceof Error ? error.message : String(error));
   } finally {
+    refreshBoundaryErrors(result.errors, boundary);
     if (shell) {
       const closure = await closeLabContext(shell, result.errors.length > 0);
       result.failureArtifacts = closure.artifacts;
       result.errors.push(...closure.errors);
     }
+    refreshBoundaryErrors(result.errors, boundary);
     evidence.geometry.push(result);
   }
 }
 
+function delayHost(milliseconds: number) {
+  return new Promise<void>((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+}
+
+async function readNoJavaScriptStabilitySnapshot(page: Page) {
+  return page.evaluate(() => {
+    const describeTarget = (target: Element) => {
+      if (target.matches("svg.header-brand-motion__field")) return "svg.header-brand-motion__field";
+      const classes = [...target.classList].slice(0, 3).join(".");
+      return `${target.tagName.toLowerCase()}${target.id ? `#${target.id}` : ""}${classes ? `.${classes}` : ""}`.slice(0, 120);
+    };
+    const targets = [
+      document.querySelector("main#main-content"),
+      document.querySelector("footer"),
+      document.querySelector('button[aria-label="Search PropeptIQ"]'),
+      document.querySelector('[role="status"][aria-label="Purchase summary"]'),
+    ].filter((target): target is Element => target instanceof Element);
+    const geometry = [
+      window.scrollY,
+      document.documentElement.scrollWidth,
+      document.documentElement.scrollHeight,
+      ...targets.flatMap((target) => {
+        const bounds = target.getBoundingClientRect();
+        return [bounds.top, bounds.bottom, bounds.left, bounds.right];
+      }),
+    ];
+    const continuingAnimations = document.getAnimations().flatMap((animation) => {
+      if (animation.playState !== "running") return [];
+      const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+      if (!(target instanceof Element)) return [];
+      const bounds = target.getBoundingClientRect();
+      if (bounds.bottom <= 0 || bounds.top >= window.innerHeight) return [];
+      const cssAnimation = animation as CSSAnimation;
+      return [{
+        animationName: cssAnimation.animationName || getComputedStyle(target).animationName,
+        targetSelector: describeTarget(target),
+      }];
+    });
+    return { continuingAnimations, fontStatus: document.fonts.status, geometry };
+  });
+}
+
+async function waitForNoJavaScriptGeometryStable(page: Page) {
+  const deadline = Date.now() + 5_000;
+  let prior: number[] | undefined;
+  let stable = 0;
+  let last = await readNoJavaScriptStabilitySnapshot(page);
+  while (Date.now() < deadline) {
+    const animationPolicy = classifyContinuingAnimations(last.continuingAnimations);
+    if (
+      last.fontStatus === "loaded" && animationPolicy.errors.length === 0 && prior &&
+      last.geometry.length === prior.length &&
+      last.geometry.every((value: number, index: number) => Math.abs(value - prior![index]!) < 0.01)
+    ) stable += 1;
+    else stable = 0;
+    if (stable >= 6) return { continuingAnimations: last.continuingAnimations, fontStatus: last.fontStatus, settled: true };
+    prior = last.geometry;
+    await delayHost(50);
+    last = await readNoJavaScriptStabilitySnapshot(page);
+  }
+  return { continuingAnimations: last.continuingAnimations, fontStatus: last.fontStatus, settled: false };
+}
+
+async function readNoJavaScriptImage(image: ReturnType<Page["locator"]>) {
+  return image.evaluate((element) => {
+    const imageElement = element as HTMLImageElement;
+    const bounds = imageElement.getBoundingClientRect();
+    const describe = (node: Element) => {
+      const classes = [...node.classList].slice(0, 3).join(".");
+      return `${node.tagName.toLowerCase()}${node.id ? `#${node.id}` : ""}${classes ? `.${classes}` : ""}`.slice(0, 120);
+    };
+    let layoutExclusion = null;
+    let node: Element | null = element;
+    while (node) {
+      if (getComputedStyle(node).display === "none") {
+        layoutExclusion = {
+          reason: node === element ? "own-display-none" : "ancestor-display-none",
+          selector: describe(node),
+        };
+        break;
+      }
+      node = node.parentElement;
+    }
+    return {
+      alt: imageElement.alt,
+      complete: imageElement.complete,
+      layoutExclusion,
+      naturalHeight: imageElement.naturalHeight,
+      naturalWidth: imageElement.naturalWidth,
+      rect: { bottom: bounds.bottom, height: bounds.height, left: bounds.left, right: bounds.right, top: bounds.top, width: bounds.width },
+      src: imageElement.currentSrc || imageElement.src,
+    };
+  });
+}
+
+async function prepareNoJavaScriptImages(page: Page) {
+  const images = page.locator("main img");
+  const errors: string[] = [];
+  const records: Array<Record<string, any>> = [];
+  const visited: string[] = [];
+  for (let index = 0; index < await images.count(); index += 1) {
+    const image = images.nth(index);
+    const before = await readNoJavaScriptImage(image);
+    const record: Record<string, any> = { alt: before.alt, after: null, before, src: before.src };
+    records.push(record);
+    if (before.layoutExclusion) {
+      record.after = before;
+      continue;
+    }
+    await image.scrollIntoViewIfNeeded();
+    const deadline = Date.now() + 15_000;
+    let after = await readNoJavaScriptImage(image);
+    while (Date.now() < deadline && !(after.complete && after.naturalWidth > 0 && after.naturalHeight > 0)) {
+      await delayHost(50);
+      after = await readNoJavaScriptImage(image);
+    }
+    if (!(after.complete && after.naturalWidth > 0 && after.naturalHeight > 0)) {
+      errors.push(`rendered no-JavaScript image readiness failed: ${before.alt}`);
+    } else {
+      visited.push(before.alt);
+    }
+    record.after = after;
+  }
+  return { errors, images: records, visited };
+}
+
+async function waitForNoJavaScriptFooter(page: Page) {
+  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }));
+  const deadline = Date.now() + 5_000;
+  let prior: number[] | undefined;
+  let stable = 0;
+  let last = await page.evaluate(() => {
+    const footerBottom = document.querySelector("footer")?.getBoundingClientRect().bottom ?? Number.NaN;
+    return {
+      atEnd: document.documentElement.scrollHeight - innerHeight - window.scrollY,
+      footerBottomDelta: footerBottom - innerHeight,
+      fontStatus: document.fonts.status,
+      geometry: [window.scrollY, document.documentElement.scrollHeight, footerBottom],
+    };
+  });
+  while (Date.now() < deadline) {
+    if (
+      last.fontStatus === "loaded" && Math.abs(last.atEnd) <= 1 && Math.abs(last.footerBottomDelta) <= 1 && prior &&
+      last.geometry.every((value: number, index: number) => Math.abs(value - prior![index]!) < 0.01)
+    ) stable += 1;
+    else stable = 0;
+    if (stable >= 6) return { ...last, settled: true };
+    prior = last.geometry;
+    await delayHost(50);
+    last = await page.evaluate(() => {
+      const footerBottom = document.querySelector("footer")?.getBoundingClientRect().bottom ?? Number.NaN;
+      return {
+        atEnd: document.documentElement.scrollHeight - innerHeight - window.scrollY,
+        footerBottomDelta: footerBottom - innerHeight,
+        fontStatus: document.fonts.status,
+        geometry: [window.scrollY, document.documentElement.scrollHeight, footerBottom],
+      };
+    });
+  }
+  return { ...last, settled: false };
+}
+
 async function noJavaScriptCase(browser: Browser, path: string, routeLabel: string, viewport: { width: number; height: number }) {
   const boundary = emptyBoundaryRecord();
-  const result: Record<string, any> = { boundary, errors: [], path, routeLabel, viewport };
+  const result: Record<string, any> = { boundary, errors: [], lifecycle: "attempted", path, routeLabel, viewport };
   let shell: LabContextShell | null = null;
   try {
     shell = await createLabContext(browser, `no-js-${routeLabel}-${viewport.width}`, {
@@ -1070,14 +1324,14 @@ async function noJavaScriptCase(browser: Browser, path: string, routeLabel: stri
     if (result.mobileDockCount !== 0) result.errors.push("client-only mobile dock rendered without JavaScript");
     result.searchRenderedOnly = await page.getByRole("button", { name: "Search PropeptIQ" }).count() === 1;
     if (!result.searchRenderedOnly) result.errors.push("search launcher missing without JavaScript");
-    result.initialStability = await waitForGeometryStable(page);
+    result.initialStability = await waitForNoJavaScriptGeometryStable(page);
     const animationPolicy = classifyContinuingAnimations(result.initialStability.continuingAnimations);
     result.knownContinuingAnimations = animationPolicy.known;
     result.errors.push(...animationPolicy.errors);
     if (!result.initialStability.settled) result.errors.push("no-JavaScript relevant geometry did not settle within 5 seconds");
     result.initialClipping = await inspectGeometry(page, viewport.width, false);
     result.errors.push(...evaluateClippingPolicy(result.initialClipping.clippingRecords).errors);
-    result.imageReadiness = await prepareRenderedImages(page);
+    result.imageReadiness = await prepareNoJavaScriptImages(page);
     result.errors.push(...result.imageReadiness.errors);
     result.essentials = await page.evaluate((label) => {
       const main = document.querySelector<HTMLElement>("main#main-content");
@@ -1100,7 +1354,10 @@ async function noJavaScriptCase(browser: Browser, path: string, routeLabel: stri
     if (result.essentials.headingCount !== 1 || result.essentials.headingText.length === 0) result.errors.push("server-rendered primary heading is missing without JavaScript");
     if (routeLabel === "home" && !result.essentials.homeHeroPresent) result.errors.push("server-rendered home hero is missing without JavaScript");
     if (routeLabel === "pdp" && !result.essentials.purchaseSummaryPresent) result.errors.push("server-rendered PDP purchase summary is missing without JavaScript");
-    result.footerReadiness = await waitForFooterReadiness(page, false);
+    result.footerReadiness = await waitForNoJavaScriptFooter(page);
+    if (!result.footerReadiness.settled) {
+      result.errors.push(`no-JavaScript footer did not settle at document end: ${JSON.stringify(result.footerReadiness)}`);
+    }
     result.snapshot = await inspectGeometry(page, viewport.width);
     result.imagePolicy = evaluateImagePolicy(result.imageReadiness.images, {
       expectedHiddenAltTexts: expectedHiddenImages(routeLabel, viewport.width),
@@ -1121,18 +1378,23 @@ async function noJavaScriptCase(browser: Browser, path: string, routeLabel: stri
       ...geometryErrors(result.snapshot),
       ...result.imagePolicy.errors,
       ...result.controlPolicy.errors,
-      ...boundaryErrors(boundary),
     );
+    refreshBoundaryErrors(result.errors, boundary);
     if (result.status !== 200) result.errors.push(`document status ${result.status}`);
+    result.lifecycle = result.errors.length > 0 ? "failed" : "completed";
   } catch (error) {
+    result.lifecycle = "interrupted";
     result.caseError = serializeError(error);
     result.errors.push(error instanceof Error ? error.message : String(error));
   } finally {
+    refreshBoundaryErrors(result.errors, boundary);
     if (shell) {
       const closure = await closeLabContext(shell, result.errors.length > 0);
       result.failureArtifacts = closure.artifacts;
       result.errors.push(...closure.errors);
     }
+    refreshBoundaryErrors(result.errors, boundary);
+    if (result.lifecycle === "completed" && result.errors.length > 0) result.lifecycle = "failed";
     evidence.noJavaScriptGeometry.push(result);
   }
 }
@@ -1180,17 +1442,19 @@ async function reducedMotionCase(browser: Browser, path: string, routeLabel: str
     result.search = search.search;
     result.searchCenterDelta = search.searchCenterDelta;
     if (!search.search || search.searchCenterDelta === null || search.searchCenterDelta > 1) result.errors.push(`fixed search centering changed: ${search.searchCenterDelta}`);
-    result.errors.push(...boundaryErrors(boundary));
+    refreshBoundaryErrors(result.errors, boundary);
     if (result.status !== 200) result.errors.push(`document status ${result.status}`);
   } catch (error) {
     result.caseError = serializeError(error);
     result.errors.push(error instanceof Error ? error.message : String(error));
   } finally {
+    refreshBoundaryErrors(result.errors, boundary);
     if (shell) {
       const closure = await closeLabContext(shell, result.errors.length > 0);
       result.failureArtifacts = closure.artifacts;
       result.errors.push(...closure.errors);
     }
+    refreshBoundaryErrors(result.errors, boundary);
     evidence.reducedMotionGeometry.push(result);
   }
 }
@@ -1237,6 +1501,12 @@ test("measures the closed production storefront once without browser side effect
         await noJavaScriptCase(browser, route.path, route.label, viewport);
       }
     }
+    evidence.noJavaScriptSummary = {
+      attempted: evidence.noJavaScriptGeometry.length,
+      completed: evidence.noJavaScriptGeometry.filter((result: any) => result.lifecycle === "completed").length,
+      failed: evidence.noJavaScriptGeometry.filter((result: any) => result.lifecycle === "failed").length,
+      interrupted: evidence.noJavaScriptGeometry.filter((result: any) => result.lifecycle === "interrupted").length,
+    };
     for (const viewport of coldViewports) {
       for (const route of [{ label: "home", path: "/" }, { label: "pdp", path: pdpPath }]) {
         await reducedMotionCase(browser, route.path, route.label, viewport);

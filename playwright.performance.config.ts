@@ -6,7 +6,7 @@ const runId = process.env.PERFORMANCE_RUN_ID ?? "";
 const buildId = process.env.PERFORMANCE_BUILD_ID ?? "";
 const outputDir = resolve(process.env.PERFORMANCE_OUTPUT_DIR ?? ".");
 const dataPath = resolve(process.env.PERFORMANCE_DATA_PATH ?? ".");
-const labRoot = resolve("test-results/performance");
+const labRoot = resolve(".superpowers/artifacts/storefront-performance");
 const relativeOutput = relative(labRoot, outputDir);
 
 if (process.env.PERFORMANCE_BASE_URL !== exactBaseURL) {

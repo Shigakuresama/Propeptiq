@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { join } from "node:path";
 
@@ -302,6 +303,44 @@ test("LCP phases prefer requestStart and clamp early or continuing resources wit
   assert.equal(calculateLcpBreakdown({ lcp, navigation, resources: [] }).resourceLoadDuration, null);
 });
 
+test("LCP attribution excludes later repeated URLs and refuses ambiguous or invalid chronology", () => {
+  const navigation = { responseStart: 80, startTime: 0 };
+  const lcp = { startTime: 600, url: "http://127.0.0.1:4641/front.webp" };
+  const valid = { name: lcp.url, requestStart: 100, responseEnd: 400, startTime: 90 };
+  const later = { name: lcp.url, requestStart: 700, responseEnd: 800, startTime: 690 };
+  assert.deepEqual(calculateLcpBreakdown({ lcp, navigation, resources: [valid, later] }), {
+    classification: "matched-lcp-resource",
+    elementRenderDelay: 200,
+    resource: valid,
+    resourceLoadDelay: 20,
+    resourceLoadDuration: 300,
+    ttfb: 80,
+  });
+
+  const ambiguous = calculateLcpBreakdown({
+    lcp,
+    navigation,
+    resources: [valid, { ...valid, requestStart: 120, startTime: 110 }],
+  });
+  assert.equal(ambiguous.classification, "ambiguous-lcp-resource");
+  assert.equal(ambiguous.resource, null);
+  assert.equal(ambiguous.resourceLoadDuration, null);
+
+  const invalid = calculateLcpBreakdown({ lcp, navigation, resources: [later] });
+  assert.equal(invalid.classification, "invalid-lcp-resource-chronology");
+  assert.equal(invalid.resource, null);
+  assert.equal(invalid.elementRenderDelay, null);
+
+  const truncated = calculateLcpBreakdown({
+    lcp,
+    navigation,
+    resources: [valid],
+    resourcesTruncated: true,
+  });
+  assert.equal(truncated.classification, "resource-timing-input-truncated");
+  assert.equal(truncated.resource, null);
+});
+
 test("network policy records safe local reads and rejects exact attribution, auth, mutation, and external routes", () => {
   const local = "http://127.0.0.1:4641";
   assert.equal(classifyBrowserRequest({ baseURL: local, method: "GET", url: `${local}/sign-in?next=%2Fcatalog` }).classification, "allowed-local-read");
@@ -310,6 +349,120 @@ test("network policy records safe local reads and rejects exact attribution, aut
   assert.equal(classifyBrowserRequest({ baseURL: local, method: "GET", url: `${local}/api/auth/session` }).classification, "unexpected-auth-read");
   assert.equal(classifyBrowserRequest({ baseURL: local, method: "POST", url: `${local}/catalog` }).classification, "mutating-local-request");
   assert.equal(classifyBrowserRequest({ baseURL: local, method: "GET", url: "https://example.com/pixel" }).classification, "blocked-external-read");
+});
+
+test("network failure policy separates only exact correlated Next prefetch and no-JS script evidence", () => {
+  assert.equal(typeof performanceHarness.classifyLocalNetworkFailure, "function");
+  const base = {
+    baseURL: "http://127.0.0.1:4641",
+    errorText: "net::ERR_ABORTED",
+    isNavigationRequest: false,
+    javaScriptEnabled: true,
+    method: "GET",
+    resourceType: "fetch",
+    response: { contentType: "text/x-component; charset=utf-8", status: 200 },
+    url: "http://127.0.0.1:4641/catalog?_rsc=abc",
+  };
+  assert.equal(performanceHarness.classifyLocalNetworkFailure({
+    ...base,
+    requestHeaders: {
+      "next-router-prefetch": "1",
+      "next-router-segment-prefetch": "/_tree",
+      rsc: "1",
+    },
+  }).classification, "unresolved-speculative-prefetch");
+
+  const canonicalPdp = {
+    ...base,
+    requestHeaders: {
+      "next-router-prefetch": "1",
+      "next-router-segment-prefetch": "/_tree",
+      rsc: "1",
+    },
+    url: "http://127.0.0.1:4641/catalog/items/retatrutide?_rsc=abc",
+  };
+  assert.equal(performanceHarness.classifyLocalNetworkFailure(canonicalPdp).classification, "hard-local-transport-failure");
+  assert.equal(performanceHarness.classifyLocalNetworkFailure({
+    ...canonicalPdp,
+    approvedCanonicalPaths: ["/catalog/items/retatrutide"],
+  }).classification, "unresolved-speculative-prefetch");
+  assert.equal(performanceHarness.classifyLocalNetworkFailure({
+    ...base,
+    requestHeaders: {
+      "next-router-prefetch": "1",
+      "next-router-state-tree": encodeURIComponent(JSON.stringify(["", {}, null, "metadata-only"])),
+      rsc: "1",
+    },
+  }).classification, "unresolved-speculative-prefetch");
+
+  for (const override of [
+    { requestHeaders: { rsc: "1" } },
+    { requestHeaders: { "next-router-prefetch": "1", "next-router-segment-prefetch": "/_tree", rsc: "1" }, response: null },
+    { requestHeaders: { "next-router-prefetch": "1", "next-router-segment-prefetch": "/_tree", rsc: "1" }, response: { contentType: "text/html", status: 200 } },
+    { requestHeaders: { "next-router-prefetch": "1", "next-router-segment-prefetch": "/_tree", rsc: "1" }, resourceType: "document" },
+    { requestHeaders: { "next-router-prefetch": "1", "next-router-segment-prefetch": "/_tree", rsc: "1" }, url: "http://127.0.0.1:4641/api/catalog?_rsc=abc" },
+    { requestHeaders: { "next-router-prefetch": "1", "next-router-segment-prefetch": "/_tree", rsc: "1" }, url: "http://127.0.0.1:4641/account/private?_rsc=abc" },
+    { errorText: "net::ERR_FAILED", requestHeaders: { "next-router-prefetch": "1", "next-router-segment-prefetch": "/_tree", rsc: "1" } },
+  ]) {
+    assert.equal(performanceHarness.classifyLocalNetworkFailure({ ...base, ...override }).classification, "hard-local-transport-failure");
+  }
+
+  const noJavaScriptScript = {
+    ...base,
+    errorText: "csp",
+    javaScriptEnabled: false,
+    requestHeaders: {},
+    resourceType: "script",
+    response: null,
+    url: "http://127.0.0.1:4641/_next/static/chunks/app.js",
+  };
+  assert.equal(performanceHarness.classifyLocalNetworkFailure(noJavaScriptScript).classification, "intentional-no-js-script-block");
+  assert.equal(performanceHarness.classifyLocalNetworkFailure({ ...noJavaScriptScript, javaScriptEnabled: true }).classification, "hard-local-transport-failure");
+  assert.equal(performanceHarness.classifyLocalNetworkFailure({ ...noJavaScriptScript, resourceType: "fetch" }).classification, "hard-local-transport-failure");
+});
+
+test("porcelain normalization preserves the first status column and every changed path", () => {
+  assert.equal(typeof performanceHarness.normalizeGitOutput, "function");
+  assert.equal(typeof performanceHarness.parsePorcelainPaths, "function");
+  const output = " M scripts/run-playwright-performance.mjs\nM  playwright.performance.config.ts\n?? tests/performance/public-storefront.performance.spec.ts\n";
+  const normalized = performanceHarness.normalizeGitOutput(output, { preserveLeading: true });
+  assert.equal(normalized.startsWith(" M "), true);
+  assert.deepEqual(performanceHarness.parsePorcelainPaths(normalized), [
+    "playwright.performance.config.ts",
+    "scripts/run-playwright-performance.mjs",
+    "tests/performance/public-storefront.performance.spec.ts",
+  ]);
+});
+
+test("future performance paths are isolated from every Playwright and task-SDD cleanup root", () => {
+  assert.equal(typeof performanceHarness.resolvePerformancePaths, "function");
+  assert.equal(typeof performanceHarness.validatePerformancePathPolicy, "function");
+  const paths = performanceHarness.resolvePerformancePaths("C:\\repo", "run-a");
+  assert.match(paths.labRoot.replaceAll("\\", "/"), /\.superpowers\/artifacts\/storefront-performance$/u);
+  assert.match(paths.labLock.replaceAll("\\", "/"), /\.superpowers\/artifacts\/storefront-performance\.lock$/u);
+  assert.equal(paths.runDirectory, join(paths.labRoot, "run-a"));
+  assert.doesNotThrow(() => performanceHarness.validatePerformancePathPolicy(paths));
+  for (const forbidden of ["test-results", "playwright-report", "blob-report", ".superpowers/sdd/2026-09-04-propeptiq-storefront-completion"]) {
+    assert.throws(() => performanceHarness.validatePerformancePathPolicy({
+      ...paths,
+      labRoot: join("C:\\repo", forbidden, "performance"),
+      runDirectory: join("C:\\repo", forbidden, "performance", "run-a"),
+    }), /forbidden cleanup root|exact isolated root/iu);
+  }
+});
+
+test("no-JavaScript cases use only host polling around synchronous page snapshots", () => {
+  const source = readFileSync(new URL("../tests/performance/public-storefront.performance.spec.ts", import.meta.url), "utf8");
+  const start = source.indexOf("async function noJavaScriptCase");
+  const end = source.indexOf("async function reducedMotionCase", start);
+  assert.ok(start >= 0 && end > start);
+  const noJavaScriptCaseSource = source.slice(start, end);
+  assert.doesNotMatch(noJavaScriptCaseSource, /waitForGeometryStable|prepareRenderedImages|waitForFooterReadiness|page\.evaluate\(async|\.evaluate\(async/gu);
+  assert.match(noJavaScriptCaseSource, /waitForNoJavaScriptGeometryStable/u);
+  assert.match(noJavaScriptCaseSource, /prepareNoJavaScriptImages/u);
+  assert.match(noJavaScriptCaseSource, /waitForNoJavaScriptFooter/u);
+  assert.match(noJavaScriptCaseSource, /lifecycle = result\.errors\.length > 0 \? "failed" : "completed"/u);
+  assert.match(noJavaScriptCaseSource, /lifecycle = "interrupted"/u);
 });
 
 test("frame longtasks are tagged against the exact observation interval and whole-context records remain separate", () => {

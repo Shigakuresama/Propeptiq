@@ -22,8 +22,9 @@ const HOST = "127.0.0.1";
 const UNUSED_CONTROL_PORT = 4631;
 const SERVER_PORT = 4641;
 const BASE_URL = `http://${HOST}:${SERVER_PORT}`;
-const LAB_ROOT = join(ROOT, "test-results", "performance");
-const LAB_LOCK = join(ROOT, "test-results", "performance-lab.lock");
+const PERFORMANCE_ROOT_PARTS = [".superpowers", "artifacts", "storefront-performance"];
+const PERFORMANCE_LOCK_PARTS = [".superpowers", "artifacts", "storefront-performance.lock"];
+const LAB_LOCK = join(ROOT, ...PERFORMANCE_LOCK_PARTS);
 const OWNED_HARNESS_PATHS = Object.freeze([
   "playwright.performance.config.ts",
   "scripts/run-playwright-performance.mjs",
@@ -101,6 +102,37 @@ export function resolveRunReportPath(runDirectory) {
   return join(runDirectory, "report.md");
 }
 
+export function resolvePerformancePaths(root, runId) {
+  const labRoot = resolve(root, ...PERFORMANCE_ROOT_PARTS);
+  return {
+    labLock: resolve(root, ...PERFORMANCE_LOCK_PARTS),
+    labRoot,
+    repoRoot: resolve(root),
+    runDirectory: resolve(labRoot, runId),
+  };
+}
+
+export function validatePerformancePathPolicy(paths) {
+  const repoRoot = resolve(paths.repoRoot);
+  const expectedRoot = resolve(repoRoot, ...PERFORMANCE_ROOT_PARTS);
+  const expectedLock = resolve(repoRoot, ...PERFORMANCE_LOCK_PARTS);
+  if (resolve(paths.labRoot) !== expectedRoot || resolve(paths.labLock) !== expectedLock) {
+    throw new Error("Performance evidence paths must use the exact isolated root and lock.");
+  }
+  assertPathInside(expectedRoot, paths.runDirectory);
+  for (const forbidden of [
+    resolve(repoRoot, "test-results"),
+    resolve(repoRoot, "playwright-report"),
+    resolve(repoRoot, "blob-report"),
+    resolve(repoRoot, ".superpowers", "sdd"),
+  ]) {
+    const relation = relative(forbidden, expectedRoot);
+    if (relation === "" || (!relation.startsWith(`..${sep}`) && relation !== ".." && !relation.startsWith(sep))) {
+      throw new Error("Performance evidence root is inside a forbidden cleanup root.");
+    }
+  }
+}
+
 export function computeCandidateFingerprint(candidate) {
   const normalized = {
     harnessHashes: Object.fromEntries(Object.entries(candidate.harnessHashes).sort(([left], [right]) => left.localeCompare(right))),
@@ -137,20 +169,37 @@ export function calculateCls(shifts) {
 export function calculateLcpBreakdown(raw) {
   const lcp = raw.lcp ?? null;
   const navigation = raw.navigation ?? null;
-  const resource = lcp?.url
-    ? [...(raw.resources ?? [])].findLast((candidate) => candidate.name === lcp.url) ?? null
-    : null;
   const ttfb = navigation
     ? Math.max(0, navigation.responseStart - navigation.startTime)
     : null;
+  const unresolved = (classification) => ({
+    classification,
+    elementRenderDelay: null,
+    resource: null,
+    resourceLoadDelay: null,
+    resourceLoadDuration: null,
+    ttfb,
+  });
   if (!lcp || !navigation) {
-    return { classification: "missing", elementRenderDelay: null, resource: null, resourceLoadDelay: null, resourceLoadDuration: null, ttfb };
+    return unresolved("missing");
   }
   if (!lcp.url) {
-    return { classification: "text-lcp-empty-url", elementRenderDelay: null, resource: null, resourceLoadDelay: null, resourceLoadDuration: null, ttfb };
+    return unresolved("text-lcp-empty-url");
   }
+  if (raw.resourcesTruncated) return unresolved("resource-timing-input-truncated");
+  const matching = (raw.resources ?? []).filter((candidate) => candidate.name === lcp.url);
+  if (matching.length === 0) return unresolved("unmatched-lcp-resource");
+  const eligible = matching.filter((candidate) => {
+    const requestStart = candidate.requestStart || candidate.startTime;
+    return [candidate.startTime, requestStart, candidate.responseEnd].every(Number.isFinite) &&
+      candidate.startTime <= lcp.startTime && requestStart <= lcp.startTime &&
+      candidate.responseEnd >= requestStart;
+  });
+  if (eligible.length === 0) return unresolved("invalid-lcp-resource-chronology");
+  if (eligible.length > 1) return unresolved("ambiguous-lcp-resource");
+  const resource = eligible[0];
   if (!resource) {
-    return { classification: "unmatched-lcp-resource", elementRenderDelay: null, resource: null, resourceLoadDelay: null, resourceLoadDuration: null, ttfb };
+    return unresolved("invalid-lcp-resource-chronology");
   }
   const navigationStart = navigation.startTime;
   const lcpTime = Math.max(0, lcp.startTime - navigationStart);
@@ -192,6 +241,81 @@ export function classifyBrowserRequest({ baseURL, method, url }) {
     return { classification: "effectful-local-read", local, read };
   }
   return { classification: "allowed-local-read", local, read };
+}
+
+const PASSIVE_PREFETCH_PATHS = new Set([
+  "/",
+  "/account/orders",
+  "/cart",
+  "/catalog",
+  "/partners",
+  "/quality-records",
+  "/research-use-policy",
+  "/rewards",
+  "/sign-in",
+]);
+
+function boundedClassificationHeaders(headers) {
+  const result = {};
+  for (const name of ["rsc", "next-router-prefetch", "next-router-segment-prefetch", "next-router-state-tree"]) {
+    const value = headers?.[name];
+    if (typeof value === "string") result[name] = value.slice(0, 512);
+  }
+  return result;
+}
+
+export function classifyLocalNetworkFailure(input) {
+  const request = classifyBrowserRequest(input);
+  const requestHeaders = boundedClassificationHeaders(input.requestHeaders);
+  const hard = (reason) => ({
+    classification: "hard-local-transport-failure",
+    family: null,
+    reason,
+    requestHeaders,
+  });
+  if (
+    input.javaScriptEnabled === false && request.classification === "allowed-local-read" &&
+    input.resourceType === "script" && input.errorText === "csp"
+  ) {
+    return {
+      classification: "intentional-no-js-script-block",
+      family: "native-script-suppression",
+      reason: "JavaScript-disabled Chromium suppressed an otherwise allowed local script",
+      requestHeaders,
+    };
+  }
+  if (request.classification !== "allowed-local-read") return hard(`request policy ${request.classification}`);
+  if (input.method.toUpperCase() !== "GET" || input.resourceType !== "fetch" || input.isNavigationRequest) {
+    return hard("request is not a same-origin non-navigation GET fetch");
+  }
+  if (input.errorText !== "net::ERR_ABORTED") return hard(`unexpected failure text ${input.errorText ?? "missing"}`);
+  if (input.response?.status !== 200 || !/^text\/x-component(?:;|$)/iu.test(input.response.contentType ?? "")) {
+    return hard("missing correlated 200 text/x-component response");
+  }
+  const pathname = new URL(input.url).pathname.replace(/\/$/u, "") || "/";
+  const approvedCanonicalPaths = new Set(input.approvedCanonicalPaths ?? []);
+  if (!PASSIVE_PREFETCH_PATHS.has(pathname) && !approvedCanonicalPaths.has(pathname)) {
+    return hard(`destination is not an approved passive document path: ${pathname}`);
+  }
+  if (requestHeaders.rsc !== "1") return hard("RSC prefetch header is not exact");
+  const segmentFamily = requestHeaders["next-router-prefetch"] === "1" &&
+    requestHeaders["next-router-segment-prefetch"] === "/_tree";
+  let metadataFamily = false;
+  if (requestHeaders["next-router-prefetch"] === "1" && requestHeaders["next-router-state-tree"]) {
+    try {
+      const decoded = decodeURIComponent(requestHeaders["next-router-state-tree"]);
+      metadataFamily = decoded === JSON.stringify(["", {}, null, "metadata-only"]);
+    } catch {
+      metadataFamily = false;
+    }
+  }
+  if (!segmentFamily && !metadataFamily) return hard("Next prefetch family headers are missing or malformed");
+  return {
+    classification: "unresolved-speculative-prefetch",
+    family: segmentFamily ? "segment-tree" : "metadata-only",
+    reason: "response headers arrived but request body completion aborted; navigation impact unresolved",
+    requestHeaders,
+  };
 }
 
 export function selectWindowLongtasks(longtasks, window) {
@@ -482,10 +606,14 @@ async function gitOutput(arguments_, childEnvironment) {
   const result = spawnCaptured("git", arguments_, { env: childEnvironment });
   const outcome = await result.completed;
   if (outcome.code !== 0) throw new Error(`Read-only git command failed (${arguments_[0]}), exit ${outcome.code}`);
-  return outcome.stdout.trim();
+  return normalizeGitOutput(outcome.stdout, { preserveLeading: arguments_[0] === "status" });
 }
 
-function parsePorcelainPaths(output) {
+export function normalizeGitOutput(output, options = {}) {
+  return options.preserveLeading ? output.trimEnd() : output.trim();
+}
+
+export function parsePorcelainPaths(output) {
   if (output.length === 0) return [];
   return output.split(/\r?\n/u).filter(Boolean).map((line) => {
     const rawPath = line.slice(3);
@@ -649,8 +777,9 @@ async function terminateOwnedProcessTree(handle, options = {}) {
 
 function createRuntimeDependencies() {
   const runId = `${new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-")}-${randomUUID()}`;
-  const runDirectory = join(LAB_ROOT, runId);
-  assertPathInside(LAB_ROOT, runDirectory);
+  const paths = resolvePerformancePaths(ROOT, runId);
+  validatePerformancePathPolicy(paths);
+  const runDirectory = paths.runDirectory;
   const runReportPath = resolveRunReportPath(runDirectory);
   const stageDirectory = join(runDirectory, "stages");
   const childEnvironment = buildChildEnvironment(process.env);
@@ -1013,6 +1142,12 @@ function createRuntimeDependencies() {
       const sampleLines = measurements?.samples?.map((sample) => (
         `| ${sample.routeLabel} | ${sample.viewport.width}x${sample.viewport.height} | ${sample.iteration} | ${sample.lcp?.startTime ?? "missing"} | ${sample.cls?.maximumSessionWindow ?? "missing"} | ${sample.longtasks?.length ?? 0} | ${sample.integrityErrors?.length ?? 0} |`
       )) ?? [];
+      const noJavaScriptSummary = measurements?.noJavaScriptSummary ?? {
+        attempted: measurements?.noJavaScriptGeometry?.length ?? 0,
+        completed: 0,
+        failed: 0,
+        interrupted: 0,
+      };
       const report = `# Task 18F production lab report\n\n` +
         `- Status: **${manifest.status}**\n` +
         `- Run ID: \`${runId}\`\n` +
@@ -1033,7 +1168,9 @@ function createRuntimeDependencies() {
         `\n\n## Counts and limitations\n\n` +
         `- Cold samples: ${measurements?.samples?.length ?? 0}/18. Failed/integrity samples: ${measurements?.samples?.filter((sample) => sample.integrityErrors?.length > 0).length ?? 0}.\n` +
         `- Frame observations: ${measurements?.frames?.length ?? 0}/2; these are frame-interval observations, not proof of 60fps or scripting cost.\n` +
-        `- Geometry checks: ${measurements?.geometry?.length ?? 0}/28 JavaScript contexts, ${measurements?.noJavaScriptGeometry?.length ?? 0}/14 no-JavaScript contexts, ${measurements?.reducedMotionGeometry?.length ?? 0}/4 reduced-motion route contexts.\n` +
+        `- Geometry checks: ${measurements?.geometry?.length ?? 0}/28 JavaScript contexts and ${measurements?.reducedMotionGeometry?.length ?? 0}/4 reduced-motion route contexts.\n` +
+        `- No-JavaScript cases: ${noJavaScriptSummary.attempted}/14 attempted; ${noJavaScriptSummary.completed} completed without case errors; ${noJavaScriptSummary.failed} completed with validation failures; ${noJavaScriptSummary.interrupted} interrupted. Attempted count is not passed coverage.\n` +
+        `- Cold means fresh browser contexts with browser cache disabled. Server-side and image caches are not separately reset.\n` +
         `- No accepted LCP budget exists. Every CLS sample must be strictly below 0.1; medians do not replace individual samples.\n` +
         `- Known LCP hints: ${measurements?.knownLcpHints?.length ?? 0}. Colour warnings: ${measurements?.colourWarnings?.length ?? 0}. Other diagnostic warnings: ${measurements?.diagnosticWarnings?.length ?? 0}. These are separate arrays in \`performance-data.json\` and are not silently treated as measurement success.\n` +
         `- Manual contexts block service workers and use snapshot tracing retained only on failure; this instrumentation can affect the local timing observations and is recorded in \`performance-data.json\`.\n` +
@@ -1058,7 +1195,7 @@ function createRuntimeDependencies() {
 
 function printHelp() {
   console.log("Run one Task 18F closed production-build performance-lab invocation.");
-  console.log("Precondition: no other worker owns ordinary .next, ports 4631/4641, or test-results/performance-lab.lock.");
+  console.log("Precondition: no other worker owns ordinary .next, ports 4631/4641, or .superpowers/artifacts/storefront-performance.lock.");
   console.log("The operator must bind the reviewed candidate; the runner records the observed HEAD and requires unchanged HEAD/status/harness hashes.");
   console.log("The runner preserves build/evidence output and removes only its own processes and exact invocation lock.");
 }
