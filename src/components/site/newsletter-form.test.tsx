@@ -48,6 +48,27 @@ afterEach(() => {
 });
 
 describe("NewsletterForm", () => {
+  it("supports the compact inverse footer presentation without changing form semantics", () => {
+    render(
+      <NewsletterForm
+        available={false}
+        presentation="footer"
+        privacyHref={null}
+        submit={vi.fn()}
+      />,
+    );
+
+    const section = screen.getByRole("region", { name: "PropeptIQ newsletter" });
+    expect(section).toHaveAttribute("data-presentation", "footer");
+    expect(section).toHaveClass("newsletter-form--footer");
+    expect(screen.getByRole("form", { name: "Newsletter signup" })).toHaveClass(
+      "newsletter-form__fields--footer",
+    );
+    expect(screen.getByRole("textbox", { name: "Email address" })).toBeDisabled();
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+  });
+
   it("keeps an approved privacy destination usable after the server-to-client serialization boundary", () => {
     const serializedPrivacyHref = JSON.parse(
       JSON.stringify(fictionalPrivacyLinkView),

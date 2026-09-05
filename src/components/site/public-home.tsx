@@ -14,7 +14,6 @@ import {
 import { ProgramStrip } from "@/components/growth/program-strip";
 import { FaqSection } from "@/components/site/faq-section";
 import { FaqJsonLd } from "@/components/site/faq-json-ld";
-import { NewsletterForm } from "@/components/site/newsletter-form";
 import { ProofRail } from "@/components/site/proof-rail";
 import { ScienceField } from "@/components/site/science-field";
 import { SectionHeading } from "@/components/site/section-heading";
@@ -23,12 +22,7 @@ import { Button } from "@/components/ui/button";
 import type { ApprovedHomepageContent } from "@/content/storefront-content";
 import type { LoyaltyPolicy } from "@/domain/rewards";
 import type { ReferralPolicy } from "@/domain/referrals";
-import {
-  newsletterConfiguration,
-  projectNewsletterPrivacyLinkView,
-  researchRestrictions,
-  type ApprovedNewsletterPrivacyHref,
-} from "@/lib/site-content";
+import { researchRestrictions } from "@/lib/site-content";
 
 const documentationStages = [
   {
@@ -60,7 +54,6 @@ const emptyHomepageContent: ApprovedHomepageContent = Object.freeze({
 
 export function PublicHome({
   homepageContent = emptyHomepageContent,
-  newsletterPrivacyHref = newsletterConfiguration.privacyHref,
   loyaltyPolicy = null,
   referralPolicy = null,
   syntheticLocal = false,
@@ -69,7 +62,6 @@ export function PublicHome({
   pricing,
 }: {
   homepageContent?: ApprovedHomepageContent | undefined;
-  newsletterPrivacyHref?: ApprovedNewsletterPrivacyHref | null | undefined;
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
   syntheticLocal?: boolean;
@@ -78,9 +70,6 @@ export function PublicHome({
   pricing: PublicStorefrontPricingContext;
 }) {
   const allBrowseOnly = products.every((product) => product.kind === "browse_only");
-  const newsletterPrivacyLink = projectNewsletterPrivacyLinkView(
-    newsletterPrivacyHref,
-  );
   const growthPrograms = [
     ...(loyaltyPolicy?.status === "active" ? [{
       title: "Earn points",
@@ -273,10 +262,6 @@ export function PublicHome({
       <WhyChoosePropeptIQ items={homepageContent.whyChoose} />
       <FaqSection entries={homepageContent.faqs} />
       <FaqJsonLd entries={homepageContent.faqs} />
-      <NewsletterForm
-        available={newsletterConfiguration.enabled}
-        privacyHref={newsletterPrivacyLink}
-      />
 
       <section
         aria-labelledby="quality-callout-heading"

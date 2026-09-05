@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { BrandLogo } from "@/components/site/brand-mark";
+import { NewsletterForm } from "@/components/site/newsletter-form";
 import {
   getApprovedStorefrontContent,
   type ControlledContentRecord,
@@ -8,9 +9,12 @@ import {
 import {
   footerNavigationGroups,
   footerSocialUrls,
+  newsletterConfiguration,
   projectFooterSocialLinks,
+  projectNewsletterPrivacyLinkView,
   researchRestrictions,
   siteName,
+  type ApprovedNewsletterPrivacyHref,
   type FooterNavigationGroup,
   type FooterSocialPlatform,
 } from "@/lib/site-content";
@@ -19,6 +23,7 @@ type SiteFooterProps = Readonly<{
   navigationGroups?: readonly FooterNavigationGroup[];
   socialUrls?: Readonly<Partial<Record<FooterSocialPlatform, unknown>>>;
   legalNotices?: readonly ControlledContentRecord[];
+  newsletterPrivacyHref?: ApprovedNewsletterPrivacyHref | null | undefined;
 }>;
 
 const footerLinkClassName =
@@ -98,6 +103,7 @@ export function SiteFooter({
   navigationGroups = footerNavigationGroups,
   socialUrls = footerSocialUrls,
   legalNotices,
+  newsletterPrivacyHref = newsletterConfiguration.privacyHref,
 }: SiteFooterProps = {}) {
   const renderedGroups = navigationGroups
     .map((group) => ({
@@ -114,12 +120,16 @@ export function SiteFooter({
   const approvedLegalNotices = approvedContent
     .filter((record) => record.kind === "legal_notice")
     .map((record) => ({ id: record.id, title: record.title, body: record.body }));
+  const newsletterPrivacyLink = projectNewsletterPrivacyLinkView(
+    newsletterPrivacyHref,
+  );
+  const currentYear = new Date().getFullYear();
 
   return (
     <footer className="bg-ink text-canvas">
       <div className="site-container py-14 md:py-20">
-        <div className="grid min-w-0 gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] xl:gap-20">
-          <div className="min-w-0 max-w-xl">
+        <div className="footer-primary-grid grid min-w-0 gap-10 md:grid-cols-2 lg:grid-cols-4 lg:gap-8 xl:gap-12">
+          <div className="footer-brand min-w-0 max-w-xl">
             <Link
               href="/"
               aria-label={`${siteName} home`}
@@ -134,23 +144,53 @@ export function SiteFooter({
               Catalog names and package configurations come from owner-supplied records;
               cart and checkout facts remain server-authoritative.
             </p>
+
+            <section aria-label="Social media" className="mt-7 min-w-0">
+              <h2 className="font-heading text-sm uppercase tracking-[0.16em] text-canvas">
+                Social media
+              </h2>
+              <ul className="mt-3 flex flex-wrap gap-2">
+                {socialLinks.map((social) => (
+                  <li key={social.platform}>
+                    <a
+                      href={social.href}
+                      aria-label={social.label}
+                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-canvas/30 text-canvas/80 transition-colors duration-200 hover:border-canvas/60 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
+                    >
+                      <SocialIcon platform={social.platform} />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </section>
           </div>
 
           <nav
             aria-label="Footer"
-            className="grid min-w-0 content-start gap-8 sm:grid-cols-2 lg:grid-cols-4"
+            className="footer-navigation grid min-w-0 content-start gap-6 md:grid-cols-1 lg:col-span-3 lg:grid-cols-3 lg:gap-8"
           >
             {renderedGroups.map((group, groupIndex) => {
-              const headingId = `footer-group-${groupIndex}`;
+              const summaryId = `footer-group-${groupIndex}-summary`;
+              const headingId = `footer-group-${groupIndex}-heading`;
               return (
-                <section key={`${group.label}-${groupIndex}`} aria-labelledby={headingId}>
-                  <h2
-                    id={headingId}
-                    className="font-heading text-sm uppercase tracking-[0.16em] text-canvas"
+                <details
+                  aria-labelledby={headingId}
+                  className="footer-navigation__group min-w-0 border-t border-canvas/20 pt-2 lg:border-t-0 lg:pt-0"
+                  key={`${group.label}-${groupIndex}`}
+                  open
+                >
+                  <summary
+                    className="min-h-11 cursor-pointer rounded-md py-2 text-canvas marker:text-canvas/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
+                    id={summaryId}
                   >
-                    {group.label}
-                  </h2>
-                  <ul className="mt-3 space-y-1">
+                    <h2
+                      className="inline font-heading text-sm uppercase tracking-[0.16em] text-canvas"
+                      id={headingId}
+                    >
+                      {group.label}
+                    </h2>
+                  </summary>
+                  <ul aria-labelledby={summaryId} className="mt-1 space-y-1">
                     {group.links.map((item) => (
                       <li key={`${item.label}-${item.href}`}>
                         {item.href.includes("#") ? (
@@ -165,37 +205,21 @@ export function SiteFooter({
                       </li>
                     ))}
                   </ul>
-                </section>
+                </details>
               );
             })}
           </nav>
         </div>
 
-        <section
-          aria-label="Social media"
-          className="mt-10 border-t border-canvas/20 pt-8"
-        >
-          <h2 className="font-heading text-sm uppercase tracking-[0.16em] text-canvas">
-            Social media
-          </h2>
-          <ul className="mt-3 flex flex-wrap gap-2">
-            {socialLinks.map((social) => (
-              <li key={social.platform}>
-                <a
-                  href={social.href}
-                  aria-label={social.label}
-                  className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-canvas/30 text-canvas/80 transition-colors duration-200 hover:border-canvas/60 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
-                >
-                  <SocialIcon platform={social.platform} />
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <NewsletterForm
+          available={newsletterConfiguration.enabled}
+          presentation="footer"
+          privacyHref={newsletterPrivacyLink}
+        />
 
         <section
           aria-labelledby="footer-notices-heading"
-          className="mt-8 border-t border-canvas/20 pt-8"
+          className="footer-bottom-row border-t border-canvas/20 pt-8"
         >
           <h2
             id="footer-notices-heading"
@@ -220,6 +244,9 @@ export function SiteFooter({
               ))}
             </div>
           ) : null}
+          <p className="mt-8 border-t border-canvas/20 pt-6 text-sm leading-6 text-canvas/70">
+            © {currentYear} {siteName}
+          </p>
         </section>
       </div>
     </footer>

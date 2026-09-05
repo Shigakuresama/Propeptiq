@@ -196,6 +196,11 @@ function checkoutClientAuthorityViolation(from: string, specifier: string): bool
     runtimeImportSpecifiers(source(resolvedPath)).includes("server-only");
 }
 
+function cartDrawerDataRouteViolation(contents: string): boolean {
+  const routeLiterals = contents.match(/["'`]\/api\/(?:catalog|data)[^"'`]*["'`]/gu) ?? [];
+  return routeLiterals.some((literal) => literal.slice(1, -1) !== "/api/catalog/preview");
+}
+
 describe("storefront client boundary", () => {
   it("enumerates every direct client entry and keeps server/env/database/payment code out", () => {
     for (const path of clientEntries) {
@@ -232,9 +237,21 @@ describe("storefront client boundary", () => {
 
     const drawerGraph = [...visited].map(source).join("\n");
     expect(drawerGraph.match(/\/api\/catalog\/preview/gu)).toHaveLength(1);
-    expect(drawerGraph).not.toMatch(/\/api\/(?:catalog|data)(?:\?|["'])/gu);
+    expect(cartDrawerDataRouteViolation(drawerGraph)).toBe(false);
     expect(visited).toContain("src/cart/cart-provider.tsx");
     expect(visited).toContain("src/cart/preview-presentation.ts");
+  });
+
+  it.each([
+    ["nested catalog", 'fetch("/api/catalog/products")', true],
+    ["nested data", 'fetch("/api/data/export")', true],
+    ["preview suffix", 'fetch("/api/catalog/preview/history")', true],
+    ["preview query", 'fetch("/api/catalog/preview?draft=1")', true],
+    ["bare catalog", 'fetch("/api/catalog")', true],
+    ["bare data", 'fetch("/api/data")', true],
+    ["exact preview", 'fetch("/api/catalog/preview")', false],
+  ] as const)("classifies the %s route literal", (_label, contents, expected) => {
+    expect(cartDrawerDataRouteViolation(contents)).toBe(expected);
   });
 
   it.each([

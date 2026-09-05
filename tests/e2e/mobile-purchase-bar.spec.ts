@@ -331,14 +331,14 @@ test("focused purchase controls hand focus to the inline heading when the viewpo
   }
 });
 
-test("footer Tab navigation keeps every focused link fully above the active purchase row", async ({ page }) => {
+test("footer Tab navigation keeps every focused target fully above the active purchase row", async ({ page }) => {
   for (const viewport of [{ width: 375, height: 812 }, { width: 390, height: 520 }]) {
     await page.setViewportSize(viewport);
     await openProduct(page);
     await chooseTwoBottles(page);
     await showMobilePurchase(page);
     const footer = page.locator(".public-layout > footer");
-    const previous = footer.getByRole("link", { name: "Order tracking", exact: true });
+    const previous = footer.getByRole("link", { name: "PROPEPTIQ LABS home", exact: true });
     const clearBottom = (await rect(mobilePurchase(page))).top - 8;
     await previous.evaluate((element, bottom) => {
       window.scrollTo({ top: window.scrollY + element.getBoundingClientRect().bottom - bottom, behavior: "instant" });
@@ -349,10 +349,26 @@ test("footer Tab navigation keeps every focused link fully above the active purc
     await expect(mobilePurchase(page)).toBeVisible();
 
     // Only the known preceding link is positioned by the fixture. All target
-    // links below receive focus through actual Tab navigation and browser scroll.
-    for (const name of ["FAQ", "Research Use Only", "Instagram", "TikTok", "X", "Facebook"]) {
+    // links and summaries below receive focus through actual Tab navigation and browser scroll.
+    const targets = [
+      ["Instagram", footer.getByRole("link", { name: "Instagram", exact: true })],
+      ["TikTok", footer.getByRole("link", { name: "TikTok", exact: true })],
+      ["X", footer.getByRole("link", { name: "X", exact: true })],
+      ["Facebook", footer.getByRole("link", { name: "Facebook", exact: true })],
+      ["Shop summary", footer.locator("summary").filter({ hasText: /^Shop$/u })],
+      ["Catalog", footer.getByRole("link", { name: "Catalog", exact: true })],
+      ["Cart", footer.getByRole("link", { name: "Cart", exact: true })],
+      ["Rewards", footer.getByRole("link", { name: "Rewards", exact: true })],
+      ["Partner Program", footer.getByRole("link", { name: "Partner Program", exact: true })],
+      ["Support summary", footer.locator("summary").filter({ hasText: /^Support$/u })],
+      ["Quality Records", footer.getByRole("link", { name: "Quality Records", exact: true })],
+      ["Order tracking", footer.getByRole("link", { name: "Order tracking", exact: true })],
+      ["FAQ", footer.getByRole("link", { name: "FAQ", exact: true })],
+      ["Legal summary", footer.locator("summary").filter({ hasText: /^Legal$/u })],
+      ["Research Use Only", footer.getByRole("link", { name: "Research Use Only", exact: true })],
+    ] as const;
+    for (const [name, target] of targets) {
       await page.keyboard.press("Tab");
-      const target = footer.getByRole("link", { name, exact: true });
       await expect(target).toBeFocused();
       await waitForPurchaseLayout(page);
       await expect(mobilePurchase(page)).toBeVisible();
