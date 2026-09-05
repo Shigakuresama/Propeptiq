@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { QuantityTierSelector } from "./quantity-tier-selector";
 describe("QuantityTierSelector", () => {
@@ -6,8 +6,16 @@ describe("QuantityTierSelector", () => {
     const select = vi.fn(); const change = vi.fn(); const { container } = render(<QuantityTierSelector quantity={1} quantityDraft="1" errorId="q-error" errorMessage={null} onQuantityDraftChange={change} onQuantitySelect={select} />);
     expect(screen.getByRole("button", { name: "1 bottle" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "10 or more bottles" })).toBeVisible();
-    expect(screen.getByRole("spinbutton", { name: "Exact quantity" })).toHaveAttribute("min", "1");
-    expect(screen.getByRole("spinbutton", { name: "Exact quantity" })).toHaveAttribute("max", "25"); expect(screen.getByRole("spinbutton", { name: "Exact quantity" })).toHaveAttribute("step", "1");
+    const exactQuantity = screen.getByRole("spinbutton", { name: "Exact quantity" });
+    expect(exactQuantity).toHaveAttribute("min", "1");
+    expect(exactQuantity).toHaveAttribute("max", "25"); expect(exactQuantity).toHaveAttribute("step", "1");
+    expect(exactQuantity).toHaveClass("min-w-0", "flex-1");
+    expect(exactQuantity).not.toHaveClass("w-24");
+    const exactControls = exactQuantity.parentElement;
+    expect(exactControls).toHaveClass("w-full", "max-w-[12.5rem]");
+    for (const control of within(exactControls!).getAllByRole("button")) {
+      expect(control).toHaveClass("min-w-11");
+    }
     expect(container.querySelector("input")?.className).toContain("min-h-11");
     fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "11" } }); expect(change).toHaveBeenCalledWith("11");
     expect(screen.getByRole("button", { name: "Decrease quantity" })).toBeDisabled();
