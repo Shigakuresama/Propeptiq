@@ -50,4 +50,3 @@ Generation is nondeterministic; repeating a prompt does not promise identical pi
 Used existing lockfile-resolved Sharp 0.35.3, already installed with Next, for one-time asset optimization only; no dependency or production converter was added. The operation was `sharp(input).toColourspace('srgb').webp({ quality: 84, effort: 6 }).toFile(newOutput)`, with an explicit refusal to overwrite an existing target. No crop, resize, relabel or compositing occurred.
 
 Manifest tests must verify exact WebP bytes/hashes, measured dimensions, six canonical slugs and unchanged shared tail. Component/browser checks must verify card/PDP agreement, loaded images, live variant/price state, disclosure, keyboard gallery controls and reserved layout. Production performance and deployment receipts belong to the completion plan; asset creation alone is not deployment evidence.
-
