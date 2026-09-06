@@ -264,6 +264,39 @@
       "identityCaveat": "The catalog uses Epithalon, while the cited papers use Epitalon for a synthetic tetrapeptide identified in those papers as AEDG (Ala-Glu-Asp-Gly). This literature spelling and study-material description do not establish the identity, sequence, composition, formulation, quality, purity, or equivalence of the PropeptIQ catalog material. Epitalon is not treated as equivalent to Epithalamin or any pineal or epiphyseal peptide extract.",
       "mechanism": null,
       "benefitClaim": null
+    },
+    {
+      "id": "kpv",
+      "productSlug": "kpv",
+      "displayName": "KPV",
+      "alternateNames": [],
+      "studyIds": ["pmid-18061177", "pmid-27458604"],
+      "strongestEvidence": "preclinical_only",
+      "identityCaveat": "The cited KPV experiments used cell or mouse models; the human tissue observations concern PepT1 and are not a human KPV treatment trial. Literature-name correspondence does not establish the identity, sequence, composition, formulation, quality, or equivalence of the PropeptIQ catalog material.",
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "ll37",
+      "productSlug": "ll37",
+      "displayName": "LL37",
+      "alternateNames": ["LL-37"],
+      "studyIds": ["pmid-25041740", "pmid-34687253"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": "The cited trials concern investigational LL-37 preparations in specific clinical settings. Name correspondence does not establish the identity, sequence, form, formulation, quality, purity, or equivalence of the PropeptIQ catalog material. These references do not establish safety or effectiveness of this catalog item.",
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "glutathione",
+      "productSlug": "glutathione",
+      "displayName": "Glutathione",
+      "alternateNames": [],
+      "studyIds": ["pmid-24791752", "pmid-21875351"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": "The cited trials concern oral study preparations. The catalog name does not establish a chemical or redox form, formulation, route, quality, purity, or equivalence to those preparations. These references do not establish safety or effectiveness of this catalog item.",
+      "mechanism": null,
+      "benefitClaim": null
     }
   ]
 }

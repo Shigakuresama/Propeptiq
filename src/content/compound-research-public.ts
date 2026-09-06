@@ -26,6 +26,7 @@ export const compoundEvidenceLabels = Object.freeze({
   human_observational: "Human research included",
   human_rct: "Randomized human research included",
   in_vitro_only: "In vitro research only",
+  preclinical_only: "Preclinical research included",
 } as const);
 
 export type StudyDesign = keyof typeof compoundStudyDesignLabels;
