@@ -9,9 +9,9 @@ const manifest = JSON.parse(
   readFileSync(join(root, "server/functions-config-manifest.json"), "utf8"),
 );
 const proxy = manifest.functions?.["/_middleware"];
-assert.equal(proxy?.runtime, "nodejs", "Authentication proxy is not registered");
+assert.equal(proxy?.runtime, "nodejs", "Authentication proxy must be registered with the Node.js runtime");
 assert.deepEqual(
-  proxy.matchers.map(({ originalSource }) => originalSource).sort(),
+  (proxy.matchers ?? []).map(({ originalSource }) => originalSource).sort(),
   ["/account/:path*", "/admin/:path*", "/checkout/:path*", "/research-sets/:path*"].sort(),
   "Authentication proxy must cover exactly the protected route families",
 );
