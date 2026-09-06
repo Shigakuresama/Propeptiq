@@ -151,8 +151,8 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
     fireEvent.click(screen.getByRole("button", { name: "2 bottles" }));
     const bar = await showBar();
     expect(bar).toHaveTextContent("$28.00");
-    expect(bar).toHaveTextContent("Cart preview only");
-    const add = within(bar).getByRole("button", { name: "Add Synthetic Product Alpha to preview cart" });
+    expect(bar).toHaveTextContent("Checkout unavailable");
+    const add = within(bar).getByRole("button", { name: "Add Synthetic Product Alpha to cart" });
     fireEvent.click(add);
     fireEvent.click(add);
     await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY)!)).toEqual({ version: 2, items: [{ variantId: "variant-10mg", quantity: 4 }] }));
@@ -185,8 +185,8 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
     render(<Fixture product={testCanonicalProduct([zero])} pricing={testPricingContext("preview", [testWinter30])} />);
     const bar = await showBar();
     expect(bar).toHaveTextContent("$0.00");
-    expect(bar).toHaveTextContent("Local cart preview");
-    expect(within(bar).getByRole("button", { name: "Add Synthetic Product Alpha to preview cart" })).toBeEnabled();
+    expect(bar).toHaveTextContent("Test mode — no payments");
+    expect(within(bar).getByRole("button", { name: "Add Synthetic Product Alpha to cart" })).toBeEnabled();
   });
 
   it("does not choose a variant when the canonical default is not a member", async () => {

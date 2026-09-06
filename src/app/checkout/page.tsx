@@ -82,8 +82,8 @@ export default async function CheckoutPage() {
       <div className="account-layout">
         <div className="grid gap-6">
           {browseOnlyPreview ? (
-            <Notice title="Browse-only Preview">
-              Shipping, tax, and payment-session creation are unavailable in this Preview. Browse the synthetic catalog without submitting checkout requests.
+            <Notice title="Checkout is currently unavailable">
+              This environment cannot accept orders or payments. You can review the synthetic catalog and your saved cart.
             </Notice>
           ) : null}
           {reason ? <ClosedState reason={reason} /> : null}

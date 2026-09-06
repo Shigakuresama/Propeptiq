@@ -159,11 +159,11 @@ describe("CatalogListingCard", () => {
     );
 
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
-    expect(within(article).getByText("Cart preview only")).toBeVisible();
+    expect(within(article).getByText("Checkout unavailable")).toBeVisible();
     const add = within(article).getByRole("button", {
-      name: "Add Synthetic Product Alpha to preview cart",
+      name: "Add Synthetic Product Alpha to cart",
     });
-    expect(add).toHaveTextContent("Add to preview cart");
+    expect(add).toHaveTextContent("Add to cart");
     await user.click(add);
 
     await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "null")).toEqual({
@@ -211,12 +211,12 @@ describe("CatalogListingCard", () => {
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
     expect(within(article).getAllByText("$0.00")).toHaveLength(2);
     expect(within(article).getAllByText("-30%")).toHaveLength(2);
-    expect(within(article).getAllByText("Local cart preview").length).toBeGreaterThan(0);
+    expect(within(article).getAllByText("Test mode — no payments").length).toBeGreaterThan(0);
     const add = within(article).getByRole("button", {
-      name: "Add Synthetic Product Alpha to preview cart",
+      name: "Add Synthetic Product Alpha to cart",
     });
     expect(add).toBeEnabled();
-    expect(add).toHaveTextContent("Add to preview cart");
+    expect(add).toHaveTextContent("Add to cart");
   });
 
   it("uses the selected higher-priced default for caption, price, and availability while ADD still opens the chooser", async () => {

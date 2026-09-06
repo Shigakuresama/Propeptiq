@@ -93,7 +93,7 @@ describe("AddToCartButton", () => {
     expect(screen.getByRole("button")).toHaveTextContent("Add to cart");
   });
 
-  it("uses exact preview-cart copy without changing the cart write", async () => {
+  it("uses unified customer cart copy without changing the cart write", async () => {
     const user = userEvent.setup();
     render(
       <AddToCartButton
@@ -107,9 +107,9 @@ describe("AddToCartButton", () => {
     );
 
     const button = screen.getByRole("button", {
-      name: "Add Synthetic Product Alpha to preview cart",
+      name: "Add Synthetic Product Alpha to cart",
     });
-    expect(button).toHaveTextContent("Add to preview cart");
+    expect(button).toHaveTextContent("Add to cart");
     await user.click(button);
 
     expect(addVariantMock).toHaveBeenCalledExactlyOnceWith(

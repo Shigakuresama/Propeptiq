@@ -128,7 +128,7 @@ describe("CartDrawer accessible progressive enhancement", () => {
 
     expect(within(dialog).getByRole("heading", { name: "Items" })).toBeVisible();
     expect(within(dialog).getByText("Review your items and current prices.", { exact: true })).toBeVisible();
-    expect(within(dialog).getByRole("complementary", { name: "Cart preview" })).toBeVisible();
+    expect(within(dialog).getByRole("complementary", { name: "Order summary" })).toBeVisible();
     expect(within(dialog).queryByText("Referral benefit", { exact: true })).toBeNull();
     expect(within(dialog).queryByText("Points redemption", { exact: true })).toBeNull();
     expect(within(cartLine).getByRole("img", {
@@ -144,7 +144,7 @@ describe("CartDrawer accessible progressive enhancement", () => {
     expect(within(cartLine).getByText("$39.99", { selector: "del" })).toBeVisible();
     expect(within(cartLine).getByText("$27.99", { selector: "strong" })).toBeVisible();
     expect(within(cartLine).getByText("$55.98", { exact: true })).toBeVisible();
-    expect(within(dialog).getByRole("complementary", { name: "Cart preview" }))
+    expect(within(dialog).getByRole("complementary", { name: "Order summary" }))
       .toHaveTextContent("$55.98");
   });
 
@@ -159,11 +159,11 @@ describe("CartDrawer accessible progressive enhancement", () => {
 
     const { dialog } = await renderAndOpen();
     const checkout = await within(dialog).findByRole("button", {
-      name: "Checkout — Coming Soon",
+      name: "Checkout unavailable",
     });
     expect(checkout).toBeDisabled();
     expect(checkout).toHaveAttribute("aria-disabled", "true");
-    expect(within(dialog).getByText(/final shipping, tax, and payment are not available/iu)).toBeVisible();
+    expect(within(dialog).getByText(/Shipping and tax are not yet calculated/iu)).toBeVisible();
   });
 
   it("uses unique bound quantity IDs and moves focus after remove and clear with real provider state", async () => {
@@ -334,15 +334,15 @@ describe("CartDrawer accessible progressive enhancement", () => {
       const trigger = await screen.findByRole("link", { name: "Cart, 1 requested unit" });
       await user.click(trigger);
       const dialog = await screen.findByRole("dialog", { name: "Your cart" });
-      const loading = within(dialog).getByRole("status", { name: "Loading cart preview" });
+      const loading = within(dialog).getByRole("status", { name: "Loading cart" });
       expect(loading).toBeVisible();
-      expect(loading).toHaveTextContent("Loading cart preview…");
+      expect(loading).toHaveTextContent("Loading cart…");
       await waitFor(() => expect(typeof rejectChunk).toBe("function"));
       await act(async () => rejectChunk(new Error("synthetic cart chunk import failure")));
       const fallback = await within(dialog).findByRole("alert");
 
       expect(fallback).toHaveTextContent(
-        "The cart preview could not be loaded. Close this panel or use View cart to continue.",
+        "Your cart could not be loaded. Close this panel or open your cart to try again.",
       );
       expect(fallback).not.toHaveTextContent("synthetic cart chunk import failure");
       const viewCart = within(dialog).getByRole("link", { name: "View cart" });

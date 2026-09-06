@@ -29,7 +29,7 @@ const cartIllustration = catalogProductVisualManifest.find((scene) => scene.id =
 const purchaseStateCopy: Readonly<Record<CartPreviewPurchaseState, string | null>> = {
   ready: null,
   checkout_unavailable: "Display price available. Checkout is not yet available for this variant.",
-  local_preview: "Local cart preview only. No payment will be created.",
+  local_preview: "Test mode — no payments.",
   pricing_pending: "Pricing coming soon.",
   unavailable: "This variant is unavailable.",
   insufficient_quantity: "The requested quantity is not currently available.",
@@ -217,7 +217,7 @@ export function CartView(props: CartViewProps) {
   const promotionSummary = preview === null
     ? error
       ? "Unavailable"
-      : "Awaiting server preview"
+      : "Updating cart"
     : hasAppliedPromotion
       ? "Included in displayed merchandise prices"
       : hasQuantityDiscount
@@ -258,7 +258,7 @@ export function CartView(props: CartViewProps) {
   }
 
   if (!hydrated) {
-    return <div className="cart-loading" aria-label="Loading saved cart" />;
+    return <div className="cart-loading" aria-label="Loading cart" role="status">Loading cart…</div>;
   }
 
   if (legacyItemCount !== null) {
@@ -320,7 +320,7 @@ export function CartView(props: CartViewProps) {
 
         {error ? (
           <div className="error-record mt-6 text-base leading-7" role="alert">
-            <p>The authoritative cart preview is unavailable. Retry before continuing.</p>
+            <p>Your cart could not be updated. Please try again.</p>
             <Button
               type="button"
               variant="outline"
@@ -332,7 +332,7 @@ export function CartView(props: CartViewProps) {
           </div>
         ) : null}
         {loading ? (
-          <div className="cart-loading mt-6" aria-label="Refreshing authoritative cart preview" />
+          <div className="cart-loading mt-6" aria-label="Updating cart" role="status">Updating cart</div>
         ) : null}
 
         <ul className="divide-y divide-border" aria-label="Cart lines" aria-live="polite">
@@ -516,13 +516,13 @@ export function CartView(props: CartViewProps) {
       </section>
 
       <aside className="cart-summary min-w-0" aria-labelledby={cartSummaryHeadingId}>
-        <p className="eyebrow">Server preview</p>
+        <p className="eyebrow">Your selection</p>
         <h2 id={cartSummaryHeadingId} className="mt-3 font-heading text-3xl text-ink">
-          {drawer ? "Cart preview" : "Order summary"}
+          Order summary
         </h2>
         <dl className="mt-7 space-y-3 border-y border-border py-5 text-base">
           <div className="flex min-w-0 flex-wrap justify-between gap-x-5 gap-y-1">
-            <dt>Merchandise preview subtotal</dt>
+            <dt>Subtotal</dt>
             <dd className="tabular-nums">
               {preview?.currency
                 ? formatMoney(preview.subtotalMinor, preview.currency)
@@ -561,18 +561,18 @@ export function CartView(props: CartViewProps) {
 
         {hasDisplayOnlyLine ? (
           <section className="warning-record mt-6 text-base leading-7" aria-labelledby={displayPreviewHeadingId}>
-            <h3 id={displayPreviewHeadingId} className="font-semibold">Display-price cart preview</h3>
+            <h3 id={displayPreviewHeadingId} className="font-semibold">Checkout is currently unavailable</h3>
             <p className="mt-2">
-              These server-calculated merchandise amounts are for display only. No order or payment can be submitted from this cart.
+              You can add items and adjust quantities. Orders and payments cannot be submitted yet.
             </p>
           </section>
         ) : null}
 
         {preview?.reasons.includes("server_facts_changed") ? (
           <div className="warning-record mt-6">
-            <p className="font-semibold">Cart facts changed or became unavailable.</p>
+            <p className="font-semibold">Your cart has changed</p>
             <p className="mt-2 text-base leading-7">
-              Requested IDs and quantities were preserved. Review the server facts before continuing.
+              Prices or availability have changed. Review your items before continuing.
             </p>
             {preview.items.every((item) => item.available) ? (
               <Button
@@ -581,7 +581,7 @@ export function CartView(props: CartViewProps) {
                 className="mt-4 min-h-11"
                 onClick={() => setAcknowledgedToken(preview.previewToken)}
               >
-                Acknowledge server changes
+                Confirm cart updates
               </Button>
             ) : null}
           </div>
@@ -605,12 +605,12 @@ export function CartView(props: CartViewProps) {
           disabled={drawer || !canContinue}
           onClick={drawer ? undefined : beginCheckoutHandoff}
         >
-          {drawer ? "Checkout — Coming Soon" : canContinue ? "Continue to sign in" : "Checkout unavailable"}
+          {drawer ? "Checkout unavailable" : canContinue ? "Continue to sign in" : "Checkout unavailable"}
         </Button>
         <p className="mt-4 text-base leading-7 text-muted-ink">
-          {drawer
-            ? "Displayed merchandise is a server preview. Final shipping, tax, and payment are not available."
-            : "Displayed merchandise discounts are already included. Account verification, referral benefits, points redemption, tax, shipping, final total, and payment remain unavailable until a separately authorized checkout step."}
+          {drawer || !canContinue
+            ? "Merchandise discounts are included. Shipping and tax are not yet calculated. Checkout is currently unavailable."
+            : "Merchandise discounts are included. Shipping and tax are calculated during checkout."}
         </p>
         <Link
           className="record-link mt-6 inline-block"

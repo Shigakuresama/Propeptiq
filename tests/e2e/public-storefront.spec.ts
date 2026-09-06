@@ -992,7 +992,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
-  const addToCart = page.getByRole("button", { name: "Add Tirzepatide to preview cart" });
+  const addToCart = page.getByRole("button", { name: "Add Tirzepatide to cart" });
   await addToCart.scrollIntoViewIfNeeded();
   await expect(addToCart).toBeVisible();
   expect(
@@ -2096,7 +2096,7 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
   await expect(page.getByText("TR5", { exact: true })).toBeVisible();
   await expect(page.getByRole("radio")).toHaveCount(9);
   await expect(page.locator("main")).toContainText("$41.99");
-  await expect(page.locator("main")).toContainText("Local cart preview");
+  await expect(page.locator("main")).toContainText("Test mode — no payments");
 
   const imageLoaded = await page.getByRole("img", {
     name: "Front AI-generated catalog illustration for Tirzepatide",
@@ -2378,14 +2378,14 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
   const chooser = page.getByRole("dialog", { name: "Choose a variant for Tirzepatide" });
   await expect(chooser).toBeVisible();
   await expect(chooser.getByRole("button", {
-    name: "Add Tirzepatide to preview cart",
-  })).toHaveText("Add to preview cart");
+    name: "Add Tirzepatide to cart",
+  })).toHaveText("Add to cart");
   const pendingVariant = chooser
     .locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`)
     .locator("xpath=ancestor::label[1]");
   await expect(pendingVariant).toBeVisible();
   await expect(pendingVariant).toContainText("$0.00");
-  await expect(pendingVariant).toContainText("Local cart preview");
+  await expect(pendingVariant).toContainText("Test mode — no payments");
   await expect(pendingVariant.locator('input[type="radio"]')).not.toBeDisabled();
   const enabledRadios = chooser.locator('input[type="radio"]:not(:disabled)');
   await enabledRadios.first().focus();
@@ -2438,7 +2438,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(card.locator("del")).toContainText("$59.99");
   await expect(card.locator("strong")).toContainText("$41.99");
   await expect(card).toContainText("-30%");
-  await expect(card.getByText("Local cart preview", { exact: true })).toBeVisible();
+  await expect(card.getByText("Test mode — no payments", { exact: true })).toBeVisible();
 
   await page.goto("/catalog/items/tirzepatide");
   const radios = page.locator('input[type="radio"]');
@@ -2462,7 +2462,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     Savings: "$0.00",
     Subtotal: "$0.00",
   });
-  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("Local cart preview");
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("Test mode — no payments");
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
   await expect(page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`)).toBeChecked();
   await expect(pricing).toContainText("$59.99");
@@ -2491,8 +2491,8 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
 
   await page.getByRole("button", { name: "1 bottle" }).click();
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
-  const addToPreviewCart = page.getByRole("button", { name: "Add Tirzepatide to preview cart" });
-  await expect(addToPreviewCart).toHaveText("Add to preview cart");
+  const addToPreviewCart = page.getByRole("button", { name: "Add Tirzepatide to cart" });
+  await expect(addToPreviewCart).toHaveText("Add to cart");
   await addToPreviewCart.click();
   await addToPreviewCart.click();
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr60}"]`).check();
@@ -2525,7 +2525,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     await expect(line.getByText("WINTER30", { exact: true })).toBeVisible();
     await expect(line.getByText("-30%", { exact: true })).toBeVisible();
     await expect(line.getByText(
-      "Local cart preview only. No payment will be created.",
+      "Test mode — no payments.",
       { exact: true },
     )).toBeVisible();
   }
@@ -2547,7 +2547,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     "Included in displayed merchandise prices",
     { exact: true },
   )).toBeVisible();
-  await expect(cartSummary.getByRole("heading", { name: "Display-price cart preview" })).toBeVisible();
+  await expect(cartSummary.getByRole("heading", { name: "Checkout is currently unavailable" })).toBeVisible();
   await expect(cartSummary.getByRole("button", { name: "Checkout unavailable" })).toBeDisabled();
 
   const increaseTr30 = page.getByRole("button", {
@@ -2559,7 +2559,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(tr30Line.getByText("$125.97", { exact: true })).toBeVisible();
   await expect(cartSummary.getByText("$202.96", { exact: true })).toBeVisible();
   await expect(tr30Line.getByText(
-    "Local cart preview only. No payment will be created.",
+    "Test mode — no payments.",
     { exact: true },
   )).toBeVisible();
   const decreaseTr30 = page.getByRole("button", {

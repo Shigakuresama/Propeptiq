@@ -10,7 +10,7 @@ async function addBpc10(page: Page, times = 1) {
   const pricing = page.getByRole("status", { name: "Purchase summary" });
   await expect(pricing).toContainText("$39.99");
   await expect(pricing).toContainText("$27.99");
-  const add = page.getByRole("button", { name: "Add BPC-157 to preview cart" });
+  const add = page.getByRole("button", { name: "Add BPC-157 to cart" });
   for (let index = 0; index < times; index += 1) await add.click();
 }
 
@@ -82,7 +82,7 @@ test("configured BPC-157 and Tirzepatide facts merge, persist, and match the ful
   await expect(bpcQuantity).toHaveValue("2");
   await bpcQuantity.fill("3");
   await expect(bpcLine.getByText("$83.97", { exact: true })).toBeVisible();
-  const checkout = drawer.getByRole("button", { name: "Checkout — Coming Soon" });
+  const checkout = drawer.getByRole("button", { name: "Checkout unavailable" });
   await expect(checkout).toBeDisabled();
   await expect(checkout).toHaveAttribute("aria-disabled", "true");
   await expect(drawer.getByText(/final shipping, tax, and payment are not available/iu)).toBeVisible();
@@ -113,7 +113,7 @@ test("configured BPC-157 and Tirzepatide facts merge, persist, and match the ful
 
   await page.goto("/catalog/items/tirzepatide");
   await page.locator(`input[type="radio"][value="${tirzepatide30VariantId}"]`).check();
-  await page.getByRole("button", { name: "Add Tirzepatide to preview cart" }).click();
+  await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
   const combined = (await openDrawer(page)).drawer;
   await expect(combined.getByRole("listitem")).toHaveCount(2);
   await expect(combined.getByRole("listitem").filter({ hasText: "Tirzepatide" }).locator("del"))
@@ -153,7 +153,7 @@ test("keyboard, dismissal, search, mobile navigation, reduced motion, and native
   await page.goto("/catalog");
   await page.goto("/catalog/items/tirzepatide?source=drawer-test");
   await page.locator(`input[type="radio"][value="${tirzepatide30VariantId}"]`).check();
-  await page.getByRole("button", { name: "Add Tirzepatide to preview cart" }).click();
+  await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
   const trigger = page.getByRole("link", { name: "Cart, 1 requested unit" });
   await trigger.focus();
   await page.keyboard.press("Enter");
@@ -252,7 +252,7 @@ test("preview failure retry, stale response isolation, short-phone layout, and r
   });
 
   const { drawer } = await openDrawer(page);
-  await expect(drawer.getByRole("alert")).toContainText("authoritative cart preview is unavailable");
+  await expect(drawer.getByRole("alert")).toContainText("Your cart could not be updated");
   await expect(drawer).not.toContainText("synthetic browser failure");
   failPreview = false;
   await drawer.getByRole("button", { name: "Retry current cart facts" }).click();

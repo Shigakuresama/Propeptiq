@@ -180,9 +180,9 @@ describe("CheckoutPage", () => {
 
     const markup = renderToStaticMarkup(await CheckoutPage());
 
-    expect(markup).toContain("Browse-only Preview");
+    expect(markup).toContain("Checkout is currently unavailable");
     expect(markup).toContain(
-      "Shipping, tax, and payment-session creation are unavailable",
+      "This environment cannot accept orders or payments",
     );
     expect(markup).not.toContain("data-testid=\"checkout-form\"");
     expect(markup).not.toContain("Authoritative checkout is available");
@@ -246,9 +246,9 @@ describe("CheckoutPage", () => {
       const markup = renderToStaticMarkup(await CheckoutPage());
 
       expect(markup).toContain(expectedGuidance);
-      expect(markup).toContain("Browse-only Preview");
+      expect(markup).toContain("Checkout is currently unavailable");
       expect(markup).toContain(
-        "Shipping, tax, and payment-session creation are unavailable",
+        "This environment cannot accept orders or payments",
       );
       expect(markup).not.toContain("data-testid=\"checkout-form\"");
       expect(markup).not.toContain("Authoritative checkout is available");
@@ -282,7 +282,7 @@ describe("CheckoutPage", () => {
     const markup = renderToStaticMarkup(await CheckoutPage());
 
     expect(markup).toContain("Checkout remains unavailable");
-    expect(markup).not.toContain("Browse-only Preview");
+    expect(markup).not.toContain("Checkout is currently unavailable");
     expect(markup).not.toContain("data-testid=\"checkout-form\"");
   });
 });

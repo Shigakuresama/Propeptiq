@@ -16,7 +16,7 @@ import {
 function CartDrawerBodyFallback() {
   return (
     <div className="error-record m-4 text-base leading-7" role="alert">
-      The cart preview could not be loaded. Close this panel or use View cart to continue.
+      Your cart could not be loaded. Close this panel or open your cart to try again.
     </div>
   );
 }
@@ -26,11 +26,11 @@ const DrawerCartView = dynamic(
   {
     loading: ({ error }) => error ? <CartDrawerBodyFallback /> : (
       <div
-        aria-label="Loading cart preview"
+        aria-label="Loading cart"
         className="cart-loading m-4"
         role="status"
       >
-        Loading cart preview…
+        Loading cart…
       </div>
     ),
     ssr: false,

@@ -53,7 +53,7 @@ describe("ProductPrice", () => {
     const { rerender } = render(<ProductPrice productId="product-alpha" variant={pendingZero} pricing={pricing("preview")} />);
     expect(screen.getAllByText("$0.00")).toHaveLength(2);
     expect(screen.getByText("-30%")).toBeVisible();
-    expect(screen.getByText("Local cart preview")).toBeVisible();
+    expect(screen.getByText("Test mode — no payments")).toBeVisible();
 
     rerender(<ProductPrice productId="product-alpha" variant={pendingZero} pricing={pricing("production")} />);
     expect(screen.getByText("Pricing coming soon")).toBeVisible();
