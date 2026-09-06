@@ -7,6 +7,20 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { FaqSection } from "../../src/components/site/faq-section";
 
+const canonicalProductSlugs = [
+  "5-amino-1mq", "acetic-acid", "admax", "aod-9604", "ara-290", "bac-water",
+  "bpc-157", "bpc-tb-blend", "bpc-tb-blend-bb20", "bpc-tb-blend-bb40",
+  "cargrilintide", "cartalax", "cjc-1295-no-dac", "cjc-1295-no-dac-ipa",
+  "cjc-1295-no-dac-ipa-cp20", "cjc-1295-with-dac", "dsip", "epithalon",
+  "ghk-cu", "glow", "glutathione", "grp-2", "hcg", "hgh", "igf-1-lr3",
+  "ipamorelin", "kisspeptin", "klow", "kpv", "lemon-bottle", "li-po-c",
+  "li-po-c-without-b12", "ll37", "mots-c", "mt1", "mt2", "nad-plus",
+  "oxytocin-acetate", "pe-22-28", "pinealon", "pt-141", "retatrutide",
+  "selank", "semaglutide", "semax", "semax-selank", "sermorelin-acetate",
+  "snap", "ss-31", "survodutide", "tb500", "tesmorelin", "tesmorelin-ipa",
+  "thymosin-alpha-1", "tirzepatide", "vip",
+] as const;
+
 type PlaywrightTransformedHostElement = Readonly<{
   __pw_type: "jsx";
   type: string;
@@ -2245,16 +2259,14 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
   );
   expect(visualSources).toHaveLength(56);
   expect(new Set(visualSources.map(({ signature }) => signature)).size).toBe(56);
-  const mappedFronts = new Map([
-    ["bpc-157", "/catalog/individual/bpc-157/front-v1.webp"],
-    ["tirzepatide", "/catalog/individual/tirzepatide/front-v1.webp"],
-    ["retatrutide", "/catalog/individual/retatrutide/front-v1.webp"],
-    ["nad-plus", "/catalog/individual/nad-plus/front-v1.webp"],
-    ["semax", "/catalog/individual/semax/front-v1.webp"],
-    ["selank", "/catalog/individual/selank/front-v1.webp"],
-  ]);
-  expect(visualSources.filter(({ slug, base }) => mappedFronts.get(slug ?? "") === base)).toHaveLength(6);
-  expect(visualSources.filter(({ slug, base }) => !mappedFronts.has(slug ?? "") && base === "/catalog/visual-masters/front.webp")).toHaveLength(50);
+  const mappedFronts = new Map<string, string>(canonicalProductSlugs.map((slug) => [
+    slug,
+    `/catalog/individual/${slug}/front-v1.webp`,
+  ]));
+  expect(visualSources.map(({ slug }) => slug).sort()).toEqual([...canonicalProductSlugs]);
+  expect(visualSources.every(({ slug, base }) => mappedFronts.get(slug ?? "") === base)).toBe(true);
+  expect(new Set(visualSources.map(({ base }) => base)).size).toBe(56);
+  expect(visualSources.filter(({ base }) => base === "/catalog/visual-masters/front.webp")).toHaveLength(0);
   expect(visualSources.every(({ signature, mode }) =>
     typeof signature === "string" &&
     signature.startsWith("PQ-") &&
@@ -2262,7 +2274,6 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
   )).toBe(true);
 
   for (const imagePath of [
-    "/catalog/visual-masters/front.webp",
     "/catalog/visual-masters/three-quarter.webp",
     "/catalog/visual-masters/multi-vial-study.webp",
     "/catalog/visual-masters/copy-space-detail.webp",
