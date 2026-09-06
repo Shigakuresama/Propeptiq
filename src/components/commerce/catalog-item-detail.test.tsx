@@ -119,9 +119,11 @@ describe("CatalogItemDetail", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(image.closest(".catalog-detail-image")).toHaveClass(
+      "mt-4",
       "lg:col-start-1",
       "lg:row-start-1",
       "lg:row-span-2",
+      "lg:mt-0",
     );
     expect(suppliedConfigurations.closest(".catalog-detail-content")).not.toHaveClass(
       "pt-16",

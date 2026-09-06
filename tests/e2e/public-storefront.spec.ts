@@ -1140,8 +1140,17 @@ test("catalog product hierarchy keeps purchase first and cards content-sized", a
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/catalog");
-  await expect(page.locator(".catalog-grid > li").nth(1)).toBeVisible();
-  const firstRowHeights = await page.locator(".catalog-grid > li").evaluateAll((cards) => {
+  const catalogCards = page.locator(".catalog-grid > li");
+  await expect.poll(() => catalogCards.count()).toBeGreaterThanOrEqual(3);
+  await expect(catalogCards.nth(1)).toBeVisible();
+  await expect.poll(() => catalogCards.evaluateAll((cards) => {
+    if (cards.length < 3) return false;
+    return cards.slice(0, 3).every((card) => {
+      const animations = card.getAnimations();
+      return animations.length === 0 || animations.every((animation) => animation.playState === "finished");
+    });
+  })).toBe(true);
+  const firstRowHeights = await catalogCards.evaluateAll((cards) => {
     const boxes = cards.map((card) => card.getBoundingClientRect());
     const firstRowTop = Math.min(...boxes.map((box) => box.top));
     return boxes.filter((box) => Math.abs(box.top - firstRowTop) <= 4).map((box) => Math.round(box.height));

@@ -103,7 +103,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
         </header>
 
         <div
-          className="catalog-detail-image lg:col-start-1 lg:row-span-2 lg:row-start-1"
+          className="catalog-detail-image mt-4 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:mt-0"
         >
           <CatalogProductGallery
             product={product}

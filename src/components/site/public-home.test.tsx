@@ -35,7 +35,12 @@ describe("PublicHome approved content composition", () => {
       />,
     );
 
-    expect(screen.getByText("Explore research materials, compare product configurations, and find the details you need in one place.")).toBeVisible();
+    const introduction = screen.getByText("Explore research materials, compare product configurations, and find the details you need in one place.");
+    expect(introduction).toBeVisible();
+    expect(introduction).toHaveClass(
+      "min-h-40",
+      "sm:min-h-0",
+    );
     expect(screen.getByText("Explore the collection")).toBeVisible();
     expect(screen.getByText("Explore 1 product configurations. Select a product to see its details, pricing, and availability.")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Find your next research material." })).toBeVisible();

@@ -112,7 +112,7 @@ export function PublicHome({
               <span className="block">documented with</span>
               <span className="block">greater clarity.</span>
             </h1>
-            <p className="mt-7 max-w-[62ch] text-pretty text-lg leading-8 text-muted-ink sm:text-xl">
+            <p className="mt-7 min-h-40 max-w-[62ch] text-pretty text-lg leading-8 text-muted-ink sm:min-h-0 sm:text-xl">
               Explore research materials, compare product configurations, and find the details you need in one place.
             </p>
             <div className="mt-6 flex flex-wrap gap-3 sm:mt-9">
