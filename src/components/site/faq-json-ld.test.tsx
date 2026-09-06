@@ -19,7 +19,7 @@ describe("FAQ structured data", () => {
     const details = [...container.querySelectorAll("details")];
     expect(data.mainEntity).toEqual(details.map((entry) => ({
       "@type": "Question",
-      name: entry.querySelector("summary > h3")!.textContent,
+      name: entry.querySelector("summary > h3 > span:not([aria-hidden])")!.textContent,
       acceptedAnswer: { "@type": "Answer", text: entry.querySelector("p")!.textContent },
     })));
     expect(details.every((entry) => entry.getAttribute("name") === "propeptiq-home-faq")).toBe(true);

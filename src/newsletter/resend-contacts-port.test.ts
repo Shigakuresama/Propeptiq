@@ -25,11 +25,17 @@ function fixture() {
   return { contacts, subscribe: () => gateway.subscribe({ email, consent: true }) };
 }
 describe("Resend newsletter subscription lifecycle", () => {
-  it("creates a confirmed new contact with only the newsletter topic", async () => {
+  it.each([404, undefined])("creates a new contact with the documented not_found result and optional statusCode %s", async (statusCode) => {
     const f = fixture();
-    f.contacts.get.mockResolvedValue({ data: null, error: { name: "not_found", statusCode: 404 } });
+    f.contacts.get.mockResolvedValue({ data: null, error: { name: "not_found", statusCode } });
     await expect(f.subscribe()).resolves.toBe("subscribed");
     expect(f.contacts.create).toHaveBeenCalledWith({ email, topics: [{ id: topicId, subscription: "opt_in" }] });
+  });
+  it("rejects an inconsistent not_found status without creating a contact", async () => {
+    const f = fixture();
+    f.contacts.get.mockResolvedValue({ data: null, error: { name: "not_found", statusCode: 403 } });
+    await expect(f.subscribe()).rejects.toThrow("Newsletter provider request failed.");
+    expect(f.contacts.create).not.toHaveBeenCalled();
   });
   it("reports confirmed duplicate topic subscriptions without another mutation", async () => {
     const f = fixture();

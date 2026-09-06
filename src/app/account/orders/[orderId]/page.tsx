@@ -25,7 +25,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
         Order history
       </Link>
       <DataLabel className="mt-6">Your order</DataLabel>
-      <h1 className="mt-4 break-all font-heading text-page leading-[0.95]">Order {order.id}</h1>
+      {/* Keep the reference identical to confirmation emails and support records. */}
+      <h1 data-heading-case="preserve" className="mt-4 break-all font-heading text-page leading-[0.95]">Order {order.id}</h1>
       <RecordPanel className="mt-8 overflow-hidden">
         <dl className="grid sm:grid-cols-2 lg:grid-cols-3">
           {[

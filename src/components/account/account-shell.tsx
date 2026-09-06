@@ -43,10 +43,12 @@ export function AccountShell({
   children,
   authEnabled = false,
   localDriver,
+  showPrograms = true,
 }: {
   children: ReactNode;
   authEnabled?: boolean;
   localDriver: boolean;
+  showPrograms?: boolean;
 }) {
   return (
     <div className="min-h-svh">
@@ -108,7 +110,7 @@ export function AccountShell({
             className="site-motion-surface site-motion-surface--quiet py-10 sm:py-16"
             data-motion-surface="private"
           >
-            <GrowthNavigation account />
+            {showPrograms ? <GrowthNavigation account /> : null}
             {children}
           </main>
           {localDriver ? (

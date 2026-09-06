@@ -34,7 +34,7 @@ function ClosedState({ reason }: { reason: string }) {
               ? "We can’t load your account right now, so checkout is unavailable."
               : "Your cart will stay saved in this browser while you sign in."}
         </p>
-        {signedOut ? <Link href={SIGN_IN_ROUTE} className="action-primary mt-7 inline-flex min-h-12 items-center rounded-full px-6 font-semibold no-underline">Continue to sign in</Link> : null}
+        {signedOut ? <Link href={authRouteWithDestination(SIGN_IN_ROUTE, "/checkout")} className="action-primary mt-7 inline-flex min-h-12 items-center rounded-full px-6 font-semibold no-underline">Continue to sign in</Link> : null}
       </RecordPanel>
     </section>
   );
@@ -63,6 +63,7 @@ export default async function CheckoutPage() {
   const browseOnlyPreview = request.environment.APP_ENV === "preview";
   return (
     <AccountShell
+      showPrograms={false}
       authEnabled={request.environment.AUTH_MODE !== "disabled"}
       localDriver={request.localDriver !== null}
     >

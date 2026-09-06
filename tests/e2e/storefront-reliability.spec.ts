@@ -9,7 +9,7 @@ for (const width of [375, 768, 1024, 1440]) {
     await page.evaluate(() => document.fonts.ready);
     await expect(page.getByRole("complementary", { name: "Promotion" })).toContainText("WINTER30 APPLIED AUTOMATICALLY");
     await expect(page.getByRole("complementary", { name: "Promotion" })).not.toContainText("USE CODE");
-    const headings = page.locator("main h1, main h2, main h3, footer h2");
+    const headings = page.locator("main h1, main h2, main h3, footer h2, .newsletter-prefooter h2");
     expect(await headings.evaluateAll((elements) => elements.every((el) => getComputedStyle(el).textTransform === "uppercase"))).toBe(true);
     const newsletter = page.getByRole("region", { name: "PropeptIQ newsletter" });
     expect(await newsletter.evaluate((el) => Boolean(el.compareDocumentPosition(document.querySelector("footer")!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
@@ -49,6 +49,7 @@ test("saved local session displays Account after navigation and refresh", async 
   await expect(page.getByRole("banner").getByRole("link", { name: "Account", exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("banner").getByRole("link", { name: "Account", exact: true })).toBeVisible();
-  await page.goto("/catalog");
+  await page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Catalog", exact: true }).click();
+  await page.waitForURL("**/catalog");
   await expect(page.getByRole("banner").getByRole("link", { name: "Account", exact: true })).toBeVisible();
 });

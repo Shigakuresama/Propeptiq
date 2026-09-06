@@ -57,6 +57,7 @@ export function PublicHome({
   loyaltyPolicy = null,
   referralPolicy = null,
   partnerAvailable = false,
+  programsUnavailable = false,
   syntheticLocal = false,
   products,
   variantCount,
@@ -66,6 +67,7 @@ export function PublicHome({
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
   partnerAvailable?: boolean;
+  programsUnavailable?: boolean;
   syntheticLocal?: boolean;
   products: readonly PublicStorefrontProduct[];
   variantCount: number;
@@ -96,7 +98,8 @@ export function PublicHome({
       description: "Keep selected materials together in a shareable research set.",
       href: "/research-sets" as const,
       Icon: Share2,
-      active: referralPolicy?.status === "active",
+      // Account/catalog eligibility owns this feature, not the referral policy.
+      active: null,
     }, {
       title: "Partner with PROPEPTIQ",
       description: "Explore the formal partner program and application requirements.",
@@ -265,7 +268,7 @@ export function PublicHome({
                     </Link>
                     </h3>
                     <p className="mt-2 text-base leading-7 text-muted-ink">{description}</p>
-                    {!active ? <p className="mt-3 text-sm font-semibold text-muted-ink">Not currently open</p> : null}
+                    {active !== true ? <p className="mt-3 text-sm font-semibold text-muted-ink">{active === null ? "Eligible account required" : programsUnavailable ? "Program details temporarily unavailable" : "Not currently open"}</p> : null}
                   </RecordPanel>
                 </li>
               ))}

@@ -36,13 +36,15 @@ export function FaqSection({
               name="propeptiq-home-faq"
             >
               <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 font-semibold text-ink marker:hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-moss">
-                <h3 className="text-base leading-6">{entry.question}</h3>
-                <span
-                  aria-hidden="true"
-                  className="faq-disclosure-indicator flex size-8 shrink-0 items-center justify-center rounded-full border border-border text-lg leading-none transition-transform duration-200 motion-reduce:transition-none"
-                >
-                  +
-                </span>
+                <h3 className="flex w-full items-center justify-between gap-4 text-base leading-6">
+                  <span>{entry.question}</span>
+                  <span
+                    aria-hidden="true"
+                    className="faq-disclosure-indicator flex size-8 shrink-0 items-center justify-center rounded-full border border-border text-lg leading-none transition-transform duration-200 motion-reduce:transition-none"
+                  >
+                    +
+                  </span>
+                </h3>
               </summary>
               <p className="border-t border-border bg-moss-soft/20 px-5 py-5 text-base leading-7 text-muted-ink">
                 {entry.answer}

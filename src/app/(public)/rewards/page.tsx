@@ -101,7 +101,7 @@ export default async function RewardsPage() {
             </p>
           ) : null}
 
-          <section id="referrals" aria-label="Current rewards program" className="rewards-records scroll-mt-32">
+          <section id={referral ? undefined : "referrals"} aria-label="Current rewards program" className="rewards-records scroll-mt-32">
             <div className="rewards-records__intro">
               <p className="eyebrow">Program details</p>
               <p className="rewards-records__description">
@@ -149,8 +149,9 @@ export default async function RewardsPage() {
                 ) : null}
                 {referral ? (
                   <section
+                    id="referrals"
                     aria-labelledby="referral-heading"
-                    className="record-card rewards-program-card"
+                    className="record-card rewards-program-card scroll-mt-32"
                   >
                     <div className="rewards-program-card__meta">
                       <Share2 aria-hidden="true" className="size-5" />

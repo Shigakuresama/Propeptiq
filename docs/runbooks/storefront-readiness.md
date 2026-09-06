@@ -4,6 +4,7 @@
 
 The storefront refinement is based on main `d288dc6`. No production database,
 credentials, provider settings, legal text or program economics were changed.
+The release repair retired one obsolete Neon preview branch as described below.
 
 - Better Auth: public navigation now reads the real session instead of always showing
   Sign in. Proxy validation forwards renewal cookies; render-only session reads disable
@@ -123,7 +124,42 @@ omitted. Supply verified Instagram, TikTok, X and/or Facebook profile URLs in
 Primary references: [Better Auth Next.js integration](https://better-auth.com/docs/integrations/next),
 [session management](https://better-auth.com/docs/concepts/session-management),
 [Resend contact retrieval](https://resend.com/docs/api-reference/contacts/get-contact),
+[Resend error types](https://resend.com/docs/api-reference/errors),
 [topic updates](https://resend.com/docs/api-reference/contacts/update-contact-topics).
+
+## PR review and deployment repair
+
+Vercel failed before building because Neon's ten-branch limit was reached. The
+deployment's Provisioning Integrations panel reported "Branch limit reached" for
+"Create database branch for deployment". Retired only the obsolete
+`preview/feat/propeptiq-growth-release` database branch associated with merged PR #3.
+It was neither primary, default nor protected, had no children, reported zero compute
+and write counters, and its endpoint was idle. Neither configured database URL
+referenced that endpoint. Main, backups and the schema rehearsal branch were preserved.
+Redeploying the same commit then provisioned successfully and built to Ready.
+
+Neon preview cleanup follows Vercel deployment retention, so merged PRs can keep
+consuming branch slots. Before future releases, check branch capacity and retire only
+verified obsolete preview branches, preserving production, backups and active work.
+See [Neon's managed integration guide](https://neon.com/docs/guides/vercel-managed-integration).
+Do not bypass required provisioning or point previews at the production database.
+
+Three independent read-only reviews found and prompted corrections to research-set
+availability, program read-error messaging, checkout navigation, order-reference
+case preservation, valid FAQ summary structure, transitions and optional Resend
+error status metadata. Pending/error session navigation now explicitly says
+"Account access" and continues through the protected account route; only a resolved
+session says "Account". Tests cover all four header states. The managed HTTP session
+client remains necessary for renewal and revalidation; server layout state alone can
+remain stale across navigation.
+
+The requested merchandising warning removal and existing save-to-cart behavior remain;
+cart/checkout restrictions and the compact mobile purchase status still communicate
+purchase availability. Preview payment gating remains intentionally closed. Duplicate
+newsletter feedback follows the requested contract and remains rate limited; the
+form records submitter consent, not verified email ownership. Newsletter activation
+still requires approved privacy content and operator verification of provider behavior.
+No confirmation email or double-opt-in flow is claimed.
 
 ## Verification scope
 

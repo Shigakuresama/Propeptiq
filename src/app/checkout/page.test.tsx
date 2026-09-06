@@ -151,6 +151,7 @@ describe("CheckoutPage", () => {
     const markup = renderToStaticMarkup(await CheckoutPage());
     expect(markup).toContain("Your account is ready. Review your cart and address details below before continuing to payment.");
     expect(markup).toContain("data-testid=\"checkout-form\"");
+    expect(markup).not.toContain('aria-label="PROPEPTIQ programs"');
     expect(markup).toContain("data-synthetic-local=\"true\"");
   });
 

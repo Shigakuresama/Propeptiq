@@ -121,7 +121,8 @@ describe("public home growth projection", () => {
     const explainer = screen.getByRole("region", { name: "Growth programs" });
     expect(within(explainer).getByRole("link", { name: "Earn points" })).toBeVisible();
     expect(within(explainer).getByRole("link", { name: "Refer a lab" })).toBeVisible();
-    expect(within(explainer).getAllByText("Not currently open")).toHaveLength(3);
+    expect(within(explainer).getAllByText("Not currently open")).toHaveLength(2);
+    expect(within(explainer).getByText("Eligible account required")).toBeVisible();
   });
 
   it.each(["inactive", "read_error"] as const)(
@@ -136,7 +137,10 @@ describe("public home growth projection", () => {
       render(await HomePage());
 
       expect(screen.queryByRole("region", { name: "Active rewards program" })).toBeNull();
-      expect(within(screen.getByRole("region", { name: "Growth programs" })).getAllByText("Not currently open")).toHaveLength(4);
+      const programs = within(screen.getByRole("region", { name: "Growth programs" }));
+      expect(programs.getAllByText(status === "read_error" ? "Program details temporarily unavailable" : "Not currently open")).toHaveLength(3);
+      expect(programs.getByText("Eligible account required")).toBeVisible();
+      if (status === "read_error") expect(programs.queryByText("Not currently open")).toBeNull();
     },
   );
 

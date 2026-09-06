@@ -14,7 +14,10 @@ export function createResendContactsPort(contacts: Resend["contacts"]): ResendCo
     },
     async subscriptionState(email, topicId) {
       const contact = await contacts.get({ email });
-      if (contact.error?.name === "not_found" && contact.error.statusCode === 404) return "new";
+      // Resend documents not_found as 404; the SDK's statusCode is optional.
+      // Do not classify authentication, permission or other failures as absence.
+      if (contact.error?.name === "not_found" &&
+        (contact.error.statusCode === undefined || contact.error.statusCode === 404)) return "new";
       if (contact.error || !contact.data?.id || contact.data.unsubscribed !== false) {
         // Never undo a global unsubscribe through a topic form.
         throw new Error("Newsletter provider request failed.");

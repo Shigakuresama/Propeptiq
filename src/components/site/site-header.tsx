@@ -31,7 +31,8 @@ export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boole
   const { itemCount } = useCart();
   const session = useSessionNavigation();
   const accountHref = session === "signed-out" ? SIGN_IN_ROUTE : "/account";
-  const accountLabel = session === "signed-out" ? "Sign in" : "Account";
+  const accountLabel = session === "signed-in" ? "Account"
+    : session === "signed-out" ? "Sign in" : "Account access";
 
   return (
     <header className="persistent-chrome">
