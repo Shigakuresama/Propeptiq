@@ -138,11 +138,11 @@ describe("CatalogListingCard", () => {
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
     expect(within(article).getByText("$10.00")).toBeVisible();
     expect(within(article).getAllByText("Checkout unavailable").length).toBeGreaterThan(0);
-    expect(
-      within(article).getByRole("button", {
-        name: /synthetic product alpha unavailable/iu,
-      }),
-    ).toBeDisabled();
+    const unavailable = within(article).getByRole("button", {
+      name: /synthetic product alpha unavailable/iu,
+    });
+    expect(unavailable).toBeDisabled();
+    expect(unavailable).toHaveTextContent("This product is currently unavailable.");
     expect(within(article).queryByText(/-\d+%/u)).toBeNull();
   });
 

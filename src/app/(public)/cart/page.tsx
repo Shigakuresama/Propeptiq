@@ -6,7 +6,7 @@ import { PageTransition } from "@/components/site/page-transition";
 
 export const metadata: Metadata = {
   title: "Cart",
-  description: "Review locally requested product IDs against authoritative server facts.",
+  description: "Review your selected products, quantities, and order summary.",
 };
 
 type CartPageProps = {
@@ -22,9 +22,9 @@ export default async function CartPage({ searchParams }: CartPageProps) {
     <PageTransition>
       <div className="site-container pb-20">
         <PageIntro
-          eyebrow="Anonymous cart"
-          title="Requested IDs, reconciled with server facts."
-          description="This browser stores only product IDs and quantities. Names, prices, availability, promotions, totals, destination, tax, and shipping remain server-owned."
+          eyebrow="Shopping cart"
+          title="Your cart"
+          description="Review your selected products, quantities, and order summary."
         />
         <CartView checkoutIntent={checkoutIntent} />
       </div>

@@ -1,7 +1,17 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { testPricingContext } from "@/components/commerce/storefront-test-fixtures";
+import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
+import { parseStorefrontBindings } from "@/catalog/storefront-bindings";
+import {
+  buildPublicStorefrontCatalog,
+  storefrontImageMetadata,
+} from "@/catalog/storefront-public";
+
+import {
+  testCanonicalProduct,
+  testPricingContext,
+} from "@/components/commerce/storefront-test-fixtures";
 import { PublicHome } from "./public-home";
 
 const fictionalHomepage = Object.freeze({
@@ -22,7 +32,56 @@ const fictionalHomepage = Object.freeze({
   ]),
 });
 
+const browseCatalog = buildPublicStorefrontCatalog({
+  configuredPublicationId: browseCatalogPublicationId,
+  catalogData: {
+    products: [],
+    bindings: parseStorefrontBindings({ products: [], variants: [] }),
+  },
+  runtimeVariantFacts: [],
+  controlledContent: [],
+  verifiedImageMetadata: storefrontImageMetadata,
+});
+
 describe("PublicHome approved content composition", () => {
+  it("uses customer-facing catalog language while preserving canonical availability context", () => {
+    render(
+      <PublicHome
+        products={[testCanonicalProduct([])]}
+        variantCount={1}
+        pricing={testPricingContext()}
+      />,
+    );
+
+    const introduction = screen.getByText("Explore research materials, compare product configurations, and find the details you need in one place.");
+    expect(introduction).toBeVisible();
+    expect(introduction).toHaveClass(
+      "min-h-40",
+      "sm:min-h-0",
+    );
+    expect(screen.getByText("Explore the collection")).toBeVisible();
+    expect(screen.getByText("Explore 1 product configurations. Select a product to see its details, pricing, and availability.")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Find your next research material." })).toBeVisible();
+    expect(screen.getByText("Explore products from the PropeptIQ research catalog.")).toBeVisible();
+    expect(screen.getByText("Product configuration")).toBeVisible();
+    expect(screen.getByText("Review each product's details and the Research-Use Policy before making your selection.")).toBeVisible();
+    expect(screen.getByText("Explore every product and configuration in our research catalog.")).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/owner-supplied|browse publication|current owner-supplied publication/iu);
+  });
+
+  it("keeps browse-only catalog language explicit without implying pricing or ordering", () => {
+    render(<PublicHome products={browseCatalog.products} variantCount={browseCatalog.displayConfigurationCount} pricing={testPricingContext()} />);
+
+    expect(screen.getByText(`Explore ${browseCatalog.displayConfigurationCount} product configurations. Select a product to see its listed details. Pricing and ordering are not available for these items.`)).toBeVisible();
+  });
+
+  it("uses the dedicated unavailable message when the homepage catalog is empty", () => {
+    render(<PublicHome products={[]} variantCount={0} pricing={testPricingContext()} />);
+
+    expect(screen.getByText("No products are available to view right now. Please check back later.")).toBeVisible();
+    expect(screen.queryByText(/Explore 0 product configurations/u)).toBeNull();
+  });
+
   it("places approved Why Choose and FAQ after catalog content and before the final quality callout", () => {
     render(
       <PublicHome

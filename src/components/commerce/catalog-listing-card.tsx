@@ -131,7 +131,7 @@ export function CatalogListingCard({
               productName={product.name}
               variantLabel={selectedVariant.label}
               canAdd={selectedCanAdd}
-              disabledReason="This product is not currently available for cart testing."
+              disabledReason="This product is currently unavailable."
               className="mt-5 min-h-11"
               {...(selectedCanAdd &&
               selectedPresentation?.purchaseState !== "ready"

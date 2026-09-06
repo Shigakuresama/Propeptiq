@@ -1032,7 +1032,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
     for (const [label, locator] of [
       ["product title", page.getByRole("heading", { level: 1, name: "Tirzepatide" })],
       ["image disclosure", page.locator(".catalog-detail-image .catalog-image-disclosure")],
-      ["configuration heading", page.getByRole("heading", { name: "Supplied configurations" })],
+      ["configuration heading", page.getByRole("heading", { name: "Product configurations" })],
       ["purchase heading", page.getByRole("heading", { name: "Purchase" })],
     ] as const) {
       const targetBounds = await clientRect(locator);
@@ -1119,7 +1119,7 @@ test("catalog product hierarchy keeps purchase first and cards content-sized", a
     await page.goto("/catalog/items/tirzepatide");
     const detailContent = page.locator(".catalog-detail-content");
     const purchaseHeading = detailContent.getByRole("heading", { name: "Purchase" });
-    const configurationsHeading = detailContent.getByRole("heading", { name: "Supplied configurations" });
+    const configurationsHeading = detailContent.getByRole("heading", { name: "Product configurations" });
     expect(await purchaseHeading.evaluate((element) => Boolean(element.compareDocumentPosition(document.querySelector("#catalog-variants-heading")!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
     const purchaseBounds = await clientRect(purchaseHeading);
     const configurationsBounds = await clientRect(configurationsHeading);
@@ -1140,8 +1140,17 @@ test("catalog product hierarchy keeps purchase first and cards content-sized", a
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/catalog");
-  await expect(page.locator(".catalog-grid > li").nth(1)).toBeVisible();
-  const firstRowHeights = await page.locator(".catalog-grid > li").evaluateAll((cards) => {
+  const catalogCards = page.locator(".catalog-grid > li");
+  await expect.poll(() => catalogCards.count()).toBeGreaterThanOrEqual(3);
+  await expect(catalogCards.nth(1)).toBeVisible();
+  await expect.poll(() => catalogCards.evaluateAll((cards) => {
+    if (cards.length < 3) return false;
+    return cards.slice(0, 3).every((card) => {
+      const animations = card.getAnimations();
+      return animations.length === 0 || animations.every((animation) => animation.playState === "finished");
+    });
+  })).toBe(true);
+  const firstRowHeights = await catalogCards.evaluateAll((cards) => {
     const boxes = cards.map((card) => card.getBoundingClientRect());
     const firstRowTop = Math.min(...boxes.map((box) => box.top));
     return boxes.filter((box) => Math.abs(box.top - firstRowTop) <= 4).map((box) => Math.round(box.height));
@@ -1620,7 +1629,7 @@ test("anonymous canonical local/test cart survives reload and preserves only var
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "Requested IDs, reconciled with server facts.",
+      name: "Your cart",
     }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
@@ -2371,7 +2380,7 @@ test("navigation, homepage trust content, product research, and related records 
     const url = new URL((image as HTMLImageElement).src);
     return url.searchParams.get("url") ?? url.pathname;
   })).toBe("/catalog/visual-masters/front.webp");
-  await expect(page.getByText(/BPC-157 is an owner-supplied catalog identity/u)).toBeVisible();
+  await expect(page.getByText("Explore BPC-157 configurations, pricing, and product information.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Product information" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Search PubMed for BPC-157" })).toHaveAttribute(
     "href",
@@ -2924,7 +2933,7 @@ test("JavaScript disabled keeps essential public sections visible and navigable"
     await browseCatalog.click();
     await expect(page).toHaveURL(/\/catalog$/u);
     await expect(
-      page.getByRole("heading", { level: 1, name: "Research catalog, organized by product." }),
+      page.getByRole("heading", { level: 1, name: "Explore the collection." }),
     ).toBeVisible();
   } finally {
     await context.close();

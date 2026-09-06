@@ -9,7 +9,7 @@ import { buildCatalogDiscoveryRows } from "@/search/catalog-discovery";
 export const metadata: Metadata = {
   title: "Catalog",
   description:
-    "Browse PROPEPTIQ LABS research catalog products and supplied package configurations.",
+    "Explore PROPEPTIQ LABS research catalog products and configurations.",
 };
 
 export default async function CatalogPage() {
@@ -23,9 +23,9 @@ export default async function CatalogPage() {
     <PageTransition>
       <div className="site-container pb-20">
         <PageIntro
-          eyebrow="Owner-supplied catalog"
-          title="Research catalog, organized by product."
-          description={`${catalog.products.length} product families and ${catalog.displayConfigurationCount} supplied package configurations. ${allBrowseOnly ? "Prices and availability are intentionally excluded" : "Current catalog price and availability snapshots are displayed where configured and revalidated before checkout"}; imagery is an original illustrative presentation rather than product photography.`}
+          eyebrow="Research catalog"
+          title="Explore the collection."
+          description={`${catalog.products.length} products and ${catalog.displayConfigurationCount} configurations to explore. ${allBrowseOnly ? "Select a product to review its listed details. Pricing and ordering are not available for these items." : "Select a product to review its details, pricing, and availability."} Images are illustrations, not product photographs.`}
         />
         {discoveryRows !== null ? (
           <CatalogExplorer
@@ -35,7 +35,7 @@ export default async function CatalogPage() {
           />
         ) : (
           <p className="record-sheet text-base leading-7 text-muted-ink">
-            No owner-approved browse catalog is currently published.
+            No products are available to view right now. Please check back later.
           </p>
         )}
       </div>

@@ -46,7 +46,7 @@ for (const product of browseCatalogProducts) {
     `propeptiq.com/storefront/content/${product.slug}/pubmed-discovery`,
   );
   const description =
-    `${product.name} is an owner-supplied catalog identity in the ${product.category} category. Review its published configurations and current purchase state separately.`;
+    `Explore ${product.name} configurations, pricing, and product information.`;
   const contentIds = Object.freeze([
     descriptionContentId,
     catalogContentId,
@@ -73,8 +73,8 @@ for (const product of browseCatalogProducts) {
       id: catalogContentId,
       kind: "product_information",
       status: "approved",
-      title: "Catalog record",
-      body: `This page presents the owner-supplied identity for ${product.name} and its published package configurations. Pricing, availability, and checkout readiness are separate record states and may be unavailable.`,
+      title: "Product details",
+      body: `Compare the listed configurations for ${product.name}. Select a variant to view its price and availability.`,
       sourceReferences: Object.freeze(["/catalog", "/research-use-policy"]),
       approvalNote: APPROVAL_NOTE,
       reviewedAt: null,
@@ -85,7 +85,7 @@ for (const product of browseCatalogProducts) {
       kind: "product_information",
       status: "approved",
       title: "PubMed literature discovery",
-      body: `Open the linked PubMed search for the exact owner-supplied catalog name “${product.name}.” Search results are provided for literature discovery only. They are not a curated study list, endorsement, product claim, or use guidance.`,
+      body: `Search PubMed for literature about ${product.name}. Search results are provided for literature discovery only. They are not a curated study list, endorsement, product claim, or use guidance.`,
       sourceReferences: Object.freeze([pubMedSearchUrl(product.name)]),
       approvalNote: APPROVAL_NOTE,
       reviewedAt: null,

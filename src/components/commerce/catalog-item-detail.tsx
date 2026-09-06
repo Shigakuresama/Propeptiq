@@ -76,7 +76,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
           data-motion-sequence="dossier-intro"
         >
           <p className="eyebrow" data-motion-step="1">
-            {canonical ? "Product" : "Browse-only catalog item"}
+            Product details
           </p>
           <h1
             className="mt-5 text-balance font-heading text-page leading-[1.02] text-ink [overflow-wrap:anywhere]"
@@ -97,13 +97,13 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
               className="mt-4 text-sm leading-6 text-muted-ink"
               data-motion-step={canonical && product.description ? "4" : "3"}
             >
-              Source label: {product.sourceName}
+              Also listed as {product.sourceName}
             </p>
           ) : null}
         </header>
 
         <div
-          className="catalog-detail-image lg:col-start-1 lg:row-span-2 lg:row-start-1"
+          className="catalog-detail-image mt-4 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:mt-0"
         >
           <CatalogProductGallery
             product={product}
@@ -135,7 +135,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
           ) : null}
           <section aria-labelledby="catalog-variants-heading" className="mt-10">
             <h2 id="catalog-variants-heading" className="font-heading text-3xl text-ink">
-              Supplied configurations
+              Product configurations
             </h2>
             <ul className="mt-5 divide-y divide-border border-y border-border">
               {product.displayConfigurations.map((configuration) => (
@@ -151,7 +151,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
                   </span>
                   {configuration.sourceName ? (
                     <span className="text-sm leading-6 text-muted-ink sm:col-start-2">
-                      Source label: {configuration.sourceName}
+                      Also listed as {configuration.sourceName}
                     </span>
                   ) : null}
                 </li>
@@ -159,7 +159,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
             </ul>
           </section>
 
-          {!canonical ? <p className="info-record mt-8 text-sm">This browse-only entry reproduces the supplied product name, code, and package configuration. Availability, quality records, and purchasing are not represented.</p> : null}
+          {!canonical ? <p className="info-record mt-8 text-sm">Product details are shown above. Pricing and ordering are not available for this item.</p> : null}
         </div>
       </div>
       {canonical ? <ProductInformationSections records={product.content} /> : null}

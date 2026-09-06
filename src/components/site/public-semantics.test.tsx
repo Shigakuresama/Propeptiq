@@ -82,7 +82,7 @@ describe("public storefront semantics", () => {
     );
     expect(screen.getByText("56")).toBeVisible();
     const catalogExplanation = screen.getByText(
-      /Product families spanning 103 supplied package configurations/iu,
+      /Explore 103 product configurations\. Select a product to see its details, pricing, and availability\./iu,
     );
     expect(catalogExplanation).toHaveClass("text-base");
     expect(catalogExplanation).not.toHaveClass("text-sm");
@@ -101,7 +101,7 @@ describe("public storefront semantics", () => {
 
     expect(screen.getByText("00")).toBeVisible();
     expect(
-      screen.getByText(/Product families spanning 0 supplied package configurations/iu),
+      screen.getByText("No products are available to view right now. Please check back later."),
     ).toBeVisible();
     expect(screen.getByText("Catalog highlights")).toBeVisible();
     expect(screen.getByRole("list", { name: "Catalog highlights" })).toBeEmptyDOMElement();
@@ -182,15 +182,13 @@ describe("public storefront semantics", () => {
     );
 
     expect(
-      screen.getAllByText(
-        /current price and availability snapshots are displayed where configured and revalidated before checkout/iu,
-      ).length,
+      screen.getAllByText(/Select a product to see its details, pricing, and availability\./iu).length,
     ).toBeGreaterThan(0);
     expect(
       screen.queryByText(
-        /purchasing and operational availability remain separate from this browse-only collection/iu,
+        /pricing and ordering are not available for these items/iu,
       ),
     ).toBeNull();
-    expect(screen.queryByText(/prices are intentionally excluded/iu)).toBeNull();
+    expect(screen.queryByText(/owner-supplied|current snapshot/iu)).toBeNull();
   });
 });

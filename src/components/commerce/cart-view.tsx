@@ -296,8 +296,7 @@ export function CartView(props: CartViewProps) {
           tabIndex={-1}
         >Your cart is empty.</h2>
         <p className="mt-4 max-w-[60ch] leading-7 text-muted-ink">
-          Add an exact eligible catalog variant to create a browser-saved request. Display prices
-          and purchase state will be reloaded from the server.
+          Explore the catalog and choose a product to add to your cart.
         </p>
         <Button asChild className="action-primary mt-7 h-auto max-w-full whitespace-normal py-2.5 text-center">
           <Link href="/catalog" {...(drawer && onNavigate ? { onClick: onNavigate } : {})}>Continue to catalog</Link>

@@ -404,7 +404,7 @@ describe("SiteFooter", () => {
     }
     expect(
       screen.getByText(
-        /Catalog names and package configurations come from owner-supplied records; cart and checkout facts remain server-authoritative\./u,
+        /Explore research materials, compare product configurations, and review the details that matter to your selection\./u,
       ),
     ).toHaveClass("text-base");
     expect(screen.queryByText(/FDA disclaimer/iu)).toBeNull();

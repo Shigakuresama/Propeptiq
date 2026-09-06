@@ -141,8 +141,8 @@ export function SiteFooter({
               Research materials,<br />documented with clarity.
             </p>
             <p className="mt-5 max-w-[62ch] text-base leading-7 text-canvas/70">
-              Catalog names and package configurations come from owner-supplied records;
-              cart and checkout facts remain server-authoritative.
+              Explore research materials, compare product configurations, and review the details
+              that matter to your selection.
             </p>
 
             <section aria-label="Social media" className="mt-7 min-w-0">

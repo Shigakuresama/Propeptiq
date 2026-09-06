@@ -62,7 +62,8 @@ describe("storefront product controlled content", () => {
       expect(catalogRecord).toMatchObject({
         kind: "product_information",
         status: "approved",
-        title: "Catalog record",
+        title: "Product details",
+        body: `Compare the listed configurations for ${product.name}. Select a variant to view its price and availability.`,
       });
       expect(catalogRecord?.body).toContain(product.name);
       expect(literatureRecord).toMatchObject({
@@ -71,6 +72,7 @@ describe("storefront product controlled content", () => {
         title: "PubMed literature discovery",
       });
       expect(literatureRecord?.body).toContain(product.name);
+      expect(literatureRecord?.body.startsWith(`Search PubMed for literature about ${product.name}.`)).toBe(true);
       expect(literatureRecord?.body).toContain("literature discovery only");
       expect(literatureRecord?.body).toContain("not a curated study list, endorsement, product claim, or use guidance");
 
