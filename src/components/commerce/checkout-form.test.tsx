@@ -139,6 +139,12 @@ describe("CheckoutForm", () => {
     fetchMock.mockResolvedValue(response(preview())); vi.stubGlobal("fetch", fetchMock); window.sessionStorage.clear();
   });
 
+  it("announces the cart check in customer language", async () => {
+    fetchMock.mockReset().mockReturnValue(new Promise<Response>(() => {}));
+    render(<CheckoutForm />);
+    expect(await screen.findByLabelText("Checking your cart")).toBeVisible();
+  });
+
   it("sends only variant authority and destination when requesting a quote", async () => {
     const user = userEvent.setup();
     fetchMock.mockReset()
@@ -149,8 +155,8 @@ describe("CheckoutForm", () => {
     expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ items: [{ variantId, quantity: 2 }] });
     await fillDestination(user);
     await user.type(screen.getByLabelText("Points to redeem (optional)"), "250");
-    await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
-    await screen.findByRole("heading", { name: "Authoritative total" });
+    await user.click(screen.getByRole("button", { name: "Calculate total" }));
+    await screen.findByRole("heading", { name: "Order total" });
     const quoteCall = fetchMock.mock.calls.find(([url]) => url === "/api/checkout/quote")!;
     const body = JSON.parse(String((quoteCall[1] as RequestInit).body));
     expect(body).toEqual({
@@ -170,10 +176,10 @@ describe("CheckoutForm", () => {
     const user = userEvent.setup();
     fetchMock.mockRejectedValueOnce(new Error("preview unavailable")).mockResolvedValueOnce(response(preview()));
     render(<CheckoutForm />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("The current server preview is unavailable.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("We couldn’t check your cart. A total cannot be calculated yet.");
     const first = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
     const callsBeforeRetry = fetchMock.mock.calls.length;
-    await user.click(screen.getByRole("button", { name: "Try server preview again" }));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBeforeRetry));
     expect(JSON.parse(String((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body))).toEqual(first);
   });
@@ -210,12 +216,12 @@ describe("CheckoutForm", () => {
     rerender(<CheckoutForm />);
 
     expect(await screen.findByRole("heading", {
-      name: "Server preview changed or became unavailable.",
+      name: "Your cart has changed.",
     })).toBeVisible();
     expect(obsoleteSignal?.aborted).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Acknowledge current server facts" }));
-    expect(screen.getByText("Current server facts acknowledged.", { exact: true })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Calculate authoritative total" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Confirm cart updates" }));
+    expect(screen.getByText("Cart updates confirmed.", { exact: true })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Calculate total" })).toBeEnabled();
     expect(JSON.parse(
       window.sessionStorage.getItem(PREVIEW_PRESENTATION_STORAGE_KEY)!,
     ).preview.previewToken).toBe(current.previewToken);
@@ -226,11 +232,11 @@ describe("CheckoutForm", () => {
       await Promise.resolve();
     });
     const acknowledgementSurvived = screen.queryByText(
-      "Current server facts acknowledged.",
+      "Cart updates confirmed.",
       { exact: true },
     ) !== null;
     const continuationStayedEnabled = screen.getByRole("button", {
-      name: "Calculate authoritative total",
+      name: "Calculate total",
     }).hasAttribute("disabled") === false;
     const storedAfterLateResponse = JSON.parse(
       window.sessionStorage.getItem(PREVIEW_PRESENTATION_STORAGE_KEY)!,
@@ -274,7 +280,7 @@ describe("CheckoutForm", () => {
       previousPreviewToken: displayOnly.previewToken,
     });
     await fillDestination(user);
-    const quoteButton = screen.getByRole("button", { name: "Calculate authoritative total" });
+    const quoteButton = screen.getByRole("button", { name: "Calculate total" });
     expect(quoteButton).toBeDisabled();
     await user.click(quoteButton);
     expect(fetchMock.mock.calls.filter(([url]) =>
@@ -291,10 +297,10 @@ describe("CheckoutForm", () => {
     render(<CheckoutForm />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The current server preview is unavailable. No quote can be requested.",
+      "We couldn’t check your cart. A total cannot be calculated yet.",
     );
     await fillDestination(user);
-    expect(screen.getByRole("button", { name: "Calculate authoritative total" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Calculate total" })).toBeDisabled();
     expect(fetchMock.mock.calls.filter(([url]) =>
       url === "/api/checkout/quote" || url === "/api/checkout/sessions")).toEqual([]);
   });
@@ -304,11 +310,11 @@ describe("CheckoutForm", () => {
       .mockResolvedValueOnce(response(preview()))
       .mockResolvedValueOnce(response(preview({ quantity: 3, requiresAcknowledgement: true, reasons: ["server_facts_changed"] })));
     const { rerender } = render(<CheckoutForm />);
-    await screen.findByText("This is the current authoritative baseline; no earlier same-tab server preview was available.");
+    await screen.findByText("Your cart details are up to date.");
     useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity: 3 }] });
     rerender(<CheckoutForm />);
-    expect(await screen.findByRole("heading", { name: "Server preview changed or became unavailable." })).toBeVisible();
-    expect(screen.getByText("Your requested variant identifiers and quantities were not replaced. Review the current server facts before checkout.")).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Your cart has changed." })).toBeVisible();
+    expect(screen.getByText("Your saved items and quantities have not been replaced. Review the latest price and availability before continuing.")).toBeVisible();
   });
 
   it("requires a fresh reviewed quote after the session boundary reports PRICE_CHANGED", async () => {
@@ -325,9 +331,9 @@ describe("CheckoutForm", () => {
     await screen.findByRole("status");
     await fillDestination(user);
     await user.type(screen.getByLabelText("Points to redeem (optional)"), "250");
-    await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
+    await user.click(screen.getByRole("button", { name: "Calculate total" }));
     await user.click(await screen.findByRole("button", { name: "Continue to hosted payment" }));
-    expect(await screen.findByText(/authoritative price changed/iu)).toBeVisible();
+    expect(await screen.findByText("A price changed. Review and calculate the current total again before continuing.")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Continue to hosted payment" })).toBeNull();
     const sessionCall = fetchMock.mock.calls.find(([url]) => url === "/api/checkout/sessions")!;
     expect(JSON.parse(String((sessionCall[1] as RequestInit).body))).toEqual({
@@ -342,7 +348,7 @@ describe("CheckoutForm", () => {
     expect(JSON.stringify(JSON.parse(String((sessionCall[1] as RequestInit).body)))).not.toMatch(
       /productId|baseUnitMinor|unitAmountMinor|subtotalMinor|totalMinor|discount|currency|promotion|coupon|stripe|priceId/iu,
     );
-    await user.click(screen.getByRole("button", { name: "Try authoritative quote again" }));
+    await user.click(screen.getByRole("button", { name: "Try calculating again" }));
     expect(await screen.findByRole("button", { name: "Continue to hosted payment" })).toBeVisible();
     const quoteCalls = fetchMock.mock.calls.filter(([url]) => url === "/api/checkout/quote");
     const firstHeaders = (quoteCalls[0]![1] as RequestInit).headers as Record<string, string>;
@@ -370,7 +376,7 @@ describe("CheckoutForm", () => {
     render(<CheckoutForm />);
     await screen.findByRole("status");
     await fillDestination(user);
-    await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
+    await user.click(screen.getByRole("button", { name: "Calculate total" }));
     await user.click(await screen.findByRole("button", { name: "Continue to hosted payment" }));
     await user.click(await screen.findByRole("button", { name: "Try hosted payment again" }));
 
@@ -416,7 +422,7 @@ describe("CheckoutForm", () => {
     render(<CheckoutForm />);
     await screen.findByRole("status");
     await fillDestination(user);
-    await user.click(screen.getByRole("button", { name: "Calculate authoritative total" }));
+    await user.click(screen.getByRole("button", { name: "Calculate total" }));
     await user.click(await screen.findByRole("button", { name: "Continue to hosted payment" }));
     await user.click(await screen.findByRole("button", { name: "Try hosted payment again" }));
 
@@ -445,6 +451,6 @@ describe("CheckoutForm", () => {
       expect(field).toBeRequired();
       expect(field).toHaveAttribute("aria-required", "true");
     }
-    expect(screen.getByRole("button", { name: "Calculate authoritative total" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Calculate total" })).toBeEnabled();
   });
 });

@@ -14,12 +14,12 @@ import { DataLabel, Notice, RecordPanel } from "@/components/design-system/archi
 
 const purchaseStateCopy: Readonly<Record<CartPreviewPurchaseState, string | null>> = {
   ready: null,
-  checkout_unavailable: "Display price available. Checkout is not yet available for this variant.",
+  checkout_unavailable: "Checkout is not available for this item yet.",
   local_preview: "Test mode — no payments.",
   pricing_pending: "Pricing coming soon.",
   unavailable: "This variant is unavailable.",
-  insufficient_quantity: "The requested quantity is not currently available.",
-  unknown_variant: "This saved variant is no longer recognized. Choose it again from the catalog.",
+  insufficient_quantity: "This quantity is not currently available.",
+  unknown_variant: "This saved item is no longer available. Choose it again from the catalog.",
 };
 
 function responseMatchesRequest(
@@ -83,9 +83,9 @@ export function CheckoutCartStatus() {
             <ScrollText aria-hidden="true" className="size-4" />
           </div>
           <div>
-            <DataLabel>Browser-saved request</DataLabel>
+            <DataLabel>Saved cart</DataLabel>
             <h2 id="saved-request-heading" className="mt-2 font-heading text-3xl">
-              {quantity} requested unit{quantity === 1 ? "" : "s"}
+              {quantity} item{quantity === 1 ? "" : "s"}
             </h2>
           </div>
         </div>
@@ -95,18 +95,18 @@ export function CheckoutCartStatus() {
           </p>
         ) : null}
         {previewError ? (
-          <Notice className="mt-5" icon={CircleAlert} tone="danger" title="Your cart could not be updated">
-            Please try again. Saved item identifiers below could not be verified.
+          <Notice className="mt-5" icon={CircleAlert} tone="danger" title="Your cart could not be loaded">
+            Please try again. Some saved items could not be confirmed.
           </Notice>
         ) : null}
         {items.length > 0 ? (
-          <ul className="mt-6 grid gap-3 p-0" aria-label="Saved cart lines">
+          <ul className="mt-6 grid gap-3 p-0" aria-label="Cart items">
             {items.map((item, index) => {
               const verified = preview?.items[index] ?? null;
               const verifiedIdentity = verified?.name !== null &&
                 verified?.name !== undefined &&
                 verified.variantLabel !== null;
-              const fallback = `Unverified saved variant: ${item.variantId}`;
+              const fallback = `Saved item: ${item.variantId}`;
               const status = verified === null
                 ? null
                 : purchaseStateCopy[verified.purchaseState];
@@ -124,7 +124,7 @@ export function CheckoutCartStatus() {
                         </span>
                       </>
                     ) : (
-                      <span className="block break-all" aria-label={fallback}>{fallback}</span>
+                      <span className="block break-all" aria-label={`Saved item unavailable, reference ${item.variantId}`}>{fallback}</span>
                     )}
                     {status ? (
                       <span className="mt-2 block text-sm font-normal leading-6 text-muted-ink">
@@ -138,10 +138,10 @@ export function CheckoutCartStatus() {
             })}
           </ul>
         ) : (
-          <p className="mt-5 text-base leading-7 text-muted-ink">No request is saved in this browser.</p>
+          <p className="mt-5 text-base leading-7 text-muted-ink">Your cart is empty.</p>
         )}
         <Link href="/cart" className="record-link mt-6 inline-flex min-h-11 items-center">
-          Review cart details
+          Review cart
         </Link>
       </RecordPanel>
     </section>

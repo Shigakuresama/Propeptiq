@@ -30,20 +30,20 @@ function paymentCopy(state: CheckoutSuccessReadModel["paymentState"]) {
   if (state === "paid") {
     return {
       heading: "Payment verified",
-      detail: "A signed payment event now matches this order's durable facts.",
+      detail: "Payment has been confirmed for this order.",
       className: "info-record",
     };
   }
   if (state === "failed") {
     return {
       heading: "Payment was not verified",
-      detail: "This order is not paid. Review the order state before trying again.",
+      detail: "This order is not paid. Review its status before trying again.",
       className: "error-record",
     };
   }
   return {
     heading: "Payment verification pending",
-    detail: "Payment is being verified from a signed provider event. Returning from hosted checkout does not mark an order paid, and refreshing cannot confirm payment.",
+    detail: "We’re waiting for payment confirmation. Returning from the payment page or refreshing this page does not mark the order as paid.",
     className: "warning-record",
   };
 }
@@ -67,7 +67,7 @@ export default async function CheckoutSuccessPage({
       localDriver={request.localDriver !== null}
     >
       <article className="mx-auto max-w-5xl">
-        <DataLabel>Owner-only order record</DataLabel>
+        <DataLabel>Your order</DataLabel>
         {request.localDriver !== null ? (
           <p className="warning-record mt-5 font-semibold">Synthetic local test only</p>
         ) : null}
@@ -75,7 +75,7 @@ export default async function CheckoutSuccessPage({
           Order status
         </h1>
         <p className="mt-5 max-w-3xl text-base leading-7 text-muted-ink">
-          This read-only record is based on internal order and signed-event facts. Refreshing it does not change payment, inventory, or fulfillment.
+          This page shows the latest order, payment, and fulfillment status. Refreshing the page does not change your order.
         </p>
 
         <section className={`${payment.className} mt-8`} role="status" aria-live="polite">

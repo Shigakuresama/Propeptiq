@@ -284,16 +284,16 @@ function isSafePriceChangedCart(value: unknown): boolean {
 function responseMessage(status: unknown, component?: unknown): string {
   if (status === "rate_limited") return "Too many checkout requests. Wait briefly, then retry with the same unchanged request.";
   if (status === "review_required") return "Manual review is required before a hosted payment session can open.";
-  if (status === "denied") return "Checkout is not permitted for the current authoritative facts.";
-  if (status === "invalid_request") return "The checkout request is invalid. Review the destination and cart, then try again.";
-  if (status === "PRICE_CHANGED") return "The authoritative price changed. Review and calculate the current total again before continuing.";
-  if (status === "CHECKOUT_UNAVAILABLE") return "One or more variants cannot be checked out with the current authoritative facts.";
-  if (status === "quote_unavailable" && component === "shipping") return "Shipping facts are temporarily unavailable. No total or paid state is being claimed.";
-  if (status === "quote_unavailable" && component === "tax") return "Tax facts are temporarily unavailable. No total or paid state is being claimed.";
-  if (status === "facts_changed_retry") return "Checkout facts changed. Calculate a new authoritative total before retrying.";
-  if (status === "idempotency_conflict" || status === "conflict") return "This request reference no longer matches. Edit or recalculate the request.";
-  if (status === "provider_unknown" || status === "provider_pending") return "The hosted-payment result is not known yet. No paid state is being claimed.";
-  if (status === "expired" || status === "failed") return "The hosted-payment attempt is closed. Recalculate current facts before trying again.";
+  if (status === "denied") return "Checkout is not available for this cart or account.";
+  if (status === "invalid_request") return "Review the address and cart, then try again.";
+  if (status === "PRICE_CHANGED") return "A price changed. Review and calculate the current total again before continuing.";
+  if (status === "CHECKOUT_UNAVAILABLE") return "One or more items are not available for checkout.";
+  if (status === "quote_unavailable" && component === "shipping") return "Shipping is temporarily unavailable, so a final total cannot be shown. No payment has been recorded.";
+  if (status === "quote_unavailable" && component === "tax") return "Tax is temporarily unavailable, so a final total cannot be shown. No payment has been recorded.";
+  if (status === "facts_changed_retry") return "Checkout details changed. Calculate the current total again before continuing.";
+  if (status === "idempotency_conflict" || status === "conflict") return "This checkout has changed. Review it and calculate the total again.";
+  if (status === "provider_unknown" || status === "provider_pending") return "The payment result is not available yet. This order is not marked as paid.";
+  if (status === "expired" || status === "failed") return "This payment attempt is closed. Calculate the current total before trying again.";
   return "Checkout is temporarily unavailable. Your browser-saved cart has not been cleared.";
 }
 
@@ -416,15 +416,15 @@ export function CheckoutForm({
         const currentIds = new Set(preview.items.map((line) => line.variantId));
         const changes = [
           ...(retained?.items.filter((line) => !currentIds.has(line.variantId))
-            .map((line) => `Removed request: ${line.name ?? line.variantId}`) ?? []),
+            .map((line) => `Removed item: ${line.name ?? line.variantId}`) ?? []),
           ...preview.items.flatMap((line) => {
             const prior = priorById.get(line.variantId);
             const label = line.name ?? prior?.name ?? line.variantId;
-            if (!line.available) return [`Unavailable request: ${label}`];
-            if (prior && prior.quantity !== line.quantity) return [`Quantity adjusted in preview: ${label}`];
+            if (!line.available) return [`Item unavailable: ${label}`];
+            if (prior && prior.quantity !== line.quantity) return [`Quantity changed: ${label}`];
             if (prior && (prior.name !== line.name || prior.packageForm !== line.packageForm ||
               prior.unitAmountMinor !== line.unitAmountMinor || prior.currency !== line.currency)) {
-              return [`Server facts changed: ${label}`];
+              return [`Price or item details changed: ${label}`];
             }
             return [];
           }),
@@ -501,7 +501,7 @@ export function CheckoutForm({
     if (!previewCanContinue) {
       setFeedback({
         fingerprint,
-        message: "Review and acknowledge the current server preview before requesting a checkout quote.",
+        message: "Review and confirm the latest cart updates before calculating your total.",
         lastFailed: null,
       });
       return;
@@ -511,7 +511,7 @@ export function CheckoutForm({
     setBusy("quote");
     setFeedback({
       fingerprint,
-      message: "Calculating current product, destination, promotion, shipping, and tax facts.",
+      message: "Calculating your current total, including discounts, shipping, and tax.",
       lastFailed: null,
     });
     try {
@@ -535,7 +535,7 @@ export function CheckoutForm({
           setFeedback({
             fingerprint,
             message: quote.status === "ready"
-              ? "Authoritative total ready. Review it before continuing to hosted payment."
+              ? "Your current total is ready. Review it before continuing to payment."
               : "Manual review is required before a hosted payment session can open.",
             lastFailed: null,
           });
@@ -564,7 +564,7 @@ export function CheckoutForm({
     setBusy("session");
     setFeedback({
       fingerprint,
-      message: "Opening the server-authorized hosted payment page.",
+      message: "Opening the payment page.",
       lastFailed: null,
     });
     try {
@@ -617,38 +617,36 @@ export function CheckoutForm({
     : rewardsUnavailableCopy(quoteView.quote.rewardsUnavailableReason);
   return (
     <section className="record-card" aria-labelledby="checkout-form-heading">
-      <p className="eyebrow">Authoritative checkout</p>
-      <h2 id="checkout-form-heading" className="mt-3 font-heading text-3xl">Destination and totals</h2>
+      <p className="eyebrow">Checkout</p>
+      <h2 id="checkout-form-heading" className="mt-3 font-heading text-3xl">Address and total</h2>
       <p className="mt-3 text-base leading-7 text-muted-ink">
-        Your browser sends only canonical variant identifiers, quantities, destination, and optional reward points. Current prices and automatic promotions are resolved by the server.
+        Enter a U.S. address to calculate the current total. Prices, discounts, shipping, and tax are checked before payment.
       </p>
       {syntheticLocal ? (
         <p className="warning-record mt-5 font-semibold">Synthetic local test only</p>
       ) : null}
 
       {previewState.key === cartKey && previewState.loading ? (
-        <div className="cart-loading mt-6" aria-label="Refreshing current server preview" />
+        <div className="cart-loading mt-6" aria-label="Checking your cart" />
       ) : null}
       {previewState.key === cartKey && previewState.error ? (
         <div className="error-record mt-6 text-base leading-7" role="alert">
-          <p>The current server preview is unavailable. No quote can be requested.</p>
+          <p>We couldn’t check your cart. A total cannot be calculated yet.</p>
           <div className="mt-4 flex flex-wrap gap-3">
-            <Button type="button" variant="outline" className="min-h-11" onClick={() => setPreviewReload((current) => current + 1)}>Try server preview again</Button>
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => setPreviewReload((current) => current + 1)}>Try again</Button>
             <a href="/cart" className="record-link inline-flex min-h-11 items-center">Review the saved cart</a>
           </div>
         </div>
       ) : null}
       {currentPreview && !currentPreview.requiresAcknowledgement ? (
         <div className="info-record mt-6 text-base leading-7" role="status">
-          {previewState.retained
-            ? "The retained server preview still matches the current authoritative baseline."
-            : "This is the current authoritative baseline; no earlier same-tab server preview was available."}
+          Your cart details are up to date.
         </div>
       ) : null}
       {currentPreview?.requiresAcknowledgement ? (
         <section className="warning-record mt-6 text-base leading-7" aria-labelledby="preview-change-heading">
-          <h3 id="preview-change-heading" className="font-semibold">Server preview changed or became unavailable.</h3>
-          <p className="mt-2">Your requested variant identifiers and quantities were not replaced. Review the current server facts before checkout.</p>
+          <h3 id="preview-change-heading" className="font-semibold">Your cart has changed.</h3>
+          <p className="mt-2">Your saved items and quantities have not been replaced. Review the latest price and availability before continuing.</p>
           {previewState.changes.length ? (
             <ul className="mt-3 list-disc space-y-2 pl-5">
               {previewState.changes.map((change) => <li key={change}>{change}</li>)}
@@ -661,12 +659,12 @@ export function CheckoutForm({
               className="mt-4 min-h-11"
               onClick={() => setAcknowledgedPreviewToken(currentPreview.previewToken)}
             >
-              Acknowledge current server facts
+              Confirm cart updates
             </Button>
           ) : currentPreview.items.some((line) => !line.available) ? (
             <a href="/cart" className="record-link mt-4 inline-flex min-h-11 items-center">Resolve unavailable cart lines</a>
           ) : (
-            <p className="mt-4 font-semibold" role="status">Current server facts acknowledged.</p>
+            <p className="mt-4 font-semibold" role="status">Cart updates confirmed.</p>
           )}
         </section>
       ) : null}
@@ -712,7 +710,7 @@ export function CheckoutForm({
           </Field>
         </div>
         <p className="info-record text-base leading-7">
-          Eligible automatic promotions are selected from current server facts; no promotion claim is sent by this form.
+          Eligible discounts are applied automatically when your total is calculated.
         </p>
         <Field
           id="rewardRedemptionPoints"
@@ -740,14 +738,14 @@ export function CheckoutForm({
           className="action-primary min-h-12 w-full sm:w-auto"
           disabled={busy !== null || !previewCanContinue}
         >
-          {busy === "quote" ? "Getting authoritative quote…" : "Calculate authoritative total"}
+          {busy === "quote" ? "Calculating total…" : "Calculate total"}
         </Button>
       </form>
 
       <p className="mt-6 min-h-6 text-base leading-7 text-muted-ink" role="status" aria-live="polite">{message}</p>
       {lastFailed === "quote" ? (
         <Button type="button" variant="outline" className="mt-3 min-h-11" onClick={() => formRef.current?.requestSubmit()}>
-          Try authoritative quote again
+          Try calculating again
         </Button>
       ) : null}
       {lastFailed === "session" && quoteView?.fingerprint === fingerprint && quoteView.quote.status === "ready" ? (
@@ -758,8 +756,8 @@ export function CheckoutForm({
 
       {quoteView?.fingerprint === fingerprint ? (
         <section className="mt-8 border-t border-border pt-8" aria-labelledby="authoritative-total-heading">
-          <p className="eyebrow">Current server result</p>
-          <h3 id="authoritative-total-heading" className="mt-3 font-heading text-3xl">Authoritative total</h3>
+          <p className="eyebrow">Current total</p>
+          <h3 id="authoritative-total-heading" className="mt-3 font-heading text-3xl">Order total</h3>
           <ul className="mt-5 grid gap-3 p-0">
             {quoteView.quote.lines.map((line) => (
               <li key={line.variantId} className="flex flex-wrap justify-between gap-3 border-b border-border pb-3">
@@ -798,7 +796,7 @@ export function CheckoutForm({
           {quoteView.quote.status === "review_required" ? (
             <div className="warning-record mt-6 text-base leading-7" role="status">
               <strong>Manual review is required</strong>
-              <p className="mt-2">No hosted-payment action is available until the exact review facts are approved.</p>
+              <p className="mt-2">Payment is unavailable until this checkout review is approved.</p>
             </div>
           ) : (
             <Button type="button" className="action-primary mt-7 min-h-12 w-full sm:w-auto" disabled={busy !== null} onClick={startSession}>

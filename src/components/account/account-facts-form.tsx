@@ -27,13 +27,13 @@ export function AccountFactsForm({
     <form action={action} className="grid gap-8" aria-label="Verified account facts">
       <section className="record-panel-recessed p-4 sm:p-5" aria-labelledby="identity-facts-heading">
         <DataLabel>Identity and purpose</DataLabel>
-        <h3 id="identity-facts-heading" className="mt-3 font-heading text-2xl">Verified buyer facts</h3>
+        <h3 id="identity-facts-heading" className="mt-3 font-heading text-2xl">Buyer details</h3>
         <div className="mt-6 grid gap-6">
           <div>
             <label className="form-label" htmlFor="verified-email">Verified email</label>
             <input id="verified-email" className="form-input" value={email} readOnly />
             <p className="mt-2 text-base leading-6 text-muted-ink">
-              This value is read from the server identity provider and cannot be edited here.
+              This verified email cannot be changed here.
             </p>
           </div>
           <label className="check-row bg-canvas">
@@ -55,7 +55,7 @@ export function AccountFactsForm({
                 defaultValue={account?.researchPurpose ?? ""}
                 required
               >
-                <option value="" disabled>Select one structured purpose</option>
+                <option value="" disabled>Select a research purpose</option>
                 <option value="in_vitro">In-vitro laboratory research</option>
                 <option value="analytical">Analytical reference work</option>
                 <option value="educational">Educational laboratory work</option>
@@ -112,7 +112,7 @@ export function AccountFactsForm({
         </div>
       ) : null}
       <Button type="submit" className={`action-primary ${compact ? "w-full" : "w-full sm:w-auto"}`} disabled={pending}>
-        {pending ? "Saving verified facts…" : account ? "Update account facts" : "Complete verified account"}
+        {pending ? "Saving account details…" : account ? "Save account details" : "Complete account setup"}
       </Button>
     </form>
   );

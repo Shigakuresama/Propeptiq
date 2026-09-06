@@ -149,7 +149,7 @@ describe("CheckoutPage", () => {
       loadCurrentAttestation: async () => ({ version: 1, policyText: "Research only." }),
     });
     const markup = renderToStaticMarkup(await CheckoutPage());
-    expect(markup).toContain("Authoritative checkout is available");
+    expect(markup).toContain("Your account is ready. Review your cart and address details below before continuing to payment.");
     expect(markup).toContain("data-testid=\"checkout-form\"");
     expect(markup).toContain("data-synthetic-local=\"true\"");
   });
@@ -185,14 +185,14 @@ describe("CheckoutPage", () => {
       "This environment cannot accept orders or payments",
     );
     expect(markup).not.toContain("data-testid=\"checkout-form\"");
-    expect(markup).not.toContain("Authoritative checkout is available");
+    expect(markup).not.toContain("Your account is ready. Review your cart and address details below before continuing to payment.");
   });
 
   it.each([
     {
       status: "new" as const,
       acceptedAttestationVersion: null,
-      expectedGuidance: "Verified account access is unavailable",
+      expectedGuidance: "We can’t verify your account right now",
     },
     {
       status: "review" as const,
@@ -251,7 +251,7 @@ describe("CheckoutPage", () => {
         "This environment cannot accept orders or payments",
       );
       expect(markup).not.toContain("data-testid=\"checkout-form\"");
-      expect(markup).not.toContain("Authoritative checkout is available");
+      expect(markup).not.toContain("Your account is ready. Review your cart and address details below before continuing to payment.");
     },
   );
 
@@ -281,7 +281,7 @@ describe("CheckoutPage", () => {
 
     const markup = renderToStaticMarkup(await CheckoutPage());
 
-    expect(markup).toContain("Checkout remains unavailable");
+    expect(markup).toContain("Your account is ready, but checkout is not available in this environment.");
     expect(markup).not.toContain("Checkout is currently unavailable");
     expect(markup).not.toContain("data-testid=\"checkout-form\"");
   });

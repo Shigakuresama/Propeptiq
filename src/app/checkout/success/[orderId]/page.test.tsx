@@ -83,6 +83,8 @@ describe("checkout success page", () => {
     }));
 
     expect(markup).toContain("Payment verification pending");
+    expect(markup).toContain("We’re waiting for payment confirmation. Returning from the payment page or refreshing this page does not mark the order as paid.");
+    expect(markup).toContain("This page shows the latest order, payment, and fulfillment status. Refreshing the page does not change your order.");
     expect(markup).toContain(">Synthetic local test only<");
     expect(markup).toContain("$51.41");
     expect(markup).toContain("Synthetic local test only — Alpha");

@@ -24,7 +24,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
         <ArrowLeft aria-hidden="true" className="size-4" />
         Order history
       </Link>
-      <DataLabel className="mt-6">Owner-only order</DataLabel>
+      <DataLabel className="mt-6">Your order</DataLabel>
       <h1 className="mt-4 break-all font-heading text-page leading-[0.95]">Order {order.id}</h1>
       <RecordPanel className="mt-8 overflow-hidden">
         <dl className="grid sm:grid-cols-2 lg:grid-cols-3">
