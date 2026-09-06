@@ -2220,7 +2220,10 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
 }) => {
   await page.goto("/catalog");
   await expect(page.locator("article.catalog-listing-card")).toHaveCount(56);
-  await expect(page.getByText("103 supplied package configurations")).toBeVisible();
+  await expect(page.getByText(
+    "56 products and 103 configurations to explore. Select a product to review its details, pricing, and availability. Images are illustrations, not product photographs.",
+    { exact: true },
+  )).toBeVisible();
   await expect(page.getByRole("button", { name: /^add .+(?:: choose a variant| to (?:preview )?cart)$/iu })).toHaveCount(56);
   await expect(page.locator("main")).toContainText("$41.99");
   await expect(page.locator("main")).toContainText("-30%");
