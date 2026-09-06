@@ -42,7 +42,7 @@ async function expectSavedCanonicalCart(page: Page, quantity: number) {
   await expect(lines.getByRole("spinbutton")).toHaveValue(String(quantity));
   await expect(lines.locator("del")).toHaveText("$59.99");
   await expect(lines.locator("strong")).toHaveText("$41.99");
-  const subtotal = lines.locator("dl > div").filter({ has: page.locator("dt", { hasText: "Line subtotal" }) }).locator("dd");
+  const subtotal = lines.locator("dl > div").filter({ has: page.locator("dt", { hasText: "Item subtotal" }) }).locator("dd");
   await expect(subtotal).toHaveText(quantity === 2 ? "$83.98" : "$41.99");
   await expect(page.getByRole("heading", { name: "Choose your variants again." })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Checkout unavailable" })).toBeDisabled();
@@ -56,11 +56,11 @@ test("empty legacy cart allows canonical addition that survives a full reload", 
   });
   await seedLegacyCart(page, false);
   await selectCanonicalVariant(page);
-  await expect(page.getByRole("link", { name: "Review saved cart" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Review cart" })).toHaveCount(0);
   await page.getByRole("button", { name: "2 bottles", exact: true }).click();
   await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
   await expect(page.getByRole("status", { name: "Cart updates" })).toHaveText("Cart updated. Tirzepatide, 30mg: 2 units in cart.");
-  await expect(page.getByRole("link", { name: "Cart, 2 requested units" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Cart, 2 items" })).toBeVisible();
   await expectSavedCanonicalCart(page, 2);
   expect(paymentRequests).toEqual([]);
 });
@@ -69,27 +69,27 @@ test("nonempty legacy cart rejects additions until explicit acknowledgement then
   const legacy = await seedLegacyCart(page, true);
   await selectCanonicalVariant(page);
   const purchase = page.getByRole("status", { name: "Purchase summary" });
-  const reviewSavedCart = purchase.getByRole("link", { name: "Review saved cart" });
-  await expect(purchase.getByText("Your saved cart uses an older format. Clear the old cart before adding a variant.")).toBeVisible();
+  const reviewSavedCart = purchase.getByRole("link", { name: "Review cart" });
+  await expect(purchase.getByText("Your saved cart needs to be refreshed. Clear it before adding this item.")).toBeVisible();
   await expect(reviewSavedCart).toBeVisible();
   await expect(reviewSavedCart).toHaveAttribute("href", "/cart");
   await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
   await expect(page.getByRole("status", { name: "Cart updates" })).toHaveText(
     "Open your cart and clear the old cart before choosing variants again. Your saved items have not been changed.",
   );
-  await expect(page.getByRole("link", { name: "Cart, 0 requested units" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Cart, 0 items" })).toBeVisible();
   expect(await page.evaluate((key) => window.localStorage.getItem(key), currentKey)).toBeNull();
   expect(await page.evaluate((key) => window.localStorage.getItem(key), legacyKey)).toBe(legacy);
   await reviewSavedCart.click();
   await expect(page).toHaveURL(/\/cart$/u);
   await page.reload();
   await expect(page.getByRole("heading", { name: "Choose your variants again." })).toBeVisible();
-  await expect(page.getByText(/contains 2 requested units from an older cart format/u)).toBeVisible();
+  await expect(page.getByText("Your saved cart needs to be refreshed. Clear it, then choose each item and variant again before continuing.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Clear old cart and choose variants" }).click();
   await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
   expect(await page.evaluate((key) => window.localStorage.getItem(key), legacyKey)).toBeNull();
   await selectCanonicalVariant(page);
-  await expect(page.getByRole("link", { name: "Review saved cart" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Review cart" })).toHaveCount(0);
   await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
   await expect(page.getByRole("status", { name: "Cart updates" })).toHaveText("Cart updated. Tirzepatide, 30mg: 1 unit in cart.");
   await expectSavedCanonicalCart(page, 1);

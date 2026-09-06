@@ -104,7 +104,7 @@ describe("public shell growth navigation", () => {
       </CartProvider>,
     );
 
-    const cartLink = screen.getByRole("link", { name: "Cart, 0 requested units" });
+    const cartLink = screen.getByRole("link", { name: "Cart, 0 items" });
     expect(cartLink).toHaveAttribute("href", "/cart");
     expect(fetchMock).not.toHaveBeenCalled();
 

@@ -219,7 +219,7 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
     window.localStorage.setItem(LEGACY_CART_STORAGE_KEY, old);
     render(<Fixture />);
     const bar = await showBar();
-    await waitFor(() => expect(within(bar).getByRole("link", { name: "Review saved cart" })).toHaveAttribute("href", "/cart"));
+    await waitFor(() => expect(within(bar).getByRole("link", { name: "Review cart" })).toHaveAttribute("href", "/cart"));
     await userEvent.click(within(bar).getByRole("button", { name: "Add Synthetic Product Alpha to cart" }));
     expect(window.localStorage.getItem(LEGACY_CART_STORAGE_KEY)).toBe(old);
     expect(screen.getByRole("status", { name: "Cart updates" })).not.toHaveTextContent("Cart updated");

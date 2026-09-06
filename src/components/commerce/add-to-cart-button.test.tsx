@@ -31,9 +31,9 @@ describe("AddToCartButton", () => {
       canAdd: true, onAdded, productName: "Synthetic Product Alpha", variantId: "variant-10mg",
     };
     const { container, rerender } = render(<AddToCartButton {...props} />);
-    const guidance = screen.getByText("Your saved cart uses an older format. Clear the old cart before adding a variant.");
+    const guidance = screen.getByText("Your saved cart needs to be refreshed. Clear it before adding this item.");
     expect(guidance).toBeVisible();
-    const link = screen.getByRole("link", { name: "Review saved cart" });
+    const link = screen.getByRole("link", { name: "Review cart" });
     expect(link).toBeVisible();
     expect(link).toHaveAttribute("href", "/cart");
     expect(link.tagName).toBe("A");
@@ -47,15 +47,15 @@ describe("AddToCartButton", () => {
     cartState.legacyItemCount = null;
     addVariantMock.mockReturnValue(true);
     rerender(<AddToCartButton {...props} />);
-    expect(screen.queryByRole("link", { name: "Review saved cart" })).not.toBeInTheDocument();
-    expect(screen.queryByText(/Your saved cart uses an older format/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Review cart" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Your saved cart needs to be refreshed/u)).not.toBeInTheDocument();
     await user.click(button);
     expect(onAdded).toHaveBeenCalledOnce();
   });
 
   it("does not show legacy guidance for a ready cart", () => {
     render(<AddToCartButton canAdd productName="Synthetic Product Alpha" variantId="variant-10mg" />);
-    expect(screen.queryByRole("link", { name: "Review saved cart" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Review cart" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" })).toBeEnabled();
   });
 

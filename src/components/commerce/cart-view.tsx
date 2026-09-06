@@ -28,7 +28,7 @@ const cartIllustration = catalogProductVisualManifest.find((scene) => scene.id =
 
 const purchaseStateCopy: Readonly<Record<CartPreviewPurchaseState, string | null>> = {
   ready: null,
-  checkout_unavailable: "Display price available. Checkout is not yet available for this variant.",
+  checkout_unavailable: "Checkout is not available for this item yet.",
   local_preview: "Test mode — no payments.",
   pricing_pending: "Pricing coming soon.",
   unavailable: "This variant is unavailable.",
@@ -226,7 +226,7 @@ export function CartView(props: CartViewProps) {
 
   function beginCheckoutHandoff() {
     const handoff = prepareCheckoutHandoff(window.localStorage, items);
-    setHandoffMessage(`Saving ${handoff.itemCount} requested unit${handoff.itemCount === 1 ? "" : "s"} for checkout.`);
+    setHandoffMessage(`Taking ${handoff.itemCount} item${handoff.itemCount === 1 ? "" : "s"} to checkout.`);
     navigate(handoff.returnTo);
   }
 
@@ -273,7 +273,7 @@ export function CartView(props: CartViewProps) {
           Choose your variants again.
         </h2>
         <p className="mt-4 max-w-[60ch] leading-7 text-muted-ink">
-          Your saved cart contains {legacyItemCount} requested unit{legacyItemCount === 1 ? "" : "s"} from an older cart format. Choose each exact variant again before continuing.
+          Your saved cart needs to be refreshed. Clear it, then choose each item and variant again before continuing.
         </p>
         <div className="mt-7 flex flex-wrap gap-3">
           <Button type="button" className="action-primary" onClick={acknowledgeLegacyAndRestoreFocus}>
@@ -310,7 +310,7 @@ export function CartView(props: CartViewProps) {
       <section aria-labelledby={cartItemsHeadingId} className="min-w-0">
         <div className="flex items-end justify-between gap-4 border-b border-border pb-5">
           <h2 id={cartItemsHeadingId} className="font-heading text-3xl text-ink" ref={fallbackFocusRef} tabIndex={-1}>
-            {drawer ? "Items" : "Requested records"}
+            Items
           </h2>
           <Button type="button" variant="ghost" className="min-h-11" onClick={clearAndRestoreFocus}>
             Clear cart
@@ -326,7 +326,7 @@ export function CartView(props: CartViewProps) {
               className="mt-4 min-h-11"
               onClick={() => setPreviewReload((current) => current + 1)}
             >
-              Retry current cart facts
+              Try again
             </Button>
           </div>
         ) : null}
@@ -339,7 +339,7 @@ export function CartView(props: CartViewProps) {
             const verifiedIdentity = item.name !== null && item.variantLabel !== null;
             const accessibleLabel = verifiedIdentity
               ? `${item.name}, ${item.variantLabel}`
-              : `Unverified saved variant: ${item.variantId}`;
+              : `Saved item: ${item.variantId}`;
             const status = preview === null ? null : purchaseStateCopy[item.purchaseState];
             const priced = item.baseUnitMinor !== null &&
               item.unitAmountMinor !== null &&
@@ -434,7 +434,7 @@ export function CartView(props: CartViewProps) {
                           </div>
                         ) : null}
                         <div className="flex min-w-0 flex-wrap justify-between gap-x-4 gap-y-1">
-                          <dt className="text-muted-ink">Line subtotal</dt>
+                          <dt className="text-muted-ink">Item subtotal</dt>
                           <dd className="font-semibold tabular-nums text-ink">
                             {formatMoney(item.lineSubtotalMinor, item.currency)}
                           </dd>
@@ -588,7 +588,7 @@ export function CartView(props: CartViewProps) {
 
         {checkoutIntent && canContinue ? (
           <p className="info-record mt-6 text-base leading-7">
-            Your saved request is ready to continue at checkout.
+            Your cart is ready for checkout.
           </p>
         ) : null}
         {handoffMessage ? (

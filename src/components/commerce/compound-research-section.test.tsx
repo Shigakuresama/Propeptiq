@@ -50,7 +50,7 @@ describe("CompoundResearchSection", () => {
   it.each([
     "5-amino-1mq", "aod-9604", "bpc-157", "cargrilintide", "cjc-1295-with-dac",
     "ghk-cu", "hcg", "igf-1-lr3", "ipamorelin", "mots-c", "nad-plus",
-    "dsip", "epithalon", "retatrutide", "semaglutide", "sermorelin-acetate", "survodutide", "tesmorelin", "tirzepatide",
+    "dsip", "epithalon", "glutathione", "kpv", "ll37", "retatrutide", "semaglutide", "sermorelin-acetate", "survodutide", "tesmorelin", "tirzepatide",
   ])("renders only the supplied bibliography for %s", (slug) => {
     const research = researchFor(slug);
     const { container } = render(<CompoundResearchSection research={research} />);
@@ -114,6 +114,28 @@ describe("CompoundResearchSection", () => {
     expect(container).not.toHaveTextContent("participants or samples");
   });
 
+  it("renders KPV as preclinical cell-and-mouse bibliography without implying human intervention", () => {
+    const { container } = render(<CompoundResearchSection research={researchFor("kpv")} />);
+    fireEvent.click(container.querySelector("summary")!);
+    expect(screen.getByText("Preclinical research included")).toBeVisible();
+    expect(screen.getAllByText("Preclinical experiment")).toHaveLength(2);
+    expect(screen.getAllByText("Preclinical research")).toHaveLength(2);
+    expect(container).not.toHaveTextContent("Human research included");
+    expect(container).not.toHaveTextContent("participants or samples");
+  });
+
+  it.each([["ll37", 34, 148], ["glutathione", 54, 40]] as const)(
+    "renders %s as two randomized human bibliography rows with source sample totals",
+    (slug, firstTotal, secondTotal) => {
+      const { container } = render(<CompoundResearchSection research={researchFor(slug)} />);
+      fireEvent.click(container.querySelector("summary")!);
+      expect(screen.getByText("Randomized human research included")).toBeVisible();
+      expect(screen.getAllByText("Randomized controlled trial")).toHaveLength(2);
+      expect(screen.getByText(`${firstTotal} participants or samples`)).toBeVisible();
+      expect(screen.getByText(`${secondTotal} participants or samples`)).toBeVisible();
+    },
+  );
+
   it.each([
     ["ara-290", "24136731", "28059429", "23168581"],
     ["thymosin-alpha-1", "39814420", "40447307", "35713670"],
@@ -145,6 +167,7 @@ describe("CompoundResearchSection", () => {
     ["human_rct", "Randomized human research included"],
     ["human_observational", "Human research included"],
     ["animal_only", "Animal research included"],
+    ["preclinical_only", "Preclinical research included"],
     ["in_vitro_only", "In vitro research only"],
   ] as const)("uses a neutral context label for %s", (strongestEvidence, label) => {
     // Test-only input exercises labels not present in the approved source set.

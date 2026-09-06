@@ -67,6 +67,30 @@ const expectedResearchBySlug = {
       { pmid: "17955380", design: "Animal experiment", context: "Animal research" },
     ],
   },
+  glutathione: {
+    evidenceLabel: "Randomized human research included",
+    pmids: ["24791752", "21875351"],
+    rows: [
+      { pmid: "24791752", design: "Randomized controlled trial", context: "Human research" },
+      { pmid: "21875351", design: "Randomized controlled trial", context: "Human research" },
+    ],
+  },
+  kpv: {
+    evidenceLabel: "Preclinical research included",
+    pmids: ["18061177", "27458604"],
+    rows: [
+      { pmid: "18061177", design: "Preclinical experiment", context: "Preclinical research" },
+      { pmid: "27458604", design: "Preclinical experiment", context: "Preclinical research" },
+    ],
+  },
+  ll37: {
+    evidenceLabel: "Randomized human research included",
+    pmids: ["25041740", "34687253"],
+    rows: [
+      { pmid: "25041740", design: "Randomized controlled trial", context: "Human research" },
+      { pmid: "34687253", design: "Randomized controlled trial", context: "Human research" },
+    ],
+  },
   selank: {
     evidenceLabel: "Randomized human research included",
     pmids: ["18454096", "25176261"],
@@ -258,14 +282,19 @@ async function verifyEpithalonWithoutJavaScript(browser: Browser) {
     const disclosure = page.locator("#research-references details");
     const summary = disclosure.locator("summary");
     await expect(summary).toContainText("2 verified references");
-    await expect(disclosure.getByText("In vitro experiment", { exact: true })).toBeVisible();
-    await expect(disclosure.getByText("In vitro research", { exact: true })).toBeVisible();
+    await expect(disclosure).not.toHaveAttribute("open");
     await expect(disclosure.locator('a[href="https://pubmed.ncbi.nlm.nih.gov/40493162/"]')).toHaveCount(1);
     await expect(summary).not.toHaveAttribute("role");
     await expect(summary).not.toHaveAttribute("onclick");
     await summary.focus();
     await page.keyboard.press("Enter");
     await expect(disclosure).toHaveAttribute("open", "");
+    await expect(disclosure.getByText("In vitro experiment", { exact: true })).toBeVisible();
+    await expect(disclosure.getByText("In vitro research", { exact: true })).toBeVisible();
+    await summary.focus();
+    await page.keyboard.press("Space");
+    await expect(disclosure).not.toHaveAttribute("open");
+    await expectVisibleFocus(summary);
     await expectNoHorizontalOverflow(page);
   } finally {
     await context.close();
@@ -344,6 +373,10 @@ test("Semax bibliography is keyboard usable at 375px, 768px, and 1440px", async 
 test("DSIP bibliography is keyboard usable at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyResearch(page, width, "dsip"); });
 test("Epithalon bibliography keeps in-vitro and animal rows distinct at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) { await verifyResearch(page, width, "epithalon"); const disclosure = page.locator("#research-references details"); const cellRow = disclosure.locator("ol > li").filter({ hasText: "PMID: 40493162" }); const animalRow = disclosure.locator("ol > li").filter({ hasText: "PMID: 17955380" }); await expect(cellRow.getByText("In vitro experiment", { exact: true })).toBeVisible(); await expect(cellRow.getByText("In vitro research", { exact: true })).toBeVisible(); await expect(animalRow.getByText("Animal experiment", { exact: true })).toBeVisible(); await expect(animalRow.getByText("Animal research", { exact: true })).toBeVisible(); await expect(disclosure.getByText("Human research", { exact: true })).toHaveCount(0); } });
 test("Epithalon bibliography remains available without JavaScript", async ({ browser }) => { await verifyEpithalonWithoutJavaScript(browser); });
+test("KPV bibliography is keyboard usable at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) { await verifyResearch(page, width, "kpv"); await expect(page.locator("#research-references").getByText("Human research", { exact: true })).toHaveCount(0); } });
+test("LL37 bibliography is keyboard usable at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyResearch(page, width, "ll37"); });
+test("Glutathione bibliography is keyboard usable at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyResearch(page, width, "glutathione"); });
+test("KPV bibliography remains available without JavaScript", async ({ browser }) => { const context = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 375, height: 1000 } }); const page = await context.newPage(); try { const response = await page.goto("/catalog/items/kpv"); expect(response?.status()).toBe(200); const disclosure = page.locator("#research-references details"); const summary = disclosure.locator("summary"); await expect(summary).toContainText("2 verified references"); await expect(disclosure).not.toHaveAttribute("open"); await expect(disclosure.locator("a")).toHaveCount(2); await summary.focus(); await page.keyboard.press("Enter"); await expect(disclosure).toHaveAttribute("open", ""); await expect(disclosure.getByText("Preclinical experiment", { exact: true })).toHaveCount(2); await expect(disclosure.getByText("Preclinical research", { exact: true })).toHaveCount(2); await expect(disclosure.locator('a[href="https://pubmed.ncbi.nlm.nih.gov/18061177/"]')).toBeVisible(); await expect(disclosure.locator('a[href="https://pubmed.ncbi.nlm.nih.gov/27458604/"]')).toBeVisible(); await expect(disclosure.getByText("Human research", { exact: true })).toHaveCount(0); await summary.focus(); await page.keyboard.press("Space"); await expect(disclosure).not.toHaveAttribute("open"); await expectVisibleFocus(summary); await expectNoHorizontalOverflow(page); } finally { await context.close(); } });
 test("unmapped Semax + Selank blend has no inferred bibliography at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyUnmappedProduct(page, width, { slug: "semax-selank", name: "Semax + Selank" }); });
 test("unmapped Pinealon has no inferred bibliography at 375px", async ({ page }) => { await verifyUnmappedProduct(page, 375); });
 test("unmapped Pinealon has no inferred bibliography at 768px", async ({ page }) => { await verifyUnmappedProduct(page, 768); });

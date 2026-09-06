@@ -937,7 +937,7 @@ test("site search launcher stays centered, operable, and clear of the footer acr
     await page.goto("/catalog");
     if (width === 195) await seedLocalTestCart(page, 12);
 
-    const cartLink = page.getByRole("link", { name: "Cart, 12 requested units" });
+    const cartLink = page.getByRole("link", { name: "Cart, 12 items" });
     await expect(cartLink).toBeVisible();
     if (width <= 352) {
       await expect(cartLink.locator(".cart-count")).toBeHidden();
@@ -1679,8 +1679,8 @@ test("anonymous canonical local/test cart survives reload and preserves only var
   await expect(page.getByRole("button", { name: /add .* to cart/iu })).toHaveCount(0);
   // The guarded local driver resolves this explicitly synthetic variant through /api/catalog/preview.
   await seedLocalTestCart(page);
-  await expect(page.getByRole("link", { name: /Cart, 1 requested unit/ })).toBeVisible();
-  await page.getByRole("link", { name: /Cart, 1 requested unit/ }).click();
+  await expect(page.getByRole("link", { name: /Cart, 1 item/ })).toBeVisible();
+  await page.getByRole("link", { name: /Cart, 1 item/ }).click();
 
   const syntheticLine = page.getByRole("list", { name: "Cart lines" }).getByRole("listitem");
   await expect(syntheticLine).toHaveCount(1);
@@ -2769,7 +2769,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(pricing).toContainText("$76.99");
   await expect(pricing).toContainText("$33.00");
   await addToPreviewCart.click();
-  await page.getByRole("link", { name: /Cart, \d+ requested units/iu }).click();
+  await page.getByRole("link", { name: /Cart, \d+ items/iu }).click();
   const drawer = page.getByRole("dialog", { name: "Your cart" });
   await expect(drawer).toBeVisible();
   await drawer.getByRole("link", { name: "View cart" }).click();
@@ -2809,7 +2809,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(tr60Line.locator("del")).toHaveText("$109.99");
   await expect(tr60Line.locator("strong")).toHaveText("$76.99");
   await expect(tr60Line.getByText("Save $33.00", { exact: true })).toBeVisible();
-  await expect(tr60Line.getByText("Line subtotal").locator("xpath=following-sibling::dd")).toHaveText("$76.99");
+  await expect(tr60Line.getByText("Item subtotal").locator("xpath=following-sibling::dd")).toHaveText("$76.99");
   const cartSummary = page.getByRole("complementary", { name: "Order summary" });
   await expect(cartSummary.getByText("$160.97", { exact: true })).toBeVisible();
   await expect(cartSummary.getByText(

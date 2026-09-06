@@ -211,6 +211,21 @@ const expectedTask8DCompounds = [
   },
 ] as const;
 
+const expectedTask8EStudies = [
+  { id: "pmid-18061177", compoundId: "kpv", pmid: "18061177", url: "https://pubmed.ncbi.nlm.nih.gov/18061177/", title: "PepT1-mediated tripeptide KPV uptake reduces intestinal inflammation.", firstAuthor: "Dalmasso G", year: 2008, journal: "Gastroenterology", design: "preclinical_experimental", evidenceContext: "preclinical", sampleSize: null, population: "Human intestinal epithelial and T-cell lines, and mouse experimental models", studiedAmount: null, duration: null, route: null, doi: "10.1053/j.gastro.2007.10.026", outcomeSummary: null, verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06" },
+  { id: "pmid-27458604", compoundId: "kpv", pmid: "27458604", url: "https://pubmed.ncbi.nlm.nih.gov/27458604/", title: "Critical role of PepT1 in promoting colitis-associated cancer and therapeutic benefits of the anti-inflammatory PepT1-mediated tripeptide KPV in a murine model.", firstAuthor: "Viennois E", year: 2016, journal: "Cell Mol Gastroenterol Hepatol", design: "preclinical_experimental", evidenceContext: "preclinical", sampleSize: null, population: "Mouse KPV experiments with separate human colonic tissue observations about PepT1", studiedAmount: null, duration: null, route: null, doi: "10.1016/j.jcmgh.2016.01.006", outcomeSummary: null, verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06" },
+  { id: "pmid-25041740", compoundId: "ll37", pmid: "25041740", url: "https://pubmed.ncbi.nlm.nih.gov/25041740/", title: "Treatment with LL-37 is safe and effective in enhancing healing of hard-to-heal venous leg ulcers: a randomized, placebo-controlled clinical trial.", firstAuthor: "Grönberg A", year: 2014, journal: "Wound Repair Regen", design: "randomized_controlled_trial", evidenceContext: "human", sampleSize: 34, population: "People with venous leg ulcers", studiedAmount: null, duration: null, route: null, doi: "10.1111/wrr.12211", outcomeSummary: null, verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06" },
+  { id: "pmid-34687253", compoundId: "ll37", pmid: "34687253", url: "https://pubmed.ncbi.nlm.nih.gov/34687253/", title: "Evaluation of LL-37 in healing of hard-to-heal venous leg ulcers: A multicentric prospective randomized placebo-controlled clinical trial.", firstAuthor: "Mahlapuu M", year: 2021, journal: "Wound Repair Regen", design: "randomized_controlled_trial", evidenceContext: "human", sampleSize: 148, population: "People with hard-to-heal venous leg ulcers", studiedAmount: null, duration: null, route: null, doi: "10.1111/wrr.12977", outcomeSummary: null, verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06" },
+  { id: "pmid-24791752", compoundId: "glutathione", pmid: "24791752", url: "https://pubmed.ncbi.nlm.nih.gov/24791752/", title: "Randomized controlled trial of oral glutathione supplementation on body stores of glutathione.", firstAuthor: "Richie JP Jr", year: 2015, journal: "Eur J Nutr", design: "randomized_controlled_trial", evidenceContext: "human", sampleSize: 54, population: "Non-smoking adults", studiedAmount: null, duration: null, route: null, doi: "10.1007/s00394-014-0706-z", outcomeSummary: null, verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06" },
+  { id: "pmid-21875351", compoundId: "glutathione", pmid: "21875351", url: "https://pubmed.ncbi.nlm.nih.gov/21875351/", title: "Effects of oral glutathione supplementation on systemic oxidative stress biomarkers in human volunteers.", firstAuthor: "Allen J", year: 2011, journal: "J Altern Complement Med", design: "randomized_controlled_trial", evidenceContext: "human", sampleSize: 40, population: "Adult volunteers without acute or chronic disease; 40 enrolled and 39 completed per protocol", studiedAmount: null, duration: null, route: null, doi: "10.1089/acm.2010.0716", outcomeSummary: null, verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06" },
+] as const;
+
+const expectedTask8ECompounds = [
+  { id: "kpv", productSlug: "kpv", displayName: "KPV", alternateNames: [], studyIds: ["pmid-18061177", "pmid-27458604"], strongestEvidence: "preclinical_only", identityCaveat: "The cited KPV experiments used cell or mouse models; the human tissue observations concern PepT1 and are not a human KPV treatment trial. Literature-name correspondence does not establish the identity, sequence, composition, formulation, quality, or equivalence of the PropeptIQ catalog material.", mechanism: null, benefitClaim: null },
+  { id: "ll37", productSlug: "ll37", displayName: "LL37", alternateNames: ["LL-37"], studyIds: ["pmid-25041740", "pmid-34687253"], strongestEvidence: "human_rct", identityCaveat: "The cited trials concern investigational LL-37 preparations in specific clinical settings. Name correspondence does not establish the identity, sequence, form, formulation, quality, purity, or equivalence of the PropeptIQ catalog material. These references do not establish safety or effectiveness of this catalog item.", mechanism: null, benefitClaim: null },
+  { id: "glutathione", productSlug: "glutathione", displayName: "Glutathione", alternateNames: [], studyIds: ["pmid-24791752", "pmid-21875351"], strongestEvidence: "human_rct", identityCaveat: "The cited trials concern oral study preparations. The catalog name does not establish a chemical or redox form, formulation, route, quality, purity, or equivalence to those preparations. These references do not establish safety or effectiveness of this catalog item.", mechanism: null, benefitClaim: null },
+] as const;
+
 const approvedCorrections = {
   schemaVersion: 1,
   corrections: [
@@ -229,9 +244,12 @@ const expectedCompoundOrder = [
   "dsip",
   "epithalon",
   "ghk-cu",
+  "glutathione",
   "hcg",
   "igf-1-lr3",
   "ipamorelin",
+  "kpv",
+  "ll37",
   "mots-c",
   "nad-plus",
   "retatrutide",
@@ -306,15 +324,19 @@ function expectInvalid(source: unknown, corrections?: unknown): void {
 }
 
 describe("verified compound research source", () => {
-  it("preserves the exact 37-study prefix and appends only the four Task 8D studies", () => {
+  it("preserves the exact 41-study prefix and appends only the six Task 8E studies", () => {
     expect(studiesJson.schemaVersion).toBe(1);
     expect(studiesJson.studies.map((study) => study.pmid)).toEqual([
       ...expectedExistingPmids,
       ...expectedPreviousReleaseStudies.map((study) => study.pmid),
       ...expectedTask8CStudies.map((study) => study.pmid),
       ...expectedTask8DStudies.map((study) => study.pmid),
+      ...expectedTask8EStudies.map((study) => study.pmid),
     ]);
-    expect(new Set(studiesJson.studies.map((study) => study.pmid)).size).toBe(41);
+    expect(new Set(studiesJson.studies.map((study) => study.pmid)).size).toBe(47);
+    expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(0, 41))).digest("hex")).toBe(
+      "2e19d76544d5c8e1b5c8db0c35c3dc8338f8356f7d86b8c09b50339f45a6352f",
+    );
     expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(0, 37))).digest("hex")).toBe(
       "6937f44c221b8a90372c25bf096cdc47d54e76935342431b6f38a2850de12992",
     );
@@ -357,12 +379,16 @@ describe("verified compound research source", () => {
       expect(study.outcomeSummary).toBeNull();
     }
     expect(studiesJson.studies.slice(33, 37)).toEqual(expectedTask8CStudies);
-    expect(studiesJson.studies.slice(37)).toEqual(expectedTask8DStudies);
+    expect(studiesJson.studies.slice(37, 41)).toEqual(expectedTask8DStudies);
+    expect(studiesJson.studies.slice(41)).toEqual(expectedTask8EStudies);
   });
 
-  it("keeps the exact 22-compound prefix and appends only the Task 8D compounds", () => {
+  it("keeps the exact 24-compound prefix and appends only the Task 8E compounds", () => {
     expect(compoundsJson.schemaVersion).toBe(1);
-    expect(compoundsJson.compounds).toHaveLength(24);
+    expect(compoundsJson.compounds).toHaveLength(27);
+    expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(0, 24))).digest("hex")).toBe(
+      "b2aee1a3a76384751989930c086ed757b4588b093424892c162aba5819b14ce4",
+    );
     expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(0, 22))).digest("hex")).toBe(
       "68575855ec13ab0363adb7777ea95cd65de9b1eb01e2efa95b7578232a11062f",
     );
@@ -381,7 +407,8 @@ describe("verified compound research source", () => {
       { id: "thymosin-alpha-1", productSlug: "thymosin-alpha-1", studyIds: ["pmid-35713670", "pmid-39814420"], strongestEvidence: "human_rct", mechanism: null, benefitClaim: null },
     ]);
     expect(compoundsJson.compounds.slice(20, 22)).toEqual(expectedTask8CCompounds);
-    expect(compoundsJson.compounds.slice(22)).toEqual(expectedTask8DCompounds);
+    expect(compoundsJson.compounds.slice(22, 24)).toEqual(expectedTask8DCompounds);
+    expect(compoundsJson.compounds.slice(24)).toEqual(expectedTask8ECompounds);
 
     const cagrilintide = compoundsJson.compounds.find(
       (compound) => compound.id === "cagrilintide",
@@ -446,7 +473,7 @@ describe("projectPublicCompoundResearch", () => {
     );
     expect(projected.compounds.flatMap((compound) =>
       compound.studies.map((study) => study.pmid)
-    )).toHaveLength(41);
+    )).toHaveLength(47);
 
     const compoundKeys = Object.keys(projected.compounds[0]!).sort();
     const studyKeys = Object.keys(projected.compounds.find((compound) => compound.id === "ss-31")!.studies[0]!).sort();
@@ -516,7 +543,26 @@ describe("projectPublicCompoundResearch", () => {
     ]) {
       expect(serialized).not.toContain(`\"${privateKey}\"`);
     }
-    expect(serialized).not.toMatch(
+    expect(projected.compounds.flatMap((compound) => compound.studies)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ outcomeSummary: expect.anything() }),
+        expect.objectContaining({ studiedAmount: expect.anything() }),
+        expect.objectContaining({ route: expect.anything() }),
+      ]),
+    );
+    const guidanceScanCopy = JSON.stringify({
+      ...projected,
+      compounds: projected.compounds.map((compound) => ({
+        ...compound,
+        studies: compound.studies.map((study) => ({
+          ...study,
+          population: study.pmid === "21875351" && study.population === expectedTask8EStudies[5].population
+            ? "[exact neutral completion metadata verified separately]"
+            : study.population,
+        })),
+      })),
+    });
+    expect(guidanceScanCopy).not.toMatch(
       /\b(?:recommended|dosage|take|self-inject|administer|protocol|stacking?|cycle|for human use|human consumption)\b/iu,
     );
   });
@@ -725,6 +771,16 @@ describe("projectPublicCompoundResearch", () => {
     findRecord(unknownStudyKey.studies.studies, "pmid-35658024").reviewNote =
       "Must remain private";
     expectInvalid(unknownStudyKey);
+
+    const guidanceInAllenPopulation = freshSource();
+    findRecord(guidanceInAllenPopulation.studies.studies, "pmid-21875351").population =
+      "Recommended dosage: administer daily";
+    expectInvalid(guidanceInAllenPopulation);
+
+    const guidanceInAllenTitle = freshSource();
+    findRecord(guidanceInAllenTitle.studies.studies, "pmid-21875351").title =
+      "Recommended dosage: administer daily";
+    expectInvalid(guidanceInAllenTitle);
   });
 
   it("rejects incompatible evidence contexts and altered approved metadata", () => {
@@ -744,6 +800,14 @@ describe("projectPublicCompoundResearch", () => {
     const erroneousHumanAggregate = freshSource();
     findRecord(erroneousHumanAggregate.compounds.compounds, "epithalon").strongestEvidence = "human_observational";
     expectInvalid(erroneousHumanAggregate);
+
+    const kpvAsHuman = freshSource();
+    findRecord(kpvAsHuman.studies.studies, "pmid-18061177").evidenceContext = "human";
+    expectInvalid(kpvAsHuman);
+
+    const kpvAsInVitroOnly = freshSource();
+    findRecord(kpvAsInVitroOnly.compounds.compounds, "kpv").strongestEvidence = "in_vitro_only";
+    expectInvalid(kpvAsInVitroOnly);
 
     const alteredNames = freshSource();
     const compound = findRecord(

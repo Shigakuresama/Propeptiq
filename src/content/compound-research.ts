@@ -55,6 +55,7 @@ const strongestEvidenceValues = Object.freeze([
   "human_observational",
   "human_rct",
   "in_vitro_only",
+  "preclinical_only",
 ] as const);
 
 type ParsedStudy = Omit<PublicCompoundStudy, "corrections"> & Readonly<{
@@ -117,9 +118,12 @@ const authorizedCompoundSlugs = Object.freeze({
   dsip: "dsip",
   epithalon: "epithalon",
   "ghk-cu": "ghk-cu",
+  glutathione: "glutathione",
   hcg: "hcg",
   "igf-1-lr3": "igf-1-lr3",
   ipamorelin: "ipamorelin",
+  kpv: "kpv",
+  ll37: "ll37",
   "mots-c": "mots-c",
   "nad-plus": "nad-plus",
   retatrutide: "retatrutide",
@@ -144,20 +148,26 @@ const authorizedStudies = Object.freeze({
   "16352683": { compoundId: "cjc-1295-with-dac", reviewedOn: "2026-09-04" },
   "16847171": { compoundId: "ghk-cu", reviewedOn: "2026-09-04" },
   "17955380": { compoundId: "epithalon", reviewedOn: "2026-09-06" },
+  "18061177": { compoundId: "kpv", reviewedOn: "2026-09-06" },
   "17018654": { compoundId: "cjc-1295-with-dac", reviewedOn: "2026-09-04" },
   "18454096": { compoundId: "selank", reviewedOn: "2026-09-05" },
   "20554713": { compoundId: "tesamorelin", reviewedOn: "2026-09-04" },
   "21030672": { compoundId: "bpc-157", reviewedOn: "2026-09-04" },
+  "21875351": { compoundId: "glutathione", reviewedOn: "2026-09-06" },
   "23168581": { compoundId: "ara-290", reviewedOn: "2026-09-05" },
   "24136731": { compoundId: "ara-290", reviewedOn: "2026-09-05" },
+  "24791752": { compoundId: "glutathione", reviewedOn: "2026-09-06" },
+  "25041740": { compoundId: "ll37", reviewedOn: "2026-09-06" },
   "25176261": { compoundId: "selank", reviewedOn: "2026-09-05" },
   "25331030": { compoundId: "ipamorelin", reviewedOn: "2026-09-04" },
+  "27458604": { compoundId: "kpv", reviewedOn: "2026-09-06" },
   "29593067": { compoundId: "mots-c", reviewedOn: "2026-09-04" },
   "29798983": { compoundId: "semax", reviewedOn: "2026-09-05" },
   "31572171": { compoundId: "nad-plus", reviewedOn: "2026-09-04" },
   "33077895": { compoundId: "ss-31", reviewedOn: "2026-09-05" },
   "33567185": { compoundId: "semaglutide", reviewedOn: "2026-09-04" },
   "33667417": { compoundId: "semaglutide", reviewedOn: "2026-09-04" },
+  "34687253": { compoundId: "ll37", reviewedOn: "2026-09-06" },
   "34798060": { compoundId: "cagrilintide", reviewedOn: "2026-09-04" },
   "35013352": { compoundId: "5-amino-1mq", reviewedOn: "2026-09-04" },
   "35658024": { compoundId: "tirzepatide", reviewedOn: "2026-09-04" },
@@ -534,6 +544,9 @@ function expectedStrongestEvidence(
   }
   if (studies.some((study) => study.evidenceContext === "animal")) {
     return "animal_only";
+  }
+  if (studies.some((study) => study.evidenceContext === "preclinical")) {
+    return "preclinical_only";
   }
   return "in_vitro_only";
 }

@@ -129,7 +129,7 @@ test("all four public sheets opt into the shared drawer motion and restore focus
     .toBeFocused();
   await closeWithEscape(page, search, searchTrigger);
 
-  const cartTrigger = page.getByRole("link", { name: /Cart, 0 requested units/iu });
+  const cartTrigger = page.getByRole("link", { name: /Cart, 0 items/iu });
   await cartTrigger.click();
   const cart = page.getByRole("dialog", { name: "Your cart" });
   await expectPublicSheetMotion(page, cart);
@@ -393,7 +393,7 @@ test("all public sheets remain contained with reachable controls at target width
     );
     await closeWithEscape(page, search, searchTrigger);
 
-    const cartTrigger = page.getByRole("link", { name: /Cart, 0 requested units/iu });
+    const cartTrigger = page.getByRole("link", { name: /Cart, 0 items/iu });
     await cartTrigger.click();
     const cart = page.getByRole("dialog", { name: "Your cart" });
     await expect(cart.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();

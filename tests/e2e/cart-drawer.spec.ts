@@ -15,7 +15,7 @@ async function addBpc10(page: Page, times = 1) {
 }
 
 async function openDrawer(page: Page) {
-  const trigger = page.getByRole("link", { name: /Cart, \d+ requested unit/iu });
+  const trigger = page.getByRole("link", { name: /Cart, \d+ items?/iu });
   await trigger.click();
   const drawer = page.getByRole("dialog", { name: "Your cart" });
   await expect(drawer).toBeVisible();
@@ -157,7 +157,7 @@ test("keyboard, dismissal, search, mobile navigation, reduced motion, and native
   await page.goto("/catalog/items/tirzepatide?source=drawer-test");
   await page.locator(`input[type="radio"][value="${tirzepatide30VariantId}"]`).check();
   await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
-  const trigger = page.getByRole("link", { name: "Cart, 1 requested unit" });
+  const trigger = page.getByRole("link", { name: "Cart, 1 item" });
   await trigger.focus();
   await page.keyboard.press("Enter");
   const drawer = page.getByRole("dialog", { name: "Your cart" });
@@ -206,7 +206,7 @@ test("keyboard, dismissal, search, mobile navigation, reduced motion, and native
   try {
     const fallbackPage = await noJavaScript.newPage();
     await fallbackPage.goto(`${origin}/catalog`);
-    const fallbackLink = fallbackPage.getByRole("link", { name: "Cart, 0 requested units" });
+    const fallbackLink = fallbackPage.getByRole("link", { name: "Cart, 0 items" });
     await expect(fallbackLink).toHaveAttribute("href", "/cart");
     await fallbackLink.click();
     await expect(fallbackPage).toHaveURL(`${origin}/cart`);
@@ -258,7 +258,7 @@ test("preview failure retry, stale response isolation, short-phone layout, and r
   await expect(drawer.getByRole("alert")).toContainText("Your cart could not be updated");
   await expect(drawer).not.toContainText("synthetic browser failure");
   failPreview = false;
-  await drawer.getByRole("button", { name: "Retry current cart facts" }).click();
+  await drawer.getByRole("button", { name: "Try again" }).click();
   await expect(drawer.getByRole("heading", { name: "BPC-157" })).toBeVisible();
   const increase = drawer.getByRole("button", { name: /Increase quantity/iu });
   const beforeHeldRequest = previewRequestCount;

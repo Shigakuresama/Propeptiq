@@ -84,7 +84,7 @@ function DrawerHarness() {
 async function renderAndOpen() {
   const user = userEvent.setup();
   const view = render(<CartProvider><DrawerHarness /></CartProvider>);
-  const trigger = await screen.findByRole("link", { name: /Cart, \d+ requested unit/iu });
+  const trigger = await screen.findByRole("link", { name: /Cart, \d+ items?/iu });
   await user.click(trigger);
   const dialog = await screen.findByRole("dialog", { name: "Your cart" });
   return { dialog, trigger, user, rerender: view.rerender };
@@ -102,7 +102,7 @@ describe("CartDrawer accessible progressive enhancement", () => {
   it("stays lazy while closed and preserves native modified-click and /cart fallbacks", async () => {
     seed([{ variantId: alphaId, quantity: 1 }]);
     render(<CartProvider><DrawerHarness /></CartProvider>);
-    const trigger = await screen.findByRole("link", { name: "Cart, 1 requested unit" });
+    const trigger = await screen.findByRole("link", { name: "Cart, 1 item" });
 
     expect(trigger).toHaveAttribute("href", "/cart");
     expect(fetch).not.toHaveBeenCalled();
@@ -114,7 +114,7 @@ describe("CartDrawer accessible progressive enhancement", () => {
     const { unmount } = render(
       <CartProvider><CartDrawer enabled itemCount={1} /></CartProvider>,
     );
-    const pageLink = screen.getAllByRole("link", { name: "Cart, 1 requested unit" }).at(-1)!;
+    const pageLink = screen.getAllByRole("link", { name: "Cart, 1 item" }).at(-1)!;
     expect(pageLink).not.toHaveAttribute("aria-haspopup");
     expect(fireEvent.click(pageLink)).toBe(true);
     expect(screen.queryByRole("dialog", { name: "Your cart" })).toBeNull();
@@ -271,7 +271,7 @@ describe("CartDrawer accessible progressive enhancement", () => {
     await user.click(screen.getByRole("button", { name: "Add Alpha" }));
     await user.click(screen.getByRole("button", { name: "Add Alpha" }));
     await user.click(screen.getByRole("button", { name: "Add Beta" }));
-    const trigger = await screen.findByRole("link", { name: "Cart, 3 requested units" });
+    const trigger = await screen.findByRole("link", { name: "Cart, 3 items" });
     expect(fetch).not.toHaveBeenCalled();
     await user.click(trigger);
     const dialog = await screen.findByRole("dialog", { name: "Your cart" });
@@ -331,7 +331,7 @@ describe("CartDrawer accessible progressive enhancement", () => {
 
     try {
       render(<CartProvider><ImportFailureHarness /></CartProvider>);
-      const trigger = await screen.findByRole("link", { name: "Cart, 1 requested unit" });
+      const trigger = await screen.findByRole("link", { name: "Cart, 1 item" });
       await user.click(trigger);
       const dialog = await screen.findByRole("dialog", { name: "Your cart" });
       const loading = within(dialog).getByRole("status", { name: "Loading cart" });

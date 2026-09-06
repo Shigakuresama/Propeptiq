@@ -72,9 +72,9 @@ export function AddToCartButton({
     </Button>
     {legacyItemCount != null ? (
       <p className="mt-3 min-w-0 basis-full text-sm leading-6 text-muted-ink">
-        <span>Your saved cart uses an older format. Clear the old cart before adding a variant.</span>{" "}
+        <span>Your saved cart needs to be refreshed. Clear it before adding this item.</span>{" "}
         <a className="record-link inline-flex min-h-11 items-center" href="/cart">
-          Review saved cart
+          Review cart
         </a>
       </p>
     ) : null}

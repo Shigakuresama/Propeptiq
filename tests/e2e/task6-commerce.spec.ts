@@ -69,7 +69,7 @@ async function seedCart(page: Page, quantity = 2) {
     window.sessionStorage.removeItem("propeptiq.cart-preview.presentation.v1");
     window.dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2", storageArea: window.localStorage }));
   }, { id: variantId, requestedQuantity: quantity, previewStorageKey: PREVIEW_PRESENTATION_STORAGE_KEY });
-  await expect(page.getByRole("link", { name: `Cart, ${quantity} requested units` })).toBeVisible();
+  await expect(page.getByRole("link", { name: `Cart, ${quantity} items` })).toBeVisible();
 }
 
 async function openBuyerCheckout(page: Page) {
