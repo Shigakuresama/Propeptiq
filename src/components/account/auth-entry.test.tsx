@@ -37,7 +37,10 @@ import { AuthEntry } from "./auth-entry";
 describe("AuthEntry", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("keeps account creation gracefully unavailable when auth is disabled", async () => {
+  it.each([
+    ["sign-in" as const, "Sign-in is currently unavailable."],
+    ["sign-up" as const, "Account creation is currently unavailable."],
+  ])("keeps %s gracefully unavailable when auth is disabled", async (kind, title) => {
     mocks.getRequestIdentity.mockResolvedValue({
       environment: { AUTH_MODE: "disabled", LOCAL_TEST_DRIVER: "disabled" },
       identity: null,
@@ -45,11 +48,10 @@ describe("AuthEntry", () => {
       localDriver: null,
     });
 
-    render(await AuthEntry({ kind: "sign-up", returnTo: "/checkout" }));
+    render(await AuthEntry({ kind, returnTo: "/checkout" }));
 
-    expect(
-      screen.getByRole("heading", { name: "Account creation is not configured." }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: title })).toBeInTheDocument();
+    expect(screen.getByText("Account access is currently unavailable. No credentials were collected, and checkout remains unavailable.")).toBeVisible();
     expect(screen.queryByText("Managed identity form")).not.toBeInTheDocument();
   });
 

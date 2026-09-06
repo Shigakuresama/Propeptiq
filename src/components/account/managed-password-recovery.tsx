@@ -130,8 +130,8 @@ export function ManagedPasswordResetForm({
           Choose a new password
         </h1>
         <p className="mt-2 text-sm leading-6 text-muted-ink">
-          Use at least 8 characters. After the reset, sign in again to continue
-          to your private page.
+          Use at least 8 characters. After resetting your password, sign in
+          again to continue.
         </p>
       </div>
 

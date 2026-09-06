@@ -34,9 +34,9 @@ test("preserves exact cart IDs and quantities through fixed sign-in and checkout
   await page.getByRole("radio", { name: "Fixed new customer" }).check();
   await page.getByRole("button", { name: "Continue to checkout" }).click();
   await expect(page).toHaveURL(/\/checkout$/);
-  await expect(page.getByRole("heading", { name: "Checkout readiness" })).toBeVisible();
-  await expect(page.getByRole("list", { name: "Saved cart lines" })).toContainText("Synthetic Reference Alpha");
-  await expect(page.getByRole("list", { name: "Saved cart lines" })).toContainText("× 2");
+  await expect(page.getByRole("heading", { name: "Complete your checkout" })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Cart items" })).toContainText("Synthetic Reference Alpha");
+  await expect(page.getByRole("list", { name: "Cart items" })).toContainText("× 2");
   const savedCart = await page.evaluate(() =>
     JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"),
   );
@@ -61,7 +61,7 @@ test("activates a new customer only after the verified account facts and current
   await page.getByRole("checkbox", { name: "I confirm that I am at least 21 years old." }).check();
   await page.getByLabel("Research purpose").selectOption("analytical");
   await page.getByRole("checkbox", { name: /accept attestation version 1/i }).check();
-  await page.getByRole("button", { name: "Complete verified account" }).click();
+  await page.getByRole("button", { name: "Complete account setup" }).click();
   await expect(
     page.getByRole("status", { name: "Account facts saved" }),
   ).toContainText("Account facts saved");
@@ -92,7 +92,7 @@ test("keeps a blocked customer read-only while retaining own account and order r
   await expect(page.getByText("Order local-order-blocked", { exact: true })).toBeVisible();
   await page.goto("/checkout");
   await expect(page.getByRole("alert").filter({ hasText: "blocked" })).toContainText("blocked");
-  await expect(page.getByRole("button", { name: /Update account facts|Complete verified account/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Save account details|Complete account setup/i })).toHaveCount(0);
 });
 
 test("shows precise admin gates for non-admin, missing-MFA, and missing-capability principals", async ({ page }) => {

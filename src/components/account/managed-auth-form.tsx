@@ -168,7 +168,7 @@ export function ManagedAuthForm({
       <ManagedOtpForm
         email={verificationEmail}
         initialMessage={
-          state.message || "Your account exists, but its email must be verified before private records are available."
+          state.message || "Verify your email to continue to your account."
         }
         returnTo={returnTo}
       />
@@ -184,8 +184,8 @@ export function ManagedAuthForm({
         </h1>
         <p className="mt-2 text-sm leading-6 text-muted-ink">
           {kind === "sign-in"
-            ? "Use the verified email connected to your private records."
-            : "Email verification is required before private records or checkout become available."}
+            ? "Enter the email address and password for your account."
+            : "Verify your email after creating your account to continue."}
         </p>
       </div>
 
@@ -264,7 +264,7 @@ export function ManagedAuthForm({
             ? "Signing in…"
             : "Creating account…"
           : kind === "sign-in"
-            ? "Sign in securely"
+            ? "Sign in"
             : "Create account"}
       </Button>
     </form>
