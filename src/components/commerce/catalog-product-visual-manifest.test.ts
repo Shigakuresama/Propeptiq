@@ -145,6 +145,12 @@ const alternateProductSlugs = [
   "nad-plus",
   "semax",
   "selank",
+  "hgh",
+  "ghk-cu",
+  "tesmorelin",
+  "tesmorelin-ipa",
+  "tb500",
+  "bpc-tb-blend",
 ] as const;
 const alternateSceneIds = [
   "three-quarter",
@@ -152,6 +158,15 @@ const alternateSceneIds = [
   "copy-space-detail",
   "overhead",
   "ambient-studio",
+] as const;
+
+const secondAlternateBatchSources = [
+  ["hgh", ["/catalog/individual/hgh/three-quarter-v1.webp", "/catalog/individual/hgh/multi-vial-study-v1.webp", "/catalog/individual/hgh/copy-space-detail-v1.webp", "/catalog/individual/hgh/overhead-v1.webp", "/catalog/individual/hgh/ambient-studio-v1.webp"]],
+  ["ghk-cu", ["/catalog/individual/ghk-cu/three-quarter-v1.webp", "/catalog/individual/ghk-cu/multi-vial-study-v1.webp", "/catalog/individual/ghk-cu/copy-space-detail-v1.webp", "/catalog/individual/ghk-cu/overhead-v1.webp", "/catalog/individual/ghk-cu/ambient-studio-v1.webp"]],
+  ["tesmorelin", ["/catalog/individual/tesmorelin/three-quarter-v1.webp", "/catalog/individual/tesmorelin/multi-vial-study-v1.webp", "/catalog/individual/tesmorelin/copy-space-detail-v1.webp", "/catalog/individual/tesmorelin/overhead-v1.webp", "/catalog/individual/tesmorelin/ambient-studio-v1.webp"]],
+  ["tesmorelin-ipa", ["/catalog/individual/tesmorelin-ipa/three-quarter-v1.webp", "/catalog/individual/tesmorelin-ipa/multi-vial-study-v1.webp", "/catalog/individual/tesmorelin-ipa/copy-space-detail-v1.webp", "/catalog/individual/tesmorelin-ipa/overhead-v1.webp", "/catalog/individual/tesmorelin-ipa/ambient-studio-v1.webp"]],
+  ["tb500", ["/catalog/individual/tb500/three-quarter-v1.webp", "/catalog/individual/tb500/multi-vial-study-v1.webp", "/catalog/individual/tb500/copy-space-detail-v1.webp", "/catalog/individual/tb500/overhead-v1.webp", "/catalog/individual/tb500/ambient-studio-v1.webp"]],
+  ["bpc-tb-blend", ["/catalog/individual/bpc-tb-blend/three-quarter-v1.webp", "/catalog/individual/bpc-tb-blend/multi-vial-study-v1.webp", "/catalog/individual/bpc-tb-blend/copy-space-detail-v1.webp", "/catalog/individual/bpc-tb-blend/overhead-v1.webp", "/catalog/individual/bpc-tb-blend/ambient-studio-v1.webp"]],
 ] as const;
 
 const expectedAlternateAssets = [
@@ -185,14 +200,59 @@ const expectedAlternateAssets = [
   ["selank", "copy-space-detail", "/catalog/individual/selank/copy-space-detail-v1.webp", "81c38103886b4d629b0c4ec33431379c910013a171f2daf01e3f12ef9f9d63a9", "8c2b6ca3755f262054f742ba94553d6782b2afd5d03572232ebe51f1a5100b6d", 31922],
   ["selank", "overhead", "/catalog/individual/selank/overhead-v1.webp", "939bbc621c64da24e9b19860ca2fe0e49d49102483648cff4982441cbce1435d", "216e525da72140545052675f546a62c648b9a53dbcfc6cfaf805e33130285647", 44816],
   ["selank", "ambient-studio", "/catalog/individual/selank/ambient-studio-v1.webp", "01df3372d2b0cb74389cb16e13c15d8c99d0a6a0e412aacd2b2695d414034807", "455285ae7323625c169099be842efe2b66149de7db67ad99180cb2039d5fedf0", 52278],
+  ["hgh", "three-quarter", "/catalog/individual/hgh/three-quarter-v1.webp", "baf8f96e5f9f7d76c2d5e72754b6de5b5d7fc1aaafed3167f7f6df6e11b18342", "a8bfb8222f8cbb345f6ce4a226b1f82363437ba885555e4a1b6540920b2fc303", 42368],
+  ["hgh", "multi-vial-study", "/catalog/individual/hgh/multi-vial-study-v1.webp", "e73fb8fed5b2c0c633fb131823a25fb6233b7fd123dbf67a48f591c54e29cbdb", "a1988d91013c33eee7913340ea3bb77da16fc0987d39398af3046e6f9e270937", 50616],
+  ["hgh", "copy-space-detail", "/catalog/individual/hgh/copy-space-detail-v1.webp", "d7e8c387c41788a743a3a861a84a562024fe1674638ad2b1cf2082e6a5b905bb", "db0f42dbfd3e131060dcab183f5d11dd7bc7fe380bf15f962c07df822c087944", 26920],
+  ["hgh", "overhead", "/catalog/individual/hgh/overhead-v1.webp", "a20488cfea299aae7061fc3e13b1df0674ce52627d5ae6303dfd33b9f1226114", "a80664c1ca0ca42121d21d9de00847ef687d0e7a70fb4e415d61d799b7c95ab7", 53952],
+  ["hgh", "ambient-studio", "/catalog/individual/hgh/ambient-studio-v1.webp", "ae7d633991adb90b8e75138263de438cd89e973af5fe455365097d62017765be", "cb95b56752881295cfcdffc028b3364d88d4be01e5b40e4de9ce224f0d79fa2f", 49340],
+  ["ghk-cu", "three-quarter", "/catalog/individual/ghk-cu/three-quarter-v1.webp", "04bcd0565374d04cf4853d2be00c1ad7d78323a9422b7d75a6ce4f05ce538c6e", "2c994d4ab661f7a7d738368724758e1ee782e0819e3557666604f7910447f027", 37614],
+  ["ghk-cu", "multi-vial-study", "/catalog/individual/ghk-cu/multi-vial-study-v1.webp", "061310921879ec5007b58ab3e1f7c9544b015eded840cf9546d6a8d14a9da7cb", "584e69770f7ef8bf5e8cf7c82b2d223f6ca0e927ea69156bdf4f5f3fcb401833", 54982],
+  ["ghk-cu", "copy-space-detail", "/catalog/individual/ghk-cu/copy-space-detail-v1.webp", "abc8f01b1560da50c07db3255c4f761d59ac997b3f70a87681924c1192f65a40", "c8bdcf95614b131d9c5932cf3cda0d7a0ad722b6b7293f72c13e303c1ae205e6", 28886],
+  ["ghk-cu", "overhead", "/catalog/individual/ghk-cu/overhead-v1.webp", "533215f8d133f7a1a78fe3c2e75d4868d7079c9d6f53638cab9d9470926fb4fd", "e1a6456f69ecdc6b2bfd56b83661e2d42ecc8726ee88db622be2f0f085ce1819", 47884],
+  ["ghk-cu", "ambient-studio", "/catalog/individual/ghk-cu/ambient-studio-v1.webp", "8056d62cbc66363424446442fb75a4b35d6e5ca36d91cf776d0d10b033420510", "bddb674422df366c14697c9fd0400225ef50199d8c78dd94677638badd350441", 53336],
+  ["tesmorelin", "three-quarter", "/catalog/individual/tesmorelin/three-quarter-v1.webp", "881c481a7e36def7a7a83e4a008608c000b45f6565d38ad55507055ee85425cd", "eda37af974be1aa17cad13b2890d317f27c33e2e477ef15661134f2565e3ef48", 46730],
+  ["tesmorelin", "multi-vial-study", "/catalog/individual/tesmorelin/multi-vial-study-v1.webp", "3f7f0498b407cc7d04bbd19b2c45fffe3d15ddf60496f27e594c35f88a5aa701", "a9e0052e2462377731d2293ec4efb3fe4cb068e85346f0c2651228bf8e4f1eac", 58242],
+  ["tesmorelin", "copy-space-detail", "/catalog/individual/tesmorelin/copy-space-detail-v1.webp", "42d79a63f65d7992d56015d53473412e95a9613d91270edbc6bbbbd6e5cf8b67", "bcbbf6f09c0e101ea9a45fc2131a39d3e817c20fb6e45eade31aabd6f2ecd577", 33416],
+  ["tesmorelin", "overhead", "/catalog/individual/tesmorelin/overhead-v1.webp", "08445af6a1813abaf4f552eaf1a62aabdd952636312344ea96ca3b927dbaf908", "3167e83bba92fb0e3283de3b9d1ff2e5ee353f1570198e44fdc04287352a6f79", 52004],
+  ["tesmorelin", "ambient-studio", "/catalog/individual/tesmorelin/ambient-studio-v1.webp", "d9b115f7bc84bf726c7c50f18d464d773e3299750463d87deeea5c040c77c9b8", "4d7fcbe846e5e7e110838a634f6e0fb34cf7164e71322d4b495c6a0116435bde", 55132],
+  ["tesmorelin-ipa", "three-quarter", "/catalog/individual/tesmorelin-ipa/three-quarter-v1.webp", "4b5aee65039c819c9ae431c7ff38a92210dc308b750c19f0d832081b4837389d", "6ca4b9f11782e97f740fec416cd5af301b42f5022f390c3bc105743a74253a2a", 45928],
+  ["tesmorelin-ipa", "multi-vial-study", "/catalog/individual/tesmorelin-ipa/multi-vial-study-v1.webp", "79809c7d692a542ef46624877fc1ad3b2c3539e8fc4d8f5834b63efbd2a74687", "f7ae993c825d344b37b1df75b073285408ce9ebf11415ebad3666ff922c371a1", 65230],
+  ["tesmorelin-ipa", "copy-space-detail", "/catalog/individual/tesmorelin-ipa/copy-space-detail-v1.webp", "746c8204a25f922fc825a02e31b071d4cecdd062f83c4ed9e5ce796180078b8f", "2588d15be2473204598146937317434f1ef5c17103b62f863b8ebbba19d4dda6", 33850],
+  ["tesmorelin-ipa", "overhead", "/catalog/individual/tesmorelin-ipa/overhead-v1.webp", "c845232b99630dcfcafb88fe4265958350aad4eda5e095d5a0216e5157886f0a", "24a733dd008325c92885348f8375b38faf44e0dda06e5540a634dd9b575f7d3d", 55986],
+  ["tesmorelin-ipa", "ambient-studio", "/catalog/individual/tesmorelin-ipa/ambient-studio-v1.webp", "5105e44c927eac4e65b95c635c204bdcbc835bfb44d4b341a88344683edb3b09", "1e98476a49467e5de787ecbd1c6b69e3ed8a2ff195303e52d7e4873c60cf42db", 63514],
+  ["tb500", "three-quarter", "/catalog/individual/tb500/three-quarter-v1.webp", "0b1788aac0bd337089692e7b282bd3d9d71db640f9c1cebc7d871efa8e5117af", "f34639d987a05a244e8a3f5b62b34fc3e3f248661c5fc478f4e1cd306233d814", 48390],
+  ["tb500", "multi-vial-study", "/catalog/individual/tb500/multi-vial-study-v1.webp", "4e7ea3d61740178ba614471e6acdff9546782cc62eaa06bcb2e9f5104b4cd1e1", "c632285a37ffc3a963f2ee41eb42ec824d1a5c7ece494ee9909a7189e4dc86e4", 72106],
+  ["tb500", "copy-space-detail", "/catalog/individual/tb500/copy-space-detail-v1.webp", "bfcb688f1060bd6cc892e3e2fad91aef735b770394f076d0086f079772d9336d", "a2ebfaa0ddbdaf58a42feb0db0cc2a2d366926c710129cdf2f1d312482144e08", 36556],
+  ["tb500", "overhead", "/catalog/individual/tb500/overhead-v1.webp", "26375c33a4b397a2ec3f819ddd3ed6978c5a14153e81e765ef73df03c628b594", "0026f5b72d1e706c8dd4fb793f8d14ff2b2af7e99c900e1faf55ee5bea78d776", 54226],
+  ["tb500", "ambient-studio", "/catalog/individual/tb500/ambient-studio-v1.webp", "c035490ffb5598468d56a61eb0cfeea8d732b13d45470ee3d624a39f43b6d342", "1d5e3243f69ee39562e51ff79f652915c7654dac66832d8cf181bba975d23ea6", 55290],
+  ["bpc-tb-blend", "three-quarter", "/catalog/individual/bpc-tb-blend/three-quarter-v1.webp", "37ff42875fb1ad2b45532b78ba26b81a5aa2eb7971e0f6cf4b0335527816306b", "22939028652f5583c8bfc4c3849bd9883ac0b8ef3ae1020ed92de6f8d69fd049", 48056],
+  ["bpc-tb-blend", "multi-vial-study", "/catalog/individual/bpc-tb-blend/multi-vial-study-v1.webp", "ec04b4af60e17aab0977000de55ec4a425fef7536eef00619e1beffbea31b8e5", "c6624f2b4fb390ac3b191412e70700b250d5cf7c1a29df541a92f2372e15f893", 63296],
+  ["bpc-tb-blend", "copy-space-detail", "/catalog/individual/bpc-tb-blend/copy-space-detail-v1.webp", "18436a0d26a8b9a2cbb4de0721811b02037074410392c4cf89a50188ebbba2ea", "c46d965683cb3c2706ae931f8e7e60be68af2c45fc9be39b7e567df37bec27bc", 34796],
+  ["bpc-tb-blend", "overhead", "/catalog/individual/bpc-tb-blend/overhead-v1.webp", "cbac340447ccb99c160fbb04a137d95929ff4ac15ec1264a088e2f5dc69fb577", "92d36232b891d59d35aea0f06f36846a546903000006129a20cae29ea511ec2a", 58966],
+  ["bpc-tb-blend", "ambient-studio", "/catalog/individual/bpc-tb-blend/ambient-studio-v1.webp", "57b4be942014131f217d9933733d38b619a3184762c96f8944cf259c4c65efbf", "2041b2cb51aab4aec410123c1145727cf4f61c91f37884a96da90793f01ffa86", 54588],
 ] as const;
 
 describe("catalog product visual manifest", () => {
-  it("resolves the exact 30 product-specific alternate assets while retaining 50 shared tails", async () => {
-    expect(expectedAlternateAssets).toHaveLength(30);
+  it("resolves the second batch of six exact product-specific alternate source sets", () => {
+    expect(secondAlternateBatchSources).toHaveLength(6);
+    expect(new Set(secondAlternateBatchSources.flatMap(([, sources]) => sources))).toHaveLength(30);
+
+    for (const [slug, expectedSources] of secondAlternateBatchSources) {
+      const resolved = getCatalogProductVisualScenes(slug);
+      expect(resolved).toHaveLength(6);
+      expect(resolved[0]).toBe(catalogProductFrontVisuals[slug]);
+      expect(resolved.slice(1).map(({ id }) => id)).toEqual([...alternateSceneIds]);
+      expect(resolved.slice(1).map(({ src }) => src)).toEqual([...expectedSources]);
+      expect(Object.isFrozen(resolved)).toBe(true);
+      expect(getCatalogProductVisualScenes(slug)).toBe(resolved);
+    }
+  });
+
+  it("resolves the exact 60 product-specific alternate assets while retaining 44 shared tails", async () => {
+    expect(expectedAlternateAssets).toHaveLength(60);
     expect([...new Set(expectedAlternateAssets.map(([slug]) => slug))]).toEqual([...alternateProductSlugs]);
-    expect(new Set(expectedAlternateAssets.map(([, , src]) => src))).toHaveLength(30);
-    expect(new Set(expectedAlternateAssets.map(([, , , , outputSha256]) => outputSha256))).toHaveLength(30);
+    expect(new Set(expectedAlternateAssets.map(([, , src]) => src))).toHaveLength(60);
+    expect(new Set(expectedAlternateAssets.map(([, , , , outputSha256]) => outputSha256))).toHaveLength(60);
 
     for (const slug of alternateProductSlugs) {
       const expected = expectedAlternateAssets.filter(([assetSlug]) => assetSlug === slug);
@@ -233,7 +293,7 @@ describe("catalog product visual manifest", () => {
     const sharedTailSlugs = expectedCanonicalProductSlugs.filter(
       (slug) => !alternateProductSlugs.includes(slug as (typeof alternateProductSlugs)[number]),
     );
-    expect(sharedTailSlugs).toHaveLength(50);
+    expect(sharedTailSlugs).toHaveLength(44);
     for (const slug of sharedTailSlugs) {
       expect(getCatalogProductVisualScenes(slug).slice(1)).toEqual(catalogProductVisualManifest.slice(1));
     }

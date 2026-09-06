@@ -12,6 +12,7 @@ import { CatalogProductGallery } from "./catalog-product-gallery";
 describe("CatalogProductGallery", () => {
   it.each([
     ["semax", "Semax", "/catalog/individual/semax/three-quarter-v1.webp"],
+    ["tesmorelin-ipa", "Tesmorelin + IPA", "/catalog/individual/tesmorelin-ipa/three-quarter-v1.webp"],
     ["cjc-1295-no-dac-ipa-cp20", "CJC-1295 NO DAC 10mg + IPA 10mg", "/catalog/visual-masters/three-quarter.webp"],
   ])("uses the mapped %s product scenes", async (slug, name, expectedAlternateSource) => {
     const product = testCanonicalProduct([], { slug, name });

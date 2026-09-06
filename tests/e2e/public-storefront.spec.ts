@@ -2530,6 +2530,12 @@ test("Retatrutide gallery decodes its five individual alternate scenes", async (
 test("NAD+ gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "nad-plus", name: "NAD+", variant: "500mg" }));
 test("Semax gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "semax", name: "Semax", variant: "10mg" }));
 test("Selank gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "selank", name: "Selank", variant: "10mg" }));
+test("HGH gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "hgh", name: "HGH", variant: "10iu" }));
+test("GHK-CU gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "ghk-cu", name: "GHK-CU", variant: "50mg" }));
+test("Tesmorelin gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "tesmorelin", name: "Tesmorelin", variant: "10mg" }));
+test("Tesmorelin + IPA gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "tesmorelin-ipa", name: "Tesmorelin + IPA", variant: "Tesmorelin 10mg + IPA 3mg" }));
+test("TB500 gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "tb500", name: "TB500 (Thymosin B4 acetate)", variant: "10mg" }));
+test("BPC 5mg + TB 5mg gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "bpc-tb-blend", name: "BPC 5mg + TB 5mg", variant: "10mg" }));
 
 test("navigation, homepage trust content, product research, and related records are visibly complete", async ({
   page,
