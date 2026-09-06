@@ -558,7 +558,10 @@ async function coldSample(browser: Browser, routeLabel: string, path: string, vi
     if (!raw.supported.includes("longtask")) sample.integrityErrors.push("missing longtask observer");
     if (raw.shifts.some((shift) => shift.hadRecentInput)) sample.integrityErrors.push("unexpected hadRecentInput layout shift in no-input sample");
     if (!(sample.cls.maximumSessionWindow < 0.1)) sample.integrityErrors.push(`CLS max session window ${sample.cls.maximumSessionWindow} is not strictly below 0.1`);
-    if (sample.lcp?.url?.toLowerCase().endsWith("front.webp")) {
+    const lcpSource = sample.lcp?.url
+      ? new URL(sample.lcp.url).searchParams.get("url") ?? new URL(sample.lcp.url).pathname
+      : null;
+    if (lcpSource && /^\/catalog\/(?:visual-masters\/front|individual\/[^/]+\/front-v1)\.webp$/u.test(lcpSource)) {
       evidence.knownLcpHints.push({ iteration, routeLabel, url: sample.lcp.url, viewport });
     }
     for (const warning of boundary.consoleWarnings) {

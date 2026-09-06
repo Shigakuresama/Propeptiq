@@ -5,7 +5,7 @@ import { useId, useRef, useState, type KeyboardEvent } from "react";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import { CatalogProductVisual } from "./catalog-product-visual";
-import { catalogProductVisualManifest as scenes } from "./catalog-product-visual-manifest";
+import { getCatalogProductVisualScenes } from "./catalog-product-visual-manifest";
 
 type GalleryProps = {
   product: PublicStorefrontProduct;
@@ -18,6 +18,7 @@ export function CatalogProductGallery(props: GalleryProps) {
 }
 
 function ProductGallery({ product, variantLabel, discountPercent }: GalleryProps) {
+  const scenes = getCatalogProductVisualScenes(product.slug);
   const [activeIndex, setActiveIndex] = useState(0);
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
   const id = useId();

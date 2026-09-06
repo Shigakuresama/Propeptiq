@@ -10,6 +10,22 @@ import { testCanonicalProduct } from "./storefront-test-fixtures";
 import { CatalogProductGallery } from "./catalog-product-gallery";
 
 describe("CatalogProductGallery", () => {
+  it("uses the mapped product front and keeps later scenes on the shared masters", async () => {
+    const product = testCanonicalProduct([], { slug: "semax", name: "Semax" });
+    render(<CatalogProductGallery product={product} />);
+    const gallery = screen.getByRole("region", {
+      name: "Semax product illustration gallery",
+    });
+    expect(within(gallery).getByRole("img").getAttribute("src")).toContain(
+      encodeURIComponent("/catalog/individual/semax/front-v1.webp"),
+    );
+
+    await userEvent.click(within(gallery).getByRole("tab", { name: "Three-quarter" }));
+    expect(within(gallery).getByRole("img").getAttribute("src")).toContain(
+      encodeURIComponent("/catalog/visual-masters/three-quarter.webp"),
+    );
+  });
+
   it("exposes one truthful active visual, six roving scene tabs, and one status", () => {
     const product = testCanonicalProduct();
     const { container } = render(
