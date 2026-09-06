@@ -697,3 +697,14 @@ The final handoff must include one row per top-level task. Use `not applicable` 
 | 19 | PR #27 merge `975a96f2ae047bb6b5e94785a5d5da82205833d1`; tested tree `3d5629ec2186323daf2b1850ab0e779fa33fef75` | Final browser 158/158, 232 files / 3,528 unit tests, lint/typecheck/fresh build/artifact gates | CodeRabbit and qlty passed | READY <https://propeptiq-43xw3wg8h-sergiosteam.vercel.app>; `propeptiq.com` and `www` aliases confirmed | Bounded bibliography/header/footer/keyboard/log/reset checks recorded above | Partial — PR #27 slice released; full storefront acceptance and remaining business/provider gates open |
 
 No row may use “done” without the task-specific evidence required by the completion rule.
+
+## Task 20 — Customer-facing language (owner addition)
+
+Owner direction: remove labels such as “Cart preview” and rephrase the storefront toward launch. This is a copy and presentation change, not authorization to imply payments, inventory, subscriptions, or newsletter delivery work when they do not.
+
+- [ ] 20A: use ordinary shopping language for cart headings, add actions, loading/error messages, price summaries and cart-update acknowledgements. Preserve disabled checkout, server pricing, pending prices and explicit test-mode identification.
+- [ ] 20B: replace internal publication/snapshot/owner-record language in homepage, catalog, product introductions and footer with concise customer-facing wording. Preserve research-use restrictions, honest illustration disclosures and unavailable product states; do not add unsupported claims.
+- [ ] Verify exact changed accessible labels and state-dependent notices, cart behavior, narrow mobile layout, keyboard use and relevant search/FAQ consistency.
+- [ ] Review, merge/deploy and inspect the wording on production; local changes alone do not complete this task.
+
+Add a Task 20 row to the final evidence table with commit, checks, review, deployment and live evidence. Initial status: Partial — implementation started, not deployed.
