@@ -165,6 +165,52 @@ const expectedTask8CCompounds = [
   },
 ] as const;
 
+const expectedTask8DStudies = [
+  {
+    id: "pmid-1299794", compoundId: "dsip", pmid: "1299794", url: "https://pubmed.ncbi.nlm.nih.gov/1299794/",
+    title: "Effects of delta sleep-inducing peptide on sleep of chronic insomniac patients. A double-blind study.", firstAuthor: "Bes F", year: 1992,
+    journal: "Neuropsychobiology", design: "randomized_controlled_trial", evidenceContext: "human", sampleSize: 16,
+    population: "People with chronic insomnia", studiedAmount: null, duration: null, route: null, doi: "10.1159/000118919", outcomeSummary: null,
+    verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06",
+  },
+  {
+    id: "pmid-6895513", compoundId: "dsip", pmid: "6895513", url: "https://pubmed.ncbi.nlm.nih.gov/6895513/",
+    title: "Acute and delayed effects of DSIP (delta sleep-inducing peptide) on human sleep behavior.", firstAuthor: "Schneider-Helmert D", year: 1981,
+    journal: "Int J Clin Pharmacol Ther Toxicol", design: "human_interventional", evidenceContext: "human", sampleSize: 6,
+    population: "Six healthy volunteers", studiedAmount: null, duration: null, route: null, doi: null, outcomeSummary: null,
+    verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06",
+  },
+  {
+    id: "pmid-40493162", compoundId: "epithalon", pmid: "40493162", url: "https://pubmed.ncbi.nlm.nih.gov/40493162/",
+    title: "The Antioxidant Tetrapeptide Epitalon Enhances Delayed Wound Healing in an in Vitro Model of Diabetic Retinopathy.", firstAuthor: "Gatta M", year: 2025,
+    journal: "Stem Cell Rev Rep", design: "in_vitro_experimental", evidenceContext: "in_vitro", sampleSize: null,
+    population: "Human ARPE-19 retinal pigment epithelial cells in vitro", studiedAmount: null, duration: null, route: null, doi: "10.1007/s12015-025-10911-x", outcomeSummary: null,
+    verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06",
+  },
+  {
+    id: "pmid-17955380", compoundId: "epithalon", pmid: "17955380", url: "https://pubmed.ncbi.nlm.nih.gov/17955380/",
+    title: "Effects of intranasal administration of epitalon on neuron activity in the rat neocortex.", firstAuthor: "Sibarov DA", year: 2007,
+    journal: "Neurosci Behav Physiol", design: "animal_experimental", evidenceContext: "animal", sampleSize: null,
+    population: "Male Wistar rats", studiedAmount: null, duration: null, route: null, doi: "10.1007/s11055-007-0095-3", outcomeSummary: null,
+    verificationStatus: "verified_primary_source", publicationStatus: "public_neutral_metadata", reviewedOn: "2026-09-06",
+  },
+] as const;
+
+const expectedTask8DCompounds = [
+  {
+    id: "dsip", productSlug: "dsip", displayName: "DSIP", alternateNames: ["Delta sleep-inducing peptide"],
+    studyIds: ["pmid-1299794", "pmid-6895513"], strongestEvidence: "human_rct",
+    identityCaveat: "The cited literature names DSIP or delta sleep-inducing peptide as a study intervention; that name correspondence does not establish the identity, sequence, composition, formulation, quality, or equivalence of the PropeptIQ catalog material.",
+    mechanism: null, benefitClaim: null,
+  },
+  {
+    id: "epithalon", productSlug: "epithalon", displayName: "Epithalon", alternateNames: ["Epitalon"],
+    studyIds: ["pmid-40493162", "pmid-17955380"], strongestEvidence: "animal_only",
+    identityCaveat: "The catalog uses Epithalon, while the cited papers use Epitalon for a synthetic tetrapeptide identified in those papers as AEDG (Ala-Glu-Asp-Gly). This literature spelling and study-material description do not establish the identity, sequence, composition, formulation, quality, purity, or equivalence of the PropeptIQ catalog material. Epitalon is not treated as equivalent to Epithalamin or any pineal or epiphyseal peptide extract.",
+    mechanism: null, benefitClaim: null,
+  },
+] as const;
+
 const approvedCorrections = {
   schemaVersion: 1,
   corrections: [
@@ -180,6 +226,8 @@ const expectedCompoundOrder = [
   "bpc-157",
   "cagrilintide",
   "cjc-1295-with-dac",
+  "dsip",
+  "epithalon",
   "ghk-cu",
   "hcg",
   "igf-1-lr3",
@@ -258,14 +306,18 @@ function expectInvalid(source: unknown, corrections?: unknown): void {
 }
 
 describe("verified compound research source", () => {
-  it("preserves the exact existing bibliography and appends only the four Task 8C studies", () => {
+  it("preserves the exact 37-study prefix and appends only the four Task 8D studies", () => {
     expect(studiesJson.schemaVersion).toBe(1);
     expect(studiesJson.studies.map((study) => study.pmid)).toEqual([
       ...expectedExistingPmids,
       ...expectedPreviousReleaseStudies.map((study) => study.pmid),
       ...expectedTask8CStudies.map((study) => study.pmid),
+      ...expectedTask8DStudies.map((study) => study.pmid),
     ]);
-    expect(new Set(studiesJson.studies.map((study) => study.pmid)).size).toBe(37);
+    expect(new Set(studiesJson.studies.map((study) => study.pmid)).size).toBe(41);
+    expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(0, 37))).digest("hex")).toBe(
+      "6937f44c221b8a90372c25bf096cdc47d54e76935342431b6f38a2850de12992",
+    );
     expect(createHash("sha256").update(JSON.stringify(studiesJson.studies.slice(0, 27))).digest("hex")).toBe(
       "13c0d57425ffcda4e861fecb10199b0e7fd83d16d8b69063b40c0ca7a80ba44f",
     );
@@ -304,12 +356,16 @@ describe("verified compound research source", () => {
       expect(study.route).toBeNull();
       expect(study.outcomeSummary).toBeNull();
     }
-    expect(studiesJson.studies.slice(33)).toEqual(expectedTask8CStudies);
+    expect(studiesJson.studies.slice(33, 37)).toEqual(expectedTask8CStudies);
+    expect(studiesJson.studies.slice(37)).toEqual(expectedTask8DStudies);
   });
 
-  it("keeps immutable catalog spelling mappings and appends only the exact Task 8C compounds", () => {
+  it("keeps the exact 22-compound prefix and appends only the Task 8D compounds", () => {
     expect(compoundsJson.schemaVersion).toBe(1);
-    expect(compoundsJson.compounds).toHaveLength(22);
+    expect(compoundsJson.compounds).toHaveLength(24);
+    expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(0, 22))).digest("hex")).toBe(
+      "68575855ec13ab0363adb7777ea95cd65de9b1eb01e2efa95b7578232a11062f",
+    );
     expect(createHash("sha256").update(JSON.stringify(compoundsJson.compounds.slice(0, 17))).digest("hex")).toBe(
       "b23f9802f40eb3d17dc01f7ff7bf614218b060e816ceaf87261f3c32cb526f0c",
     );
@@ -324,7 +380,8 @@ describe("verified compound research source", () => {
       { id: "ss-31", productSlug: "ss-31", studyIds: ["pmid-33077895", "pmid-37268435"], strongestEvidence: "human_rct", mechanism: null, benefitClaim: null },
       { id: "thymosin-alpha-1", productSlug: "thymosin-alpha-1", studyIds: ["pmid-35713670", "pmid-39814420"], strongestEvidence: "human_rct", mechanism: null, benefitClaim: null },
     ]);
-    expect(compoundsJson.compounds.slice(20)).toEqual(expectedTask8CCompounds);
+    expect(compoundsJson.compounds.slice(20, 22)).toEqual(expectedTask8CCompounds);
+    expect(compoundsJson.compounds.slice(22)).toEqual(expectedTask8DCompounds);
 
     const cagrilintide = compoundsJson.compounds.find(
       (compound) => compound.id === "cagrilintide",
@@ -389,7 +446,7 @@ describe("projectPublicCompoundResearch", () => {
     );
     expect(projected.compounds.flatMap((compound) =>
       compound.studies.map((study) => study.pmid)
-    )).toHaveLength(37);
+    )).toHaveLength(41);
 
     const compoundKeys = Object.keys(projected.compounds[0]!).sort();
     const studyKeys = Object.keys(projected.compounds.find((compound) => compound.id === "ss-31")!.studies[0]!).sort();
@@ -675,6 +732,18 @@ describe("projectPublicCompoundResearch", () => {
     findRecord(hostileContext.studies.studies, "pmid-35658024").evidenceContext =
       "animal";
     expectInvalid(hostileContext);
+
+    const inVitroAsHuman = freshSource();
+    findRecord(inVitroAsHuman.studies.studies, "pmid-40493162").evidenceContext = "human";
+    expectInvalid(inVitroAsHuman);
+
+    const inVitroAsAnimal = freshSource();
+    findRecord(inVitroAsAnimal.studies.studies, "pmid-40493162").evidenceContext = "animal";
+    expectInvalid(inVitroAsAnimal);
+
+    const erroneousHumanAggregate = freshSource();
+    findRecord(erroneousHumanAggregate.compounds.compounds, "epithalon").strongestEvidence = "human_observational";
+    expectInvalid(erroneousHumanAggregate);
 
     const alteredNames = freshSource();
     const compound = findRecord(

@@ -242,6 +242,28 @@
       "identityCaveat": "The cited literature names Semax as a study intervention; that name correspondence does not establish the identity, composition, formulation, quality, or equivalence of the PropeptIQ catalog material.",
       "mechanism": null,
       "benefitClaim": null
+    },
+    {
+      "id": "dsip",
+      "productSlug": "dsip",
+      "displayName": "DSIP",
+      "alternateNames": ["Delta sleep-inducing peptide"],
+      "studyIds": ["pmid-1299794", "pmid-6895513"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": "The cited literature names DSIP or delta sleep-inducing peptide as a study intervention; that name correspondence does not establish the identity, sequence, composition, formulation, quality, or equivalence of the PropeptIQ catalog material.",
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "epithalon",
+      "productSlug": "epithalon",
+      "displayName": "Epithalon",
+      "alternateNames": ["Epitalon"],
+      "studyIds": ["pmid-40493162", "pmid-17955380"],
+      "strongestEvidence": "animal_only",
+      "identityCaveat": "The catalog uses Epithalon, while the cited papers use Epitalon for a synthetic tetrapeptide identified in those papers as AEDG (Ala-Glu-Asp-Gly). This literature spelling and study-material description do not establish the identity, sequence, composition, formulation, quality, purity, or equivalence of the PropeptIQ catalog material. Epitalon is not treated as equivalent to Epithalamin or any pineal or epiphyseal peptide extract.",
+      "mechanism": null,
+      "benefitClaim": null
     }
   ]
 }
