@@ -114,9 +114,12 @@ export function CatalogListingCard({
               pricing={pricing}
               showPurchaseStatus={false}
             />
-            <p className="mt-2 text-sm text-muted-ink">
-              {publicVariantPurchaseLabel(selectedPresentation.purchaseState)}
-            </p>
+            {selectedPresentation.purchaseState !== "checkout_unavailable" &&
+              selectedPresentation.purchaseState !== "cart_preview" ? (
+              <p className="mt-2 text-sm text-muted-ink">
+                {publicVariantPurchaseLabel(selectedPresentation.purchaseState)}
+              </p>
+            ) : null}
           </div>
         ) : (
           <p className="mt-5 text-sm font-medium text-muted-ink">Pricing coming soon</p>

@@ -61,6 +61,7 @@ describe("application-owned Better Auth request identity", () => {
     });
     expect(mocks.getSession).toHaveBeenCalledWith({
       headers: mocks.requestHeaders,
+      query: { disableRefresh: true },
     });
   });
 });

@@ -77,10 +77,10 @@ export function ProductPurchasePanel(props: ProductPurchasePanelProps) {
     <div><h3 className="mb-3 font-heading text-2xl text-ink">Quantity</h3><QuantityTierSelector quantity={lastValidQuantity} quantityDraft={quantityDraft} errorId="quantity-error" errorMessage={errorMessage} onQuantityDraftChange={(draft) => { setQuantityDraft(draft); const parsed = parseQuantityDraft(draft, minimumQuantity); if (parsed !== null) storeValidQuantity(parsed); else props.onSelectedQuantityChange?.(null); }} onQuantitySelect={chooseQuantity} /></div>
     <div ref={inlineSummaryRef} role="status" aria-label="Purchase summary" aria-live="polite" aria-atomic="true" className="space-y-2 rounded-xl border border-border bg-canvas p-4">
       <p className="font-semibold text-ink">{selected?.label ?? "No variant selected"} · {quantityIsValid ? `${quantity} bottle${quantity === 1 ? "" : "s"}` : errorMessage}</p>
-      <p className="text-sm text-muted-ink">{status}</p>
+      {presentation?.purchaseState !== "checkout_unavailable" && presentation?.purchaseState !== "cart_preview" ? <p className="text-sm text-muted-ink">{status}</p> : null}
       {price ? <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm"><dt>Standard unit price</dt><dd>{price.effectiveDiscountBps > 0 ? <del>{formatStorefrontMoney(price.baseUnitMinor)}</del> : formatStorefrontMoney(price.baseUnitMinor)}</dd><dt>Effective unit price</dt><dd className="font-semibold">{formatStorefrontMoney(price.effectiveUnitMinor)}</dd><dt>Discount</dt><dd>{price.effectiveDiscountBps / 100}%</dd><dt>Savings</dt><dd>{formatStorefrontMoney(price.lineSavingsMinor)}</dd><dt>Quantity</dt><dd>{price.quantity}</dd><dt>Subtotal</dt><dd className="font-semibold">{formatStorefrontMoney(price.lineSubtotalMinor)}</dd></dl> : null}
       {price?.appliedPromotionIds.length ? <p className="text-sm font-semibold text-moss">{price.appliedPromotionIds.map((id) => { const promotion = pricing.automaticPromotions.find((entry) => entry.id === id); return promotion?.displayCode ?? promotion?.displayName ?? null; }).filter((label): label is string => label !== null).join(", ")}</p> : null}
-      <AddToCartButton {...addToCartProps} />
+      <div className="pt-4"><AddToCartButton {...addToCartProps} /></div>
     </div>
     <MobilePurchaseBar productSlug={product.slug} inlineSummaryRef={inlineSummaryRef} quantity={quantityIsValid ? quantity : null} presentation={presentation} status={status} addToCartProps={addToCartProps} />
   </section>;

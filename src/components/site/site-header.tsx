@@ -4,6 +4,7 @@ import { Menu, UserRound } from "lucide-react";
 import Link from "next/link";
 
 import { SIGN_IN_ROUTE } from "@/auth/routes";
+import { useSessionNavigation } from "@/auth/session-navigation";
 import { useCart } from "@/cart/cart-provider";
 import { CartDrawer } from "@/components/commerce/cart-drawer";
 import { BrandLogo } from "@/components/site/brand-mark";
@@ -28,6 +29,10 @@ import {
 
 export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boolean }>) {
   const { itemCount } = useCart();
+  const session = useSessionNavigation();
+  const accountHref = session === "signed-out" ? SIGN_IN_ROUTE : "/account";
+  const accountLabel = session === "signed-in" ? "Account"
+    : session === "signed-out" ? "Sign in" : "Account access";
 
   return (
     <header className="persistent-chrome">
@@ -63,11 +68,11 @@ export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boole
           <CartDrawer enabled={cartDrawer} itemCount={itemCount} />
 
           <Link
-            href={SIGN_IN_ROUTE}
+            href={accountHref}
             className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-3"
           >
             <UserRound aria-hidden="true" className="size-4" />
-            <span>Sign in</span>
+            <span>{accountLabel}</span>
           </Link>
 
           <Sheet>
@@ -118,10 +123,10 @@ export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boole
                 </SheetClose>
                 <SheetClose asChild>
                   <Link
-                    href={SIGN_IN_ROUTE}
+                    href={accountHref}
                     className="flex min-h-12 items-center rounded-xl px-3 py-3 font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    Sign in
+                    {accountLabel}
                   </Link>
                 </SheetClose>
               </nav>

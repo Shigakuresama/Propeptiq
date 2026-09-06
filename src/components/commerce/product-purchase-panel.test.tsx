@@ -197,7 +197,7 @@ describe("ProductPurchasePanel", () => {
   });
 
   it.each([
-    ["mapping missing", testPublicVariant({ checkoutReady: false }), "Checkout unavailable", true],
+    ["mapping missing", testPublicVariant({ checkoutReady: false }), "This item is unavailable.", true],
     ["unavailable", testPublicVariant({ availability: "unavailable", checkoutReady: false }), "Unavailable", false],
     ["pending null", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: null, currency: null, checkoutReady: false }), "Pricing coming soon", false],
     ["pending positive", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 1000, currency: "USD", checkoutReady: false }), "Pricing coming soon", false],
@@ -227,7 +227,7 @@ describe("ProductPurchasePanel", () => {
     });
     render(<CartProvider><ProductPurchasePanel product={testCanonicalProduct([previewOnly])} pricing={testPricingContext("production")} /></CartProvider>);
     fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: "3" } });
-    expect(screen.getByRole("status", { name: "Purchase summary" })).toHaveTextContent("Checkout unavailable");
+    expect(screen.getByRole("status", { name: "Purchase summary" })).not.toHaveTextContent("Checkout unavailable");
     const add = screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" });
     expect(add).toHaveTextContent("Add to cart");
     fireEvent.click(add);

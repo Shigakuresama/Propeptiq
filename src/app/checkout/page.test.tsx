@@ -91,7 +91,7 @@ vi.mock("@/auth/server", () => ({
   getRequestRepositories: getRequestRepositoriesMock,
 }));
 vi.mock("@/commerce/server-runtime", () => ({
-  isBuyerCheckoutRuntimeReady: buyerCheckoutReadyMock,
+  isCheckoutPageRuntimeReady: buyerCheckoutReadyMock,
 }));
 
 import CheckoutPage from "./page";
@@ -121,7 +121,7 @@ describe("CheckoutPage", () => {
   it("redirects signed-out checkout requests to sign-in", async () => {
     await expect(CheckoutPage()).rejects.toThrow("redirect:/sign-in/");
     expect(redirectMock).toHaveBeenCalledOnce();
-    expect(redirectMock).toHaveBeenCalledWith("/sign-in/");
+    expect(redirectMock).toHaveBeenCalledWith("/sign-in/?returnTo=%2Fcheckout");
   });
 
   it("renders the checkout form only after the active account and attestation gate", async () => {
@@ -151,6 +151,7 @@ describe("CheckoutPage", () => {
     const markup = renderToStaticMarkup(await CheckoutPage());
     expect(markup).toContain("Your account is ready. Review your cart and address details below before continuing to payment.");
     expect(markup).toContain("data-testid=\"checkout-form\"");
+    expect(markup).not.toContain('aria-label="PROPEPTIQ programs"');
     expect(markup).toContain("data-synthetic-local=\"true\"");
   });
 

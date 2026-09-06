@@ -39,13 +39,14 @@ export function PromotionBar({
   return (
     <aside
       aria-label="Promotion"
-      className="grid min-h-24 grid-cols-[auto_minmax(0,1fr)_auto] items-center justify-center gap-2 bg-promotion px-3 py-1 text-center text-sm font-semibold leading-6 text-promotion-foreground sm:min-h-0 sm:grid-cols-[auto_auto_auto] sm:gap-4 sm:px-4 sm:py-2"
+      className="promotion-banner bg-promotion px-4 py-5 text-center text-promotion-foreground sm:py-6"
     >
-      <span aria-hidden="true" className="text-base">❄</span>
-      <p className="min-w-0 [overflow-wrap:anywhere]">
+      <p className="promotion-banner__title">
         {promotion.displayName.toUpperCase()}: {promotion.percentage}% OFF
-        {" "}SITEWIDE — USE CODE {promotion.code}
+        {" "}SITEWIDE
       </p>
+      <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+      <p className="text-sm font-semibold tracking-[0.08em]">{promotion.code} APPLIED AUTOMATICALLY</p>
       <button
         type="button"
         aria-label={`${copyState === "copied" ? "Copied" : "Copy"} promotion code ${promotion.code}`}
@@ -54,6 +55,7 @@ export function PromotionBar({
       >
         {copyState === "copied" ? "Copied" : "Copy"}
       </button>
+      </div>
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
         {status}
       </p>

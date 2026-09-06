@@ -1,6 +1,7 @@
 "use client";
 
 import { type FormEvent, useRef, useState } from "react";
+import { CheckCircle2, LoaderCircle, Mail } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -106,7 +107,12 @@ export function NewsletterForm({
     setLoading(true);
     setStatus(loadingMessage);
     try {
-      setStatus(messageForResult(await submit(parsed.data)));
+      const result = parseNewsletterResult(await submit(parsed.data));
+      if (result?.status === "INVALID" && result.field !== "request") {
+        announceInvalid(result.field);
+      } else {
+        setStatus(messageForResult(result));
+      }
     } catch {
       setStatus(genericErrorMessage);
     } finally {
@@ -128,6 +134,7 @@ export function NewsletterForm({
         : "site-container grid gap-7 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:items-start"}
       >
         <div className="min-w-0 max-w-[36rem]">
+          <Mail aria-hidden="true" className={`mb-5 size-7 ${inFooter ? "text-teal-200" : "text-accent-readable"}`} />
           <p className={inFooter ? "eyebrow text-canvas/70" : "eyebrow"}>Newsletter</p>
           <h2
             id="newsletter-heading"
@@ -142,6 +149,7 @@ export function NewsletterForm({
 
         <form
           aria-label="Newsletter signup"
+          aria-busy={loading}
           className={inFooter
             ? "newsletter-form__fields--footer grid min-w-0 gap-5 rounded-[0.875rem] border border-canvas/25 bg-canvas/[0.06] p-5 sm:p-6"
             : "record-sheet grid gap-5 p-5 sm:p-6"}
@@ -154,6 +162,7 @@ export function NewsletterForm({
             Email address
             <input
               aria-invalid={invalidField === "email" || undefined}
+              aria-describedby={invalidField === "email" ? "newsletter-status" : undefined}
               autoComplete="email"
               className="min-h-11 min-w-0 w-full rounded-lg border border-border bg-canvas px-3 text-base font-normal text-ink outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={unavailable || loading}
@@ -172,6 +181,7 @@ export function NewsletterForm({
           <label className={`flex min-w-0 items-start gap-3 text-sm leading-6 ${inFooter ? "text-canvas/75" : "text-muted-ink"}`}>
             <input
               aria-invalid={invalidField === "consent" || undefined}
+              aria-describedby={invalidField === "consent" ? "newsletter-status" : undefined}
               className="mt-0.5 size-5 shrink-0 accent-moss focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ring"
               disabled={unavailable || loading}
               name="consent"
@@ -184,7 +194,7 @@ export function NewsletterForm({
             />
             <span>
               {privacyLink === null ? (
-                "Newsletter consent is unavailable until an approved privacy policy is configured."
+                "Email signup is not open yet. Please check back later."
               ) : (
                 <>
                   I consent to receive PropeptIQ newsletter emails. Review the{" "}
@@ -207,6 +217,7 @@ export function NewsletterForm({
               disabled={unavailable || loading}
               type="submit"
             >
+              {loading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin motion-reduce:animate-none" /> : null}
               {loading ? loadingMessage : "Subscribe"}
             </Button>
             <p
@@ -214,7 +225,10 @@ export function NewsletterForm({
               aria-live="polite"
               className={`min-h-6 min-w-0 flex-1 text-sm leading-6 ${inFooter ? "text-canvas/75" : "text-muted-ink"}`}
               role="status"
+              id="newsletter-status"
             >
+              {status === subscribedMessage || status === duplicateMessage
+                ? <CheckCircle2 aria-hidden="true" className="mr-2 inline size-4" /> : null}
               {visibleStatus}
             </p>
           </div>

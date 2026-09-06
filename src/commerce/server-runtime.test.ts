@@ -30,6 +30,7 @@ import {
   createStaffCommerceServerRuntime,
   createStripeWebhookServerRuntime,
   isBuyerCheckoutRuntimeReady,
+  isCheckoutPageRuntimeReady,
 } from "@/commerce/server-runtime";
 import { parseServerEnv, type ServerEnv } from "@/config/env-schema";
 import { createAttributionCookie } from "@/growth/attribution-cookie";
@@ -429,6 +430,28 @@ describe("commerce server composition", () => {
     expect(runtime!.buyerUserId).toBe(requestForActor("non_admin").principal!.actorId);
     expect(typeof runtime!.quoteCheckout).toBe("function");
     expect(typeof runtime!.startSession).toBe("function");
+  });
+
+  it("opens the page for configured live PostgreSQL checkout while keeping launch gates closed by default", () => {
+    const request = postgresBuyerRequest({
+      APP_ENV: "production", VERCEL_ENV: "production",
+      CATALOG_DEMO_MODE: "disabled", LOCAL_TEST_DRIVER: "disabled",
+      AUTH_MODE: "live", DATABASE_MODE: "live", EMAIL_MODE: "live",
+      PAYMENTS_MODE: "live", TAX_MODE: "live", SHIPPING_MODE: "live",
+      FULFILLMENT_MODE: "live",
+      COMMERCE_LIVE_CAPABILITY: "enabled", PAYMENTS_LIVE_CAPABILITY: "enabled",
+      STRIPE_SECRET_KEY: "sk_live_synthetic_configuration_test_only",
+    });
+    expect(isCheckoutPageRuntimeReady(request)).toBe(true);
+    expect(isCheckoutPageRuntimeReady({ ...request, principal: null })).toBe(false);
+    for (const key of ["COMMERCE_LIVE_CAPABILITY", "PAYMENTS_LIVE_CAPABILITY"] as const) {
+      expect(isCheckoutPageRuntimeReady({ ...request, environment: {
+        ...request.environment, [key]: "disabled",
+      } })).toBe(false);
+    }
+    expect(isCheckoutPageRuntimeReady({ ...request, environment: {
+      ...request.environment, STRIPE_SHIPPING_RATE_ID: undefined,
+    } as ServerEnv })).toBe(false);
   });
 
   it.each([

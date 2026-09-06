@@ -8,15 +8,23 @@ export default async function proxy(request: NextRequest) {
   const environment = parseServerEnv(process.env);
   const auth = getBetterAuthForEnvironment(environment);
   if (!auth) return;
-  const validatedSession = await auth.api.getSession({
+  const { response: validatedSession, headers: sessionHeaders } = await auth.api.getSession({
     headers: request.headers,
+    returnHeaders: true,
   });
-  if (validatedSession?.user) return;
 
   const returnTo = `${request.nextUrl.pathname}${request.nextUrl.search}`;
-  return NextResponse.redirect(
-    new URL(authRouteWithDestination(SIGN_IN_ROUTE, returnTo), request.url),
-  );
+  const response = validatedSession?.user
+    ? NextResponse.next()
+    : NextResponse.redirect(
+        new URL(authRouteWithDestination(SIGN_IN_ROUTE, returnTo), request.url),
+      );
+  // Preserve renewal and revocation cookies from the validated server session.
+  for (const cookie of sessionHeaders.getSetCookie()) {
+    response.headers.append("Set-Cookie", cookie);
+  }
+  response.headers.set("Cache-Control", "private, no-store");
+  return response;
 }
 
 export const config = {

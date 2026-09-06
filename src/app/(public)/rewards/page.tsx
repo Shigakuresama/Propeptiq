@@ -9,6 +9,7 @@ import {
 } from "@/auth/routes";
 import { getRequestIdentity } from "@/auth/server";
 import { PageTransition } from "@/components/site/page-transition";
+import { GrowthNavigation } from "@/components/growth/growth-navigation";
 import { RewardsScienceScene } from "@/components/site/rewards-science-scene";
 import { getPublicGrowthProjection } from "@/growth/public-growth-server";
 
@@ -54,6 +55,7 @@ export default async function RewardsPage() {
     <PageTransition>
       <div className="rewards-page pb-20">
         <div className="site-container">
+          <GrowthNavigation />
           <section aria-labelledby="rewards-heading" className="rewards-hero">
             <div className="rewards-hero__copy">
               <p className="data-label data-label-inverse">Current program record</p>
@@ -61,8 +63,8 @@ export default async function RewardsPage() {
                 Rewards
               </h1>
               <p className="rewards-hero__lead">
-                Policy-backed program details, surfaced only when an active server record is
-                available.
+                Explore points and lab referrals. Available benefits and eligibility
+                appear in the current program terms.
               </p>
               {accountAction || termsAvailable ? (
                 <div className="rewards-hero__actions">
@@ -99,11 +101,11 @@ export default async function RewardsPage() {
             </p>
           ) : null}
 
-          <section aria-label="Current rewards program" className="rewards-records">
+          <section id={referral ? undefined : "referrals"} aria-label="Current rewards program" className="rewards-records scroll-mt-32">
             <div className="rewards-records__intro">
-              <p className="eyebrow">Verified program details</p>
+              <p className="eyebrow">Program details</p>
               <p className="rewards-records__description">
-                Only records currently marked active are presented as program benefits.
+                Review the current benefits and eligibility before participating.
               </p>
             </div>
 
@@ -147,8 +149,9 @@ export default async function RewardsPage() {
                 ) : null}
                 {referral ? (
                   <section
+                    id="referrals"
                     aria-labelledby="referral-heading"
-                    className="record-card rewards-program-card"
+                    className="record-card rewards-program-card scroll-mt-32"
                   >
                     <div className="rewards-program-card__meta">
                       <Share2 aria-hidden="true" className="size-5" />

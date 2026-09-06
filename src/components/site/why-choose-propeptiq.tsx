@@ -45,8 +45,8 @@ export function WhyChoosePropeptIQ({
                 ? icons[item.id as keyof typeof icons]
                 : LibraryBig;
               return (
-                <li className="record-card min-w-0 bg-surface-record p-6 [overflow-wrap:anywhere] sm:p-7" key={item.id}>
-                  <span className="inline-flex size-11 items-center justify-center rounded-full border border-border bg-moss-soft/30 text-accent-readable">
+                <li className="advantage-card record-card min-w-0 bg-surface-record p-6 [overflow-wrap:anywhere] sm:p-7" key={item.id}>
+                  <span className="advantage-icon inline-flex size-12 items-center justify-center rounded-xl border">
                     <Icon aria-hidden="true" className="size-5" />
                   </span>
                   <h3 className="mt-6 font-heading text-2xl leading-tight text-ink">

@@ -47,7 +47,8 @@ export function ProductPrice({
           Save {formatStorefrontMoney(price.lineSavingsMinor)}
         </p>
       ) : null}
-      {showPurchaseStatus ? (
+      {showPurchaseStatus && presentation.purchaseState !== "checkout_unavailable" &&
+        presentation.purchaseState !== "cart_preview" ? (
         <p className="text-xs font-medium text-muted-ink">
           {publicVariantPurchaseLabel(presentation.purchaseState)}
         </p>

@@ -498,7 +498,7 @@ test("denies growth administration without capability or current-session MFA", a
   await expect(page.getByRole("heading", { name: "Required capability is not granted" })).toBeVisible();
 });
 
-test("keeps both public rewards orbits static without removing the contained science scene or logo loop", async ({
+test("keeps rewards orbits static and the teal logo accent finite", async ({
   baseURL,
   browser,
   page,
@@ -546,10 +546,9 @@ test("keeps both public rewards orbits static without removing the contained sci
           };
         })
     ));
-    expect(continuingPublicAnimations).toEqual([{
-      animationName: "header-brand-molecular-drift",
-      isHeaderBrandField: true,
-    }]);
+    expect(continuingPublicAnimations).toEqual([]);
+    await expect(page.locator(".header-brand-motion__field")).toHaveCSS("animation-iteration-count", "2");
+    await expect(page.locator(".header-brand-motion__field")).toHaveCSS("color", "rgb(20, 125, 120)");
   }
 
   await page.emulateMedia({ reducedMotion: "reduce" });

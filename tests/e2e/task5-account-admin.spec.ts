@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 /**
  * These checks intentionally use the fixed local deterministic driver. They are
- * synthetic browser proof only; they do not exercise Clerk, a shared database,
+ * synthetic browser proof only; they do not exercise Better Auth, a shared database,
  * payment providers, or production records.
  *
  * The suite is serial because the local driver owns one module-global state and
@@ -30,7 +30,7 @@ test("preserves exact cart IDs and quantities through fixed sign-in and checkout
   await expect(page.getByRole("button", { name: "Continue to sign in" })).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Continue to sign in" }).click();
-  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page).toHaveURL(/\/sign-in\?returnTo=%2Fcheckout$/);
   await page.getByRole("radio", { name: "Fixed new customer" }).check();
   await page.getByRole("button", { name: "Continue to checkout" }).click();
   await expect(page).toHaveURL(/\/checkout$/);

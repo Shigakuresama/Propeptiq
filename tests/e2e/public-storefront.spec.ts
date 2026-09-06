@@ -309,6 +309,8 @@ async function waitForUntouchedGallery(page: Page, gallery: Locator) {
         if (animation.playState !== "running" || !Number.isFinite(animation.effect?.getComputedTiming().endTime)) return false;
         const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
         if (!(target instanceof Element)) return false;
+        // The finite header accent cannot move the gallery; its motion is tested separately.
+        if (target.matches(".header-brand-motion__field")) return false;
         const bounds = target.getBoundingClientRect();
         return bounds.bottom > 0 && bounds.top < window.innerHeight;
       });
@@ -689,66 +691,32 @@ test("owner-configured WINTER30 promotion remains visible with preview-only cano
   await expect(banner).toBeVisible();
   await expect(
     banner.getByText(
-      "WINTER SALE: 30% OFF SITEWIDE — USE CODE WINTER30",
+      "WINTER SALE: 30% OFF SITEWIDE",
       { exact: true },
     ),
   ).toBeVisible();
   const copy = banner.getByRole("button", { name: "Copy promotion code WINTER30" });
   await expect(copy).toBeVisible();
-  const compactLayout = await banner.evaluate((element) => {
-    const styles = getComputedStyle(element);
-    const root = document.documentElement;
-    const bannerBounds = element.getBoundingClientRect();
-    const visualChildren = [
-      element.querySelector('[aria-hidden="true"]'),
-      element.querySelector("p:not([role='status'])"),
-      element.querySelector("button"),
-    ].filter((child): child is Element => child !== null);
-    const childBounds = visualChildren.map((child) => {
-      const bounds = child.getBoundingClientRect();
-      return {
-        bottom: bounds.bottom,
-        center: bounds.top + bounds.height / 2,
-        top: bounds.top,
-      };
-    });
-    const middle = visualChildren[1] as HTMLElement | undefined;
-    const middleStyles = middle ? getComputedStyle(middle) : null;
-    const buttonBounds = visualChildren[2]?.getBoundingClientRect();
+  const layout = await banner.evaluate((element) => {
+    const title = element.querySelector('.promotion-banner__title')!;
+    const code = element.querySelector('div > p')!;
+    const button = element.querySelector('button')!;
     return {
-      bannerBottom: bannerBounds.bottom,
-      bannerHeight: bannerBounds.height,
-      bannerTop: bannerBounds.top,
-      buttonHeight: buttonBounds?.height ?? 0,
-      buttonWidth: buttonBounds?.width ?? 0,
-      childBounds,
-      columns: styles.gridTemplateColumns.trim().split(/\s+/u),
-      display: styles.display,
-      middleClientWidth: middle?.clientWidth ?? 0,
-      middleMinWidth: middleStyles?.minWidth ?? "",
-      middleScrollWidth: middle?.scrollWidth ?? 0,
-      middleWhiteSpace: middleStyles?.whiteSpace ?? "",
-      rows: styles.gridTemplateRows.trim().split(/\s+/u),
-      overflow: root.scrollWidth - root.clientWidth,
+      titleBottom: title.getBoundingClientRect().bottom,
+      codeTop: code.getBoundingClientRect().top,
+      titleSize: parseFloat(getComputedStyle(title).fontSize),
+      codeSize: parseFloat(getComputedStyle(code).fontSize),
+      buttonWidth: button.getBoundingClientRect().width,
+      buttonHeight: button.getBoundingClientRect().height,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     };
   });
-  expect(compactLayout.display).toBe("grid");
-  expect(compactLayout.columns).toHaveLength(3);
-  expect(compactLayout.rows).toHaveLength(1);
-  expect(compactLayout.bannerHeight).toBeLessThanOrEqual(96);
-  expect(compactLayout.childBounds).toHaveLength(3);
-  expect(Math.max(...compactLayout.childBounds.map(({ center }) => center)) -
-    Math.min(...compactLayout.childBounds.map(({ center }) => center))).toBeLessThanOrEqual(1);
-  for (const bounds of compactLayout.childBounds) {
-    expect(bounds.top).toBeGreaterThanOrEqual(compactLayout.bannerTop);
-    expect(bounds.bottom).toBeLessThanOrEqual(compactLayout.bannerBottom);
-  }
-  expect(compactLayout.buttonHeight).toBeGreaterThanOrEqual(44);
-  expect(compactLayout.buttonWidth).toBeGreaterThanOrEqual(44);
-  expect(compactLayout.middleMinWidth).toBe("0px");
-  expect(compactLayout.middleWhiteSpace).toBe("normal");
-  expect(compactLayout.middleScrollWidth - compactLayout.middleClientWidth).toBeLessThanOrEqual(1);
-  expect(compactLayout.overflow).toBeLessThanOrEqual(1);
+  expect(layout.titleSize).toBeGreaterThan(layout.codeSize);
+  expect(layout.codeTop).toBeGreaterThanOrEqual(layout.titleBottom);
+  expect(layout.buttonHeight).toBeGreaterThanOrEqual(44);
+  expect(layout.buttonWidth).toBeGreaterThanOrEqual(44);
+  expect(layout.overflow).toBeLessThanOrEqual(1);
+  await expect(banner).toContainText('WINTER30 APPLIED AUTOMATICALLY');
   await copy.click();
   await expect(banner.getByRole("button", { name: "Copied promotion code WINTER30" })).toHaveText("Copied");
   await expect(banner.getByRole("status")).toHaveText("WINTER30 copied");
@@ -1706,7 +1674,7 @@ test("anonymous canonical local/test cart survives reload and preserves only var
     }),
   ).toHaveValue("1");
   await page.getByRole("button", { name: "Continue to sign in" }).click();
-  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page).toHaveURL(/\/sign-in\?returnTo=%2Fcheckout$/);
   expect(
     await page.evaluate(() =>
       JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"),
@@ -1978,7 +1946,7 @@ test("header brand uses a contained alpha mark and motion field while navigation
       name: styles.animationName,
     };
   })).toEqual({
-    duration: "10s",
+    duration: "5s",
     easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
     name: "header-brand-molecular-drift",
   });
@@ -2059,7 +2027,7 @@ test("homepage stays contained and reduced-motion safe before hydration with Jav
     });
     expect(staticMotion).toEqual({
       animationName: "none",
-      opacity: "0.16",
+      opacity: "0.3",
       transform: "none",
     });
 

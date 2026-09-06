@@ -136,6 +136,9 @@ function buildBetterAuthOptions(input: Readonly<{
       },
     },
     session: {
+      // Explicitly retain Better Auth's existing seven-day rolling session policy.
+      expiresIn: 60 * 60 * 24 * 7,
+      updateAge: 60 * 60 * 24,
       cookieCache: { enabled: false },
     },
     rateLimit: {

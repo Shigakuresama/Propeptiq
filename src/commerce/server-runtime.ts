@@ -27,7 +27,7 @@ import {
 import { createStripeShippingQuotePort } from "@/commerce/stripe-shipping-provider";
 import { createStripeTaxQuotePort } from "@/commerce/stripe-tax-provider";
 import { createStaffCommerceCommandRuntimeV1, type StaffCommerceCommandRuntimeV1 } from "@/commerce/staff-commerce-command-runtime";
-import { isSyntheticLocalCommerceEnvironmentConfigured } from "@/config/commerce-capability";
+import { isLiveCheckoutEnvironmentConfigured, isSyntheticLocalCommerceEnvironmentConfigured } from "@/config/commerce-capability";
 import { createPostgresAdminRepository, type AdminTransactionRunner } from "@/db/repositories/admin-repository";
 import { createPostgresCheckoutRepository } from "@/db/repositories/checkout-repository";
 import { createProviderSessionRepository } from "@/db/repositories/provider-session-repository";
@@ -165,6 +165,13 @@ export function isPostgresBuyerCheckoutReady(
     environment.STRIPE_SHIPPING_RATE_ID !== undefined &&
     environment.STRIPE_TAX_CODE !== undefined &&
     environment.RATE_LIMIT_SECRET !== undefined;
+}
+
+/** Page visibility only. Quotes/sessions still validate every transaction prerequisite. */
+export function isCheckoutPageRuntimeReady(request: RequestIdentity): boolean {
+  return isBuyerCheckoutRuntimeReady(request) ||
+    (isPostgresBuyerCheckoutReady(request) &&
+      isLiveCheckoutEnvironmentConfigured(request.environment));
 }
 
 async function createPostgresCheckoutServerRuntime(

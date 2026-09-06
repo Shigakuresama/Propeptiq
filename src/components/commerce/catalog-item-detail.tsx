@@ -79,7 +79,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
             Product details
           </p>
           <h1
-            className="mt-5 text-balance font-heading text-page leading-[1.02] text-ink [overflow-wrap:anywhere]"
+            className="catalog-detail-heading mt-5 text-balance font-heading text-page leading-[1.02] text-ink [overflow-wrap:anywhere]"
             data-motion-step="2"
           >
             {product.name}

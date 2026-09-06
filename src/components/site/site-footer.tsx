@@ -126,6 +126,16 @@ export function SiteFooter({
   const currentYear = new Date().getFullYear();
 
   return (
+    <>
+    <div className="newsletter-prefooter bg-ink text-canvas">
+      <div className="site-container">
+        <NewsletterForm
+          available={newsletterConfiguration.enabled}
+          presentation="footer"
+          privacyHref={newsletterPrivacyLink}
+        />
+      </div>
+    </div>
     <footer className="bg-ink text-canvas">
       <div className="site-container py-14 md:py-20">
         <div className="footer-primary-grid grid min-w-0 gap-10 md:grid-cols-2 lg:grid-cols-4 lg:gap-8 xl:gap-12">
@@ -145,7 +155,7 @@ export function SiteFooter({
               that matter to your selection.
             </p>
 
-            <section aria-label="Social media" className="mt-7 min-w-0">
+            {socialLinks.length > 0 ? <section aria-label="Social media" className="mt-7 min-w-0">
               <h2 className="font-heading text-sm uppercase tracking-[0.16em] text-canvas">
                 Social media
               </h2>
@@ -155,14 +165,15 @@ export function SiteFooter({
                     <a
                       href={social.href}
                       aria-label={social.label}
-                      className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border border-canvas/30 text-canvas/80 transition-colors duration-200 hover:border-canvas/60 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas"
+                      data-platform={social.platform}
+                      className="footer-social-link inline-flex min-h-11 min-w-11 items-center justify-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas focus-visible:ring-offset-2 focus-visible:ring-offset-ink"
                     >
                       <SocialIcon platform={social.platform} />
                     </a>
                   </li>
                 ))}
               </ul>
-            </section>
+            </section> : null}
           </div>
 
           <nav
@@ -211,12 +222,6 @@ export function SiteFooter({
           </nav>
         </div>
 
-        <NewsletterForm
-          available={newsletterConfiguration.enabled}
-          presentation="footer"
-          privacyHref={newsletterPrivacyLink}
-        />
-
         <section
           aria-labelledby="footer-notices-heading"
           className="footer-bottom-row border-t border-canvas/20 pt-8"
@@ -250,5 +255,6 @@ export function SiteFooter({
         </section>
       </div>
     </footer>
+    </>
   );
 }
