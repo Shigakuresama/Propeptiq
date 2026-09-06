@@ -70,6 +70,11 @@ export function PublicHome({
   pricing: PublicStorefrontPricingContext;
 }) {
   const allBrowseOnly = products.every((product) => product.kind === "browse_only");
+  const catalogSummary = products.length === 0
+    ? "No products are available to view right now. Please check back later."
+    : `Explore ${variantCount} product configurations. ${allBrowseOnly
+        ? "Select a product to see its listed details. Pricing and ordering are not available for these items."
+        : "Select a product to see its details, pricing, and availability."}`;
   const growthPrograms = [
     ...(loyaltyPolicy?.status === "active" ? [{
       title: "Earn points",
@@ -151,9 +156,7 @@ export function PublicHome({
                   />
                 </div>
                 <p className="mt-6 max-w-[38ch] border-t border-border pt-5 text-base leading-7 text-muted-ink">
-                  Explore {variantCount} product configurations. {allBrowseOnly
-                    ? "Select a product to see its listed details. Pricing and ordering are not available for these items."
-                    : "Select a product to see its details, pricing, and availability."}
+                  {catalogSummary}
                 </p>
               </div>
             </div>

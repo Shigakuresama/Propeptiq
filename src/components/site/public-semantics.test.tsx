@@ -101,7 +101,7 @@ describe("public storefront semantics", () => {
 
     expect(screen.getByText("00")).toBeVisible();
     expect(
-      screen.getByText(/Explore 0 product configurations\. Select a product to see its listed details\. Pricing and ordering are not available for these items\./iu),
+      screen.getByText("No products are available to view right now. Please check back later."),
     ).toBeVisible();
     expect(screen.getByText("Catalog highlights")).toBeVisible();
     expect(screen.getByRole("list", { name: "Catalog highlights" })).toBeEmptyDOMElement();

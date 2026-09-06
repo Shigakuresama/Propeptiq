@@ -159,7 +159,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
             </ul>
           </section>
 
-          {!canonical ? <p className="info-record mt-8 text-sm">Product details are available below. Pricing and ordering are not available for this item.</p> : null}
+          {!canonical ? <p className="info-record mt-8 text-sm">Product details are shown above. Pricing and ordering are not available for this item.</p> : null}
         </div>
       </div>
       {canonical ? <ProductInformationSections records={product.content} /> : null}

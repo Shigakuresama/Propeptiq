@@ -1,6 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { browseCatalogPublicationId } from "@/catalog/browse-catalog-publication";
+import { parseStorefrontBindings } from "@/catalog/storefront-bindings";
+import {
+  buildPublicStorefrontCatalog,
+  storefrontImageMetadata,
+} from "@/catalog/storefront-public";
+
 import {
   testCanonicalProduct,
   testPricingContext,
@@ -23,6 +30,17 @@ const fictionalHomepage = Object.freeze({
       anchor: "faq-fictional-question" as const,
     }),
   ]),
+});
+
+const browseCatalog = buildPublicStorefrontCatalog({
+  configuredPublicationId: browseCatalogPublicationId,
+  catalogData: {
+    products: [],
+    bindings: parseStorefrontBindings({ products: [], variants: [] }),
+  },
+  runtimeVariantFacts: [],
+  controlledContent: [],
+  verifiedImageMetadata: storefrontImageMetadata,
 });
 
 describe("PublicHome approved content composition", () => {
@@ -52,9 +70,16 @@ describe("PublicHome approved content composition", () => {
   });
 
   it("keeps browse-only catalog language explicit without implying pricing or ordering", () => {
+    render(<PublicHome products={browseCatalog.products} variantCount={browseCatalog.displayConfigurationCount} pricing={testPricingContext()} />);
+
+    expect(screen.getByText(`Explore ${browseCatalog.displayConfigurationCount} product configurations. Select a product to see its listed details. Pricing and ordering are not available for these items.`)).toBeVisible();
+  });
+
+  it("uses the dedicated unavailable message when the homepage catalog is empty", () => {
     render(<PublicHome products={[]} variantCount={0} pricing={testPricingContext()} />);
 
-    expect(screen.getByText("Explore 0 product configurations. Select a product to see its listed details. Pricing and ordering are not available for these items.")).toBeVisible();
+    expect(screen.getByText("No products are available to view right now. Please check back later.")).toBeVisible();
+    expect(screen.queryByText(/Explore 0 product configurations/u)).toBeNull();
   });
 
   it("places approved Why Choose and FAQ after catalog content and before the final quality callout", () => {

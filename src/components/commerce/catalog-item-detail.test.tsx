@@ -250,7 +250,7 @@ describe("CatalogItemDetail", () => {
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
     const configurations = screen.getByRole("heading", { name: "Product configurations" });
-    const notice = screen.getByText("Product details are available below. Pricing and ordering are not available for this item.");
+    const notice = screen.getByText("Product details are shown above. Pricing and ordering are not available for this item.");
     expect(configurations.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Purchase" })).toBeNull();
   });
