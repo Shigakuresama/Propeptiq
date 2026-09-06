@@ -4,15 +4,15 @@
 
 Thirty original alternate illustrations generated September 6, 2026 with the built-in image-generation tool for HGH, GHK-CU, Tesmorelin, Tesmorelin + IPA, TB500 (Thymosin B4 acetate), and BPC 5mg + TB 5mg. Five views per product: three-quarter, multi-vial-study, copy-space-detail, overhead, ambient-studio.
 
-This batch is prepared for release; merge/deployment/live proof belongs in the [completion plan](../superpowers/plans/2026-09-04-propeptiq-storefront-completion.md). With its mappings, 12 products have individual alternate sets (60 views), and 44 products retain 220 shared alternate views. The original56 fronts, prior30 individual alternates and six shared masters are preserved. Whole imagery completion is not claimed.
+This batch was published through [PR #38](https://github.com/Shigakuresama/Propeptiq/pull/38); exact merge/deployment/live evidence is recorded in the [completion plan](../superpowers/plans/2026-09-04-propeptiq-storefront-completion.md). Twelve products now have individual alternate sets (60 views), and 44 products retain 220 shared alternate views. The original 56 fronts, prior 30 individual alternates and six shared masters are preserved. Whole imagery completion is not claimed.
 
 These are conceptual illustrations, not photographs of verified packaging, contents, scale or quantity. The gallery's existing AI disclosure and scene-specific truth notes remain. Labels preserve existing owner catalog wording, including the BPC 5mg + TB 5mg product name; no variant amount or product claim was inferred. No old asset is deleted.
 
 ## Design and processing
 
-Each product's existing front-v1.webp is its visual reference. All30 source outputs were individually inspected for exact lettering, contained silhouettes, scene differentiation and absent unsupported claims/props. They preserve clear glass, brushed silver, ivory labels, ink lettering and deep teal bands.
+Each product's existing front-v1.webp is its visual reference. All 30 source outputs were individually inspected for exact lettering, contained silhouettes, scene differentiation and absent unsupported claims/props. They preserve clear glass, brushed silver, ivory labels, ink lettering and deep teal bands.
 
-Format optimization only with existing Sharp 0.35.3: sRGB, WebP quality84/effort6. No crop, resize, compositing or scripted lettering. Every source and final is1254 ×1254 pixels. Combined final size: 1482200bytes. Each final path: public/catalog/individual/<slug>/<scene>-v1.webp.
+Format optimization only with existing Sharp 0.35.3: sRGB, WebP quality 84/effort 6. No crop, resize, compositing or scripted lettering. Every source and final is 1,254 × 1,254 pixels. Combined final size: 1,482,200 bytes. Each final path: public/catalog/individual/<slug>/<scene>-v1.webp.
 
 ## Asset register
 
