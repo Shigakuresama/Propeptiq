@@ -23,6 +23,8 @@ At **2026-09-06T05:20:16Z**, [official NCBI EFetch](https://eutils.ncbi.nlm.nih.
 
 No indexed correction, retraction, withdrawal or expression of concern was found in these records at that checkpoint. Richie has two `CommentIn` links: [commentary PMID 25792077](https://pubmed.ncbi.nlm.nih.gov/25792077/) and [author reply PMID 25808115](https://pubmed.ncbi.nlm.nih.gov/25808115/). They are not corrections and do not increase the study or correction count. This is dated indexed evidence, not a guarantee against later or unindexed notices.
 
+The pre-publication read-back at **2026-09-06T05:55:01Z** again returned all six exact records with HTTP 200 and the same linked-notice status. It does not expand the full-text or product-equivalence claims below.
+
 All six DOIs returned registry redirects, and Crossref confirmed their identities and corresponding titles:
 
 - [10.1053/j.gastro.2007.10.026](https://doi.org/10.1053/j.gastro.2007.10.026) and [10.1016/j.jcmgh.2016.01.006](https://doi.org/10.1016/j.jcmgh.2016.01.006): HTTPS Elsevier destinations.
