@@ -34,6 +34,7 @@ describe("Managed password recovery", () => {
     expect(document.querySelector('input[name="returnTo"]')).toHaveValue(
       "/account/orders/order-1",
     );
+    expect(screen.getByText(/For privacy, the confirmation is the same whether or not an account exists\./)).toBeVisible();
     expect(screen.getByRole("link", { name: "Back to sign in" })).toHaveAttribute(
       "href",
       "/sign-in?returnTo=%2Faccount%2Forders%2Forder-1",
@@ -65,6 +66,10 @@ describe("Managed password recovery", () => {
     expect(document.querySelector('input[name="returnTo"]')).toHaveValue(
       "/research-sets",
     );
+    expect(screen.getByText("Use at least 8 characters. After resetting your password, sign in again to continue.")).toBeVisible();
+    expect(screen.queryByText("Use at least 8 characters. After the reset, sign in again to continue to your private page.")).toBeNull();
+    expect(screen.getByLabelText("New password")).toHaveAttribute("minlength", "8");
+    expect(screen.getByLabelText("New password")).toHaveAttribute("maxlength", "128");
   });
 
   it("does not render password inputs without a valid callback token", () => {

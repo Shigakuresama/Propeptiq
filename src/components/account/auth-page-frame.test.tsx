@@ -5,6 +5,37 @@ import { AuthPageFrame } from "./auth-page-frame";
 
 describe("AuthPageFrame", () => {
   it.each([
+    ["sign-in" as const, "Your account", "Welcome back.", "Sign in to review your account and orders.", "Account access"],
+    ["sign-up" as const, "Create an account", "Your PropeptIQ account.", "Create an account, then verify your email to continue.", "Account setup"],
+  ])("renders customer-facing %s copy without retired service jargon", (kind, eyebrow, title, description, label) => {
+    render(
+      <AuthPageFrame kind={kind} returnTo="/account/orders/order-1">
+        <h1>Test account form</h1>
+      </AuthPageFrame>,
+    );
+
+    for (const text of [
+      eyebrow,
+      title,
+      description,
+      label,
+      "Sign in to view your account and orders.",
+      "Your saved cart stays in this browser.",
+      "Review product prices and availability in your cart.",
+      "Test account form",
+    ]) expect(screen.getByText(text, { exact: true })).toBeVisible();
+
+    for (const retired of [
+      "Private account access",
+      "Verified account setup",
+      "Owner-scoped records remain private.",
+      "Checkout facts are verified by the server.",
+      "Identity verification",
+      "Account enrollment",
+    ]) expect(screen.queryByText(retired, { exact: true })).toBeNull();
+  });
+
+  it.each([
     [
       "sign-in" as const,
       "Sign in",
@@ -26,6 +57,12 @@ describe("AuthPageFrame", () => {
     expect(active).toHaveAttribute("href", href);
     expect(active).toHaveAttribute("aria-current", "page");
     expect(active).toHaveClass("action-primary");
+    const inactiveLabel = kind === "sign-in" ? "Create account" : "Sign in";
+    const inactiveRoute = kind === "sign-in" ? "/sign-up" : "/sign-in";
+    expect(screen.getByRole("link", { name: inactiveLabel })).toHaveAttribute(
+      "href",
+      `${inactiveRoute}?returnTo=%2Faccount%2Forders%2Forder-1`,
+    );
     expect(screen.getByRole("link", { name: "Return to cart" })).toHaveAttribute("href", "/cart");
     const home = screen.getByRole("link", { name: "PROPEPTIQ LABS home" });
     expect(home).toHaveAttribute("href", "/");

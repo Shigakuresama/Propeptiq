@@ -14,16 +14,14 @@ import { ScienceField } from "@/components/site/science-field";
 
 const accessCopy = {
   "sign-in": {
-    eyebrow: "Private account access",
-    title: "Return to your research account.",
-    description:
-      "Continue to checkout or review owner-scoped account and order records after identity verification.",
+    eyebrow: "Your account",
+    title: "Welcome back.",
+    description: "Sign in to review your account and orders.",
   },
   "sign-up": {
-    eyebrow: "Verified account setup",
-    title: "Create your research account.",
-    description:
-      "Account setup begins here. Research-use facts and the current attestation are completed at checkout.",
+    eyebrow: "Create an account",
+    title: "Your PropeptIQ account.",
+    description: "Create an account, then verify your email to continue.",
   },
 } as const;
 
@@ -76,15 +74,15 @@ export function AuthPageFrame({
             <ul className="relative z-10 grid gap-3 border-t border-canvas/15 pt-6 text-sm leading-6 text-canvas/75 sm:grid-cols-3 lg:grid-cols-1">
               <li className="flex gap-3">
                 <LockKeyhole aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-canvas" />
-                <span>Owner-scoped records remain private.</span>
+                <span>Sign in to view your account and orders.</span>
               </li>
               <li className="flex gap-3">
                 <RefreshCw aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-canvas" />
-                <span>Your browser-saved cart remains intact.</span>
+                <span>Your saved cart stays in this browser.</span>
               </li>
               <li className="flex gap-3">
                 <ShieldCheck aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-canvas" />
-                <span>Checkout facts are verified by the server.</span>
+                <span>Review product prices and availability in your cart.</span>
               </li>
             </ul>
           </section>
@@ -116,7 +114,7 @@ export function AuthPageFrame({
               </nav>
             </div>
             <div className="mt-7 flex min-h-0 flex-1 flex-col justify-center">
-              <DataLabel>{kind === "sign-in" ? "Identity verification" : "Account enrollment"}</DataLabel>
+              <DataLabel>{kind === "sign-in" ? "Account access" : "Account setup"}</DataLabel>
               <div className="mt-4">{children}</div>
             </div>
           </section>

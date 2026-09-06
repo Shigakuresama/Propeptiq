@@ -34,11 +34,11 @@ export async function PasswordRecoveryEntry({
             Return to sign in
           </Link>
         )}
-        description="Managed password recovery is unavailable because secure recovery has not been fully configured."
+        description="Password recovery is currently unavailable. You can return to sign in."
         eyebrow="Account access unavailable"
         headingLevel="h1"
         icon={LockKeyhole}
-        title="Password recovery is not configured."
+        title="Password recovery is currently unavailable."
       />
     );
   }

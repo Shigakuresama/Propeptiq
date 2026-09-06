@@ -23,10 +23,10 @@ export async function AuthEntry({
         eyebrow="Account access unavailable"
         headingLevel="h1"
         icon={LockKeyhole}
-        title={kind === "sign-in" ? "Sign-in is not configured." : "Account creation is not configured."}
+        title={kind === "sign-in" ? "Sign-in is currently unavailable." : "Account creation is currently unavailable."}
         description={(
           <>
-          The identity service is disabled. No credentials were collected and checkout remains closed.
+          Account access is currently unavailable. No credentials were collected, and checkout remains unavailable.
           </>
         )}
         action={(
