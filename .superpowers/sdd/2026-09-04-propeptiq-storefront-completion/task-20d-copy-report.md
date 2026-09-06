@@ -49,3 +49,18 @@ The first E2E attempt exited 1 after 24.4s because the shared checkout helper st
 ## Concerns
 
 No implementation blocker. The full copy audit found no retired Task 20D customer strings in the seven owned production files. Internal exception/log strings were intentionally unchanged.
+
+## Independent review round 1 follow-up — 2026-09-06
+
+Closed both Important test-coverage findings without changing runtime code:
+
+- Added exact `paid` assertions for `Payment verified` and `Payment has been confirmed for this order.`
+- Added exact `failed` assertions for `Payment was not verified` and `This order is not paid. Review its status before trying again.`
+- Both non-pending cases assert that the pending heading/detail are absent, preserving the three-way payment-state distinction.
+- Added existing-account coverage for `Save account details` and a controlled pending-state assertion for the disabled `Saving account details…` action.
+
+Exact verification command:
+
+`npm test -- --run "src/app/checkout/success/[orderId]/page.test.tsx" src/components/account/account-facts-form.test.tsx`
+
+Output: exit 0; 2 test files passed; 7 tests passed; Vitest duration 1.43s (command wall time 2.45s). No warnings were emitted.

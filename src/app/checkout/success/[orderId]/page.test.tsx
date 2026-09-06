@@ -21,6 +21,35 @@ import CheckoutSuccessPage, { dynamic, metadata } from "./page";
 
 const ownerId = "50000000-0000-4000-8000-000000000004";
 const orderId = "71000000-0000-4000-8000-000000000001";
+const pendingOrder = {
+  orderId,
+  state: "checkout_pending",
+  currency: "USD",
+  subtotalMinor: 4_800,
+  discountMinor: 480,
+  shippingMinor: 500,
+  taxMinor: 321,
+  totalMinor: 5_141,
+  paymentState: "pending_verification" as const,
+  refundState: "none",
+  holdState: "none",
+  releaseState: "none",
+  shipmentState: "none",
+  carrier: "STAFF-ONLY-CARRIER-SENTINEL",
+  trackingReference: "STAFF-ONLY-TRACKING-SENTINEL",
+  createdAt: "2026-08-26T12:00:00.000Z",
+  updatedAt: "2026-08-26T12:00:00.000Z",
+  items: [{
+    id: "72000000-0000-4000-8000-000000000001",
+    productName: "Synthetic local test only — Alpha",
+    packageForm: "Research vial",
+    quantity: 2,
+    unitAmountMinor: 2_400,
+    subtotalMinor: 4_800,
+    discountMinor: 480,
+    totalMinor: 4_320,
+  }],
+};
 
 describe("checkout success page", () => {
   beforeEach(() => {
@@ -43,36 +72,24 @@ describe("checkout success page", () => {
       },
       localDriver: {},
     });
-    loadCheckoutSuccess.mockResolvedValue({
-      orderId,
-      state: "checkout_pending",
-      currency: "USD",
-      subtotalMinor: 4_800,
-      discountMinor: 480,
-      shippingMinor: 500,
-      taxMinor: 321,
-      totalMinor: 5_141,
-      paymentState: "pending_verification",
-      refundState: "none",
-      holdState: "none",
-      releaseState: "none",
-      shipmentState: "none",
-      carrier: "STAFF-ONLY-CARRIER-SENTINEL",
-      trackingReference: "STAFF-ONLY-TRACKING-SENTINEL",
-      createdAt: "2026-08-26T12:00:00.000Z",
-      updatedAt: "2026-08-26T12:00:00.000Z",
-      items: [{
-        id: "72000000-0000-4000-8000-000000000001",
-        productName: "Synthetic local test only — Alpha",
-        packageForm: "Research vial",
-        quantity: 2,
-        unitAmountMinor: 2_400,
-        subtotalMinor: 4_800,
-        discountMinor: 480,
-        totalMinor: 4_320,
-      }],
-    });
+    loadCheckoutSuccess.mockResolvedValue(pendingOrder);
     getRequestRepositories.mockReturnValue({ loadCheckoutSuccess });
+  });
+
+  it.each([
+    ["paid", "Payment verified", "Payment has been confirmed for this order."],
+    ["failed", "Payment was not verified", "This order is not paid. Review its status before trying again."],
+  ] as const)("keeps the %s payment state distinct", async (paymentState, heading, detail) => {
+    loadCheckoutSuccess.mockResolvedValue({ ...pendingOrder, paymentState });
+
+    const markup = renderToStaticMarkup(await CheckoutSuccessPage({
+      params: Promise.resolve({ orderId }),
+    }));
+
+    expect(markup).toContain(heading);
+    expect(markup).toContain(detail);
+    expect(markup).not.toContain("Payment verification pending");
+    expect(markup).not.toContain("We’re waiting for payment confirmation.");
   });
 
   it("renders a no-store owner-only pending read without claiming payment", async () => {
