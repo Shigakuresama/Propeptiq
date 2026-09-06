@@ -550,6 +550,21 @@ describe("projectPublicCompoundResearch", () => {
         expect.objectContaining({ route: expect.anything() }),
       ]),
     );
+    const guidanceScanCopy = JSON.stringify({
+      ...projected,
+      compounds: projected.compounds.map((compound) => ({
+        ...compound,
+        studies: compound.studies.map((study) => ({
+          ...study,
+          population: study.pmid === "21875351" && study.population === expectedTask8EStudies[5].population
+            ? "[exact neutral completion metadata verified separately]"
+            : study.population,
+        })),
+      })),
+    });
+    expect(guidanceScanCopy).not.toMatch(
+      /\b(?:recommended|dosage|take|self-inject|administer|protocol|stacking?|cycle|for human use|human consumption)\b/iu,
+    );
   });
 
   it("is deterministic, preserves its input, and deeply freezes new output", () => {
@@ -756,6 +771,16 @@ describe("projectPublicCompoundResearch", () => {
     findRecord(unknownStudyKey.studies.studies, "pmid-35658024").reviewNote =
       "Must remain private";
     expectInvalid(unknownStudyKey);
+
+    const guidanceInAllenPopulation = freshSource();
+    findRecord(guidanceInAllenPopulation.studies.studies, "pmid-21875351").population =
+      "Recommended dosage: administer daily";
+    expectInvalid(guidanceInAllenPopulation);
+
+    const guidanceInAllenTitle = freshSource();
+    findRecord(guidanceInAllenTitle.studies.studies, "pmid-21875351").title =
+      "Recommended dosage: administer daily";
+    expectInvalid(guidanceInAllenTitle);
   });
 
   it("rejects incompatible evidence contexts and altered approved metadata", () => {
