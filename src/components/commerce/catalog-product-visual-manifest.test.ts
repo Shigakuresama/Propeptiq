@@ -154,6 +154,15 @@ const alternateSceneIds = [
   "ambient-studio",
 ] as const;
 
+const secondAlternateBatchSources = [
+  ["hgh", ["/catalog/individual/hgh/three-quarter-v1.webp", "/catalog/individual/hgh/multi-vial-study-v1.webp", "/catalog/individual/hgh/copy-space-detail-v1.webp", "/catalog/individual/hgh/overhead-v1.webp", "/catalog/individual/hgh/ambient-studio-v1.webp"]],
+  ["ghk-cu", ["/catalog/individual/ghk-cu/three-quarter-v1.webp", "/catalog/individual/ghk-cu/multi-vial-study-v1.webp", "/catalog/individual/ghk-cu/copy-space-detail-v1.webp", "/catalog/individual/ghk-cu/overhead-v1.webp", "/catalog/individual/ghk-cu/ambient-studio-v1.webp"]],
+  ["tesmorelin", ["/catalog/individual/tesmorelin/three-quarter-v1.webp", "/catalog/individual/tesmorelin/multi-vial-study-v1.webp", "/catalog/individual/tesmorelin/copy-space-detail-v1.webp", "/catalog/individual/tesmorelin/overhead-v1.webp", "/catalog/individual/tesmorelin/ambient-studio-v1.webp"]],
+  ["tesmorelin-ipa", ["/catalog/individual/tesmorelin-ipa/three-quarter-v1.webp", "/catalog/individual/tesmorelin-ipa/multi-vial-study-v1.webp", "/catalog/individual/tesmorelin-ipa/copy-space-detail-v1.webp", "/catalog/individual/tesmorelin-ipa/overhead-v1.webp", "/catalog/individual/tesmorelin-ipa/ambient-studio-v1.webp"]],
+  ["tb500", ["/catalog/individual/tb500/three-quarter-v1.webp", "/catalog/individual/tb500/multi-vial-study-v1.webp", "/catalog/individual/tb500/copy-space-detail-v1.webp", "/catalog/individual/tb500/overhead-v1.webp", "/catalog/individual/tb500/ambient-studio-v1.webp"]],
+  ["bpc-tb-blend", ["/catalog/individual/bpc-tb-blend/three-quarter-v1.webp", "/catalog/individual/bpc-tb-blend/multi-vial-study-v1.webp", "/catalog/individual/bpc-tb-blend/copy-space-detail-v1.webp", "/catalog/individual/bpc-tb-blend/overhead-v1.webp", "/catalog/individual/bpc-tb-blend/ambient-studio-v1.webp"]],
+] as const;
+
 const expectedAlternateAssets = [
   ["bpc-157", "three-quarter", "/catalog/individual/bpc-157/three-quarter-v1.webp", "80bbed05f7483e35d63ce9dd88e46c2607003b7dccf4daab169a151eed45bcb8", "16ac54de8690cc9c723f14d439048bcd6ed85d06683709d130543c89dcae970e", 50812],
   ["bpc-157", "multi-vial-study", "/catalog/individual/bpc-157/multi-vial-study-v1.webp", "833d0c2d07f8dbc26af6cdef2529aaa6af154662187ce45a02257c38811af65c", "34a4a4b71cbb858008aadf7d7e7c03476f31ea843cefc68e7409000278acb003", 52370],
@@ -188,6 +197,21 @@ const expectedAlternateAssets = [
 ] as const;
 
 describe("catalog product visual manifest", () => {
+  it("resolves the second batch of six exact product-specific alternate source sets", () => {
+    expect(secondAlternateBatchSources).toHaveLength(6);
+    expect(new Set(secondAlternateBatchSources.flatMap(([, sources]) => sources))).toHaveLength(30);
+
+    for (const [slug, expectedSources] of secondAlternateBatchSources) {
+      const resolved = getCatalogProductVisualScenes(slug);
+      expect(resolved).toHaveLength(6);
+      expect(resolved[0]).toBe(catalogProductFrontVisuals[slug]);
+      expect(resolved.slice(1).map(({ id }) => id)).toEqual([...alternateSceneIds]);
+      expect(resolved.slice(1).map(({ src }) => src)).toEqual([...expectedSources]);
+      expect(Object.isFrozen(resolved)).toBe(true);
+      expect(getCatalogProductVisualScenes(slug)).toBe(resolved);
+    }
+  });
+
   it("resolves the exact 30 product-specific alternate assets while retaining 50 shared tails", async () => {
     expect(expectedAlternateAssets).toHaveLength(30);
     expect([...new Set(expectedAlternateAssets.map(([slug]) => slug))]).toEqual([...alternateProductSlugs]);
