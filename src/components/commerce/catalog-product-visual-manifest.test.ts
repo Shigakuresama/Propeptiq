@@ -2,11 +2,14 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import sharp from "sharp";
 
 import { storefrontCatalogData } from "@/catalog/storefront-catalog-data";
 
 import {
+  catalogProductFrontVisuals,
   catalogProductVisualManifest,
+  getCatalogProductVisualScenes,
   getCatalogVisualIdentity,
 } from "./catalog-product-visual-manifest";
 
@@ -50,6 +53,47 @@ const expectedVisuals = [
 ] as const;
 
 describe("catalog product visual manifest", () => {
+  it("resolves only the six approved product fronts without mutating the shared scene tail", async () => {
+    const expectedMappedSources = {
+      "bpc-157": "/catalog/individual/bpc-157/front-v1.webp",
+      "tirzepatide": "/catalog/individual/tirzepatide/front-v1.webp",
+      "retatrutide": "/catalog/individual/retatrutide/front-v1.webp",
+      "nad-plus": "/catalog/individual/nad-plus/front-v1.webp",
+      semax: "/catalog/individual/semax/front-v1.webp",
+      selank: "/catalog/individual/selank/front-v1.webp",
+    } as const;
+
+    expect(Object.keys(catalogProductFrontVisuals)).toEqual(Object.keys(expectedMappedSources));
+    expect(Object.isFrozen(catalogProductFrontVisuals)).toBe(true);
+    for (const [slug, expectedSource] of Object.entries(expectedMappedSources)) {
+      const resolved = getCatalogProductVisualScenes(slug);
+      expect(resolved).toHaveLength(6);
+      expect(resolved[0]).toMatchObject({ id: "front", src: expectedSource });
+      expect(resolved.slice(1)).toEqual(catalogProductVisualManifest.slice(1));
+      expect(Object.isFrozen(resolved)).toBe(true);
+      expect(Object.isFrozen(resolved[0])).toBe(true);
+      expect(getCatalogProductVisualScenes(slug)).toEqual(resolved);
+      expect(storefrontCatalogData.products.some((product) => product.slug === slug)).toBe(true);
+      const bytes = readFileSync(resolve(process.cwd(), `public${expectedSource}`));
+      expect(bytes.subarray(0, 4).toString("ascii")).toBe("RIFF");
+      expect(bytes.subarray(8, 12).toString("ascii")).toBe("WEBP");
+      expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+        resolved[0]!.outputSha256,
+      );
+      expect(await sharp(bytes).metadata()).toMatchObject({
+        format: "webp",
+        width: resolved[0]!.width,
+        height: resolved[0]!.height,
+      });
+    }
+
+    const unmapped = getCatalogProductVisualScenes("ipamorelin");
+    expect(unmapped).toBe(catalogProductVisualManifest);
+    expect(getCatalogProductVisualScenes("constructor")).toBe(catalogProductVisualManifest);
+    expect(getCatalogProductVisualScenes("toString")).toBe(catalogProductVisualManifest);
+    expect(getCatalogProductVisualScenes("__proto__")).toBe(catalogProductVisualManifest);
+  });
+
   it("records the exact six ordered illustrative sources and immutable metadata", () => {
     expect(catalogProductVisualManifest).toHaveLength(6);
     expect(

@@ -93,7 +93,7 @@ describe("CatalogListingCard", () => {
     );
     expect(visual?.querySelectorAll("img")).toHaveLength(1);
     expect(image.getAttribute("src")).toContain(
-      encodeURIComponent("/catalog/visual-masters/front.webp"),
+      encodeURIComponent("/catalog/individual/tirzepatide/front-v1.webp"),
     );
     expect(image.closest(".catalog-image-frame")).not.toBeNull();
     expect(within(article).getByRole("heading", { name: product.name })).toBeVisible();
@@ -128,6 +128,23 @@ describe("CatalogListingCard", () => {
     });
     expect(add).toBeEnabled();
     expect(add).toHaveTextContent("Add to cart");
+  });
+
+  it("uses the approved mapped front by default while retaining the live product plate", () => {
+    renderCanonical(testCanonicalProduct([], {
+      slug: "bpc-157",
+      name: "BPC-157",
+    }));
+
+    const article = screen.getByRole("article", { name: "BPC-157" });
+    const image = within(article).getByRole("img", {
+      name: "Front AI-generated catalog illustration for BPC-157",
+    });
+    expect(image.getAttribute("src")).toContain(
+      encodeURIComponent("/catalog/individual/bpc-157/front-v1.webp"),
+    );
+    expect(within(article).getByRole("heading", { name: "BPC-157" })).toBeVisible();
+    expect(within(article).getByText("RESEARCH USE ONLY")).toBeVisible();
   });
 
   it("shows a truthful price but disables direct ADD when checkout mapping is unavailable", () => {

@@ -177,8 +177,36 @@ test("six-view product gallery loads all scenes and keeps keyboard, focus, and g
 
   for (const width of [320, 375, 768, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.goto("/catalog/items/tirzepatide");
+    await page.goto("/catalog");
+    const card = page.getByRole("article", { name: "Tirzepatide", exact: true });
+    const cardImage = card.getByRole("img", {
+      name: "Front AI-generated catalog illustration for Tirzepatide",
+    });
+    await cardImage.scrollIntoViewIfNeeded();
+    await expect.poll(() => cardImage.evaluate((node) => {
+      const image = node as HTMLImageElement;
+      return image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
+    })).toBe(true);
+    const cardSource = await cardImage.evaluate((node) => {
+      const url = new URL((node as HTMLImageElement).src);
+      return url.searchParams.get("url") ?? url.pathname;
+    });
+    expect(cardSource).toBe("/catalog/individual/tirzepatide/front-v1.webp");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    await card.getByRole("link", { name: "View catalog item: Tirzepatide" }).click();
+    await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide$/u);
     const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
+    const pdpFront = gallery.getByRole("img", {
+      name: "Front AI-generated catalog illustration for Tirzepatide",
+    });
+    await expect.poll(() => pdpFront.evaluate((node) => {
+      const image = node as HTMLImageElement;
+      return image.complete && image.naturalWidth > 0 && image.naturalHeight > 0;
+    })).toBe(true);
+    expect(await pdpFront.evaluate((node) => {
+      const url = new URL((node as HTMLImageElement).src);
+      return url.searchParams.get("url") ?? url.pathname;
+    })).toBe(cardSource);
     await page.evaluate(() => document.fonts.ready);
     const search = page.getByRole("button", { name: "Search PropeptIQ" });
     const initialSearch = await clientRect(search);
@@ -2192,7 +2220,10 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
 }) => {
   await page.goto("/catalog");
   await expect(page.locator("article.catalog-listing-card")).toHaveCount(56);
-  await expect(page.getByText("103 supplied package configurations")).toBeVisible();
+  await expect(page.getByText(
+    "56 products and 103 configurations to explore. Select a product to review its details, pricing, and availability. Images are illustrations, not product photographs.",
+    { exact: true },
+  )).toBeVisible();
   await expect(page.getByRole("button", { name: /^add .+(?:: choose a variant| to (?:preview )?cart)$/iu })).toHaveCount(56);
   await expect(page.locator("main")).toContainText("$41.99");
   await expect(page.locator("main")).toContainText("-30%");
@@ -2205,6 +2236,7 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
         return url.searchParams.get("url") ?? url.pathname;
       };
       return {
+        slug: visual.getAttribute("data-product-slug"),
         signature: visual.getAttribute("data-visual-signature"),
         base: pathFor(".catalog-product-visual__base"),
         mode: visual.getAttribute("data-visual-presentation"),
@@ -2213,10 +2245,19 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
   );
   expect(visualSources).toHaveLength(56);
   expect(new Set(visualSources.map(({ signature }) => signature)).size).toBe(56);
-  expect(visualSources.every(({ signature, base, mode }) =>
+  const mappedFronts = new Map([
+    ["bpc-157", "/catalog/individual/bpc-157/front-v1.webp"],
+    ["tirzepatide", "/catalog/individual/tirzepatide/front-v1.webp"],
+    ["retatrutide", "/catalog/individual/retatrutide/front-v1.webp"],
+    ["nad-plus", "/catalog/individual/nad-plus/front-v1.webp"],
+    ["semax", "/catalog/individual/semax/front-v1.webp"],
+    ["selank", "/catalog/individual/selank/front-v1.webp"],
+  ]);
+  expect(visualSources.filter(({ slug, base }) => mappedFronts.get(slug ?? "") === base)).toHaveLength(6);
+  expect(visualSources.filter(({ slug, base }) => !mappedFronts.has(slug ?? "") && base === "/catalog/visual-masters/front.webp")).toHaveLength(50);
+  expect(visualSources.every(({ signature, mode }) =>
     typeof signature === "string" &&
     signature.startsWith("PQ-") &&
-    base === "/catalog/visual-masters/front.webp" &&
     mode === "illustration_with_catalog_data_plate"
   )).toBe(true);
 
@@ -2227,6 +2268,7 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
     "/catalog/visual-masters/copy-space-detail.webp",
     "/catalog/visual-masters/overhead.webp",
     "/catalog/visual-masters/ambient-studio.webp",
+    ...mappedFronts.values(),
   ]) {
     const response = await request.get(imagePath);
     expect(response.ok(), `${imagePath} illustration response`).toBe(true);
@@ -2379,7 +2421,7 @@ test("navigation, homepage trust content, product research, and related records 
   expect(await heroImage.evaluate((image) => {
     const url = new URL((image as HTMLImageElement).src);
     return url.searchParams.get("url") ?? url.pathname;
-  })).toBe("/catalog/visual-masters/front.webp");
+  })).toBe("/catalog/individual/bpc-157/front-v1.webp");
   await expect(page.getByText("Explore BPC-157 configurations, pricing, and product information.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Product information" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Search PubMed for BPC-157" })).toHaveAttribute(
@@ -2430,7 +2472,11 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
     { amount: "10 mg · 1 bottle", base: "$69.99", name: "Retatrutide", sale: "$48.99" },
     { amount: "500 mg · 1 bottle", base: "$69.99", name: "NAD+", sale: "$48.99" },
   ] as const;
-  const targetImagePaths = new Set<string>(["/catalog/visual-masters/front.webp"]);
+  const targetImagePaths = new Set<string>([
+    "/catalog/individual/tirzepatide/front-v1.webp",
+    "/catalog/individual/retatrutide/front-v1.webp",
+    "/catalog/individual/nad-plus/front-v1.webp",
+  ]);
   const nextImageRequest = /\/_next\/image(?:\?.*)?$/u;
 
   for (const width of [375, 1440]) {
@@ -2478,7 +2524,7 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
         measuredFrames.push({ before: beforeImageCompletion, image });
       }
 
-      await expect.poll(() => heldImagePaths.size).toBe(1);
+      await expect.poll(() => heldImagePaths.size).toBe(3);
       releaseActualImages();
 
       for (const { before, image } of measuredFrames) {

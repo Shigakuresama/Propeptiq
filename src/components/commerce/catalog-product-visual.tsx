@@ -4,14 +4,13 @@ import type { CSSProperties } from "react";
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import {
   catalogIllustrationDisclosure,
-  catalogProductVisualManifest,
+  getCatalogProductVisualScenes,
   getCatalogVisualIdentity,
   type CatalogProductVisualScene,
 } from "./catalog-product-visual-manifest";
 
 export const catalogProductVisualPresentation = Object.freeze({
   mode: "illustration_with_catalog_data_plate" as const,
-  baseAsset: "/catalog/visual-masters/front.webp" as const,
 });
 
 export function CatalogProductVisual({
@@ -20,7 +19,7 @@ export function CatalogProductVisual({
   priority = false,
   sizes = "(min-width: 1280px) 28vw, (min-width: 768px) 45vw, calc(100vw - 2rem)",
   discountPercent,
-  scene = catalogProductVisualManifest[0]!,
+  scene,
 }: {
   product: PublicStorefrontProduct;
   variantLabel?: string | undefined;
@@ -29,6 +28,7 @@ export function CatalogProductVisual({
   discountPercent?: number | undefined;
   scene?: CatalogProductVisualScene | undefined;
 }) {
+  const resolvedScene = scene ?? getCatalogProductVisualScenes(product.slug)[0]!;
   const identity = getCatalogVisualIdentity(product.slug, product.category);
   return (
     <div
@@ -42,13 +42,13 @@ export function CatalogProductVisual({
     >
       <div className="catalog-product-visual__image">
         <Image
-          alt={`${scene.sceneLabel} AI-generated catalog illustration for ${product.name}`}
+          alt={`${resolvedScene.sceneLabel} AI-generated catalog illustration for ${product.name}`}
           className="catalog-product-visual__base"
-          width={scene.width}
-          height={scene.height}
+          width={resolvedScene.width}
+          height={resolvedScene.height}
           {...(priority ? { preload: true } : { loading: "lazy" as const })}
           sizes={sizes}
-          src={scene.src}
+          src={resolvedScene.src}
         />
       </div>
       <div className="catalog-product-visual__label">
