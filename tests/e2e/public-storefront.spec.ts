@@ -58,6 +58,117 @@ type PublicRoute =
   | "/quality-records"
   | "/research-use-policy";
 
+type GalleryMotionState = Readonly<{
+  transform: string;
+  translate: string;
+  rotate: string;
+  scale: string;
+  transitionDuration: string;
+  activeAnimations: number;
+  violations: readonly string[];
+}>;
+
+async function galleryMotionState(image: Locator): Promise<GalleryMotionState> {
+  return image.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const transformMatrix = style.transform === "none"
+      ? new DOMMatrixReadOnly()
+      : new DOMMatrixReadOnly(style.transform);
+    const neutralTokenList = (value: string, neutral: number) => value === "none" || value
+      .trim()
+      .split(/\s+/)
+      .every((token) => Number.parseFloat(token) === neutral);
+    const transitionIsZero = style.transitionDuration
+      .split(",")
+      .every((duration) => Number.parseFloat(duration) === 0);
+    const activeAnimations = element
+      .getAnimations()
+      .filter((animation) => animation.pending || animation.playState === "running")
+      .length;
+    const violations: string[] = [];
+    if (!transformMatrix.isIdentity) {
+      violations.push(`nonidentity transform: ${style.transform}`);
+    }
+    if (!neutralTokenList(style.translate, 0)) violations.push(`non-neutral translate: ${style.translate}`);
+    if (!neutralTokenList(style.rotate, 0)) violations.push(`non-neutral rotate: ${style.rotate}`);
+    if (!neutralTokenList(style.scale, 1)) violations.push(`non-neutral scale: ${style.scale}`);
+    if (!transitionIsZero) violations.push(`nonzero transition duration: ${style.transitionDuration}`);
+    if (activeAnimations > 0) violations.push(`active image animations: ${activeAnimations}`);
+    return {
+      transform: style.transform,
+      translate: style.translate,
+      rotate: style.rotate,
+      scale: style.scale,
+      transitionDuration: style.transitionDuration,
+      activeAnimations,
+      violations,
+    };
+  });
+}
+
+async function expectGalleryImageToHaveNoMotion(image: Locator) {
+  const state = await galleryMotionState(image);
+  expect(state.violations, `Gallery image motion state: ${JSON.stringify(state)}`).toEqual([]);
+}
+
+async function waitForPublicMainToSettle(page: Page) {
+  await page.locator("main#main-content").evaluate(async (main) => {
+    const animatedTextTargets = new Set<Element>();
+    let stableFrames = 0;
+    const deadline = performance.now() + 5_000;
+
+    while (performance.now() < deadline) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const activeFiniteAnimations = document.getAnimations().filter((animation) => {
+        if (!animation.pending && animation.playState !== "running") return false;
+        if (!Number.isFinite(animation.effect?.getComputedTiming().endTime)) return false;
+        const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+        if (!(target instanceof Element) || (target !== main && !main.contains(target))) return false;
+        const bounds = target.getBoundingClientRect();
+        const style = getComputedStyle(target);
+        const visible = style.display !== "none"
+          && style.visibility !== "hidden"
+          && bounds.bottom > 0
+          && bounds.top < window.innerHeight
+          && bounds.right > 0
+          && bounds.left < window.innerWidth;
+        if (visible && target.textContent?.trim()) animatedTextTargets.add(target);
+        return visible;
+      });
+      const unsettledTextOpacity = [...animatedTextTargets].some((target) => {
+        for (let element: Element | null = target; element; element = element.parentElement) {
+          if (Number.parseFloat(getComputedStyle(element).opacity) < 1) return true;
+          if (element === main) break;
+        }
+        return false;
+      });
+
+      if (activeFiniteAnimations.length === 0 && !unsettledTextOpacity) {
+        stableFrames += 1;
+        if (stableFrames >= 2) return;
+      } else {
+        stableFrames = 0;
+      }
+    }
+
+    throw new Error("Public main did not settle after visible finite motion and text opacity.");
+  });
+}
+
+test("gallery no-motion evaluator rejects nonidentity transforms and active motion [browser-only doubles]", async ({ page }) => {
+  await page.setContent(`
+    <style>@keyframes active-motion { to { opacity: .5; } }</style>
+    <img id="scaled" alt="scaled double" style="transform: scale(1.1); transition-duration: 0s">
+    <img id="translated" alt="translated double" style="translate: 1px; transition-duration: 0s">
+    <img id="animated" alt="animated double" style="animation: active-motion 10s linear infinite; transition-duration: 0s">
+  `);
+
+  await expect.poll(async () => (await galleryMotionState(page.locator("#animated"))).activeAnimations).toBeGreaterThan(0);
+  expect((await galleryMotionState(page.locator("#scaled"))).violations.some((violation) => violation.startsWith("nonidentity transform:"))).toBe(true);
+  expect((await galleryMotionState(page.locator("#translated"))).violations).toContain("non-neutral translate: 1px");
+  expect((await galleryMotionState(page.locator("#animated"))).violations).toContain("active image animations: 1");
+});
+
 test("six-view product gallery loads all scenes and keeps keyboard, focus, and geometry stable", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -116,8 +227,7 @@ test("six-view product gallery loads all scenes and keeps keyboard, focus, and g
   }
   await page.emulateMedia({ reducedMotion: "reduce" });
   const gallery = page.locator(".catalog-product-gallery");
-  await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transition-duration", "0s");
-  await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transform", "none");
+  await expectGalleryImageToHaveNoMotion(gallery.locator(".catalog-product-visual__base"));
   expect(errors).toEqual([]);
 });
 
@@ -129,8 +239,7 @@ test("six-view product gallery keeps a visible front image with JavaScript disab
     const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
     await expect(gallery.getByRole("img")).toBeVisible();
     await expect(gallery.getByRole("status")).toHaveText("View 1 of 6: Front");
-    await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transform", "none");
-    await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transition-duration", "0s");
+    await expectGalleryImageToHaveNoMotion(gallery.locator(".catalog-product-visual__base"));
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   } finally {
     await context.close();
@@ -992,7 +1101,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
-  const addToCart = page.getByRole("button", { name: "Add Tirzepatide to preview cart" });
+  const addToCart = page.getByRole("button", { name: "Add Tirzepatide to cart" });
   await addToCart.scrollIntoViewIfNeeded();
   await expect(addToCart).toBeVisible();
   expect(
@@ -1412,9 +1521,26 @@ async function expectPublicRouteRestrictionAndAccessibility(
   await expect(
     page.getByText("For legitimate laboratory and research use only.").first(),
   ).toBeVisible();
+  await waitForPublicMainToSettle(page);
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations, `${route} axe violations`).toEqual([]);
 }
+
+test("public route readiness waits for delayed text fades [browser-only double]", async ({ page }) => {
+  await page.setContent(`
+    <style>
+      @keyframes delayed-fade { from { opacity: 0.4; } to { opacity: 1; } }
+      #intro { animation: delayed-fade 240ms linear 120ms both; }
+    </style>
+    <main id="main-content"><section id="intro"><h1>Delayed introduction</h1></section></main>
+  `);
+
+  const intro = page.locator("#intro");
+  await expect.poll(() => intro.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)))
+    .toBeLessThan(1);
+  await waitForPublicMainToSettle(page);
+  await expect(intro).toHaveCSS("opacity", "1");
+});
 
 test("public route / renders the shared restriction and passes axe", async ({ page }) => {
   await expectPublicRouteRestrictionAndAccessibility(page, "/");
@@ -1793,6 +1919,18 @@ test("header brand uses a contained alpha mark and motion field while navigation
   });
   const animatedWrapper = animatedBrand.locator(".header-brand-motion");
   await expect(animatedWrapper).toHaveAttribute("data-motion-state", "running");
+  expect(await animatedWrapper.locator(".header-brand-motion__field").evaluate((field) => {
+    const styles = getComputedStyle(field);
+    return {
+      duration: styles.animationDuration,
+      easing: styles.animationTimingFunction,
+      name: styles.animationName,
+    };
+  })).toEqual({
+    duration: "10s",
+    easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+    name: "header-brand-molecular-drift",
+  });
   const beforeAnimation = await clientRect(animatedBrand);
   await page.waitForTimeout(12_000);
   const afterAnimation = await clientRect(animatedBrand);
@@ -2008,18 +2146,27 @@ test("reduced motion disables transition and animation durations", async ({ page
   await card.hover();
   const motion = await page
     .getByRole("link", { name: "View catalog item: Tirzepatide" })
-    .evaluate((element) => ({
-      animationDuration: getComputedStyle(element).animationDuration,
-      transitionDuration: getComputedStyle(element).transitionDuration,
-      scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
-      cardTransform: getComputedStyle(element.closest("article")!).transform,
-    }));
-  expect(motion).toEqual({
+    .evaluate((element) => {
+      const linkStyle = getComputedStyle(element);
+      const cardTransform = getComputedStyle(element.closest("article")!).transform;
+      const cardTransformMatrix = cardTransform === "none"
+        ? new DOMMatrixReadOnly()
+        : new DOMMatrixReadOnly(cardTransform);
+      return {
+        animationDuration: linkStyle.animationDuration,
+        transitionDuration: linkStyle.transitionDuration,
+        scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
+        cardTransform,
+        cardTransformIsIdentity: cardTransformMatrix.isIdentity,
+      };
+    });
+  expect(motion).toMatchObject({
     animationDuration: "0s",
     transitionDuration: "0s",
     scrollBehavior: "auto",
-    cardTransform: "none",
+    cardTransformIsIdentity: true,
   });
+  expect(motion.cardTransformIsIdentity, `Reduced-motion card transform: ${motion.cardTransform}`).toBe(true);
 });
 
 test("unknown product slugs fail closed", async ({ page }) => {
@@ -2084,7 +2231,7 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
   await expect(page.getByText("TR5", { exact: true })).toBeVisible();
   await expect(page.getByRole("radio")).toHaveCount(9);
   await expect(page.locator("main")).toContainText("$41.99");
-  await expect(page.locator("main")).toContainText("Local cart preview");
+  await expect(page.locator("main")).toContainText("Test mode — no payments");
 
   const imageLoaded = await page.getByRole("img", {
     name: "Front AI-generated catalog illustration for Tirzepatide",
@@ -2366,14 +2513,14 @@ test("configured catalog cards keep selected one-bottle prices, layout, chooser,
   const chooser = page.getByRole("dialog", { name: "Choose a variant for Tirzepatide" });
   await expect(chooser).toBeVisible();
   await expect(chooser.getByRole("button", {
-    name: "Add Tirzepatide to preview cart",
-  })).toHaveText("Add to preview cart");
+    name: "Add Tirzepatide to cart",
+  })).toHaveText("Add to cart");
   const pendingVariant = chooser
     .locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`)
     .locator("xpath=ancestor::label[1]");
   await expect(pendingVariant).toBeVisible();
   await expect(pendingVariant).toContainText("$0.00");
-  await expect(pendingVariant).toContainText("Local cart preview");
+  await expect(pendingVariant).toContainText("Test mode — no payments");
   await expect(pendingVariant.locator('input[type="radio"]')).not.toBeDisabled();
   const enabledRadios = chooser.locator('input[type="radio"]:not(:disabled)');
   await enabledRadios.first().focus();
@@ -2426,7 +2573,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(card.locator("del")).toContainText("$59.99");
   await expect(card.locator("strong")).toContainText("$41.99");
   await expect(card).toContainText("-30%");
-  await expect(card.getByText("Local cart preview", { exact: true })).toBeVisible();
+  await expect(card.getByText("Test mode — no payments", { exact: true })).toBeVisible();
 
   await page.goto("/catalog/items/tirzepatide");
   const radios = page.locator('input[type="radio"]');
@@ -2450,7 +2597,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     Savings: "$0.00",
     Subtotal: "$0.00",
   });
-  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("Local cart preview");
+  await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("Test mode — no payments");
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
   await expect(page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`)).toBeChecked();
   await expect(pricing).toContainText("$59.99");
@@ -2479,8 +2626,8 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
 
   await page.getByRole("button", { name: "1 bottle" }).click();
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).check();
-  const addToPreviewCart = page.getByRole("button", { name: "Add Tirzepatide to preview cart" });
-  await expect(addToPreviewCart).toHaveText("Add to preview cart");
+  const addToPreviewCart = page.getByRole("button", { name: "Add Tirzepatide to cart" });
+  await expect(addToPreviewCart).toHaveText("Add to cart");
   await addToPreviewCart.click();
   await addToPreviewCart.click();
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr60}"]`).check();
@@ -2513,7 +2660,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     await expect(line.getByText("WINTER30", { exact: true })).toBeVisible();
     await expect(line.getByText("-30%", { exact: true })).toBeVisible();
     await expect(line.getByText(
-      "Local cart preview only. No payment will be created.",
+      "Test mode — no payments.",
       { exact: true },
     )).toBeVisible();
   }
@@ -2535,7 +2682,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     "Included in displayed merchandise prices",
     { exact: true },
   )).toBeVisible();
-  await expect(cartSummary.getByRole("heading", { name: "Display-price cart preview" })).toBeVisible();
+  await expect(cartSummary.getByRole("heading", { name: "Checkout is currently unavailable" })).toBeVisible();
   await expect(cartSummary.getByRole("button", { name: "Checkout unavailable" })).toBeDisabled();
 
   const increaseTr30 = page.getByRole("button", {
@@ -2547,7 +2694,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(tr30Line.getByText("$125.97", { exact: true })).toBeVisible();
   await expect(cartSummary.getByText("$202.96", { exact: true })).toBeVisible();
   await expect(tr30Line.getByText(
-    "Local cart preview only. No payment will be created.",
+    "Test mode — no payments.",
     { exact: true },
   )).toBeVisible();
   const decreaseTr30 = page.getByRole("button", {
@@ -2676,6 +2823,16 @@ test("scroll reveal keeps server content visible, hides only below-fold sections
   await expect(firstSection).toHaveCSS("opacity", "1");
   await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "pending");
   await expect(belowFoldSection).toHaveCSS("transition-duration", "0s");
+  expect(await belowFoldSection.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return {
+      opacity: styles.opacity,
+      transform: styles.transform,
+    };
+  })).toEqual({
+    opacity: "0",
+    transform: "matrix(1, 0, 0, 1, 0, 12)",
+  });
   const before = await belowFoldSection.evaluate((element) => ({
     height: (element as HTMLElement).offsetHeight,
     offsetTop: (element as HTMLElement).offsetTop,
@@ -2686,7 +2843,11 @@ test("scroll reveal keeps server content visible, hides only below-fold sections
   await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
   await expect(belowFoldSection).toHaveCSS(
     "transition-duration",
-    /^0\.28s(?:,\s*0\.28s)?$/u,
+    /^0\.24s(?:,\s*0\.24s)?$/u,
+  );
+  await expect(belowFoldSection).toHaveCSS(
+    "transition-timing-function",
+    /^cubic-bezier\(0\.4, 0, 0\.2, 1\)(?:,\s*cubic-bezier\(0\.4, 0, 0\.2, 1\))?$/u,
   );
   const after = await belowFoldSection.evaluate((element) => ({
     height: (element as HTMLElement).offsetHeight,
@@ -2800,6 +2961,50 @@ test("scroll reveal public routes stay overflow-free and error-free on mobile an
 
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
+});
+
+test("scroll reveal permanently exposes pending sections after reduced motion changes live", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.setViewportSize({ width: 375, height: 520 });
+  await page.goto("/");
+  const belowFoldSection = page
+    .locator(".public-layout > main section")
+    .filter({ hasText: "Catalog highlights" });
+
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "pending");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  await expect(belowFoldSection).toHaveCSS("opacity", "1");
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await expect(belowFoldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  await expect(belowFoldSection).toHaveCSS("opacity", "1");
+});
+
+test("scroll reveal reaches a naturally tall section on a short narrow viewport", async ({ page }) => {
+  await page.setViewportSize({ width: 195, height: 320 });
+  await page.goto("/");
+  const tallSection = page.locator(
+    '.public-layout > main section[aria-labelledby="home-highlights-heading"]',
+  );
+  const geometry = await tallSection.evaluate((element) => ({
+    height: element.getBoundingClientRect().height,
+    viewportHeight: window.innerHeight,
+  }));
+  expect(geometry.height * 0.15).toBeGreaterThan(geometry.viewportHeight);
+  await expect(tallSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+
+  await page.locator("#home-highlights-heading")
+    .evaluate((heading) => heading.scrollIntoView({ behavior: "instant", block: "start" }));
+
+  await expect(tallSection).toHaveAttribute("data-scroll-reveal-state", "visible");
+  await expect(tallSection).toHaveCSS("opacity", "1");
+  expect(await page.locator("#home-highlights-heading").evaluate((heading) => {
+    const bounds = heading.getBoundingClientRect();
+    return bounds.top >= 0 && bounds.bottom <= window.innerHeight;
+  })).toBe(true);
 });
 
 test("PDP purchase choices synchronize the live hero discount badge without reload", async ({

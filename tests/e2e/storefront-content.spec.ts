@@ -46,10 +46,29 @@ async function expectTouchTarget(control: Locator) {
   expect(rect!.height).toBeGreaterThanOrEqual(44);
 }
 
+const expectedResearchBySlug = {
+  "aod-9604": {
+    evidenceLabel: "Animal research only",
+    pmids: ["11146367", "11713213"],
+  },
+  selank: {
+    evidenceLabel: "Randomized human research included",
+    pmids: ["18454096", "25176261"],
+  },
+  semax: {
+    evidenceLabel: "Human research included",
+    pmids: ["11517472", "29798983"],
+  },
+  tirzepatide: {
+    evidenceLabel: "Randomized human research included",
+    pmids: ["35658024", "37385275"],
+  },
+} as const;
+
 async function verifyResearch(
   page: Page,
   width: number,
-  slug: "tirzepatide" | "aod-9604",
+  slug: keyof typeof expectedResearchBySlug,
 ) {
   await openPublicPage(page, `/catalog/items/${slug}`, width);
   const section = page.getByRole("region", { name: "Verified research references", exact: true });
@@ -61,9 +80,8 @@ async function verifyResearch(
     "Primary-source bibliography for the named compound. These studies did not test this catalog item.",
     { exact: true },
   )).toBeVisible();
-  await expect(section.getByText(slug === "tirzepatide"
-    ? "Randomized human research included"
-    : "Animal research only", { exact: true })).toBeVisible();
+  const expectedResearch = expectedResearchBySlug[slug];
+  await expect(section.getByText(expectedResearch.evidenceLabel, { exact: true })).toBeVisible();
 
   const disclosure = section.locator("details");
   const summary = disclosure.locator("summary");
@@ -76,12 +94,9 @@ async function verifyResearch(
   await expect(disclosure).toHaveAttribute("open", "");
   await expectVisibleFocus(summary);
 
-  const expectedPmids = slug === "tirzepatide"
-    ? ["35658024", "37385275"]
-    : ["11146367", "11713213"];
   const links = disclosure.getByRole("link");
   await expect(links).toHaveCount(2);
-  for (const pmid of expectedPmids) {
+  for (const pmid of expectedResearch.pmids) {
     const link = disclosure.locator(`a[href="https://pubmed.ncbi.nlm.nih.gov/${pmid}/"]`);
     await expect(link).toBeVisible();
     await expect(link).toHaveAttribute("target", "_blank");
@@ -103,10 +118,16 @@ async function verifyResearch(
   await expectNoHorizontalOverflow(page);
 }
 
-async function verifyUnmappedProduct(page: Page, width: number) {
-  // Pinealon is an owner-supplied real catalog slug without an approved bibliography join.
-  await openPublicPage(page, "/catalog/items/pinealon", width);
-  await expect(page.getByRole("heading", { name: "Pinealon", exact: true, level: 1 })).toBeVisible();
+async function verifyUnmappedProduct(
+  page: Page,
+  width: number,
+  product: Readonly<{ slug: "pinealon" | "semax-selank"; name: "Pinealon" | "Semax + Selank" }> = {
+    slug: "pinealon",
+    name: "Pinealon",
+  },
+) {
+  await openPublicPage(page, `/catalog/items/${product.slug}`, width);
+  await expect(page.getByRole("heading", { name: product.name, exact: true, level: 1 })).toBeVisible();
   await expect(page.getByRole("region", { name: "Verified research references", exact: true })).toHaveCount(0);
   await expect(page.locator("#research-references")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
@@ -269,6 +290,9 @@ test("ARA-290 route keeps its correction with the exact parent at all widths", a
 test("SS-31 route has two studies and no correction notice at all widths", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyCorrectionResearch(page, width, { slug: "ss-31", parentPmid: null, correctionPmid: null, siblingPmid: "33077895" }); });
 test("Thymosin Alpha-1 route keeps its correction with the exact parent at all widths", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyCorrectionResearch(page, width, { slug: "thymosin-alpha-1", parentPmid: "39814420", correctionPmid: "40447307", siblingPmid: "35713670" }); });
 test("server HTML keeps a native corrected bibliography disclosure without JavaScript", async ({ browser }) => { await verifyCorrectionWithoutJavaScript(browser, { slug: "thymosin-alpha-1", parentPmid: "39814420", correctionPmid: "40447307", siblingPmid: "35713670" }); });
+test("Selank bibliography is keyboard usable at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyResearch(page, width, "selank"); });
+test("Semax bibliography is keyboard usable at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyResearch(page, width, "semax"); });
+test("unmapped Semax + Selank blend has no inferred bibliography at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyUnmappedProduct(page, width, { slug: "semax-selank", name: "Semax + Selank" }); });
 test("unmapped Pinealon has no inferred bibliography at 375px", async ({ page }) => { await verifyUnmappedProduct(page, 375); });
 test("unmapped Pinealon has no inferred bibliography at 768px", async ({ page }) => { await verifyUnmappedProduct(page, 768); });
 test("unmapped Pinealon has no inferred bibliography at 1440px", async ({ page }) => { await verifyUnmappedProduct(page, 1440); });

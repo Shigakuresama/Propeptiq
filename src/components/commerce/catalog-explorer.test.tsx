@@ -346,7 +346,7 @@ describe("CatalogExplorer", () => {
     expect(resultHeadings()).toEqual(["Zero-preview Product", "Paid Product"]);
     const zeroCard = screen.getByRole("article", { name: "Zero-preview Product" });
     expect(within(zeroCard).getAllByText("$0.00")).toHaveLength(1);
-    expect(within(zeroCard).getByText("Local cart preview")).toBeVisible();
+    expect(within(zeroCard).getByText("Test mode — no payments")).toBeVisible();
   });
 
   it("clear search preserves facets and sort, while broad reset preserves only sort", () => {

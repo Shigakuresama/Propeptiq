@@ -112,6 +112,98 @@ async function footerDockGeometry(page: Page) {
   });
 }
 
+async function readCartStatusFooterGeometry(
+  page: Page,
+  route: "/" | "/cart",
+  viewport: { width: 195 | 320; height: 520 | 812 },
+) {
+  await page.setViewportSize(viewport);
+  const response = await page.goto(route);
+  expect(response?.status()).toBe(200);
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const root = document.documentElement;
+    const visibleImagesReady = [...document.images]
+      .filter((image) => {
+        const bounds = image.getBoundingClientRect();
+        return bounds.bottom > 0 && bounds.top < root.clientHeight;
+      })
+      .every((image) => image.complete && image.naturalWidth > 0 && image.naturalHeight > 0);
+    return {
+      atEnd: Math.abs(window.scrollY + root.clientHeight - root.scrollHeight) <= 1,
+      fonts: document.fonts.status,
+      visibleImagesReady,
+    };
+  })).toEqual({ atEnd: true, fonts: "loaded", visibleImagesReady: true });
+
+  await page.evaluate(async () => {
+    let previous = "";
+    let stableFrames = 0;
+    for (let frame = 0; frame < 180 && stableFrames < 6; frame += 1) {
+      await new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()));
+      const footer = document.querySelector<HTMLElement>(".public-layout > footer")?.getBoundingClientRect();
+      const status = document.querySelector<HTMLElement>('p[aria-label="Cart updates"]')?.getBoundingClientRect();
+      const signature = JSON.stringify({
+        footerBottom: footer?.bottom,
+        scrollHeight: document.documentElement.scrollHeight,
+        scrollY: window.scrollY,
+        statusBottom: status?.bottom,
+      });
+      stableFrames = signature === previous ? stableFrames + 1 : 0;
+      previous = signature;
+    }
+    if (stableFrames < 6) throw new Error("Footer geometry did not settle within 180 animation frames.");
+  });
+
+  const status = page.getByRole("status", { name: "Cart updates" });
+  await expect(status).toHaveCount(1);
+  await expect(status).toHaveAttribute("aria-label", "Cart updates");
+  await expect(status).toHaveAttribute("aria-live", "polite");
+  await expect(status).toHaveAttribute("aria-atomic", "true");
+  await expect(status).toHaveAttribute("role", "status");
+
+  return status.evaluate((element) => {
+    const root = document.documentElement;
+    const statusBounds = element.getBoundingClientRect();
+    const footerBounds = document.querySelector<HTMLElement>(".public-layout > footer")!.getBoundingClientRect();
+    const statusStyle = getComputedStyle(element);
+    return {
+      atEnd: window.scrollY + root.clientHeight - root.scrollHeight,
+      footerBottomFromDocumentBottom: footerBounds.bottom + window.scrollY - root.scrollHeight,
+      footerBottomFromViewportBottom: footerBounds.bottom - root.clientHeight,
+      horizontalOffenders: [...document.body.querySelectorAll<HTMLElement>("*")]
+        .filter((candidate) => {
+          const bounds = candidate.getBoundingClientRect();
+          return bounds.left < -0.5 || bounds.right > root.clientWidth + 0.5;
+        })
+        .slice(0, 20)
+        .map((candidate) => {
+          const bounds = candidate.getBoundingClientRect();
+          return {
+            ariaLabel: candidate.getAttribute("aria-label"),
+            className: candidate.getAttribute("class") ?? "",
+            left: bounds.left,
+            right: bounds.right,
+            tagName: candidate.tagName,
+          };
+        }),
+      horizontalOverflow: root.scrollWidth - root.clientWidth,
+      status: {
+        documentBottom: statusBounds.bottom + window.scrollY,
+        documentTop: statusBounds.top + window.scrollY,
+        height: statusBounds.height,
+        overflow: statusStyle.overflow,
+        position: statusStyle.position,
+        width: statusBounds.width,
+      },
+      statusBottomFromFooterBottom: statusBounds.bottom - footerBounds.bottom,
+    };
+  });
+}
+
 async function expectFooterColumns(
   page: Page,
   width: 375 | 768 | 1440,
@@ -229,6 +321,63 @@ test("footer long content stays contained at 195px and 320px", async ({ page }) 
       await expectContained(page, footer, width);
     }
   }
+});
+
+test("home cart status remains hidden without extending the 320px document footer", async ({ page }) => {
+  const geometry = await readCartStatusFooterGeometry(page, "/", { width: 320, height: 812 });
+  expect(Math.abs(geometry.atEnd)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.footerBottomFromDocumentBottom)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.footerBottomFromViewportBottom)).toBeLessThanOrEqual(1);
+  expect(
+    geometry.horizontalOverflow,
+    `horizontal offenders: ${JSON.stringify(geometry.horizontalOffenders)}`,
+  ).toBeLessThanOrEqual(1);
+  expect(geometry.status).toEqual({
+    documentBottom: 1,
+    documentTop: 0,
+    height: 1,
+    overflow: "hidden",
+    position: "absolute",
+    width: 1,
+  });
+  expect(geometry.statusBottomFromFooterBottom).toBeLessThanOrEqual(0);
+});
+
+test("cart status remains hidden without extending the 195px document footer", async ({ page }) => {
+  const geometry = await readCartStatusFooterGeometry(page, "/cart", { width: 195, height: 520 });
+  expect(Math.abs(geometry.atEnd)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.footerBottomFromDocumentBottom)).toBeLessThanOrEqual(1);
+  expect(Math.abs(geometry.footerBottomFromViewportBottom)).toBeLessThanOrEqual(1);
+  expect(
+    geometry.horizontalOverflow,
+    `horizontal offenders: ${JSON.stringify(geometry.horizontalOffenders)}`,
+  ).toBeLessThanOrEqual(1);
+  expect(geometry.status).toEqual({
+    documentBottom: 1,
+    documentTop: 0,
+    height: 1,
+    overflow: "hidden",
+    position: "absolute",
+    width: 1,
+  });
+  expect(geometry.statusBottomFromFooterBottom).toBeLessThanOrEqual(0);
+
+  const catalogLink = page.getByRole("link", { name: "Continue to catalog" });
+  await expect(catalogLink).toHaveAttribute("href", "/catalog");
+  const catalogBounds = await catalogLink.boundingBox();
+  expect(catalogBounds).not.toBeNull();
+  expect(catalogBounds!.x).toBeGreaterThanOrEqual(-1);
+  expect(catalogBounds!.x + catalogBounds!.width).toBeLessThanOrEqual(196);
+  expect(catalogBounds!.height).toBeGreaterThanOrEqual(44);
+  for (let tab = 0; tab < 30 && !(await catalogLink.evaluate((link) => document.activeElement === link)); tab += 1) {
+    await page.keyboard.press("Tab");
+  }
+  await expect(catalogLink).toBeFocused();
+  expect(await catalogLink.evaluate((link) => {
+    const style = getComputedStyle(link);
+    const visibleOutline = style.outlineStyle !== "none" && Number.parseFloat(style.outlineWidth) >= 2;
+    return link.matches(":focus-visible") && (visibleOutline || style.boxShadow !== "none");
+  })).toBe(true);
 });
 
 test("footer FAQ native anchor reactivates when the fragment is already current", async ({ page }) => {

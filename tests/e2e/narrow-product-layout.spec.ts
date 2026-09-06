@@ -65,7 +65,7 @@ async function expectNarrowDescendants(page: Page) {
   const configurations = page.getByRole("heading", { name: "Supplied configurations" });
   const summary = page.getByRole("status", { name: "Purchase summary" });
   const definitionList = summary.locator("dl");
-  const add = summary.getByRole("button", { name: "Add Tirzepatide to preview cart" });
+  const add = summary.getByRole("button", { name: "Add Tirzepatide to cart" });
   await expectInside(content, [configurations, summary, definitionList, add], "195px detail content");
 
   const exactInput = page.getByRole("spinbutton", { name: "Exact quantity" });
@@ -127,7 +127,7 @@ async function runNarrowProductCase(page: Page, width: 195 | 240 | 320, testInfo
 
   if (width === 320) {
     const add = page.getByRole("status", { name: "Purchase summary" })
-      .getByRole("button", { name: "Add Tirzepatide to preview cart" });
+      .getByRole("button", { name: "Add Tirzepatide to cart" });
     await add.click();
     await expect(page.getByRole("status", { name: "Cart updates" })).toContainText("1 unit in cart");
     await expect(page.getByRole("dialog", { name: "Your cart" })).toHaveCount(0);

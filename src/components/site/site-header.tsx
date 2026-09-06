@@ -41,7 +41,7 @@ export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boole
           >
             <HeaderBrandMotion>
               <BrandLogo
-                className="transition-transform duration-200 ease-out group-hover:-translate-y-0.5 motion-reduce:transform-none"
+                className="header-brand-mark transition-transform duration-200 ease-out group-hover:-translate-y-0.5"
                 decorative
                 priority
               />
@@ -83,6 +83,7 @@ export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boole
               </Button>
             </SheetTrigger>
             <SheetContent
+              motionScope="public"
               side="right"
               className="w-[min(24rem,calc(100vw-1rem))] border-border bg-canvas p-0"
             >

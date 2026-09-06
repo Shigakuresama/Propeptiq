@@ -71,9 +71,9 @@ export type PublicVariantPurchaseLabelContext = "availability" | "purchase_summa
 
 const PUBLIC_VARIANT_PURCHASE_LABELS = Object.freeze({
   ready: "Available",
-  cart_preview: "Cart preview only",
+  cart_preview: "Checkout unavailable",
   checkout_unavailable: "Checkout unavailable",
-  local_preview: "Local cart preview",
+  local_preview: "Test mode — no payments",
   pricing_pending: "Pricing coming soon",
   unavailable: "Unavailable",
 } satisfies Readonly<Record<PublicVariantPurchaseState, string>>);

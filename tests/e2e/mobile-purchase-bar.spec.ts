@@ -9,7 +9,7 @@ const tr30VariantId = "5ff78cc3-c541-5bf4-9f3b-12be2222cc75";
 const tr60VariantId = "d6b26e70-2a1b-599c-93f0-c85cd014ffd5";
 const cartKey = "propeptiq.cart.v2";
 const legacyCartKey = "propeptiq.cart.v1";
-const addLabel = "Add Tirzepatide to preview cart";
+const addLabel = "Add Tirzepatide to cart";
 
 const purchaseSummary = (page: Page) => page.getByRole("status", { name: "Purchase summary" });
 const mobilePurchase = (page: Page) => page.getByRole("region", { name: "Mobile purchase controls" });
@@ -33,7 +33,7 @@ async function openProduct(page: Page) {
   await page.goto(productPath);
   await expect(page.getByRole("heading", { name: "Tirzepatide", exact: true })).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
-  await expect(purchaseSummary(page)).toContainText("Local cart preview");
+  await expect(purchaseSummary(page)).toContainText("Test mode — no payments");
 }
 
 async function chooseTwoBottles(page: Page) {
@@ -136,7 +136,7 @@ test("mobile purchase waits until the inline summary has passed above the viewpo
   await expect(mobilePurchase(page)).toContainText("30mg");
   await expect(mobilePurchase(page)).toContainText("2 bottles");
   await expect(mobilePurchase(page)).toContainText("$83.98");
-  await expect(mobilePurchase(page)).toContainText("Local cart preview");
+  await expect(mobilePurchase(page)).toContainText("Test mode — no payments");
   await expect(mobilePurchase(page).getByRole("button", { name: addLabel })).toBeEnabled();
   await expect(mobilePurchase(page).locator('[aria-live], [role="status"], [role="alert"]')).toHaveCount(0);
   await expect(page.getByRole("status", { name: "Purchase summary" })).toHaveCount(1);

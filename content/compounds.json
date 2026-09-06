@@ -220,6 +220,28 @@
       "identityCaveat": "The cited papers use Thymosin alpha 1, thymosin α1, and Tα1; these source spelling and typography variants do not establish catalog-item equivalence.",
       "mechanism": null,
       "benefitClaim": null
+    },
+    {
+      "id": "selank",
+      "productSlug": "selank",
+      "displayName": "Selank",
+      "alternateNames": [],
+      "studyIds": ["pmid-18454096", "pmid-25176261"],
+      "strongestEvidence": "human_rct",
+      "identityCaveat": "The cited literature names Selank as a study intervention; that name correspondence does not establish the identity, composition, formulation, quality, or equivalence of the PropeptIQ catalog material.",
+      "mechanism": null,
+      "benefitClaim": null
+    },
+    {
+      "id": "semax",
+      "productSlug": "semax",
+      "displayName": "Semax",
+      "alternateNames": [],
+      "studyIds": ["pmid-11517472", "pmid-29798983"],
+      "strongestEvidence": "human_observational",
+      "identityCaveat": "The cited literature names Semax as a study intervention; that name correspondence does not establish the identity, composition, formulation, quality, or equivalence of the PropeptIQ catalog material.",
+      "mechanism": null,
+      "benefitClaim": null
     }
   ]
 }

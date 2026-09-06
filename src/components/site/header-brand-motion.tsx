@@ -36,7 +36,13 @@ export function HeaderBrandMotion({ children }: { children: ReactNode }) {
     };
     const observer = typeof window.IntersectionObserver === "function"
       ? new IntersectionObserver((entries) => {
-          const wrapperEntry = entries.find((entry) => entry.target === wrapper);
+          let wrapperEntry: IntersectionObserverEntry | undefined;
+          for (let index = entries.length - 1; index >= 0; index -= 1) {
+            if (entries[index]?.target === wrapper) {
+              wrapperEntry = entries[index];
+              break;
+            }
+          }
           if (wrapperEntry === undefined) return;
           isIntersecting = wrapperEntry.isIntersecting;
           updateMotionState();

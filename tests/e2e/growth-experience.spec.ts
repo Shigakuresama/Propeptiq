@@ -1,5 +1,11 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type JSHandle,
+  type Page,
+} from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 
@@ -12,6 +18,26 @@ const screenshotDirectory = path.resolve(
   process.cwd(),
   ".superpowers/sdd/2026-08-27-propeptiq-rewards-referrals/screenshots",
 );
+
+type CaretStyleObservation = Readonly<{
+  caretMutationCount: number;
+  caretStyleMutationDetected: boolean;
+  observedControlCount: number;
+  styleMutationCount: number;
+  styleStateUnchanged: boolean;
+}>;
+
+type BrowserCaretStyleObserver = {
+  initialStyles: Map<Element, string | null>;
+  inspect: (records: readonly MutationRecord[]) => void;
+  observer: MutationObserver;
+  result: {
+    caretMutationCount: number;
+    caretStyleMutationDetected: boolean;
+    observedControlCount: number;
+    styleMutationCount: number;
+  };
+};
 
 test.describe.configure({ mode: "serial" });
 
@@ -65,6 +91,127 @@ async function seedCart(page: Page, quantity = 2) {
     }));
     dispatchEvent(new StorageEvent("storage", { key: "propeptiq.cart.v2", storageArea: window.localStorage }));
   }, { id: variantId, count: quantity });
+}
+
+async function waitForFiniteAnimations(page: Page, selector: string) {
+  await page.locator(selector).evaluateAll(async (elements) => {
+    await Promise.all(elements.flatMap((element) => (
+      element.getAnimations().map((animation) => animation.finished)
+    )));
+  });
+}
+
+async function inspectStaticRewardsScene(page: Page) {
+  const scene = page.locator(".rewards-science-scene");
+  const svg = scene.locator(".rewards-science-visual__svg");
+  await expect(scene).toBeVisible();
+  await expect(svg).toBeVisible();
+  await expect(svg).toHaveAttribute("aria-hidden", "true");
+  await expect(svg).toHaveAttribute("focusable", "false");
+  await waitForFiniteAnimations(
+    page,
+    ".rewards-hero__copy, .rewards-science-scene, .rewards-records",
+  );
+
+  return scene.evaluate((element) => {
+    const sceneBounds = element.getBoundingClientRect();
+    const svgElement = element.querySelector(".rewards-science-visual__svg");
+    if (!(svgElement instanceof SVGSVGElement)) {
+      throw new Error("Expected the rewards science SVG");
+    }
+    const svgBounds = svgElement.getBoundingClientRect();
+    const orbits = [...element.querySelectorAll<SVGGElement>(
+      ".rewards-science-visual__orbit",
+    )].map((orbit) => {
+      const styles = getComputedStyle(orbit);
+      const continuingAnimations = orbit.getAnimations().filter((animation) => {
+        const effect = animation.effect;
+        return effect instanceof AnimationEffect &&
+          effect.getTiming().iterations === Infinity &&
+          animation.playState === "running";
+      });
+      return {
+        animationName: styles.animationName,
+        className: orbit.getAttribute("class") ?? "",
+        continuingAnimationCount: continuingAnimations.length,
+        transform: styles.transform,
+      };
+    });
+
+    return {
+      contained: sceneBounds.left >= 0 &&
+        sceneBounds.right <= document.documentElement.clientWidth + 1 &&
+        svgBounds.left >= sceneBounds.left - 1 &&
+        svgBounds.right <= sceneBounds.right + 1,
+      interactiveCount: element.querySelectorAll(
+        'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      ).length,
+      meaningfulShapeCount: svgElement.querySelectorAll("path, ellipse, circle").length,
+      orbits,
+      svgViewBox: svgElement.getAttribute("viewBox"),
+    };
+  });
+}
+
+async function observeCaretStyleDuringScreenshot(
+  page: Page,
+  screenshot: () => Promise<unknown>,
+): Promise<CaretStyleObservation> {
+  const observation: JSHandle<BrowserCaretStyleObserver> = await page.evaluateHandle(() => {
+    const controls = [...document.querySelectorAll("input, textarea")];
+    const initialStyles = new Map(
+      controls.map((control) => [control, control.getAttribute("style")]),
+    );
+    const result = {
+      caretMutationCount: 0,
+      caretStyleMutationDetected: false,
+      observedControlCount: controls.length,
+      styleMutationCount: 0,
+    };
+    const inspect = (records: readonly MutationRecord[]): void => {
+      for (const record of records) {
+        const target = record.target;
+        if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+          continue;
+        }
+        result.styleMutationCount += 1;
+        const oldStyle = record.oldValue ?? "";
+        const currentStyle = target.getAttribute("style") ?? "";
+        if (/caret-color\s*:\s*transparent(?:\s*!important)?/iu.test(oldStyle) ||
+          /caret-color\s*:\s*transparent(?:\s*!important)?/iu.test(currentStyle)) {
+          result.caretMutationCount += 1;
+          result.caretStyleMutationDetected = true;
+        }
+      }
+    };
+    const observer = new MutationObserver(inspect);
+    observer.observe(document.documentElement, {
+      attributeFilter: ["style"],
+      attributeOldValue: true,
+      attributes: true,
+      subtree: true,
+    });
+    return { initialStyles, inspect, observer, result };
+  });
+
+  let result: CaretStyleObservation | undefined;
+  try {
+    await screenshot();
+  } finally {
+    result = await observation.evaluate((state) => {
+      state.inspect(state.observer.takeRecords());
+      state.observer.disconnect();
+      return {
+        ...state.result,
+        styleStateUnchanged: [...state.initialStyles].every(
+          ([control, initialStyle]) => control.getAttribute("style") === initialStyle,
+        ),
+      };
+    });
+    await observation.dispose();
+  }
+  if (result === undefined) throw new Error("Caret style observation did not complete");
+  return result;
 }
 
 function checkoutBody() {
@@ -351,6 +498,93 @@ test("denies growth administration without capability or current-session MFA", a
   await expect(page.getByRole("heading", { name: "Required capability is not granted" })).toBeVisible();
 });
 
+test("keeps both public rewards orbits static without removing the contained science scene or logo loop", async ({
+  baseURL,
+  browser,
+  page,
+}) => {
+  if (baseURL === undefined) throw new Error("Playwright baseURL is required.");
+
+  const expectStaticScene = (evidence: Awaited<ReturnType<typeof inspectStaticRewardsScene>>) => {
+    expect(evidence.contained).toBe(true);
+    expect(evidence.interactiveCount).toBe(0);
+    expect(evidence.meaningfulShapeCount).toBeGreaterThanOrEqual(10);
+    expect(evidence.svgViewBox).toBe("0 0 620 500");
+    expect(evidence.orbits.map(({ className }) => className)).toEqual([
+      "rewards-science-visual__orbit rewards-science-visual__orbit--outer",
+      "rewards-science-visual__orbit rewards-science-visual__orbit--inner",
+    ]);
+    expect(evidence.orbits.every(({ animationName, continuingAnimationCount, transform }) => (
+      animationName === "none" && continuingAnimationCount === 0 && transform === "none"
+    ))).toBe(true);
+  };
+
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/rewards");
+    await expect(page.locator(".header-brand-motion")).toHaveAttribute(
+      "data-motion-state",
+      "running",
+    );
+    expectStaticScene(await inspectStaticRewardsScene(page));
+    const continuingPublicAnimations = await page.evaluate(() => (
+      document.getAnimations()
+        .filter((animation) => {
+          const effect = animation.effect;
+          return effect instanceof AnimationEffect &&
+            effect.getTiming().iterations === Infinity &&
+            animation.playState === "running";
+        })
+        .map((animation) => {
+          const effect = animation.effect;
+          const target = effect instanceof KeyframeEffect ? effect.target : null;
+          return {
+            animationName: animation instanceof CSSAnimation ? animation.animationName : "",
+            isHeaderBrandField: target instanceof Element &&
+              target.matches(".header-brand-motion__field"),
+          };
+        })
+    ));
+    expect(continuingPublicAnimations).toEqual([{
+      animationName: "header-brand-molecular-drift",
+      isHeaderBrandField: true,
+    }]);
+  }
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  for (const width of [375, 1440]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/rewards");
+    expectStaticScene(await inspectStaticRewardsScene(page));
+    await expect(page.locator(".header-brand-motion__field")).toHaveCSS(
+      "animation-name",
+      "none",
+    );
+  }
+
+  const noJavaScript = await browser.newContext({
+    baseURL,
+    javaScriptEnabled: false,
+    reducedMotion: "reduce",
+    viewport: { width: 375, height: 1000 },
+  });
+  const noJavaScriptPage = await noJavaScript.newPage();
+  try {
+    for (const width of [375, 1440]) {
+      await noJavaScriptPage.setViewportSize({ width, height: 1000 });
+      await noJavaScriptPage.goto("/rewards");
+      expectStaticScene(await inspectStaticRewardsScene(noJavaScriptPage));
+      await expect(noJavaScriptPage.locator(".header-brand-motion__field")).toHaveCSS(
+        "animation-name",
+        "none",
+      );
+    }
+  } finally {
+    await noJavaScript.close();
+  }
+});
+
 test("keeps growth routes responsive, keyboard-visible, reduced-motion-safe, and free of serious a11y issues", async ({ page }) => {
   const publicRoutes = ["/", "/catalog", "/rewards", "/partners", `/sets/${sharedSetCode}`];
   for (const width of [375, 768, 1024, 1440]) {
@@ -431,6 +665,28 @@ test("keeps growth routes responsive, keyboard-visible, reduced-motion-safe, and
 });
 
 test("captures the required growth surfaces at narrow and desktop widths", async ({ page }) => {
+  const pageErrors: string[] = [];
+  const hydrationErrors: string[] = [];
+  const otherConsoleDiagnostics: string[] = [];
+  const screenshotObservations: Array<Readonly<{
+    captureName: string;
+    observation: CaretStyleObservation;
+  }>> = [];
+  let screenshotCaptureCount = 0;
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (!["error", "warning"].includes(message.type())) return;
+    const diagnostic = `${message.type()}: ${message.text()}`;
+    if (
+      message.type() === "error" &&
+      /hydration|hydrated|server rendered html.*didn.t match/iu.test(message.text())
+    ) {
+      hydrationErrors.push(diagnostic);
+      return;
+    }
+    otherConsoleDiagnostics.push(diagnostic);
+  });
+
   for (const width of [375, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     for (const [name, route] of [
@@ -441,10 +697,16 @@ test("captures the required growth surfaces at narrow and desktop widths", async
       ["cart", "/cart"],
     ] as const) {
       await page.goto(route);
-      await page.screenshot({
-        path: path.join(screenshotDirectory, `${name}-${width}.png`),
-        fullPage: true,
-      });
+      const captureName = `${name}-${width}`;
+      const observation = await observeCaretStyleDuringScreenshot(page, () => (
+        page.screenshot({
+          path: path.join(screenshotDirectory, `${captureName}.png`),
+          fullPage: true,
+          caret: "initial",
+        })
+      ));
+      screenshotObservations.push({ captureName, observation });
+      screenshotCaptureCount += 1;
     }
 
     await page.goto("/");
@@ -463,17 +725,50 @@ test("captures the required growth surfaces at narrow and desktop widths", async
       ["partner", "/account/partner"],
     ] as const) {
       await page.goto(route);
-      await page.screenshot({
-        path: path.join(screenshotDirectory, `${name}-${width}.png`),
-        fullPage: true,
-      });
+      const captureName = `${name}-${width}`;
+      const observation = await observeCaretStyleDuringScreenshot(page, () => (
+        page.screenshot({
+          path: path.join(screenshotDirectory, `${captureName}.png`),
+          fullPage: true,
+          caret: "initial",
+        })
+      ));
+      screenshotObservations.push({ captureName, observation });
+      screenshotCaptureCount += 1;
     }
 
     await signInAs(page, "Fixed capable administrator");
     await page.goto("/admin/loyalty-policies");
-    await page.screenshot({
-      path: path.join(screenshotDirectory, `admin-loyalty-policy-${width}.png`),
-      fullPage: true,
-    });
+    const captureName = `admin-loyalty-policy-${width}`;
+    const observation = await observeCaretStyleDuringScreenshot(page, () => (
+      page.screenshot({
+        path: path.join(screenshotDirectory, `${captureName}.png`),
+        fullPage: true,
+        caret: "initial",
+      })
+    ));
+    screenshotObservations.push({ captureName, observation });
+    screenshotCaptureCount += 1;
   }
+
+  const adminObservations = screenshotObservations.filter(({ captureName }) => (
+    captureName.startsWith("admin-loyalty-policy-")
+  ));
+  expect(screenshotCaptureCount).toBe(16);
+  expect(screenshotObservations).toHaveLength(16);
+  expect(adminObservations).toHaveLength(2);
+  expect(adminObservations.every(({ observation }) => observation.observedControlCount > 0))
+    .toBe(true);
+  expect(adminObservations.filter(({ observation }) => observation.caretStyleMutationDetected))
+    .toEqual([]);
+  expect(screenshotObservations.filter(({ observation }) => !observation.styleStateUnchanged))
+    .toEqual([]);
+  expect(screenshotObservations.filter(({ observation }) => observation.caretMutationCount > 0))
+    .toEqual([]);
+  expect(pageErrors).toEqual([]);
+  expect(hydrationErrors).toEqual([]);
+  console.info(
+    `Growth screenshot diagnostics (${otherConsoleDiagnostics.length}): ${JSON.stringify(otherConsoleDiagnostics)}`,
+  );
+  console.info(`Growth screenshot captures: ${screenshotCaptureCount}`);
 });

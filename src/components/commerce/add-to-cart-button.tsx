@@ -17,7 +17,6 @@ export function AddToCartButton({
   quantity = 1,
   canAdd,
   disabledReason,
-  presentation = "checkout",
   className,
   onAdded,
 }: {
@@ -41,12 +40,7 @@ export function AddToCartButton({
     (variantId === null
       ? "Choose a variant before adding this item."
       : "This item is unavailable.");
-  const actionLabel = presentation === "preview"
-    ? `Add ${productName} to preview cart`
-    : `Add ${productName} to cart`;
-  const actionText = presentation === "preview"
-    ? "Add to preview cart"
-    : "Add to cart";
+  const actionLabel = `Add ${productName} to cart`;
 
   return (
     <>
@@ -74,7 +68,7 @@ export function AddToCartButton({
       }}
     >
       <ShoppingBag aria-hidden="true" />
-      {unavailable ? resolvedDisabledReason : actionText}
+      {unavailable ? resolvedDisabledReason : "Add to cart"}
     </Button>
     {legacyItemCount != null ? (
       <p className="mt-3 min-w-0 basis-full text-sm leading-6 text-muted-ink">

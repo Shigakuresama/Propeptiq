@@ -23,10 +23,12 @@ type ObserverHarness = Readonly<{
 }>;
 
 const observers: ObserverHarness[] = [];
+const mediaListeners = new Set<(event: MediaQueryListEvent) => void>();
 let reducedMotion = false;
 let originalIntersectionObserver: PropertyDescriptor | undefined;
 let originalMatchMedia: PropertyDescriptor | undefined;
 let rectSpy: ReturnType<typeof vi.spyOn> | undefined;
+let removeMediaListener: ReturnType<typeof vi.fn>;
 
 function rect(top: number, height: number): DOMRect {
   return {
@@ -79,25 +81,36 @@ function installIntersectionObserver(): void {
 }
 
 function installMatchMedia(): void {
+  removeMediaListener = vi.fn(
+    (_: string, listener: (event: MediaQueryListEvent) => void) => {
+      mediaListeners.delete(listener);
+    },
+  );
   Object.defineProperty(window, "matchMedia", {
     configurable: true,
     value: vi.fn((query: string) => ({
-      addEventListener: vi.fn(),
+      addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => {
+        mediaListeners.add(listener);
+      },
       addListener: vi.fn(),
       dispatchEvent: vi.fn(),
       matches: reducedMotion && query === "(prefers-reduced-motion: reduce)",
       media: query,
       onchange: null,
-      removeEventListener: vi.fn(),
+      removeEventListener: removeMediaListener,
       removeListener: vi.fn(),
     })),
   });
 }
 
-function entry(target: Element, isIntersecting: boolean): IntersectionObserverEntry {
+function entry(
+  target: Element,
+  isIntersecting: boolean,
+  intersectionRatio = isIntersecting ? 1 : 0,
+): IntersectionObserverEntry {
   return {
     boundingClientRect: target.getBoundingClientRect(),
-    intersectionRatio: isIntersecting ? 1 : 0,
+    intersectionRatio,
     intersectionRect: isIntersecting ? target.getBoundingClientRect() : rect(0, 0),
     isIntersecting,
     rootBounds: null,
@@ -123,6 +136,7 @@ beforeEach(() => {
   pathnameState.value = "/";
   reducedMotion = false;
   observers.length = 0;
+  mediaListeners.clear();
   window.history.replaceState({}, "", "/");
   originalIntersectionObserver = Object.getOwnPropertyDescriptor(
     window,
@@ -148,6 +162,7 @@ afterEach(() => {
     Reflect.deleteProperty(window, "matchMedia");
   }
   window.history.replaceState({}, "", "/");
+  mediaListeners.clear();
 });
 
 describe("ScrollRevealController progressive behavior", () => {
@@ -182,8 +197,8 @@ describe("ScrollRevealController progressive behavior", () => {
     expect(observers).toHaveLength(1);
     expect(observers[0]?.options).toEqual({
       root: null,
-      rootMargin: "0px 0px -8% 0px",
-      threshold: 0.08,
+      rootMargin: "0px",
+      threshold: 0.15,
     });
     expect(observers[0]?.observe.mock.calls.map(([target]) => target)).toEqual([
       first,
@@ -229,6 +244,87 @@ describe("ScrollRevealController progressive behavior", () => {
     expect(target).toHaveAttribute("data-scroll-reveal-state", "visible");
     expect(observer.observe).toHaveBeenCalledOnce();
     expect(observer.unobserve).toHaveBeenCalledOnce();
+  });
+
+  it("reveals a tall pending section on its first low-ratio intersection", () => {
+    const { getByTestId } = render(
+      <PublicFixture>
+        <section data-fixture-height="3000" data-fixture-top="800" data-testid="tall">
+          Tall section
+        </section>
+      </PublicFixture>,
+    );
+    const target = getByTestId("tall");
+    const observer = observers[0]!;
+
+    act(() => observer.callback([entry(target, true, 0.03)], observer as never));
+
+    expect(target).toHaveAttribute("data-scroll-reveal-state", "visible");
+    expect(observer.unobserve).toHaveBeenCalledOnce();
+    expect(observer.unobserve).toHaveBeenCalledWith(target);
+  });
+
+  it("never hides a below-fold section whose height makes the threshold unreachable", () => {
+    const { getByTestId } = render(
+      <PublicFixture>
+        <section data-fixture-height="5000" data-fixture-top="800" data-testid="too-tall">
+          Threshold-unreachable section
+        </section>
+      </PublicFixture>,
+    );
+
+    expect(getByTestId("too-tall")).toHaveAttribute(
+      "data-scroll-reveal-state",
+      "visible",
+    );
+    expect(observers).toHaveLength(0);
+  });
+
+  it("permanently reveals pending sections when reduced motion becomes enabled live", () => {
+    const rendered = render(
+      <PublicFixture>
+        <section data-fixture-top="800" data-testid="first">First</section>
+        <section data-fixture-top="980" data-testid="second">Second</section>
+      </PublicFixture>,
+    );
+    const observer = observers[0]!;
+    expect(mediaListeners).toHaveLength(1);
+
+    act(() => {
+      for (const listener of mediaListeners) {
+        listener({ matches: true } as MediaQueryListEvent);
+      }
+    });
+
+    expect(rendered.getByTestId("first")).toHaveAttribute(
+      "data-scroll-reveal-state",
+      "visible",
+    );
+    expect(rendered.getByTestId("second")).toHaveAttribute(
+      "data-scroll-reveal-state",
+      "visible",
+    );
+    expect(observer.disconnect).toHaveBeenCalledOnce();
+
+    act(() => {
+      for (const listener of mediaListeners) {
+        listener({ matches: false } as MediaQueryListEvent);
+      }
+      observer.callback([entry(rendered.getByTestId("first"), false)], observer as never);
+    });
+
+    expect(rendered.getByTestId("first")).toHaveAttribute(
+      "data-scroll-reveal-state",
+      "visible",
+    );
+    expect(rendered.getByTestId("second")).toHaveAttribute(
+      "data-scroll-reveal-state",
+      "visible",
+    );
+
+    rendered.unmount();
+    expect(removeMediaListener).toHaveBeenCalledWith("change", expect.any(Function));
+    expect(mediaListeners).toHaveLength(0);
   });
 
   it("keeps all sections visible without observing for reduced motion or a missing observer", () => {
@@ -334,8 +430,10 @@ describe("ScrollRevealController progressive behavior", () => {
     const oldObserver = observers[0]!;
     const focusHandler = documentAddSpy.mock.calls.find(([name]) => name === "focusin")?.[1];
     const hashHandler = windowAddSpy.mock.calls.find(([name]) => name === "hashchange")?.[1];
+    const mediaHandler = [...mediaListeners][0];
     expect(focusHandler).toEqual(expect.any(Function));
     expect(hashHandler).toEqual(expect.any(Function));
+    expect(mediaHandler).toEqual(expect.any(Function));
 
     pathnameState.value = "/quality-records";
     view.rerender(
@@ -348,6 +446,9 @@ describe("ScrollRevealController progressive behavior", () => {
     expect(oldSection).toHaveAttribute("data-scroll-reveal-state", "visible");
     expect(documentRemoveSpy).toHaveBeenCalledWith("focusin", focusHandler);
     expect(windowRemoveSpy).toHaveBeenCalledWith("hashchange", hashHandler);
+    expect(removeMediaListener).toHaveBeenCalledWith("change", mediaHandler);
+    expect(mediaListeners).not.toContain(mediaHandler);
+    expect(mediaListeners).toHaveLength(1);
     expect(observers).toHaveLength(2);
     expect(view.getByTestId("new-section")).toHaveAttribute(
       "data-scroll-reveal-state",
@@ -358,6 +459,82 @@ describe("ScrollRevealController progressive behavior", () => {
     view.rerender(<PublicFixture><p>No sections</p></PublicFixture>);
     expect(observers[1]?.disconnect).toHaveBeenCalledOnce();
     expect(observers).toHaveLength(2);
+  });
+
+  it("completes only bounded public entrance targets after a pathname change", () => {
+    const view = render(
+      <div className="public-layout">
+        <main>
+          <section data-fixture-top="0">
+            <div data-motion-step data-testid="public-step">Public step</div>
+            <div data-motion-sequence="home-hero" data-testid="hero-sequence">
+              <div>Hero one</div>
+              <div>Hero two</div>
+              <div>Hero three</div>
+              <div>Hero four</div>
+            </div>
+            <ul className="catalog-grid" data-testid="catalog-sequence">
+              <li>Catalog one</li>
+              <li>Catalog two</li>
+              <li>Catalog three</li>
+              <li data-testid="catalog-four">Catalog four</li>
+            </ul>
+          </section>
+        </main>
+        <div data-motion-step data-testid="outside-main">Outside main</div>
+        <ScrollRevealController />
+      </div>,
+    );
+    const publicStep = view.getByTestId("public-step");
+    const heroSteps = [...view.getByTestId("hero-sequence").children];
+    const catalogSteps = [...view.getByTestId("catalog-sequence").children];
+
+    expect(publicStep).not.toHaveAttribute("data-finite-reveal-state");
+    expect(heroSteps.every(
+      (step) => !step.hasAttribute("data-finite-reveal-state"),
+    )).toBe(true);
+    expect(catalogSteps.every(
+      (step) => !step.hasAttribute("data-finite-reveal-state"),
+    )).toBe(true);
+
+    pathnameState.value = "/quality-records";
+    view.rerender(
+      <div className="public-layout">
+        <main>
+          <section data-fixture-top="0">
+            <div data-motion-step data-testid="public-step">Public step</div>
+            <div data-motion-sequence="home-hero" data-testid="hero-sequence">
+              <div>Hero one</div>
+              <div>Hero two</div>
+              <div>Hero three</div>
+              <div>Hero four</div>
+            </div>
+            <ul className="catalog-grid" data-testid="catalog-sequence">
+              <li>Catalog one</li>
+              <li>Catalog two</li>
+              <li>Catalog three</li>
+              <li data-testid="catalog-four">Catalog four</li>
+            </ul>
+          </section>
+        </main>
+        <div data-motion-step data-testid="outside-main">Outside main</div>
+        <ScrollRevealController />
+      </div>,
+    );
+
+    expect(publicStep).toHaveAttribute("data-finite-reveal-state", "complete");
+    expect(heroSteps.every(
+      (step) => step.getAttribute("data-finite-reveal-state") === "complete",
+    )).toBe(true);
+    expect(catalogSteps.slice(0, 3).every(
+      (step) => step.getAttribute("data-finite-reveal-state") === "complete",
+    )).toBe(true);
+    expect(view.getByTestId("catalog-four")).not.toHaveAttribute(
+      "data-finite-reveal-state",
+    );
+    expect(view.getByTestId("outside-main")).not.toHaveAttribute(
+      "data-finite-reveal-state",
+    );
   });
 
   it("uses no replay, polling, scrolling, mutation, persistence, focus, or content-authority APIs", () => {
@@ -377,7 +554,7 @@ describe("ScrollRevealController progressive behavior", () => {
 });
 
 describe("scroll reveal CSS", () => {
-  it("uses only a short composited transition in the public main and forces a visible reduced-motion fallback", () => {
+  it("uses shared composited reveal properties in the public main and forces a visible reduced-motion fallback", () => {
     const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
     const visibleSelector =
       ".public-layout main section[data-scroll-reveal-state]";
@@ -385,10 +562,10 @@ describe("scroll reveal CSS", () => {
       '.public-layout main section[data-scroll-reveal-state="pending"]';
 
     expect(css).toMatch(
-      /\.public-layout main section\[data-scroll-reveal-state\]\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*translateY\(0\);[^}]*transition:\s*opacity 280ms ease-out,\s*transform 280ms ease-out;[^}]*\}/su,
+      /\.public-layout main section\[data-scroll-reveal-state\]\s*\{[^}]*opacity:\s*1;[^}]*transform:\s*translateY\(0\);[^}]*transition:\s*opacity var\(--motion-duration-reveal\) var\(--motion-ease-standard\),\s*transform var\(--motion-duration-reveal\) var\(--motion-ease-standard\);[^}]*\}/su,
     );
     expect(css).toMatch(
-      /\.public-layout main section\[data-scroll-reveal-state="pending"\]\s*\{[^}]*opacity:\s*0;[^}]*transform:\s*translateY\(0\.625rem\);[^}]*transition:\s*none;[^}]*\}/su,
+      /\.public-layout main section\[data-scroll-reveal-state="pending"\]\s*\{[^}]*opacity:\s*0;[^}]*transform:\s*translateY\(var\(--motion-rise-reveal\)\);[^}]*transition:\s*none;[^}]*\}/su,
     );
     const visibleRuleStart = css.indexOf(`${visibleSelector} {`);
     const pendingRuleStart = css.indexOf(`${pendingSelector} {`);

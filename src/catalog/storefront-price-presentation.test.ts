@@ -141,15 +141,15 @@ describe("public variant state equivalence", () => {
 describe("public variant purchase labels", () => {
   it.each([
     ["ready", "availability", "Available"],
-    ["cart_preview", "availability", "Cart preview only"],
+    ["cart_preview", "availability", "Checkout unavailable"],
     ["checkout_unavailable", "availability", "Checkout unavailable"],
-    ["local_preview", "availability", "Local cart preview"],
+    ["local_preview", "availability", "Test mode — no payments"],
     ["pricing_pending", "availability", "Pricing coming soon"],
     ["unavailable", "availability", "Unavailable"],
     ["ready", "purchase_summary", "Ready to purchase"],
-    ["cart_preview", "purchase_summary", "Cart preview only"],
+    ["cart_preview", "purchase_summary", "Checkout unavailable"],
     ["checkout_unavailable", "purchase_summary", "Checkout unavailable"],
-    ["local_preview", "purchase_summary", "Local cart preview"],
+    ["local_preview", "purchase_summary", "Test mode — no payments"],
     ["pricing_pending", "purchase_summary", "Pricing coming soon"],
     ["unavailable", "purchase_summary", "Unavailable"],
   ] as const)(

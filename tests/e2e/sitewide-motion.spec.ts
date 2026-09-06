@@ -14,6 +14,14 @@ async function signInAs(page: Page, actorLabel: string) {
   await expect(page).toHaveURL(/\/checkout$/);
 }
 
+async function waitForFiniteAnimations(page: Page, selector: string) {
+  await page.locator(selector).evaluateAll(async (elements) => {
+    await Promise.all(elements.flatMap((element) => (
+      element.getAnimations().map((animation) => animation.finished)
+    )));
+  });
+}
+
 test("public routes expose the shared public motion surface", async ({ page }) => {
   for (const route of [
     "/",
@@ -86,9 +94,35 @@ test("reduced motion removes surface, step, and science signal animation", async
   expect(motion.every(({ animationName, transform }) => animationName === "none" && transform === "none")).toBe(true);
 });
 
+test("finite catalog and hero entrances use the shared duration, easing, and 70ms stagger", async ({ page }) => {
+  await page.goto("/catalog");
+  const catalogMotion = await page.locator(".catalog-grid > li:nth-child(-n + 3)")
+    .evaluateAll((elements) => elements.map((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        delay: styles.animationDelay,
+        duration: styles.animationDuration,
+        easing: styles.animationTimingFunction,
+      };
+    }));
+  expect(catalogMotion).toEqual([
+    { delay: "0s", duration: "0.24s", easing: "cubic-bezier(0.4, 0, 0.2, 1)" },
+    { delay: "0.07s", duration: "0.24s", easing: "cubic-bezier(0.4, 0, 0.2, 1)" },
+    { delay: "0.14s", duration: "0.24s", easing: "cubic-bezier(0.4, 0, 0.2, 1)" },
+  ]);
+
+  await page.goto("/");
+  const heroDelays = await page.locator('[data-motion-sequence="home-hero"] > :nth-child(-n + 4)')
+    .evaluateAll((elements) => elements.map((element) => getComputedStyle(element).animationDelay));
+  expect(heroDelays).toEqual(["0s", "0.07s", "0.14s", "0.21s"]);
+});
+
 test("finite entrance motion releases transform ownership after completion", async ({ page }) => {
   await page.goto("/catalog");
-  await page.waitForTimeout(750);
+  await waitForFiniteAnimations(
+    page,
+    '[data-motion-surface="public"], .catalog-grid > li:nth-child(-n + 3)',
+  );
 
   const motion = await page.locator(
     '[data-motion-surface="public"], .catalog-grid > li:nth-child(-n + 3)',
@@ -111,19 +145,24 @@ test("finite entrance motion releases transform ownership after completion", asy
 
 test("click navigation keeps the public destination content visible", async ({ page }) => {
   await page.goto("/");
-  await page.waitForTimeout(400);
+  await waitForFiniteAnimations(
+    page,
+    '[data-motion-surface="public"], [data-motion-sequence="home-hero"] > *',
+  );
   await page.evaluate(() => {
     const state = window as typeof window & {
+      __siteMotionCaptureComplete?: boolean;
       __siteMotionSamples?: Array<{
         cardOpacity: number;
         headingOpacity: number;
         nodeOpacity: number;
         path: string;
-        signalOffset: number;
+        signalOpacity: number;
         signalPlayState: string;
         surfaceOpacity: number;
       }>;
     };
+    state.__siteMotionCaptureComplete = false;
     state.__siteMotionSamples = [];
     let frame = 0;
     const capture = () => {
@@ -137,21 +176,26 @@ test("click navigation keeps the public destination content visible", async ({ p
         headingOpacity: heading ? Number.parseFloat(getComputedStyle(heading).opacity) : 0,
         nodeOpacity: node ? Number.parseFloat(getComputedStyle(node).opacity) : 1,
         path: window.location.pathname,
-        signalOffset: signal
-          ? Number.parseFloat(getComputedStyle(signal).strokeDashoffset)
-          : 0,
+        signalOpacity: signal ? Number.parseFloat(getComputedStyle(signal).opacity) : 1,
         signalPlayState: signal ? getComputedStyle(signal).animationPlayState : "none",
         surfaceOpacity: surface ? Number.parseFloat(getComputedStyle(surface).opacity) : 0,
       });
       frame += 1;
-      if (frame < 75) window.requestAnimationFrame(capture);
+      if (frame < 75) {
+        window.requestAnimationFrame(capture);
+      } else {
+        state.__siteMotionCaptureComplete = true;
+      }
     };
     window.requestAnimationFrame(capture);
   });
 
   await page.getByRole("link", { name: "Browse catalog", exact: true }).first().click();
   await expect(page).toHaveURL(/\/catalog$/u);
-  await page.waitForTimeout(500);
+  await page.waitForFunction(() => (
+    (window as typeof window & { __siteMotionCaptureComplete?: boolean })
+      .__siteMotionCaptureComplete === true
+  ));
 
   const destinationSamples = await page.evaluate(() => {
     const state = window as typeof window & {
@@ -160,7 +204,7 @@ test("click navigation keeps the public destination content visible", async ({ p
         headingOpacity: number;
         nodeOpacity: number;
         path: string;
-        signalOffset: number;
+        signalOpacity: number;
         signalPlayState: string;
         surfaceOpacity: number;
       }>;
@@ -172,15 +216,22 @@ test("click navigation keeps the public destination content visible", async ({ p
     expect(Math.min(...destinationSamples.map((sample) => sample[key]))).toBeGreaterThan(0.98);
   }
   expect(destinationSamples.some(({ signalPlayState }) => signalPlayState === "paused")).toBe(true);
-  expect(destinationSamples[0]!.signalOffset).toBeGreaterThan(0.98);
+  expect(destinationSamples[0]!.signalOpacity).toBeLessThan(0.02);
   expect(destinationSamples[0]!.nodeOpacity).toBeLessThan(0.02);
 });
 
 test("staggered destination content does not rewind after navigation", async ({ page }) => {
   await page.goto("/catalog");
-  await page.waitForTimeout(400);
+  await waitForFiniteAnimations(
+    page,
+    '[data-motion-surface="public"], .catalog-grid > li:nth-child(-n + 3)',
+  );
   await page.evaluate(() => {
-    const state = window as typeof window & { __homeStepSamples?: number[] };
+    const state = window as typeof window & {
+      __homeStepCaptureComplete?: boolean;
+      __homeStepSamples?: number[];
+    };
+    state.__homeStepCaptureComplete = false;
     state.__homeStepSamples = [];
     let frame = 0;
     const capture = () => {
@@ -193,14 +244,21 @@ test("staggered destination content does not rewind after navigation", async ({ 
         );
       }
       frame += 1;
-      if (frame < 90) window.requestAnimationFrame(capture);
+      if (frame < 90) {
+        window.requestAnimationFrame(capture);
+      } else {
+        state.__homeStepCaptureComplete = true;
+      }
     };
     window.requestAnimationFrame(capture);
   });
 
   await page.getByRole("banner").getByRole("link", { name: "PROPEPTIQ LABS home" }).click();
   await expect(page).toHaveURL(/\/$/u);
-  await page.waitForTimeout(700);
+  await page.waitForFunction(() => (
+    (window as typeof window & { __homeStepCaptureComplete?: boolean })
+      .__homeStepCaptureComplete === true
+  ));
 
   const samples = await page.evaluate(() => (
     (window as typeof window & { __homeStepSamples?: number[] }).__homeStepSamples ?? []

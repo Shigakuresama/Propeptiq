@@ -15,7 +15,7 @@ import { DataLabel, Notice, RecordPanel } from "@/components/design-system/archi
 const purchaseStateCopy: Readonly<Record<CartPreviewPurchaseState, string | null>> = {
   ready: null,
   checkout_unavailable: "Display price available. Checkout is not yet available for this variant.",
-  local_preview: "Local cart preview only. No payment will be created.",
+  local_preview: "Test mode — no payments.",
   pricing_pending: "Pricing coming soon.",
   unavailable: "This variant is unavailable.",
   insufficient_quantity: "The requested quantity is not currently available.",
@@ -91,12 +91,12 @@ export function CheckoutCartStatus() {
         </div>
         {items.length > 0 && preview === null && !previewError ? (
           <p className="mt-5 text-base leading-7 text-muted-ink" role="status">
-            Awaiting server verification.
+            Updating cart
           </p>
         ) : null}
         {previewError ? (
-          <Notice className="mt-5" icon={CircleAlert} tone="danger" title="Server preview unavailable">
-            The authoritative variant preview is unavailable. Browser request identifiers below are not verified variant facts.
+          <Notice className="mt-5" icon={CircleAlert} tone="danger" title="Your cart could not be updated">
+            Please try again. Saved item identifiers below could not be verified.
           </Notice>
         ) : null}
         {items.length > 0 ? (

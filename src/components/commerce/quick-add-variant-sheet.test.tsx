@@ -312,11 +312,11 @@ describe("QuickAddVariantSheet", () => {
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("radio", { name: /30 mg/iu })).toBeEnabled();
     expect(within(dialog).getByRole("radio", { name: /Pending/iu })).toBeDisabled();
-    expect(within(dialog).getByText("Cart preview only")).toBeVisible();
+    expect(within(dialog).getByText("Checkout unavailable")).toBeVisible();
     const confirm = within(dialog).getByRole("button", {
-      name: "Add Synthetic Product Alpha to preview cart",
+      name: "Add Synthetic Product Alpha to cart",
     });
-    expect(confirm).toHaveTextContent("Add to preview cart");
+    expect(confirm).toHaveTextContent("Add to cart");
     await user.click(confirm);
     expect(addVariantMock).toHaveBeenCalledExactlyOnceWith("production-preview-variant", 1, {
       productName: "Synthetic Product Alpha", variantLabel: "30 mg",

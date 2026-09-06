@@ -133,7 +133,7 @@ describe("CheckoutCartStatus", () => {
   it.each([
     ["ready", null],
     ["checkout_unavailable", "Display price available. Checkout is not yet available for this variant."],
-    ["local_preview", "Local cart preview only. No payment will be created."],
+    ["local_preview", "Test mode — no payments."],
     ["pricing_pending", "Pricing coming soon."],
     ["unavailable", "This variant is unavailable."],
     ["insufficient_quantity", "The requested quantity is not currently available."],
@@ -170,7 +170,7 @@ describe("CheckoutCartStatus", () => {
 
     const status = screen.getByRole("status");
     expect(status).toBeVisible();
-    expect(status).toHaveTextContent("Awaiting server verification.");
+    expect(status).toHaveTextContent("Updating cart");
     expect(screen.getAllByRole("status")).toHaveLength(1);
     expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
 
@@ -179,7 +179,7 @@ describe("CheckoutCartStatus", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    await waitFor(() => expect(screen.queryByText("Awaiting server verification.", { exact: true })).toBeNull());
+    await waitFor(() => expect(screen.queryByText("Updating cart", { exact: true })).toBeNull());
     expect(screen.queryByRole("status")).toBeNull();
   });
 
@@ -203,7 +203,7 @@ describe("CheckoutCartStatus", () => {
 
     render(<CheckoutCartStatus />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Server preview unavailable");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be updated");
     expect(screen.queryByText("Synthetic local test only — Alpha", { exact: true })).toBeNull();
     expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
   });
@@ -223,7 +223,7 @@ describe("CheckoutCartStatus", () => {
 
     render(<CheckoutCartStatus />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Server preview unavailable");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be updated");
     expect(screen.queryByText("Synthetic local test only — Alpha", { exact: true })).toBeNull();
     expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
     expect(screen.getByText(new RegExp(`Unverified saved variant:.*${secondVariantId}`, "u"))).toBeVisible();
@@ -276,12 +276,12 @@ describe("CheckoutCartStatus", () => {
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeVisible());
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Browser request identifiers below are not verified variant facts.",
+      "Saved item identifiers below could not be verified.",
     );
     const fallback = screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"));
     expect(fallback).toBeVisible();
     expect(fallback).toHaveAccessibleName(`Unverified saved variant: ${variantId}`);
-    expect(screen.queryByText("Awaiting server verification.", { exact: true })).toBeNull();
+    expect(screen.queryByText("Updating cart", { exact: true })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
   });
 });

@@ -241,8 +241,8 @@ describe("CartView", () => {
     const summary = screen.getByRole("complementary", { name: "Order summary" });
     expect(within(summary).getByText("$160.97", { exact: true })).toBeVisible();
     expect(within(summary).getByText("Included in displayed merchandise prices", { exact: true })).toBeVisible();
-    expect(within(summary).getByRole("heading", { name: "Display-price cart preview" })).toBeVisible();
-    expect(within(summary).getByText(/no order or payment can be submitted/iu)).toBeVisible();
+    expect(within(summary).getByRole("heading", { name: "Checkout is currently unavailable" })).toBeVisible();
+    expect(within(summary).getByText(/Orders and payments cannot be submitted yet/iu)).toBeVisible();
     expect(within(summary).getByRole("button", { name: "Checkout unavailable" })).toBeDisabled();
     expect(screen.queryByText(/sold out|no longer available|calculated at checkout/iu)).toBeNull();
     expect(screen.queryByText(/Unverified saved variant:/u)).toBeNull();
@@ -282,7 +282,7 @@ describe("CartView", () => {
   it.each([
     ["ready", null],
     ["checkout_unavailable", "Display price available. Checkout is not yet available for this variant."],
-    ["local_preview", "Local cart preview only. No payment will be created."],
+    ["local_preview", "Test mode — no payments."],
     ["pricing_pending", "Pricing coming soon."],
     ["unavailable", "This variant is unavailable."],
     ["insufficient_quantity", "The requested quantity is not currently available."],
@@ -301,7 +301,7 @@ describe("CartView", () => {
     if (expected === null) {
       for (const copy of [
         "Display price available. Checkout is not yet available for this variant.",
-        "Local cart preview only. No payment will be created.",
+        "Test mode — no payments.",
         "Pricing coming soon.",
         "This variant is unavailable.",
         "The requested quantity is not currently available.",
@@ -325,10 +325,10 @@ describe("CartView", () => {
     expect(fallback).toHaveAccessibleName(`Unverified saved variant: ${variantId}`);
     const summary = screen.getByRole("complementary", { name: "Order summary" });
     const promotionValue = within(summary).getByText("Promotion", { exact: true }).nextElementSibling;
-    expect(promotionValue).toHaveTextContent("Awaiting server preview");
+    expect(promotionValue).toHaveTextContent("Updating cart");
     expect(within(summary).queryByText("No automatic promotion applied", { exact: true })).toBeNull();
     await act(async () => rejectRequest?.(new Error("preview unavailable")));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The authoritative cart preview is unavailable.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be updated. Please try again.");
     expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
     expect(promotionValue).toHaveTextContent("Unavailable");
     expect(within(summary).queryByText("No automatic promotion applied", { exact: true })).toBeNull();
@@ -346,7 +346,7 @@ describe("CartView", () => {
 
     render(<CartView checkoutIntent="resume" />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("The authoritative cart preview is unavailable.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be updated. Please try again.");
     expect(screen.queryByText("Synthetic local test only — Alpha", { exact: true })).toBeNull();
     expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
     expect(screen.queryByText("Your saved request is ready to continue at checkout.", { exact: true })).toBeNull();
@@ -373,7 +373,7 @@ describe("CartView", () => {
 
     render(<CartView checkoutIntent="resume" />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("The authoritative cart preview is unavailable.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be updated. Please try again.");
     expect(screen.queryByRole("heading", { name: "Tirzepatide" })).toBeNull();
     expect(screen.getByText(new RegExp(`Unverified saved variant:.*${tr30VariantId}`, "u"))).toBeVisible();
     expect(screen.getByText(new RegExp(`Unverified saved variant:.*${tr60VariantId}`, "u"))).toBeVisible();
@@ -402,7 +402,7 @@ describe("CartView", () => {
 
     render(<CartView checkoutIntent={null} />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("The authoritative cart preview is unavailable.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be updated. Please try again.");
     const first = requestBody();
     await user.click(screen.getByRole("button", { name: "Retry current cart facts" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -430,7 +430,7 @@ describe("CartView", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await act(async () => rejectRevalidation?.(new Error("same-cart revalidation failed")));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The authoritative cart preview is unavailable.",
+      "Your cart could not be updated. Please try again.",
     );
     const showedVerifiedFactsUnderError = screen.queryByText(
       "Synthetic local test only — Alpha",
@@ -450,7 +450,7 @@ describe("CartView", () => {
 
     await act(async () => rejectRetry?.(new Error("same-cart retry failed")));
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The authoritative cart preview is unavailable.",
+      "Your cart could not be updated. Please try again.",
     );
     expect(showedVerifiedFactsUnderError).toBe(false);
     expect(showedVerifiedFactsDuringRetry).toBe(false);
@@ -556,7 +556,7 @@ describe("CartView", () => {
 
     expect(await screen.findByRole("button", { name: "Checkout unavailable" })).toBeDisabled();
     expect(screen.queryByText("Your saved request is ready to continue at checkout.", { exact: true })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Acknowledge server changes" }));
+    await user.click(screen.getByRole("button", { name: "Confirm cart updates" }));
     expect(screen.getByText("Your saved request is ready to continue at checkout.", { exact: true })).toBeVisible();
     const continueButton = screen.getByRole("button", { name: "Continue to sign in" });
     expect(continueButton).toBeEnabled();
@@ -585,7 +585,15 @@ describe("CartView", () => {
     render(<CartView checkoutIntent="resume" />);
 
     expect(screen.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
-    expect(screen.getByRole("link", { name: "Continue to catalog" })).toHaveAttribute("href", "/catalog");
+    const catalogLink = screen.getByRole("link", { name: "Continue to catalog" });
+    expect(catalogLink).toHaveAttribute("href", "/catalog");
+    expect(catalogLink).toHaveClass(
+      "h-auto",
+      "max-w-full",
+      "whitespace-normal",
+      "py-2.5",
+      "text-center",
+    );
     expect(screen.queryByText("Your saved request is ready to continue at checkout.", { exact: true })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -600,12 +608,12 @@ describe("CartView", () => {
       />,
     );
 
-    const checkout = await screen.findByRole("button", { name: "Checkout — Coming Soon" });
+    const checkout = await screen.findByRole("button", { name: "Checkout unavailable" });
     expect(checkout).toBeDisabled();
     expect(checkout).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(checkout);
     expect(navigate).not.toHaveBeenCalled();
-    expect(screen.getByText(/final shipping, tax, and payment are not available/iu)).toBeVisible();
+    expect(screen.getByText(/Shipping and tax are not yet calculated/iu)).toBeVisible();
     expect(screen.getByRole("img", {
       name: "AI-generated catalog illustration beside Synthetic local test only — Alpha, Synthetic 5 mg",
     })).toHaveAttribute("loading", "lazy");
@@ -628,9 +636,9 @@ describe("CartView", () => {
     );
 
     await waitFor(() => expect(screen.getAllByRole("heading", {
-      name: "Display-price cart preview",
+      name: "Checkout is currently unavailable",
     })).toHaveLength(2));
-    const headings = screen.getAllByRole("heading", { name: "Display-price cart preview" });
+    const headings = screen.getAllByRole("heading", { name: "Checkout is currently unavailable" });
     expect(headings[0]?.id).toBeTruthy();
     expect(headings[1]?.id).toBeTruthy();
     expect(headings[0]?.id).not.toBe(headings[1]?.id);

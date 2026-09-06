@@ -58,7 +58,7 @@ test("empty legacy cart allows canonical addition that survives a full reload", 
   await selectCanonicalVariant(page);
   await expect(page.getByRole("link", { name: "Review saved cart" })).toHaveCount(0);
   await page.getByRole("button", { name: "2 bottles", exact: true }).click();
-  await page.getByRole("button", { name: "Add Tirzepatide to preview cart" }).click();
+  await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
   await expect(page.getByRole("status", { name: "Cart updates" })).toHaveText("Cart updated. Tirzepatide, 30mg: 2 units in cart.");
   await expect(page.getByRole("link", { name: "Cart, 2 requested units" })).toBeVisible();
   await expectSavedCanonicalCart(page, 2);
@@ -73,7 +73,7 @@ test("nonempty legacy cart rejects additions until explicit acknowledgement then
   await expect(purchase.getByText("Your saved cart uses an older format. Clear the old cart before adding a variant.")).toBeVisible();
   await expect(reviewSavedCart).toBeVisible();
   await expect(reviewSavedCart).toHaveAttribute("href", "/cart");
-  await page.getByRole("button", { name: "Add Tirzepatide to preview cart" }).click();
+  await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
   await expect(page.getByRole("status", { name: "Cart updates" })).toHaveText(
     "Open your cart and clear the old cart before choosing variants again. Your saved items have not been changed.",
   );
@@ -90,7 +90,7 @@ test("nonempty legacy cart rejects additions until explicit acknowledgement then
   expect(await page.evaluate((key) => window.localStorage.getItem(key), legacyKey)).toBeNull();
   await selectCanonicalVariant(page);
   await expect(page.getByRole("link", { name: "Review saved cart" })).toHaveCount(0);
-  await page.getByRole("button", { name: "Add Tirzepatide to preview cart" }).click();
+  await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
   await expect(page.getByRole("status", { name: "Cart updates" })).toHaveText("Cart updated. Tirzepatide, 30mg: 1 unit in cart.");
   await expectSavedCanonicalCart(page, 1);
 });
