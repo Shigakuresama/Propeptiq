@@ -58,6 +58,73 @@ type PublicRoute =
   | "/quality-records"
   | "/research-use-policy";
 
+type GalleryMotionState = Readonly<{
+  transform: string;
+  translate: string;
+  rotate: string;
+  scale: string;
+  transitionDuration: string;
+  activeAnimations: number;
+  violations: readonly string[];
+}>;
+
+async function galleryMotionState(image: Locator): Promise<GalleryMotionState> {
+  return image.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const transformMatrix = style.transform === "none"
+      ? new DOMMatrixReadOnly()
+      : new DOMMatrixReadOnly(style.transform);
+    const neutralTokenList = (value: string, neutral: number) => value === "none" || value
+      .trim()
+      .split(/\s+/)
+      .every((token) => Number.parseFloat(token) === neutral);
+    const transitionIsZero = style.transitionDuration
+      .split(",")
+      .every((duration) => Number.parseFloat(duration) === 0);
+    const activeAnimations = element
+      .getAnimations()
+      .filter((animation) => animation.pending || animation.playState === "running")
+      .length;
+    const violations: string[] = [];
+    if (!transformMatrix.isIdentity) {
+      violations.push(`nonidentity transform: ${style.transform}`);
+    }
+    if (!neutralTokenList(style.translate, 0)) violations.push(`non-neutral translate: ${style.translate}`);
+    if (!neutralTokenList(style.rotate, 0)) violations.push(`non-neutral rotate: ${style.rotate}`);
+    if (!neutralTokenList(style.scale, 1)) violations.push(`non-neutral scale: ${style.scale}`);
+    if (!transitionIsZero) violations.push(`nonzero transition duration: ${style.transitionDuration}`);
+    if (activeAnimations > 0) violations.push(`active image animations: ${activeAnimations}`);
+    return {
+      transform: style.transform,
+      translate: style.translate,
+      rotate: style.rotate,
+      scale: style.scale,
+      transitionDuration: style.transitionDuration,
+      activeAnimations,
+      violations,
+    };
+  });
+}
+
+async function expectGalleryImageToHaveNoMotion(image: Locator) {
+  const state = await galleryMotionState(image);
+  expect(state.violations, `Gallery image motion state: ${JSON.stringify(state)}`).toEqual([]);
+}
+
+test("gallery no-motion evaluator rejects nonidentity transforms and active motion [browser-only doubles]", async ({ page }) => {
+  await page.setContent(`
+    <style>@keyframes active-motion { to { opacity: .5; } }</style>
+    <img id="scaled" alt="scaled double" style="transform: scale(1.1); transition-duration: 0s">
+    <img id="translated" alt="translated double" style="translate: 1px; transition-duration: 0s">
+    <img id="animated" alt="animated double" style="animation: active-motion 10s linear infinite; transition-duration: 0s">
+  `);
+
+  await expect.poll(async () => (await galleryMotionState(page.locator("#animated"))).activeAnimations).toBeGreaterThan(0);
+  expect((await galleryMotionState(page.locator("#scaled"))).violations.some((violation) => violation.startsWith("nonidentity transform:"))).toBe(true);
+  expect((await galleryMotionState(page.locator("#translated"))).violations).toContain("non-neutral translate: 1px");
+  expect((await galleryMotionState(page.locator("#animated"))).violations).toContain("active image animations: 1");
+});
+
 test("six-view product gallery loads all scenes and keeps keyboard, focus, and geometry stable", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -116,8 +183,7 @@ test("six-view product gallery loads all scenes and keeps keyboard, focus, and g
   }
   await page.emulateMedia({ reducedMotion: "reduce" });
   const gallery = page.locator(".catalog-product-gallery");
-  await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transition-duration", "0s");
-  await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transform", "none");
+  await expectGalleryImageToHaveNoMotion(gallery.locator(".catalog-product-visual__base"));
   expect(errors).toEqual([]);
 });
 
@@ -129,8 +195,7 @@ test("six-view product gallery keeps a visible front image with JavaScript disab
     const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
     await expect(gallery.getByRole("img")).toBeVisible();
     await expect(gallery.getByRole("status")).toHaveText("View 1 of 6: Front");
-    await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transform", "none");
-    await expect(gallery.locator(".catalog-product-visual__base")).toHaveCSS("transition-duration", "0s");
+    await expectGalleryImageToHaveNoMotion(gallery.locator(".catalog-product-visual__base"));
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   } finally {
     await context.close();
