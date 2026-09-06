@@ -573,6 +573,11 @@ test("no-JavaScript cases use only host polling around synchronous page snapshot
   assert.match(noJavaScriptCaseSource, /waitForNoJavaScriptFooter/u);
   assert.match(noJavaScriptCaseSource, /lifecycle = result\.errors\.length > 0 \? "failed" : "completed"/u);
   assert.match(noJavaScriptCaseSource, /lifecycle = "interrupted"/u);
+  const imageStart = source.indexOf("async function prepareNoJavaScriptImages");
+  const imageEnd = source.indexOf("async function waitForNoJavaScriptFooter", imageStart);
+  assert.ok(imageStart >= 0 && imageEnd > imageStart);
+  const noJavaScriptImagesSource = source.slice(imageStart, imageEnd);
+  assert.doesNotMatch(noJavaScriptImagesSource, /scrollIntoViewIfNeeded|\.evaluate\(async/gu);
 });
 
 test("frame longtasks are tagged against the exact observation interval and whole-context records remain separate", () => {

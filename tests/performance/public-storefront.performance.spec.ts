@@ -1252,7 +1252,7 @@ async function prepareNoJavaScriptImages(page: Page) {
       record.after = before;
       continue;
     }
-    await image.scrollIntoViewIfNeeded();
+    await image.evaluate((element) => element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }));
     const deadline = Date.now() + 15_000;
     let after = await readNoJavaScriptImage(image);
     while (Date.now() < deadline && !(after.complete && after.naturalWidth > 0 && after.naturalHeight > 0)) {
