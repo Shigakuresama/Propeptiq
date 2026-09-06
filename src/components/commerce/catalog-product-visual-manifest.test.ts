@@ -138,7 +138,87 @@ const originalProductFronts = {
   ],
 } as const;
 
+const alternateProductSlugs = [
+  "bpc-157",
+  "tirzepatide",
+  "retatrutide",
+  "nad-plus",
+  "semax",
+  "selank",
+] as const;
+const alternateSceneIds = [
+  "three-quarter",
+  "multi-vial-study",
+  "copy-space-detail",
+  "overhead",
+  "ambient-studio",
+] as const;
+
 describe("catalog product visual manifest", () => {
+  it("resolves the exact 30 product-specific alternate assets while retaining 50 shared tails", async () => {
+    const receipt = JSON.parse(readFileSync(resolve(
+      process.cwd(),
+      ".superpowers/sdd/2026-09-04-propeptiq-storefront-completion/task-4e-asset-receipt.json",
+    ), "utf8")) as { assets: Array<{
+      slug: string;
+      scene: string;
+      src: string;
+      width: number;
+      height: number;
+      inputSha256: string;
+      outputSha256: string;
+      bytes: number;
+    }> };
+    expect(receipt.assets).toHaveLength(30);
+    expect([...new Set(receipt.assets.map(({ slug }) => slug))]).toEqual([...alternateProductSlugs]);
+    expect(new Set(receipt.assets.map(({ src }) => src))).toHaveLength(30);
+    expect(new Set(receipt.assets.map(({ outputSha256 }) => outputSha256))).toHaveLength(30);
+
+    for (const slug of alternateProductSlugs) {
+      const expected = receipt.assets.filter((asset) => asset.slug === slug);
+      expect(expected.map(({ scene }) => scene)).toEqual([...alternateSceneIds]);
+      const resolved = getCatalogProductVisualScenes(slug);
+      expect(resolved[0]).toBe(catalogProductFrontVisuals[slug]);
+      expect(resolved.slice(1).map(({ id }) => id)).toEqual([...alternateSceneIds]);
+      expect(resolved.slice(1).map(({ src }) => src)).toEqual(
+        alternateSceneIds.map((scene) => `/catalog/individual/${slug}/${scene}-v1.webp`),
+      );
+      expect(Object.isFrozen(resolved)).toBe(true);
+      expect(getCatalogProductVisualScenes(slug)).toBe(resolved);
+
+      for (const [index, expectedAsset] of expected.entries()) {
+        const scene = resolved[index + 1]!;
+        expect(scene).toMatchObject({
+          id: expectedAsset.scene,
+          src: expectedAsset.src,
+          width: expectedAsset.width,
+          height: expectedAsset.height,
+          inputSha256: expectedAsset.inputSha256,
+          outputSha256: expectedAsset.outputSha256,
+        });
+        expect(Object.isFrozen(scene)).toBe(true);
+        const bytes = readFileSync(resolve(process.cwd(), `public${scene.src}`));
+        expect(bytes).toHaveLength(expectedAsset.bytes);
+        expect(bytes.subarray(0, 4).toString("ascii")).toBe("RIFF");
+        expect(bytes.subarray(8, 12).toString("ascii")).toBe("WEBP");
+        expect(createHash("sha256").update(bytes).digest("hex")).toBe(expectedAsset.outputSha256);
+        expect(await sharp(bytes).metadata()).toMatchObject({
+          format: "webp",
+          width: 1254,
+          height: 1254,
+        });
+      }
+    }
+
+    const sharedTailSlugs = expectedCanonicalProductSlugs.filter(
+      (slug) => !alternateProductSlugs.includes(slug as (typeof alternateProductSlugs)[number]),
+    );
+    expect(sharedTailSlugs).toHaveLength(50);
+    for (const slug of sharedTailSlugs) {
+      expect(getCatalogProductVisualScenes(slug).slice(1)).toEqual(catalogProductVisualManifest.slice(1));
+    }
+  });
+
   it("resolves exact immutable fronts for all 56 canonical products without mutating the shared scene tail", async () => {
     const mappedSlugs = Object.keys(catalogProductFrontVisuals).sort();
     const expectedCatalogSlugs = storefrontCatalogData.products
@@ -161,7 +241,9 @@ describe("catalog product visual manifest", () => {
       const resolved = getCatalogProductVisualScenes(slug);
       expect(resolved).toHaveLength(6);
       expect(resolved[0]).toMatchObject({ id: "front", src: expectedSource });
-      expect(resolved.slice(1)).toEqual(catalogProductVisualManifest.slice(1));
+      if (!alternateProductSlugs.includes(slug as (typeof alternateProductSlugs)[number])) {
+        expect(resolved.slice(1)).toEqual(catalogProductVisualManifest.slice(1));
+      }
       expect(Object.isFrozen(resolved)).toBe(true);
       expect(Object.isFrozen(resolved[0])).toBe(true);
       expect(getCatalogProductVisualScenes(slug)).toEqual(resolved);
