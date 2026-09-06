@@ -198,8 +198,17 @@ describe("storefront controlled content", () => {
     const homepage = getApprovedHomepageContent();
     const serialized = JSON.stringify(homepage);
 
-    expect(serialized).toContain("owner-supplied product names and package configurations");
-    expect(serialized).toContain("same exact variant");
+    expect(homepage.faqs.map(({ question, answer }) => ({ question, answer }))).toEqual([
+      { question: "What information is in the catalog?", answer: "Explore product names, configurations, and product details. Each listing shows pricing and availability when available." },
+      { question: "How does storefront search work?", answer: "Search by product name, category, SKU, or configuration. Use the search button at the bottom of the page to find products, pages, and FAQs." },
+      { question: "How do I choose a product configuration?", answer: "Select the configuration you want before adding a product to your cart. Different variants stay on separate cart lines." },
+      { question: "How do quantity discounts work?", answer: "One item has no volume discount; two receive 8%; three through nine receive 10%; and ten or more receive 30%. If an eligible promotion is higher, only the single higher percentage applies." },
+      { question: "Does the cart combine different configurations?", answer: "Repeated additions of the same exact variant merge and recalculate its quantity tier. Different variants remain separate and do not combine toward a tier." },
+      { question: "What does Pricing coming soon mean?", answer: "Pricing is not available for that variant yet. You can still view its details, but it cannot be purchased." },
+      { question: "How are prices and availability confirmed?", answer: "Prices, discounts, and availability are checked again before checkout. If anything changes, you will be asked to review your cart. Checkout remains unavailable while ordering is not enabled." },
+      { question: "Where can I review the research-use restrictions?", answer: "Open the Research-Use Policy from the site navigation or footer. It lists the permitted nonclinical research contexts and purchaser responsibilities." },
+    ]);
+    expect(serialized).toContain("Different variants stay on separate cart lines");
     expect(serialized).toContain("single higher percentage");
     expect(serialized).toContain("Research-Use Policy");
     expect(serialized).not.toMatch(

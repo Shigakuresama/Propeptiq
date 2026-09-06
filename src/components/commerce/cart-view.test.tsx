@@ -585,6 +585,7 @@ describe("CartView", () => {
     render(<CartView checkoutIntent="resume" />);
 
     expect(screen.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
+    expect(screen.getByText("Explore the catalog and choose a product to add to your cart.")).toBeVisible();
     const catalogLink = screen.getByRole("link", { name: "Continue to catalog" });
     expect(catalogLink).toHaveAttribute("href", "/catalog");
     expect(catalogLink).toHaveClass(

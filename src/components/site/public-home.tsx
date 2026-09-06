@@ -33,7 +33,7 @@ const documentationStages = [
   {
     index: "02",
     label: "Record",
-    detail: "Owner-supplied configuration",
+    detail: "Product configuration",
   },
   {
     index: "03",
@@ -113,9 +113,7 @@ export function PublicHome({
               <span className="block">greater clarity.</span>
             </h1>
             <p className="mt-7 max-w-[62ch] text-pretty text-lg leading-8 text-muted-ink sm:text-xl">
-              {allBrowseOnly
-                ? "Explore the owner-supplied product catalog and package configurations. Purchasing and operational availability remain separate from this browse-only collection."
-                : "Explore the owner-supplied product catalog and package configurations. Current price and availability snapshots are displayed where configured and revalidated before checkout."}
+              Explore research materials, compare product configurations, and find the details you need in one place.
             </p>
             <div className="mt-6 flex flex-wrap gap-3 sm:mt-9">
               <Button asChild className="action-primary">
@@ -136,7 +134,7 @@ export function PublicHome({
               <div className="flex items-start justify-between gap-4 p-6 sm:p-8">
                 <DataLabel>Current catalog</DataLabel>
                 <p className="rounded-full border border-border bg-surface-record px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] text-accent-readable">
-                  {allBrowseOnly ? "Browse-only" : "Current snapshot"}
+                  Explore the collection
                 </p>
               </div>
               <div className="border-t border-border bg-surface-record p-6 sm:p-8">
@@ -153,9 +151,9 @@ export function PublicHome({
                   />
                 </div>
                 <p className="mt-6 max-w-[38ch] border-t border-border pt-5 text-base leading-7 text-muted-ink">
-                  Product families spanning {variantCount} supplied package configurations. {allBrowseOnly
-                    ? "Prices are intentionally excluded."
-                    : "Current price and availability snapshots are displayed where configured and revalidated before checkout."}
+                  Explore {variantCount} product configurations. {allBrowseOnly
+                    ? "Select a product to see its listed details. Pricing and ordering are not available for these items."
+                    : "Select a product to see its details, pricing, and availability."}
                 </p>
               </div>
             </div>
@@ -192,10 +190,10 @@ export function PublicHome({
         <SectionShell>
           <div className="grid gap-7 lg:grid-cols-[minmax(0,8fr)_minmax(14rem,4fr)] lg:items-end">
             <SectionHeading
-              description="A closer view of entries from the current owner-supplied publication."
+              description="Explore products from the PropeptIQ research catalog."
               eyebrow="Catalog highlights"
               id="home-highlights-heading"
-              title="Selected entries, given room to be read."
+              title="Find your next research material."
             />
             <div className="flex items-center gap-3 lg:justify-end">
               <LibraryBig aria-hidden="true" className="size-5 text-moss" />
@@ -324,8 +322,7 @@ export function PublicHome({
                 <p>{researchRestrictions[1]}</p>
               </div>
               <p className="mt-6 text-base leading-7 text-muted-ink">
-                The browse publication identifies owner-supplied product families and package
-                configurations. Purchasing and operational availability remain separate.
+                Review each product&apos;s details and the Research-Use Policy before making your selection.
               </p>
               <Link
                 className="record-link mt-7 inline-flex min-h-11 items-center"
@@ -349,7 +346,7 @@ export function PublicHome({
               Explore the full research catalog.
             </h2>
             <p className="mt-5 max-w-[58ch] text-base leading-7 text-canvas/75">
-              Review every currently published product family and supplied package configuration.
+              Explore every product and configuration in our research catalog.
             </p>
           </div>
           <Button asChild className="action-inverse" variant="outline">

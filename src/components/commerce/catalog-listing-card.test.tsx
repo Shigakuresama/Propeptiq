@@ -142,7 +142,7 @@ describe("CatalogListingCard", () => {
       within(article).getByRole("button", {
         name: /synthetic product alpha unavailable/iu,
       }),
-    ).toBeDisabled();
+    ).toHaveTextContent("This product is currently unavailable.");
     expect(within(article).queryByText(/-\d+%/u)).toBeNull();
   });
 

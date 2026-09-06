@@ -1032,7 +1032,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
     for (const [label, locator] of [
       ["product title", page.getByRole("heading", { level: 1, name: "Tirzepatide" })],
       ["image disclosure", page.locator(".catalog-detail-image .catalog-image-disclosure")],
-      ["configuration heading", page.getByRole("heading", { name: "Supplied configurations" })],
+      ["configuration heading", page.getByRole("heading", { name: "Product configurations" })],
       ["purchase heading", page.getByRole("heading", { name: "Purchase" })],
     ] as const) {
       const targetBounds = await clientRect(locator);
@@ -1119,7 +1119,7 @@ test("catalog product hierarchy keeps purchase first and cards content-sized", a
     await page.goto("/catalog/items/tirzepatide");
     const detailContent = page.locator(".catalog-detail-content");
     const purchaseHeading = detailContent.getByRole("heading", { name: "Purchase" });
-    const configurationsHeading = detailContent.getByRole("heading", { name: "Supplied configurations" });
+    const configurationsHeading = detailContent.getByRole("heading", { name: "Product configurations" });
     expect(await purchaseHeading.evaluate((element) => Boolean(element.compareDocumentPosition(document.querySelector("#catalog-variants-heading")!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
     const purchaseBounds = await clientRect(purchaseHeading);
     const configurationsBounds = await clientRect(configurationsHeading);
@@ -1620,7 +1620,7 @@ test("anonymous canonical local/test cart survives reload and preserves only var
   await expect(
     page.getByRole("heading", {
       level: 1,
-      name: "Requested IDs, reconciled with server facts.",
+      name: "Your cart",
     }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
@@ -2371,7 +2371,7 @@ test("navigation, homepage trust content, product research, and related records 
     const url = new URL((image as HTMLImageElement).src);
     return url.searchParams.get("url") ?? url.pathname;
   })).toBe("/catalog/visual-masters/front.webp");
-  await expect(page.getByText(/BPC-157 is an owner-supplied catalog identity/u)).toBeVisible();
+  await expect(page.getByText("Explore BPC-157 configurations, pricing, and product information.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Product information" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Search PubMed for BPC-157" })).toHaveAttribute(
     "href",
@@ -2924,7 +2924,7 @@ test("JavaScript disabled keeps essential public sections visible and navigable"
     await browseCatalog.click();
     await expect(page).toHaveURL(/\/catalog$/u);
     await expect(
-      page.getByRole("heading", { level: 1, name: "Research catalog, organized by product." }),
+      page.getByRole("heading", { level: 1, name: "Explore the collection." }),
     ).toBeVisible();
   } finally {
     await context.close();

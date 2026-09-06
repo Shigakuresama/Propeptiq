@@ -108,7 +108,7 @@ describe("CatalogItemDetail", () => {
       name: "Front AI-generated catalog illustration for Pinealon",
     });
     const suppliedConfigurations = screen.getByRole("heading", {
-      name: "Supplied configurations",
+      name: "Product configurations",
     });
     expect(image).toBeVisible();
     expect(
@@ -133,7 +133,8 @@ describe("CatalogItemDetail", () => {
       "lg:row-start-2",
       "lg:pt-0",
     );
-    expect(screen.getByText("Source label: Pinealon10mg")).toBeVisible();
+    expect(screen.getByText("Also listed as Pinealon10mg")).toBeVisible();
+    expect(screen.getByText("Product details")).toBeVisible();
     expect(screen.getByText("PN5")).toBeVisible();
     expect(within(suppliedConfigurations.closest("section")!).getByText("5mg")).toBeVisible();
     expect(screen.queryByText("5mg × 10 vials")).not.toBeInTheDocument();
@@ -156,7 +157,7 @@ describe("CatalogItemDetail", () => {
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
     const purchase = screen.getByRole("heading", { name: "Purchase" });
-    const configurations = screen.getByRole("heading", { name: "Supplied configurations" });
+    const configurations = screen.getByRole("heading", { name: "Product configurations" });
     const information = screen.getByRole("heading", { name: "Approved product information" });
     expect(purchase.compareDocumentPosition(configurations) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(configurations.compareDocumentPosition(information) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -246,8 +247,8 @@ describe("CatalogItemDetail", () => {
     const product = findPublicStorefrontProduct(browseOnlyCatalog, "pinealon")!;
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
-    const configurations = screen.getByRole("heading", { name: "Supplied configurations" });
-    const notice = screen.getByText(/not represented\./u);
+    const configurations = screen.getByRole("heading", { name: "Product configurations" });
+    const notice = screen.getByText("Product details are available below. Pricing and ordering are not available for this item.");
     expect(configurations.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Purchase" })).toBeNull();
   });
@@ -264,7 +265,7 @@ describe("CatalogItemDetail", () => {
 
     const variantRow = screen.getByText(code).closest("li");
     expect(variantRow).not.toBeNull();
-    expect(within(variantRow!).getByText(`Source label: ${sourceName}`)).toBeVisible();
+    expect(within(variantRow!).getByText(`Also listed as ${sourceName}`)).toBeVisible();
   });
 
   it("renders only approved allowed content literally and forwards exact pricing", () => {

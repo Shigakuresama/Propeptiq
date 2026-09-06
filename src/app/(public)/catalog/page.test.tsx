@@ -56,7 +56,7 @@ vi.mock("@/components/site/page-transition", () => ({
   PageTransition: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-import CatalogPage from "./page";
+import CatalogPage, { metadata } from "./page";
 
 const projectedCatalog = buildPublicStorefrontCatalog({
   configuredPublicationId: browseCatalogPublicationId,
@@ -86,9 +86,10 @@ describe("retained browse catalog route", () => {
     render(await CatalogPage());
 
     expect(screen.getAllByRole("article")).toHaveLength(56);
-    expect(
-      screen.getByText(/56 product families and 103 supplied package configurations/iu),
-    ).toBeVisible();
+    expect(screen.getByText(/56 products and 103 configurations to explore/iu)).toBeVisible();
+    expect(screen.getByText(/Images are illustrations, not product photographs\./u)).toBeVisible();
+    expect(screen.getByText(/select a product to review its details, pricing, and availability/iu)).toBeVisible();
+    expect(metadata.description).toBe("Explore PROPEPTIQ LABS research catalog products and configurations.");
     expect(getPublicStorefrontViewMock).toHaveBeenCalledTimes(1);
     expect(getPublicBrowseCatalogMock).not.toHaveBeenCalled();
     expect(buildCatalogDiscoveryRowsMock).toHaveBeenCalledTimes(1);
@@ -113,8 +114,8 @@ describe("retained browse catalog route", () => {
     });
 
     render(await CatalogPage());
-    expect(screen.getByText(/current catalog price and availability snapshots are displayed where configured and revalidated before checkout/iu)).toBeVisible();
-    expect(screen.queryByText(/prices and availability are intentionally excluded/iu)).toBeNull();
+    expect(screen.getByText(/select a product to review its details, pricing, and availability/iu)).toBeVisible();
+    expect(screen.queryByText(/pricing and ordering are not available for these items/iu)).toBeNull();
   });
 
   it("skips discovery projection and explorer rendering for an empty catalog", async () => {
@@ -134,7 +135,8 @@ describe("retained browse catalog route", () => {
     expect(buildCatalogDiscoveryRowsMock).not.toHaveBeenCalled();
     expect(explorerProps).toHaveLength(0);
     expect(screen.queryByRole("region", { name: "Synthetic catalog explorer" })).toBeNull();
-    expect(screen.getByText("No owner-approved browse catalog is currently published.")).toBeVisible();
+    expect(screen.getByText(/pricing and ordering are not available for these items/iu)).toBeVisible();
+    expect(screen.getByText("No products are available to view right now. Please check back later.")).toBeVisible();
     expect(getPublicBrowseCatalogMock).not.toHaveBeenCalled();
   });
 });

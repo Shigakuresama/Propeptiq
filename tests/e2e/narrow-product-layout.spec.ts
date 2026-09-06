@@ -62,7 +62,7 @@ async function expectPrimaryGeometry(page: Page, width: number) {
 
 async function expectNarrowDescendants(page: Page) {
   const content = page.locator(".catalog-detail-content");
-  const configurations = page.getByRole("heading", { name: "Supplied configurations" });
+  const configurations = page.getByRole("heading", { name: "Product configurations" });
   const summary = page.getByRole("status", { name: "Purchase summary" });
   const definitionList = summary.locator("dl");
   const add = summary.getByRole("button", { name: "Add Tirzepatide to cart" });
