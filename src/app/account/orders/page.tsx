@@ -22,13 +22,13 @@ export default async function OrdersPage() {
   const orders = await repositories.listOrders();
   return (
     <section>
-      <DataLabel>Owner-scoped records</DataLabel>
+      <DataLabel>Your orders</DataLabel>
       <h1 className="mt-4 font-heading text-page leading-[0.95]">Order history</h1>
-      <p className="mt-5 max-w-2xl text-base leading-7 text-muted-ink">Only orders belonging to this authenticated account are queried.</p>
+      <p className="mt-5 max-w-2xl text-base leading-7 text-muted-ink">Only orders for this signed-in account are shown.</p>
       {orders.length === 0 ? (
         <EmptyState
           className="mt-8"
-          description="Completed checkout records will appear here only after the server creates an owner-scoped order."
+          description="Orders will appear here after checkout creates an order record."
           eyebrow="Order archive"
           icon={PackageOpen}
           title="No orders exist for this account."

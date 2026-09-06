@@ -2476,6 +2476,61 @@ test("long CP20 front loads from its exact individual source on card and PDP at 
   }
 });
 
+const alternateSceneLabels = [
+  ["three-quarter", "Three-quarter"],
+  ["multi-vial-study", "Multi-vial study"],
+  ["copy-space-detail", "Copy-space detail"],
+  ["overhead", "Overhead"],
+  ["ambient-studio", "Ambient studio"],
+] as const;
+
+async function expectIndividualAlternateGallery(
+  page: Page,
+  product: { slug: string; name: string; variant: string },
+) {
+  for (const width of [375, 768, 1440]) {
+    await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
+    await page.goto(`/catalog/items/${product.slug}`);
+    const gallery = page.getByRole("region", { name: `${product.name} product illustration gallery` });
+    const panel = gallery.getByRole("tabpanel");
+    const initialPanelRect = await clientRect(panel);
+    expect(initialPanelRect.width / initialPanelRect.height, `${width}px ${product.slug} reserved ratio`).toBeCloseTo(4 / 3, 2);
+
+    for (const [index, [scene, label]] of alternateSceneLabels.entries()) {
+      await gallery.getByRole("tab", { name: label, exact: true }).click();
+      const image = gallery.getByRole("img", {
+        name: `${label} AI-generated catalog illustration for ${product.name}`,
+      });
+      await expect.poll(() => image.evaluate((node) => {
+        const entry = node as HTMLImageElement;
+        return entry.complete && entry.naturalWidth > 0 && entry.naturalHeight > 0;
+      })).toBe(true);
+      expect(await image.evaluate((node) => {
+        const url = new URL((node as HTMLImageElement).src);
+        return url.searchParams.get("url") ?? url.pathname;
+      })).toBe(`/catalog/individual/${product.slug}/${scene}-v1.webp`);
+      await expect(gallery.getByRole("status")).toHaveText(`View ${index + 2} of 6: ${label}`);
+      await expect(gallery.locator(".catalog-product-visual__name")).toHaveText(product.name);
+      await expect(gallery.locator(".catalog-product-visual__variant")).toHaveText(product.variant);
+      await expect(gallery.getByText("RESEARCH USE ONLY", { exact: true })).toBeVisible();
+      await expect(gallery.getByText("AI-generated catalog illustration — not actual product photography.", { exact: true })).toBeVisible();
+      const activePanelRect = await clientRect(panel);
+      expect(activePanelRect.width).toBeCloseTo(initialPanelRect.width, 3);
+      expect(activePanelRect.height).toBeCloseTo(initialPanelRect.height, 3);
+    }
+
+    const layout = await horizontalLayout(page);
+    expect(layout.scrollWidth - layout.clientWidth, `${width}px ${product.slug} overflow`).toBeLessThanOrEqual(1);
+  }
+}
+
+test("BPC-157 gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "bpc-157", name: "BPC-157", variant: "10mg" }));
+test("Tirzepatide gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "tirzepatide", name: "Tirzepatide", variant: "30mg" }));
+test("Retatrutide gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "retatrutide", name: "Retatrutide", variant: "10mg" }));
+test("NAD+ gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "nad-plus", name: "NAD+", variant: "500mg" }));
+test("Semax gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "semax", name: "Semax", variant: "10mg" }));
+test("Selank gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "selank", name: "Selank", variant: "10mg" }));
+
 test("navigation, homepage trust content, product research, and related records are visibly complete", async ({
   page,
 }) => {

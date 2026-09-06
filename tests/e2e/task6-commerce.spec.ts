@@ -75,7 +75,7 @@ async function seedCart(page: Page, quantity = 2) {
 async function openBuyerCheckout(page: Page) {
   await seedCart(page);
   await signInAs(page, "Fixed non-administrator");
-  await expect(page.getByText(/current authoritative baseline/i)).toBeVisible();
+  await expect(page.getByText("Your cart details are up to date.", { exact: true })).toBeVisible();
 }
 
 async function fillDestination(page: Page, stateCode: "CA" | "OR" | "NV" | "DE") {
@@ -227,8 +227,9 @@ test("renders exact CA totals and keeps hosted return pending until one internal
   page.on("response", (response) => networkMetadata.push(response.url(), JSON.stringify(response.headers())));
   await openBuyerCheckout(page);
   await fillDestination(page, "CA");
-  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
-  await expect(page.getByRole("heading", { name: "Authoritative total" })).toBeVisible();
+  await expect(page.getByText("Your cart details are up to date.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Calculate total" }).click();
+  await expect(page.getByRole("heading", { name: "Order total" })).toBeVisible();
   await expect(page.getByText("Synthetic Reference Alpha — Demo Only", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("−$3.84", { exact: true })).toBeVisible();
   await expect(page.getByText("$5.00", { exact: true })).toBeVisible();
@@ -247,7 +248,7 @@ test("renders exact CA totals and keeps hosted return pending until one internal
   await page.getByRole("button", { name: "Return without payment event" }).click();
   await expect(page.getByRole("heading", { name: "Payment verification pending" })).toBeVisible();
   await expect(page.getByText("Synthetic local test only", { exact: true })).toBeVisible();
-  await expect(page.getByText(/refreshing cannot confirm payment/i)).toBeVisible();
+  await expect(page.getByText("We’re waiting for payment confirmation. Returning from the payment page or refreshing this page does not mark the order as paid.", { exact: true })).toBeVisible();
   const successUrl = page.url();
   await captureBrowserChannels(page, exposedChannels, loadedScripts);
   const pending = await inspectCommerce(request);
@@ -315,7 +316,7 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
   await page.setViewportSize({ width: 375, height: 812 });
   await openBuyerCheckout(page);
   await fillDestination(page, "OR");
-  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
+  await page.getByRole("button", { name: "Calculate total" }).click();
   await expect(page.getByText("Manual review is required", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to hosted payment" })).toHaveCount(0);
   const reviewHeaders = {
@@ -343,18 +344,18 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
   await page.screenshot({ path: path.join(screenshotDirectory, "checkout-review-375.png"), fullPage: true });
 
   await page.getByLabel("State or district").selectOption("NV");
-  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
-  await expect(page.getByText(/checkout is not permitted/i)).toBeVisible();
+  await page.getByRole("button", { name: "Calculate total" }).click();
+  await expect(page.getByText("Checkout is not available for this cart or account.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to hosted payment" })).toHaveCount(0);
   await page.screenshot({ path: path.join(screenshotDirectory, "checkout-blocked-375.png"), fullPage: true });
 
   await page.getByLabel("State or district").selectOption("DE");
-  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
+  await page.getByRole("button", { name: "Calculate total" }).click();
   await expect(page.getByText(
-    "One or more variants cannot be checked out with the current authoritative facts.",
+    "One or more items are not available for checkout.",
     { exact: true },
   )).toBeVisible();
-  await expect(page.getByRole("button", { name: "Try authoritative quote again" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try calculating again" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue to hosted payment" })).toHaveCount(0);
   expect((await inspectCommerce(request)).providerSessionCount).toBe(0);
 });
@@ -362,7 +363,7 @@ test("shows OR review, NV blocked, and DE unavailable without exposing a hosted 
 test("owner success URLs fail closed for malformed and cross-owner reads", async ({ page, request }) => {
   await openBuyerCheckout(page);
   await fillDestination(page, "CA");
-  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
+  await page.getByRole("button", { name: "Calculate total" }).click();
   await page.getByRole("button", { name: "Continue to hosted payment" }).click();
   await page.getByRole("button", { name: "Return without payment event" }).click();
   const ownerSuccessUrl = page.url();
@@ -449,7 +450,7 @@ test("required commerce pages preserve responsive, keyboard, and accessibility c
   await page.emulateMedia({ reducedMotion: "reduce" });
   await openBuyerCheckout(page);
   await fillDestination(page, "CA");
-  await page.getByRole("button", { name: "Calculate authoritative total" }).click();
+  await page.getByRole("button", { name: "Calculate total" }).click();
   await page.getByRole("button", { name: "Continue to hosted payment" }).click();
   await page.getByRole("button", { name: "Return without payment event" }).click();
   const successUrl = page.url();

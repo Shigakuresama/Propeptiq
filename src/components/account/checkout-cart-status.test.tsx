@@ -132,22 +132,22 @@ describe("CheckoutCartStatus", () => {
 
   it.each([
     ["ready", null],
-    ["checkout_unavailable", "Display price available. Checkout is not yet available for this variant."],
+    ["checkout_unavailable", "Checkout is not available for this item yet."],
     ["local_preview", "Test mode — no payments."],
     ["pricing_pending", "Pricing coming soon."],
     ["unavailable", "This variant is unavailable."],
-    ["insufficient_quantity", "The requested quantity is not currently available."],
-    ["unknown_variant", "This saved variant is no longer recognized. Choose it again from the catalog."],
+    ["insufficient_quantity", "This quantity is not currently available."],
+    ["unknown_variant", "This saved item is no longer available. Choose it again from the catalog."],
   ] as const)("shows exact identity and concise %s status from a parsed v2 response", async (state, expected) => {
     const line = stateLine(state);
     fetchMock.mockResolvedValue(response(preview([line], reasonFor(state))));
 
     render(<CheckoutCartStatus />);
 
-    const savedLines = screen.getByRole("list", { name: "Saved cart lines" });
+    const savedLines = screen.getByRole("list", { name: "Cart items" });
     if (state === "unknown_variant") {
       expect(await within(savedLines).findByText(
-        new RegExp(`Unverified saved variant:.*${variantId}`, "u"),
+        `Saved item: ${variantId}`,
       )).toBeVisible();
     } else {
       expect(await within(savedLines).findByText("Synthetic local test only — Alpha", { exact: true })).toBeVisible();
@@ -172,7 +172,7 @@ describe("CheckoutCartStatus", () => {
     expect(status).toBeVisible();
     expect(status).toHaveTextContent("Updating cart");
     expect(screen.getAllByRole("status")).toHaveLength(1);
-    expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
+    expect(screen.getByText(`Saved item: ${variantId}`)).toHaveAccessibleName(`Saved item unavailable, reference ${variantId}`);
 
     await act(async () => {
       resolveRequest?.(response(preview()));
@@ -203,9 +203,9 @@ describe("CheckoutCartStatus", () => {
 
     render(<CheckoutCartStatus />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be updated");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be loaded");
     expect(screen.queryByText("Synthetic local test only — Alpha", { exact: true })).toBeNull();
-    expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
+    expect(screen.getByText(`Saved item: ${variantId}`)).toBeVisible();
   });
 
   it.each([
@@ -223,10 +223,10 @@ describe("CheckoutCartStatus", () => {
 
     render(<CheckoutCartStatus />);
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be updated");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Your cart could not be loaded");
     expect(screen.queryByText("Synthetic local test only — Alpha", { exact: true })).toBeNull();
-    expect(screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"))).toBeVisible();
-    expect(screen.getByText(new RegExp(`Unverified saved variant:.*${secondVariantId}`, "u"))).toBeVisible();
+    expect(screen.getByText(`Saved item: ${variantId}`)).toBeVisible();
+    expect(screen.getByText(`Saved item: ${secondVariantId}`)).toBeVisible();
   });
 
   it("does not let an aborted older response replace a newer coherent cart", async () => {
@@ -269,19 +269,36 @@ describe("CheckoutCartStatus", () => {
     expect(screen.queryByText("Synthetic local test only — Alpha", { exact: true })).toBeNull();
   });
 
-  it("keeps the exact unverified prefix after a request failure", async () => {
+  it("keeps the saved reference distinguishable after a request failure", async () => {
     fetchMock.mockRejectedValue(new Error("preview unavailable"));
 
     render(<CheckoutCartStatus />);
 
     await waitFor(() => expect(screen.getByRole("alert")).toBeVisible());
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Saved item identifiers below could not be verified.",
+      "Please try again. Some saved items could not be confirmed.",
     );
-    const fallback = screen.getByText(new RegExp(`Unverified saved variant:.*${variantId}`, "u"));
+    const fallback = screen.getByText(`Saved item: ${variantId}`);
     expect(fallback).toBeVisible();
-    expect(fallback).toHaveAccessibleName(`Unverified saved variant: ${variantId}`);
+    expect(fallback).toHaveAccessibleName(`Saved item unavailable, reference ${variantId}`);
     expect(screen.queryByText("Updating cart", { exact: true })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it.each([[1, "1 item"], [3, "3 items"]] as const)("shows the %i-item cart count", (quantity, label) => {
+    useCart.mockReturnValue(cart([{ variantId, quantity }]));
+    render(<CheckoutCartStatus />);
+    expect(screen.getByRole("heading", { name: label })).toBeVisible();
+  });
+
+  it("covers loading, empty, and review-link customer copy", () => {
+    useCart.mockReturnValue({ hydrated: false, items: [] });
+    const { rerender } = render(<CheckoutCartStatus />);
+    expect(screen.getByLabelText("Loading saved cart")).toBeVisible();
+
+    useCart.mockReturnValue(cart([]));
+    rerender(<CheckoutCartStatus />);
+    expect(screen.getByText("Your cart is empty.")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Review cart" })).toHaveAttribute("href", "/cart");
   });
 });

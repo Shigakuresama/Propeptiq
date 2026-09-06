@@ -138,7 +138,107 @@ const originalProductFronts = {
   ],
 } as const;
 
+const alternateProductSlugs = [
+  "bpc-157",
+  "tirzepatide",
+  "retatrutide",
+  "nad-plus",
+  "semax",
+  "selank",
+] as const;
+const alternateSceneIds = [
+  "three-quarter",
+  "multi-vial-study",
+  "copy-space-detail",
+  "overhead",
+  "ambient-studio",
+] as const;
+
+const expectedAlternateAssets = [
+  ["bpc-157", "three-quarter", "/catalog/individual/bpc-157/three-quarter-v1.webp", "80bbed05f7483e35d63ce9dd88e46c2607003b7dccf4daab169a151eed45bcb8", "16ac54de8690cc9c723f14d439048bcd6ed85d06683709d130543c89dcae970e", 50812],
+  ["bpc-157", "multi-vial-study", "/catalog/individual/bpc-157/multi-vial-study-v1.webp", "833d0c2d07f8dbc26af6cdef2529aaa6af154662187ce45a02257c38811af65c", "34a4a4b71cbb858008aadf7d7e7c03476f31ea843cefc68e7409000278acb003", 52370],
+  ["bpc-157", "copy-space-detail", "/catalog/individual/bpc-157/copy-space-detail-v1.webp", "030078125785a7a917e87281899fd62e913aa87aae7713047e4567696ce37064", "db8367ce4190320b18518d235c8a8fd6c7bdbf354bae2481e3a0bde78ab80650", 31270],
+  ["bpc-157", "overhead", "/catalog/individual/bpc-157/overhead-v1.webp", "09008ce87bb9e806129c31dcf1b75870d4b416d308f5204b5030e14e447566b2", "3b6212949c0daaeb1e574bb7082256a0aba9ec1cfba26f8823961a60fec18b69", 47324],
+  ["bpc-157", "ambient-studio", "/catalog/individual/bpc-157/ambient-studio-v1.webp", "0827d04ceb0ced5e4ad17f1279fdf3c92f2f8ab0b0150a26f83f337cdfbe8bd2", "52780ad0b5fb8122bf8fb5c83a6ddf453f9d6c69a96f36a8401fb628e1e7a0c5", 50286],
+  ["tirzepatide", "three-quarter", "/catalog/individual/tirzepatide/three-quarter-v1.webp", "ec5dfe448fc24a76de6ef4c12ba569b8a488e757bda0f39dc723848a64f6040d", "af0e761bd31ee3d53150644758a985f465bfa908cd12cda7013454c399595d3b", 49572],
+  ["tirzepatide", "multi-vial-study", "/catalog/individual/tirzepatide/multi-vial-study-v1.webp", "7403fbd967b549a5b01ec828ec5e0cad26c3c69800f06a8c620d3e1d27603daa", "d5144530a355b93548bd26c77949157e0f7aeea0e2b8b69c451d9916eaf172db", 54712],
+  ["tirzepatide", "copy-space-detail", "/catalog/individual/tirzepatide/copy-space-detail-v1.webp", "95cb21fa36c89e852f3e538cbbe34e6482eb94c6d7f512c97a2b5dad1a57aca1", "4f743657078ed3da22516cb2e338ee08ba11ecd09f0e7b7f3caa4a27539aa885", 32462],
+  ["tirzepatide", "overhead", "/catalog/individual/tirzepatide/overhead-v1.webp", "666b339ddf72dfe8fc0354a491b8b3dad7782f5448afd6667a408cfc6e99492a", "9dbcc1f70d9fca89cc4c12365289fa01efd566f5a093b5681ea538b4326becce", 44962],
+  ["tirzepatide", "ambient-studio", "/catalog/individual/tirzepatide/ambient-studio-v1.webp", "d61497fe7a11ba4cf62da804337a9b00a0e45b1a45845dd935f5ae33dd215744", "25f89ff909494ceb48611f75a27cd077bc93ae14e7babde90a022023899c3e87", 50258],
+  ["retatrutide", "three-quarter", "/catalog/individual/retatrutide/three-quarter-v1.webp", "8629e93aed48a9a3d5ca168e03b132d3eec73a8915fda8a356c3f2f576a6b499", "a66dd47902ad696f2d9eadf0377dba788e875f6607eccf80d3ac65fa95822095", 49896],
+  ["retatrutide", "multi-vial-study", "/catalog/individual/retatrutide/multi-vial-study-v1.webp", "a86ae49e5d42c6933852e0689a18a14172145d65de344922ae503359d98294b4", "da7550d7a75ca88831ebab9a5ee2210d6e5295ea1b09c960c1510a8e1ec9b70f", 55624],
+  ["retatrutide", "copy-space-detail", "/catalog/individual/retatrutide/copy-space-detail-v1.webp", "6c8e09c4eb62c731c60cab7bbdd9fd8e143f80014ae1de9686c69fb745186ad9", "c066184519abbc12167e08cee0f9c157309cda9d23ff17bba2fe5e73d1eb5883", 33636],
+  ["retatrutide", "overhead", "/catalog/individual/retatrutide/overhead-v1.webp", "955cf4d588b76f51bb21b858d5980c49dda9e27b6cf89cef64b6ae16a0dca28e", "1a55529a0a3a29e9970fc2ea98f9523f0d5317c91199dc5f29b695b78846e1d2", 45440],
+  ["retatrutide", "ambient-studio", "/catalog/individual/retatrutide/ambient-studio-v1.webp", "055cf3e2204e16dfa81c417ff0ca6a91d87cfe5227935a28db21f8d313893757", "08a8dd0d7739f5fc907b96069904dbe1e3a94abbc425c5582f9be49ee0697f8f", 51406],
+  ["nad-plus", "three-quarter", "/catalog/individual/nad-plus/three-quarter-v1.webp", "788fe63bd49c8121e49b4cc92ce57cfbd053a851726cfad5ddc85c390ccbfdfc", "57540642d052ae9af9bd3616e53c5fa1f8b1d95e28bb0b9cbeeaa0f758a8aa6b", 49552],
+  ["nad-plus", "multi-vial-study", "/catalog/individual/nad-plus/multi-vial-study-v1.webp", "38412355002807e80b88ad6388a6744a397adf300b9bcef11d4e115ce3f5aa9c", "410e72fa93e65b51504b71a2c64f8370e1fdc7cd361ea7f8123be5973ef0ab54", 52094],
+  ["nad-plus", "copy-space-detail", "/catalog/individual/nad-plus/copy-space-detail-v1.webp", "fe99f3b17156af1d7552494281fd9156192c4a399fb530cb5d01878b3cd8278a", "3f1aec7262fe1e33cd6ef7ba6f8c1f3f1af2fb472f45277c6b3feb374615b3dc", 30564],
+  ["nad-plus", "overhead", "/catalog/individual/nad-plus/overhead-v1.webp", "8b8af8970a3a3ef6883258e96cec091b9e7af3694d8364dadfc6f0d522e0ee31", "01299ba9b6de5d5288ae6f841846b5fda68ed54cf758a5d51c92e866148447b7", 42258],
+  ["nad-plus", "ambient-studio", "/catalog/individual/nad-plus/ambient-studio-v1.webp", "34a9de8d5ac469a54e58eadf41f977839846e70d911ab1610e08151b1bc4ed58", "f0818bb5e4960997da4a2598db97077a3b5d734fd8880ee132206f861290efee", 47504],
+  ["semax", "three-quarter", "/catalog/individual/semax/three-quarter-v1.webp", "a7536edea9efc21e6a67724a28c7e0997e81d9e1b6fa175985a4bf135dd6454b", "0850a79420a9b64e055f7db30a47bd8adc6c2b494443958b66b77e11c3c1ae8d", 50036],
+  ["semax", "multi-vial-study", "/catalog/individual/semax/multi-vial-study-v1.webp", "f03f9b09bb1ec64307ce55eee39e7740814b8c7fc0dfad3145a032d8af93e64f", "0e974cd9a0e947abc8744f3d8de23454ad116c30167c5c3f2274d0fa3cb36e82", 54600],
+  ["semax", "copy-space-detail", "/catalog/individual/semax/copy-space-detail-v1.webp", "1c6009c7aff7d55dbe22bc16aa9b784d33f2ef962dbf98d0f36fa41db9328cb7", "c73a29229320e9eb915b4d9caf3dcb1f9d6a7d2bab841cfd771cdf913069573c", 31566],
+  ["semax", "overhead", "/catalog/individual/semax/overhead-v1.webp", "6a5d97ae65099c1cc45d9878cce0823b40ebca3f8c6938679dc3dfa8b1aa0ecb", "6fab9a372d80728908d85c9a994e34e915f3da75b7f40635b3e71fff90dbac08", 43896],
+  ["semax", "ambient-studio", "/catalog/individual/semax/ambient-studio-v1.webp", "d4ea3d4ff14c9014ec294d34ddd501e8a4bb3fd081c9bec769147bac7dec495c", "d0b02c17adf4f596a3d5766776856d564758f808046901a54c0df9a292f6837e", 50712],
+  ["selank", "three-quarter", "/catalog/individual/selank/three-quarter-v1.webp", "5f31705c2691ea68994e64d13c78f89ba73e8f64c2cfa4a1e5703fefa0625cf5", "fc341029cb3a928672431259c1fdcce2ef0316e29eb4c29afc3a5c379ff47fc1", 46320],
+  ["selank", "multi-vial-study", "/catalog/individual/selank/multi-vial-study-v1.webp", "86de0ca20a0b1f362b513775d0ec2b2a1527b10a363ee335c225d4de254aa361", "e153a8043b5b59de0593a43511c9466067f48fa9740c38497e6ac780a51a9dd6", 53900],
+  ["selank", "copy-space-detail", "/catalog/individual/selank/copy-space-detail-v1.webp", "81c38103886b4d629b0c4ec33431379c910013a171f2daf01e3f12ef9f9d63a9", "8c2b6ca3755f262054f742ba94553d6782b2afd5d03572232ebe51f1a5100b6d", 31922],
+  ["selank", "overhead", "/catalog/individual/selank/overhead-v1.webp", "939bbc621c64da24e9b19860ca2fe0e49d49102483648cff4982441cbce1435d", "216e525da72140545052675f546a62c648b9a53dbcfc6cfaf805e33130285647", 44816],
+  ["selank", "ambient-studio", "/catalog/individual/selank/ambient-studio-v1.webp", "01df3372d2b0cb74389cb16e13c15d8c99d0a6a0e412aacd2b2695d414034807", "455285ae7323625c169099be842efe2b66149de7db67ad99180cb2039d5fedf0", 52278],
+] as const;
+
 describe("catalog product visual manifest", () => {
+  it("resolves the exact 30 product-specific alternate assets while retaining 50 shared tails", async () => {
+    expect(expectedAlternateAssets).toHaveLength(30);
+    expect([...new Set(expectedAlternateAssets.map(([slug]) => slug))]).toEqual([...alternateProductSlugs]);
+    expect(new Set(expectedAlternateAssets.map(([, , src]) => src))).toHaveLength(30);
+    expect(new Set(expectedAlternateAssets.map(([, , , , outputSha256]) => outputSha256))).toHaveLength(30);
+
+    for (const slug of alternateProductSlugs) {
+      const expected = expectedAlternateAssets.filter(([assetSlug]) => assetSlug === slug);
+      expect(expected.map(([, scene]) => scene)).toEqual([...alternateSceneIds]);
+      const resolved = getCatalogProductVisualScenes(slug);
+      expect(resolved[0]).toBe(catalogProductFrontVisuals[slug]);
+      expect(resolved.slice(1).map(({ id }) => id)).toEqual([...alternateSceneIds]);
+      expect(resolved.slice(1).map(({ src }) => src)).toEqual(
+        alternateSceneIds.map((scene) => `/catalog/individual/${slug}/${scene}-v1.webp`),
+      );
+      expect(Object.isFrozen(resolved)).toBe(true);
+      expect(getCatalogProductVisualScenes(slug)).toBe(resolved);
+
+      for (const [index, [, expectedId, expectedSrc, inputSha256, outputSha256, expectedBytes]] of expected.entries()) {
+        const scene = resolved[index + 1]!;
+        expect(scene).toMatchObject({
+          id: expectedId,
+          src: expectedSrc,
+          width: 1254,
+          height: 1254,
+          inputSha256,
+          outputSha256,
+        });
+        expect(Object.isFrozen(scene)).toBe(true);
+        const bytes = readFileSync(resolve(process.cwd(), `public${scene.src}`));
+        expect(bytes).toHaveLength(expectedBytes);
+        expect(bytes.subarray(0, 4).toString("ascii")).toBe("RIFF");
+        expect(bytes.subarray(8, 12).toString("ascii")).toBe("WEBP");
+        expect(createHash("sha256").update(bytes).digest("hex")).toBe(outputSha256);
+        expect(await sharp(bytes).metadata()).toMatchObject({
+          format: "webp",
+          width: 1254,
+          height: 1254,
+        });
+      }
+    }
+
+    const sharedTailSlugs = expectedCanonicalProductSlugs.filter(
+      (slug) => !alternateProductSlugs.includes(slug as (typeof alternateProductSlugs)[number]),
+    );
+    expect(sharedTailSlugs).toHaveLength(50);
+    for (const slug of sharedTailSlugs) {
+      expect(getCatalogProductVisualScenes(slug).slice(1)).toEqual(catalogProductVisualManifest.slice(1));
+    }
+  });
+
   it("resolves exact immutable fronts for all 56 canonical products without mutating the shared scene tail", async () => {
     const mappedSlugs = Object.keys(catalogProductFrontVisuals).sort();
     const expectedCatalogSlugs = storefrontCatalogData.products
@@ -161,7 +261,9 @@ describe("catalog product visual manifest", () => {
       const resolved = getCatalogProductVisualScenes(slug);
       expect(resolved).toHaveLength(6);
       expect(resolved[0]).toMatchObject({ id: "front", src: expectedSource });
-      expect(resolved.slice(1)).toEqual(catalogProductVisualManifest.slice(1));
+      if (!alternateProductSlugs.includes(slug as (typeof alternateProductSlugs)[number])) {
+        expect(resolved.slice(1)).toEqual(catalogProductVisualManifest.slice(1));
+      }
       expect(Object.isFrozen(resolved)).toBe(true);
       expect(Object.isFrozen(resolved[0])).toBe(true);
       expect(getCatalogProductVisualScenes(slug)).toEqual(resolved);
