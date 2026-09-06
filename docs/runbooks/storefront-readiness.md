@@ -163,6 +163,15 @@ No confirmation email or double-opt-in flow is claimed.
 
 ## Verification scope
 
+Post-merge production verification found that the root `proxy.ts` compiled but was
+not registered by Next.js because this application uses `src/app`. The proxy now
+lives at `src/proxy.ts`. `npm run build` verifies the generated Node.js proxy
+registration and matchers for all four protected route families. Direct Webpack
+builds must also run `node scripts/verify-auth-proxy.mjs`, as documented in
+`docs/testing.md`. This checks build registration; live requests verify redirects
+and session behavior. Keep the proxy beside `src/app`;
+direct unit imports alone cannot detect a misplaced framework entry point.
+
 Final local evidence: workspace boundary, lint and TypeScript passed; all 3,607 unit
 tests passed; 552 integration tests passed with three isolated-PostgreSQL tests skipped;
 177 distinct browser checks passed across the selected suites and focused regression
