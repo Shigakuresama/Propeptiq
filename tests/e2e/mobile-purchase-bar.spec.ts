@@ -175,7 +175,7 @@ test("inline and mobile additions merge the same canonical variant and persist t
   await expect(lines.getByText("SKU PPQ-TIRZEPATIDE-TR30", { exact: true })).toBeVisible();
   await expect(lines.getByRole("spinbutton")).toHaveValue("4");
   await expect(lines.locator("strong")).toHaveText("$41.99");
-  await expect(lines.getByText("Line subtotal").locator("xpath=following-sibling::dd")).toHaveText("$167.96");
+  await expect(lines.getByText("Item subtotal").locator("xpath=following-sibling::dd")).toHaveText("$167.96");
   await expect(page.getByRole("button", { name: "Checkout unavailable" })).toBeDisabled();
   await expect(mobilePurchase(page)).toBeHidden();
   expect(paymentRequests).toEqual([]);
@@ -609,16 +609,16 @@ test("legacy-cart help wraps inside the purchase row and denied additions leave 
     const availableHeight = Math.min(406, 812 - headerHeight - 96);
     if (occupiedHeight > availableHeight) {
       await expect(mobilePurchase(page)).toBeHidden();
-      await expect(purchaseSummary(page)).toContainText("Your saved cart uses an older format.");
-      await expect(purchaseSummary(page).getByRole("link", { name: "Review saved cart" })).toHaveAttribute("href", "/cart");
+      await expect(purchaseSummary(page)).toContainText("Your saved cart needs to be refreshed.");
+      await expect(purchaseSummary(page).getByRole("link", { name: "Review cart" })).toHaveAttribute("href", "/cart");
       await expect(searchTrigger(page)).toBeVisible();
       continue;
     }
     await expect(mobilePurchase(page)).toBeVisible();
-    const help = mobilePurchase(page).getByText("Your saved cart uses an older format. Clear the old cart before adding a variant.", { exact: true });
+    const help = mobilePurchase(page).getByText("Your saved cart needs to be refreshed. Clear it before adding this item.", { exact: true });
     await expect(help).toBeVisible();
     expect(await help.evaluate((element) => element.getClientRects().length)).toBeGreaterThan(1);
-    await expect(mobilePurchase(page).getByRole("link", { name: "Review saved cart" })).toHaveAttribute("href", "/cart");
+    await expect(mobilePurchase(page).getByRole("link", { name: "Review cart" })).toHaveAttribute("href", "/cart");
     await expectDockGeometry(page, originalSearchBottom);
     await mobilePurchase(page).getByRole("button", { name: addLabel }).click();
     addedThroughDock = true;

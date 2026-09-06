@@ -99,7 +99,7 @@ export function CartDrawer({
       aria-controls={drawerEnabled ? dialogId : undefined}
       aria-expanded={drawerEnabled ? open : undefined}
       aria-haspopup={drawerEnabled ? "dialog" : undefined}
-      aria-label={`Cart, ${itemCount} requested unit${itemCount === 1 ? "" : "s"}`}
+      aria-label={`Cart, ${itemCount} item${itemCount === 1 ? "" : "s"}`}
       className="ml-auto inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-semibold text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring xl:ml-3 sm:px-3"
       href="/cart"
       onClick={handleTriggerClick}

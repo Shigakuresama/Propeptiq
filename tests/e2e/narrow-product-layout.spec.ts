@@ -131,7 +131,7 @@ async function runNarrowProductCase(page: Page, width: 195 | 240 | 320, testInfo
     await add.click();
     await expect(page.getByRole("status", { name: "Cart updates" })).toContainText("1 unit in cart");
     await expect(page.getByRole("dialog", { name: "Your cart" })).toHaveCount(0);
-    const cart = page.getByRole("link", { name: "Cart, 1 requested unit" });
+    const cart = page.getByRole("link", { name: "Cart, 1 item" });
     await cart.click();
     await expect(page.getByRole("dialog", { name: "Your cart" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth))
