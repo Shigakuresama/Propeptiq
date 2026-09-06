@@ -52,18 +52,110 @@ const expectedVisuals = [
   ],
 ] as const;
 
-describe("catalog product visual manifest", () => {
-  it("resolves only the six approved product fronts without mutating the shared scene tail", async () => {
-    const expectedMappedSources = {
-      "bpc-157": "/catalog/individual/bpc-157/front-v1.webp",
-      "tirzepatide": "/catalog/individual/tirzepatide/front-v1.webp",
-      "retatrutide": "/catalog/individual/retatrutide/front-v1.webp",
-      "nad-plus": "/catalog/individual/nad-plus/front-v1.webp",
-      semax: "/catalog/individual/semax/front-v1.webp",
-      selank: "/catalog/individual/selank/front-v1.webp",
-    } as const;
+const expectedCanonicalProductSlugs = [
+  "5-amino-1mq",
+  "acetic-acid",
+  "admax",
+  "aod-9604",
+  "ara-290",
+  "bac-water",
+  "bpc-157",
+  "bpc-tb-blend",
+  "bpc-tb-blend-bb20",
+  "bpc-tb-blend-bb40",
+  "cargrilintide",
+  "cartalax",
+  "cjc-1295-no-dac",
+  "cjc-1295-no-dac-ipa",
+  "cjc-1295-no-dac-ipa-cp20",
+  "cjc-1295-with-dac",
+  "dsip",
+  "epithalon",
+  "ghk-cu",
+  "glow",
+  "glutathione",
+  "grp-2",
+  "hcg",
+  "hgh",
+  "igf-1-lr3",
+  "ipamorelin",
+  "kisspeptin",
+  "klow",
+  "kpv",
+  "lemon-bottle",
+  "li-po-c",
+  "li-po-c-without-b12",
+  "ll37",
+  "mots-c",
+  "mt1",
+  "mt2",
+  "nad-plus",
+  "oxytocin-acetate",
+  "pe-22-28",
+  "pinealon",
+  "pt-141",
+  "retatrutide",
+  "selank",
+  "semaglutide",
+  "semax",
+  "semax-selank",
+  "sermorelin-acetate",
+  "snap",
+  "ss-31",
+  "survodutide",
+  "tb500",
+  "tesmorelin",
+  "tesmorelin-ipa",
+  "thymosin-alpha-1",
+  "tirzepatide",
+  "vip",
+] as const;
 
-    expect(Object.keys(catalogProductFrontVisuals)).toEqual(Object.keys(expectedMappedSources));
+const originalProductFronts = {
+  "bpc-157": [
+    "2bf1318c4c1dbc4ecc178489cc44ea7e47f259977e2eb4106eb0454842cd2a8b",
+    "14962877a70be6667b17ca843100f99ccf2d3a88f89a0c595e66422969679893",
+  ],
+  tirzepatide: [
+    "4cd6b2c1bb22846c7dd9d6e972f2d852b1c162781cc24fb550a3d1c17362bbbb",
+    "236f9248340369ab8c898e3c98cee5b61ec15d3de0d50dc06fd37e775dbf4b51",
+  ],
+  retatrutide: [
+    "f76a0b28116d2b928e62aee9c7cef8664e0186606c8b542d1993541b952160db",
+    "498bb5fcada2c34b94bd6cd0078f44606d03f5652211648a47eb68e70db9ac38",
+  ],
+  "nad-plus": [
+    "8d9dc1a7f75871ec57fe3a25f1db30f03912ccf63c7c8844e3dd9e6292c812d0",
+    "4d5669cc0200b78347a6f85d244f26e3175a51293d23282c9f500e5824dc47b8",
+  ],
+  semax: [
+    "852571841f2bdc7384ef454d5272b82fbe4144851e94ea1e8b02f5dfbbd7645b",
+    "e845ad20ac9843bd030a2ab83b0b78e39ecd910655852ecc1f6d4832882d580e",
+  ],
+  selank: [
+    "abf3280ab817845ee3df65c3fbd800ce9701763d0ed7fa9e193d12f509ebceb7",
+    "8749b8e5d79a72e43e25d5b95270c59f4cf961039d3f346dca7bcff28b47ed85",
+  ],
+} as const;
+
+describe("catalog product visual manifest", () => {
+  it("resolves exact immutable fronts for all 56 canonical products without mutating the shared scene tail", async () => {
+    const mappedSlugs = Object.keys(catalogProductFrontVisuals).sort();
+    const expectedCatalogSlugs = storefrontCatalogData.products
+      .map((product) => product.slug)
+      .sort();
+    const expectedMappedSources = Object.fromEntries(
+      expectedCanonicalProductSlugs.map((slug) => [
+        slug,
+        `/catalog/individual/${slug}/front-v1.webp`,
+      ]),
+    );
+
+    expect(mappedSlugs).toEqual([...expectedCanonicalProductSlugs]);
+    expect(expectedCatalogSlugs).toEqual([...expectedCanonicalProductSlugs]);
+    expect(new Set(Object.values(expectedMappedSources))).toHaveLength(56);
+    expect(new Set(Object.values(catalogProductFrontVisuals).map((front) => front.src))).toHaveLength(56);
+    expect(new Set(Object.values(catalogProductFrontVisuals).map((front) => front.outputSha256))).toHaveLength(56);
     expect(Object.isFrozen(catalogProductFrontVisuals)).toBe(true);
     for (const [slug, expectedSource] of Object.entries(expectedMappedSources)) {
       const resolved = getCatalogProductVisualScenes(slug);
@@ -87,7 +179,11 @@ describe("catalog product visual manifest", () => {
       });
     }
 
-    const unmapped = getCatalogProductVisualScenes("ipamorelin");
+    for (const [slug, [inputSha256, outputSha256]] of Object.entries(originalProductFronts)) {
+      expect(catalogProductFrontVisuals[slug]).toMatchObject({ inputSha256, outputSha256 });
+    }
+
+    const unmapped = getCatalogProductVisualScenes("fictional-unpublished-product");
     expect(unmapped).toBe(catalogProductVisualManifest);
     expect(getCatalogProductVisualScenes("constructor")).toBe(catalogProductVisualManifest);
     expect(getCatalogProductVisualScenes("toString")).toBe(catalogProductVisualManifest);

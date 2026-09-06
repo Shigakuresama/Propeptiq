@@ -10,14 +10,17 @@ import { testCanonicalProduct } from "./storefront-test-fixtures";
 import { CatalogProductGallery } from "./catalog-product-gallery";
 
 describe("CatalogProductGallery", () => {
-  it("uses the mapped product front and keeps later scenes on the shared masters", async () => {
-    const product = testCanonicalProduct([], { slug: "semax", name: "Semax" });
+  it.each([
+    ["semax", "Semax"],
+    ["cjc-1295-no-dac-ipa-cp20", "CJC-1295 NO DAC 10mg + IPA 10mg"],
+  ])("uses the mapped %s product front and keeps later scenes on the shared masters", async (slug, name) => {
+    const product = testCanonicalProduct([], { slug, name });
     render(<CatalogProductGallery product={product} />);
     const gallery = screen.getByRole("region", {
-      name: "Semax product illustration gallery",
+      name: `${name} product illustration gallery`,
     });
     expect(within(gallery).getByRole("img").getAttribute("src")).toContain(
-      encodeURIComponent("/catalog/individual/semax/front-v1.webp"),
+      encodeURIComponent(`/catalog/individual/${slug}/front-v1.webp`),
     );
 
     await userEvent.click(within(gallery).getByRole("tab", { name: "Three-quarter" }));
