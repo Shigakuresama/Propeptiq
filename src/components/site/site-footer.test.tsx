@@ -110,12 +110,12 @@ describe("footer configuration", () => {
     }
   });
 
-  it("projects the exact owner-authorized social placeholders without mutating input", () => {
+  it("omits missing social profiles and home-link placeholders without mutating input", () => {
     expect(footerContent.footerSocialUrls).toEqual({
-      instagram: "/",
-      tiktok: "/",
-      x: "/",
-      facebook: "/",
+      instagram: null,
+      tiktok: null,
+      x: null,
+      facebook: null,
     });
     expect(Object.isFrozen(footerContent.footerSocialUrls)).toBe(true);
 
@@ -133,7 +133,6 @@ describe("footer configuration", () => {
     const projected = project(input);
 
     expect(projected).toEqual([
-      { platform: "instagram", label: "Instagram", href: "/" },
       {
         platform: "tiktok",
         label: "TikTok",
@@ -144,7 +143,6 @@ describe("footer configuration", () => {
         label: "X",
         href: "https://x.example.test/propeptiq?from=footer#profile",
       },
-      { platform: "facebook", label: "Facebook", href: "/" },
     ]);
     expect(input).toEqual(before);
     expect(Object.isFrozen(input)).toBe(false);
@@ -321,18 +319,33 @@ describe("SiteFooter", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the four owner-authorized social placeholders as accessible icon links", () => {
-    render(<SiteFooter />);
+  it("renders configured social profiles as colored accessible icon links", () => {
+    render(<SiteFooter socialUrls={{
+      instagram: "https://instagram.com/test-fixture",
+      tiktok: "https://tiktok.com/@test-fixture",
+      x: "https://x.com/test-fixture",
+      facebook: "https://facebook.com/test-fixture",
+    }} />);
 
     const socialRegion = screen.getByRole("region", { name: "Social media" });
     expect(within(socialRegion).queryByRole("navigation")).toBeNull();
     for (const label of ["Instagram", "TikTok", "X", "Facebook"] as const) {
       const link = within(socialRegion).getByRole("link", { name: label });
-      expect(link).toHaveAttribute("href", "/");
+      expect(link.getAttribute("href")).toMatch(/^https:/);
+      expect(link).toHaveAttribute("data-platform");
       expect(link).not.toHaveAttribute("target");
       expect(link).toHaveClass("min-h-11", "min-w-11", "focus-visible:ring-2");
       expect(link.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     }
+  });
+
+  it("puts the newsletter before the main footer and omits unconfigured socials", () => {
+    render(<SiteFooter />);
+    const newsletter = screen.getByRole("form", { name: "Newsletter signup" });
+    const footer = screen.getByRole("contentinfo");
+    expect(footer.contains(newsletter)).toBe(false);
+    expect(newsletter.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Social media" })).toBeNull();
   });
 
   it("renders approved legal notices below navigation while excluding all non-approved content and metadata", () => {

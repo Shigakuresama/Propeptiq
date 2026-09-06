@@ -41,7 +41,7 @@ describe("application-owned Better Auth proxy", () => {
   });
 
   it("redirects an absent database-validated session to the application sign-in route", async () => {
-    mocks.getSession.mockResolvedValue(null);
+    mocks.getSession.mockResolvedValue({ response: null, headers: new Headers() });
     mocks.getBetterAuthForEnvironment.mockReturnValue({
       api: { getSession: mocks.getSession },
     });
@@ -60,13 +60,13 @@ describe("application-owned Better Auth proxy", () => {
     expect(response?.headers.get("location")).toBe(
       "https://example.test/sign-in/?returnTo=%2Faccount%2Forders%2Forder-1%3Ftab%3Drecord",
     );
-    expect(mocks.getSession).toHaveBeenCalledWith({ headers: request.headers });
+    expect(mocks.getSession).toHaveBeenCalledWith({ headers: request.headers, returnHeaders: true });
   });
 
   it("allows a private request only after a validated user session", async () => {
     mocks.getSession.mockResolvedValue({
-      session: { id: "session-1" },
-      user: { id: "user-1" },
+      response: { session: { id: "session-1" }, user: { id: "user-1" } },
+      headers: new Headers({ "Set-Cookie": "propeptiq.session_token=synthetic; Max-Age=604800; HttpOnly; Secure; SameSite=Lax; Path=/" }),
     });
     mocks.getBetterAuthForEnvironment.mockReturnValue({
       api: { getSession: mocks.getSession },
@@ -77,6 +77,22 @@ describe("application-owned Better Auth proxy", () => {
       nextUrl: { pathname: "/account/", search: "" },
     };
 
-    await expect(proxy(request as never)).resolves.toBeUndefined();
+    const response = await proxy(request as never);
+    expect(response?.headers.get("x-middleware-next")).toBe("1");
+    expect(response?.headers.get("Set-Cookie")).toContain("Max-Age=604800");
+    expect(response?.headers.get("Set-Cookie")).toContain("HttpOnly; Secure; SameSite=Lax");
+    expect(response?.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
+  it("forwards expired session cookie removal while denying private navigation", async () => {
+    const headers = new Headers();
+    headers.append("Set-Cookie", "propeptiq.session_token=; Max-Age=0; HttpOnly; Secure; Path=/");
+    headers.append("Set-Cookie", "propeptiq.session_data=; Max-Age=0; HttpOnly; Secure; Path=/");
+    mocks.getSession.mockResolvedValue({ response: null, headers });
+    mocks.getBetterAuthForEnvironment.mockReturnValue({ api: { getSession: mocks.getSession } });
+    const response = await proxy({ url: "https://example.test/checkout", headers: new Headers(), nextUrl: { pathname: "/checkout", search: "" } } as never);
+    expect(response?.status).toBe(307);
+    expect(response?.headers.getSetCookie()).toHaveLength(2);
+    expect(response?.headers.get("location")).toContain("returnTo=%2Fcheckout");
   });
 });

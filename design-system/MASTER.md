@@ -1,5 +1,17 @@
 # PROPEPTIQ LABS Design System
 
+## September 6, 2026 storefront amendment
+
+The current user-approved refinement supersedes earlier placement and presentation
+instructions below: customer headings follow the uppercase rule in `AGENTS.md`;
+teal accents complement the established ink/moss/off-white palette; WINTER30 remains
+automatic and must say so; the newsletter sits above the main footer; unverified
+social destinations are omitted. Four compact growth destinations remain discoverable
+with explicit inactive states and no invented benefits. Customer-entered research-set
+names preserve their original case. Security and financial rules are unchanged.
+
+See `docs/runbooks/storefront-readiness.md` for activation requirements and verification.
+
 **Binding visual baseline:** approved desktop-v3.
 
 **Binding behavioral handoff:** `responsive-v2`. It retains desktop-v3 styling while superseding the earlier public-access behavior.

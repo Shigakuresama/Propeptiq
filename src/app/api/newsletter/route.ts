@@ -1,7 +1,12 @@
 import { createProductionNewsletterPostHandler } from "@/newsletter/runtime";
 
-const productionPOST = createProductionNewsletterPostHandler();
-
 export async function POST(request: Request): Promise<Response> {
-  return productionPOST(request);
+  try {
+    return await createProductionNewsletterPostHandler()(request);
+  } catch {
+    return Response.json({ status: "NEWSLETTER_NOT_CONFIGURED" }, {
+      status: 503,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
 }

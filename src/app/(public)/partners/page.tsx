@@ -3,6 +3,7 @@ import { Handshake, Timer } from "lucide-react";
 import Link from "next/link";
 
 import { PageIntro } from "@/components/site/page-intro";
+import { GrowthNavigation } from "@/components/growth/growth-navigation";
 import { PageTransition } from "@/components/site/page-transition";
 import { getPublicGrowthProjection } from "@/growth/public-growth-server";
 
@@ -20,10 +21,11 @@ export default async function PartnersPage() {
   return (
     <PageTransition>
       <div className="site-container pb-20">
+        <GrowthNavigation />
         <PageIntro
           eyebrow="Current program record"
           title="Partner Program"
-          description="Program details appear only when an active server record is available."
+          description="Explore formal partnerships with PROPEPTIQ and review current eligibility and application details."
         />
         {result.syntheticLocal === true ? (
           <p className="warning-record mb-6 text-base font-semibold">Synthetic local test only</p>

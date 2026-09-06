@@ -40,7 +40,8 @@ export function SharedSetCard(props: SharedSetCardProps) {
       <article className="grid gap-6" aria-labelledby={headingId}>
         <div>
           <p className="eyebrow">Shared research set</p>
-          <h1 id={headingId} className="mt-4 font-heading text-page">{props.label}</h1>
+          {/* Preserve customer-entered set labels. */}
+          <h1 data-heading-case="preserve" id={headingId} className="mt-4 font-heading text-page">{props.label}</h1>
           <p className="mt-4 max-w-2xl text-base leading-7 text-muted-ink">
             Product details are resolved from the current public catalog. This set carries quantities only.
           </p>
@@ -85,7 +86,7 @@ export function SharedSetCard(props: SharedSetCardProps) {
     <article className="record-card min-w-0" aria-labelledby={headingId}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h3 id={headingId} className="font-heading text-2xl">{props.label}</h3>
+          <h3 data-heading-case="preserve" id={headingId} className="font-heading text-2xl">{props.label}</h3>
           <p className="mt-2 text-base text-muted-ink">
             {props.itemCount} saved {props.itemCount === 1 ? "product" : "products"}
           </p>

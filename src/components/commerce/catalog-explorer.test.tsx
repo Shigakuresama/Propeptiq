@@ -319,7 +319,7 @@ describe("CatalogExplorer", () => {
     expect(within(selectorCard).getByText("$70.00").tagName).toBe("STRONG");
     const checkoutCard = screen.getByRole("article", { name: "Checkout-unavailable Product" });
     expect(within(checkoutCard).getByText("$17.50")).toBeVisible();
-    expect(within(checkoutCard).getAllByText("Checkout unavailable").length).toBeGreaterThan(0);
+    expect(within(checkoutCard).queryByText("Checkout unavailable")).toBeNull();
     expect(within(screen.getByRole("article", { name: "Pending Product" })).getByText("Pricing coming soon")).toBeVisible();
     expect(within(screen.getByRole("article", { name: "Unavailable Product" })).getByText("Unavailable")).toBeVisible();
   });

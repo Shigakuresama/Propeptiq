@@ -20,6 +20,8 @@ export type ResendContactCreateInput = Readonly<{
 
 export type ResendContactsCreatePort = Readonly<{
   create: (input: ResendContactCreateInput) => Promise<unknown>;
+  subscriptionState?: (email: string, topicId: string) => Promise<"new" | "existing" | "subscribed">;
+  updateTopics?: (input: ResendContactCreateInput) => Promise<unknown>;
 }>;
 
 const uuidPattern =
@@ -86,7 +88,7 @@ export function createResendNewsletterGateway(input: Readonly<{
   return Object.freeze({
     async subscribe(
       value: NewsletterSubscriptionInput,
-    ): Promise<"subscribed"> {
+    ): Promise<"subscribed" | "duplicate"> {
       let parsed: ReturnType<typeof parseNewsletterSubscriptionInput>;
       try {
         parsed = parseNewsletterSubscriptionInput(value);
@@ -107,7 +109,18 @@ export function createResendNewsletterGateway(input: Readonly<{
 
       let response: unknown;
       try {
-        response = await Reflect.apply(create, input.contacts, [payload]);
+        const state = input.contacts.subscriptionState
+          ? await input.contacts.subscriptionState(parsed.data.email, topicId)
+          : "new";
+        if (state === "subscribed") return "duplicate";
+        if (state === "existing") {
+          if (!input.contacts.updateTopics) throw providerFailure();
+          response = await input.contacts.updateTopics(payload);
+        } else if (state === "new") {
+          response = await Reflect.apply(create, input.contacts, [payload]);
+        } else {
+          throw providerFailure();
+        }
       } catch {
         throw providerFailure();
       }

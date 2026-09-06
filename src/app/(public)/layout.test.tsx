@@ -70,7 +70,7 @@ describe("public layout promotion composition", () => {
     expect(screen.getByRole("banner")).toHaveTextContent("Site header");
     expect(siteHeaderMock.mock.calls[0]?.[0]).toEqual({ cartDrawer: true });
     expect(screen.getByRole("complementary", { name: "Promotion" })).toHaveTextContent(
-      "WINTER SALE: 30% OFF SITEWIDE — USE CODE WINTER30",
+      "WINTER SALE: 30% OFF SITEWIDE",
     );
     expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
     expect(screen.getByRole("main")).toHaveAttribute("tabindex", "-1");

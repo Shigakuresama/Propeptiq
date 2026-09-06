@@ -148,7 +148,7 @@ describe("public storefront semantics", () => {
     const highlights = screen.getByText("Catalog highlights");
     const programs = screen.getByRole("heading", {
       level: 2,
-      name: "Programs appear only from active policy records.",
+      name: "More ways to connect.",
     });
     const documentation = screen.getByRole("heading", {
       level: 2,

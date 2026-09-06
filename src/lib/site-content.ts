@@ -267,7 +267,7 @@ export const footerNavigationGroups: readonly FooterNavigationGroup[] =
 export type FooterSocialPlatform = "instagram" | "tiktok" | "x" | "facebook";
 
 export type FooterSocialUrlConfiguration = Readonly<
-  Record<FooterSocialPlatform, string>
+  Record<FooterSocialPlatform, string | null>
 >;
 
 export type FooterSocialLink = Readonly<{
@@ -277,10 +277,10 @@ export type FooterSocialLink = Readonly<{
 }>;
 
 export const footerSocialUrls: FooterSocialUrlConfiguration = Object.freeze({
-  instagram: "/",
-  tiktok: "/",
-  x: "/",
-  facebook: "/",
+  instagram: null,
+  tiktok: null,
+  x: null,
+  facebook: null,
 });
 
 const footerSocialDefinitions = Object.freeze([
@@ -295,7 +295,6 @@ const unsafeSocialUrlCharacters = /[\s\u0000-\u001f\u007f-\u009f]/u;
 const encodedSocialControlCharacter = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
 
 function isSafeFooterSocialHref(value: unknown): value is string {
-  if (value === "/") return true;
   if (
     typeof value !== "string" ||
     unsafeSocialUrlCharacters.test(value) ||

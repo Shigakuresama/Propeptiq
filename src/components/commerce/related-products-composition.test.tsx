@@ -89,7 +89,7 @@ describe("related products through the published catalog and real purchase compo
     expect(within(snap).getByText("$29.99")).toBeVisible();
     expect(within(snap).getByText("$20.99")).toBeVisible();
     expect(within(snap).getByLabelText("-30%")).toBeVisible();
-    expect(within(snap).getByText("Checkout unavailable")).toBeVisible();
+    expect(within(snap).queryByText("Checkout unavailable")).toBeNull();
     await user.click(within(snap).getByRole("button", { name: "Add SNAP to cart" }));
     await waitFor(() => expect(loadCart(window.localStorage)).toEqual({
       status: "ready", items: [{ variantId: publishedProduct("snap").defaultVariantId, quantity: 1 }],

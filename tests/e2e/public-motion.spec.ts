@@ -150,14 +150,13 @@ test("all four public sheets opt into the shared drawer motion and restore focus
   await closeWithEscape(page, quickAdd, quickAddTrigger);
 });
 
-test("public controls and interactive catalog records use restrained transform-only motion", async ({ page }) => {
+test("public controls and catalog records keep restrained transitions without card movement", async ({ page }) => {
   await page.goto("/catalog");
   const representatives = [
     page.getByRole("button", { name: /choose a variant/iu }).first(),
     page.getByRole("link", { name: /View catalog item:/iu }).first(),
     page.getByRole("searchbox", { name: "Search catalog" }),
     page.getByRole("combobox", { name: "Sort catalog" }),
-    page.locator(".catalog-listing-card").first(),
   ];
   for (const representative of representatives) {
     await expect.poll(async () => {
@@ -175,11 +174,12 @@ test("public controls and interactive catalog records use restrained transform-o
   }
 
   const card = page.locator(".catalog-listing-card").first();
+  await expect(card).toHaveCSS("transition-property", "border-color, background-color, box-shadow");
   const image = card.locator(".catalog-product-visual__base");
   const before = await card.boundingBox();
   await card.hover();
   await expect.poll(() => card.evaluate((element) => getComputedStyle(element).transform))
-    .toBe("matrix(1, 0, 0, 1, 0, -4)");
+    .toBe("none");
   await expect.poll(() => image.evaluate((element) => getComputedStyle(element).transform))
     .toBe("matrix(1.03, 0, 0, 1.03, 0, 0)");
   const after = await card.boundingBox();
@@ -189,7 +189,7 @@ test("public controls and interactive catalog records use restrained transform-o
   const action = page.getByRole("button", { name: /choose a variant/iu }).first();
   await action.hover();
   await expect.poll(() => action.evaluate((element) => getComputedStyle(element).transform))
-    .toBe("matrix(1, 0, 0, 1, 0, -4)");
+    .toBe("none");
 
   const launcher = page.getByRole("button", { name: "Search PropeptIQ" });
   const lane = page.locator(".site-search-launcher-lane");

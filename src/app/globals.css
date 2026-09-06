@@ -23,7 +23,9 @@
   --surface-inverse: #171915;
   --accent-readable: #56604d;
   --rule-strong: #aaa598;
-  --promotion: #075985;
+  --teal: #147d78;
+  --teal-ink: #105d59;
+  --promotion: #105d59;
   --promotion-foreground: #ffffff;
   --muted-ink: rgba(23, 25, 21, 0.72);
   --unknown: rgba(23, 25, 21, 0.62);
@@ -146,10 +148,80 @@ body {
 
 h1,
 h2,
-h3 {
+h3,
+h4,
+h5,
+h6 {
   hyphens: none;
   page-break-after: avoid;
 }
+
+/* Shared visual heading rule; never mutate legal copy or customer-entered text. */
+:is(.public-layout, .site-motion-surface:not([data-motion-surface="admin"]), .auth-page-frame)
+  :is(h1, h2, h3, h4, h5, h6):not([data-heading-case="preserve"]),
+.promotion-banner__title {
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.promotion-banner {
+  background-image: linear-gradient(115deg, #103f3f, #126b65 55%, #105653);
+  border-block: 1px solid #77bdb5;
+  box-shadow: inset 0 1px 0 #ffffff18;
+}
+
+.promotion-banner__title {
+  margin: 0;
+  font-size: clamp(1.35rem, 2.8vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+/* Preserve initial product-heading clearance above the fixed search on short phones. */
+@media (max-width: 767px) {
+  .catalog-detail-heading {
+    font-size: clamp(1.875rem, 8.5vw, 2.5rem);
+    margin-top: 0.75rem;
+  }
+}
+
+@media (max-width: 767px) and (max-height: 600px) {
+  .promotion-banner { padding-block: 0.25rem; }
+  .promotion-banner > div { margin-top: 0.125rem; }
+  .catalog-detail-image { margin-top: var(--site-search-reserved-height); }
+}
+
+.newsletter-prefooter {
+  background-color: #173d39;
+  border-top: 1px solid #64978b;
+  border-bottom: 1px solid #47756a;
+}
+
+.newsletter-prefooter .newsletter-form--footer { border-top: 0; }
+
+.footer-social-link { color: var(--social-color); border-color: color-mix(in srgb, var(--social-color) 40%, transparent); background: color-mix(in srgb, var(--social-color) 9%, transparent); }
+.footer-social-link[data-platform="instagram"] { --social-color: #f0a6ca; }
+.footer-social-link[data-platform="tiktok"] { --social-color: #7bdddb; }
+.footer-social-link[data-platform="x"] { --social-color: #e7e9ed; }
+.footer-social-link[data-platform="facebook"] { --social-color: #9abfff; }
+.footer-social-link:hover { border-color: var(--social-color); background: color-mix(in srgb, var(--social-color) 18%, transparent); }
+
+.advantage-icon { color: var(--teal-ink); border-color: #9dbdb1; background: #e2ece5; }
+.advantage-card:nth-child(3n + 2) .advantage-icon { color: #315e77; border-color: #aac1ce; background: #e5edf0; }
+.advantage-card:nth-child(3n) .advantage-icon { color: #655630; border-color: #c9bfa2; background: #eee9dd; }
+.advantage-card, .faq-record { transition: border-color 200ms ease, background-color 200ms ease, box-shadow 200ms ease; }
+.advantage-card:hover, .faq-record[open] { border-color: #72998a; box-shadow: 0 5px 18px #1719150a; }
+.faq-record summary:hover { background: #e6ece2; }
+.faq-record[open] summary { background: #e3ebe1; }
+.faq-record[open] > p { animation: faq-answer-reveal 200ms ease-out; }
+@keyframes faq-answer-reveal { from { opacity: 0; } to { opacity: 1; } }
+
+.growth-navigation { display: flex; flex-wrap: wrap; gap: 0.5rem; padding-block: 1rem; }
+.growth-navigation a { min-height: 44px; display: inline-flex; align-items: center; gap: 0.5rem; border: 1px solid var(--rule); border-radius: 999px; padding: 0.5rem 1rem; color: var(--teal-ink); background: var(--surface-record); font-weight: 600; }
+.growth-navigation a:hover, .growth-navigation a[aria-current="page"] { border-color: var(--teal); background: #e2ece5; }
+.growth-navigation a:focus-visible { outline: 2px solid var(--teal-ink); outline-offset: 3px; }
 
 p {
   margin: 0;
@@ -244,13 +316,13 @@ footer a,
   position: absolute;
   z-index: 0;
   inset-block: 0;
-  inset-inline: -0.1875rem;
-  width: calc(100% + 0.375rem);
+  inset-inline: 0;
+  width: 100%;
   height: 100%;
-  color: var(--moss);
+  color: var(--teal);
   pointer-events: none;
-  opacity: 0.12;
-  animation: header-brand-molecular-drift 10s var(--motion-ease-brand-drift) infinite;
+  opacity: 0.3;
+  animation: header-brand-molecular-drift 5s var(--motion-ease-brand-drift) 2;
   animation-play-state: paused;
 }
 
@@ -259,7 +331,7 @@ footer a,
 }
 
 .header-brand-motion[data-motion-state="static"] .header-brand-motion__field {
-  opacity: 0.16;
+  opacity: 0.3;
   animation: none;
   transform: none;
 }
@@ -267,13 +339,13 @@ footer a,
 @keyframes header-brand-molecular-drift {
   0%,
   100% {
-    opacity: 0.12;
-    transform: translate3d(-1px, 0, 0);
+    opacity: 0.3;
+    transform: translate3d(-3px, 0, 0);
   }
 
   50% {
-    opacity: 0.2;
-    transform: translate3d(1px, -1px, 0);
+    opacity: 0.55;
+    transform: translate3d(3px, -2px, 0);
   }
 }
 
@@ -528,7 +600,7 @@ footer a,
 .record-panel-interactive:focus-within {
   border-color: color-mix(in srgb, var(--moss) 58%, var(--rule));
   box-shadow: var(--shadow-float);
-  transform: translateY(-2px);
+  background: color-mix(in srgb, var(--surface-record) 96%, var(--teal));
 }
 
 .metric-value {
@@ -600,7 +672,6 @@ footer a,
 .catalog-listing-card:hover,
 .catalog-listing-card:focus-within {
   border-color: color-mix(in srgb, var(--moss) 58%, var(--rule));
-  transform: translateY(-2px);
 }
 
 .catalog-image-frame,
@@ -1712,7 +1783,7 @@ footer a {
 
 .public-layout main :is(.catalog-listing-card, .record-panel-interactive) {
   transition-duration: var(--motion-duration-interaction);
-  transition-property: transform, opacity;
+  transition-property: border-color, background-color, box-shadow;
   transition-timing-function: var(--motion-ease-standard);
 }
 
@@ -1724,7 +1795,7 @@ footer a {
   .public-layout main :is(.catalog-listing-card, .record-panel-interactive):hover,
   .public-layout main :is(a, button):is(.action-primary, .action-secondary):not(:disabled):not([aria-disabled="true"]):hover,
   [data-motion-scope="public"][data-slot="sheet-content"] :is(a, button):is(.action-primary, .action-secondary):not(:disabled):not([aria-disabled="true"]):hover {
-    transform: translateY(-4px);
+    border-color: var(--teal);
   }
 }
 
@@ -2312,10 +2383,12 @@ footer a {
   }
 
   .header-brand-motion__field {
-    opacity: 0.16;
+    opacity: 0.3;
     animation: none;
     transform: none;
   }
+
+  .faq-record[open] > p { animation: none; }
 
   [data-motion-scope="public"][data-slot="sheet-content"],
   [data-motion-scope="public"][data-slot="sheet-overlay"] {

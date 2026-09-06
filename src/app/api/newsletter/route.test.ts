@@ -16,9 +16,17 @@ vi.mock("@/newsletter/runtime", async (importOriginal) => {
 import * as newsletterRoute from "./route";
 
 describe("production newsletter route", () => {
+  it("returns a fixed safe response when runtime composition fails", async () => {
+    runtimeComposition.mockImplementationOnce(() => { throw new Error("private-provider-configuration"); });
+    const response = await newsletterRoute.POST(new Request("https://store.example.test/api/newsletter", { method: "POST" }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({ status: "NEWSLETTER_NOT_CONFIGURED" });
+    runtimeComposition.mockClear();
+  });
+
   it("exports POST only and remains closed before reading any request body", async () => {
     expect(Object.keys(newsletterRoute)).toEqual(["POST"]);
-    expect(runtimeComposition).toHaveBeenCalledTimes(1);
     const request = new Request("https://store.example.test/api/newsletter", {
       method: "POST",
       headers: {
@@ -32,6 +40,7 @@ describe("production newsletter route", () => {
     });
 
     const response = await newsletterRoute.POST(request);
+    expect(runtimeComposition).toHaveBeenCalledTimes(1);
 
     expect(response.status).toBe(503);
     expect(response.headers.get("cache-control")).toBe("no-store");

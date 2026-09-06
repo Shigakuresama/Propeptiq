@@ -21,6 +21,7 @@ import {
   type ResendContactsCreatePort,
 } from "@/newsletter/resend-gateway";
 import { createNewsletterPostHandler } from "@/newsletter/server";
+import { createResendContactsPort } from "@/newsletter/resend-contacts-port";
 
 export type NewsletterRuntimeConfiguration = Readonly<{
   enabled: boolean;
@@ -120,17 +121,7 @@ export function createNewsletterRuntimePostHandler(
 
 function createProductionContactsPort(apiKey: string): ResendContactsCreatePort {
   const resend = new Resend(apiKey);
-  return Object.freeze({
-    create(input) {
-      return resend.contacts.create({
-        email: input.email,
-        topics: input.topics.map((topic) => ({
-          id: topic.id,
-          subscription: topic.subscription,
-        })),
-      });
-    },
-  });
+  return createResendContactsPort(resend.contacts);
 }
 
 export function createProductionNewsletterPostHandler(): (

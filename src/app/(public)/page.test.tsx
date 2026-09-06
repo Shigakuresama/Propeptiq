@@ -90,7 +90,7 @@ describe("public home growth projection", () => {
     expect(explainer).toHaveTextContent("Refer a lab");
     expect(explainer).toHaveTextContent("Share a research set");
     expect(within(explainer).getByRole("link", { name: "Earn points" })).toHaveAttribute("href", "/rewards");
-    expect(within(explainer).getByRole("link", { name: "Refer a lab" })).toHaveAttribute("href", "/account/referrals");
+    expect(within(explainer).getByRole("link", { name: "Refer a lab" })).toHaveAttribute("href", "/rewards#referrals");
     expect(within(explainer).getByRole("link", { name: "Share a research set" })).toHaveAttribute("href", "/research-sets");
     expect(explainer).not.toHaveTextContent(/\$|%|save|member|limited|hurry|popular/iu);
     expect(getPublicStorefrontViewMock).toHaveBeenCalledTimes(1);
@@ -101,7 +101,7 @@ describe("public home growth projection", () => {
     expect(explainer.compareDocumentPosition(quality) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("omits referral and shared-set entries when only loyalty is active", async () => {
+  it("keeps related programs discoverable with explicit inactive states", async () => {
     getPublicStorefrontViewMock.mockResolvedValue({
       catalog: { products: [], displayConfigurationCount: 103 },
       pricing,
@@ -120,8 +120,8 @@ describe("public home growth projection", () => {
 
     const explainer = screen.getByRole("region", { name: "Growth programs" });
     expect(within(explainer).getByRole("link", { name: "Earn points" })).toBeVisible();
-    expect(within(explainer).queryByRole("link", { name: "Refer a lab" })).toBeNull();
-    expect(within(explainer).queryByRole("link", { name: "Share a research set" })).toBeNull();
+    expect(within(explainer).getByRole("link", { name: "Refer a lab" })).toBeVisible();
+    expect(within(explainer).getAllByText("Not currently open")).toHaveLength(3);
   });
 
   it.each(["inactive", "read_error"] as const)(
@@ -136,7 +136,7 @@ describe("public home growth projection", () => {
       render(await HomePage());
 
       expect(screen.queryByRole("region", { name: "Active rewards program" })).toBeNull();
-      expect(screen.queryByRole("region", { name: "Growth programs" })).toBeNull();
+      expect(within(screen.getByRole("region", { name: "Growth programs" })).getAllByText("Not currently open")).toHaveLength(4);
     },
   );
 

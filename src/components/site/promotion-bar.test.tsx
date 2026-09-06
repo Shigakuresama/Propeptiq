@@ -54,24 +54,19 @@ describe("PromotionBar", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders exact campaign copy in a non-wrapping three-column narrow layout with a 44-pixel copy target", () => {
+  it("renders a dominant sale heading above truthful automatic promotion instructions", () => {
     const { container } = render(<PromotionBar promotion={winter30} />);
 
     expect(
-      screen.getByText("WINTER SALE: 30% OFF SITEWIDE — USE CODE WINTER30"),
+      screen.getByText("WINTER SALE: 30% OFF SITEWIDE"),
     ).toBeVisible();
-    const snowflake = container.querySelector('[aria-hidden="true"]');
-    expect(snowflake).toHaveTextContent("❄");
+    expect(container).toHaveTextContent("WINTER30 APPLIED AUTOMATICALLY");
+    expect(container).not.toHaveTextContent("USE CODE");
     const banner = screen.getByRole("complementary", { name: "Promotion" });
     expect(banner).toHaveClass(
       "bg-promotion",
       "text-promotion-foreground",
-      "grid",
-      "grid-cols-[auto_minmax(0,1fr)_auto]",
-      "items-center",
-      "justify-center",
-      "px-3",
-      "leading-6",
+      "promotion-banner",
     );
     expect(banner).not.toHaveClass("flex-wrap");
     expect(screen.getByRole("button", { name: "Copy promotion code WINTER30" }))
@@ -95,7 +90,7 @@ describe("PromotionBar", () => {
     });
     expect(
       screen.getByText(
-        `${safeProp.displayName.toUpperCase()}: ${safeProp.percentage}% OFF SITEWIDE — USE CODE ${safeProp.code}`,
+        `${safeProp.displayName.toUpperCase()}: ${safeProp.percentage}% OFF SITEWIDE`,
       ),
     ).toBeVisible();
     expect(copy).toHaveTextContent("Copy");
@@ -274,7 +269,10 @@ describe("PromotionBar", () => {
     const promotion = css.match(/--promotion:\s*(#[0-9a-f]{6});/iu)?.[1];
     const foreground = css.match(/--promotion-foreground:\s*(#[0-9a-f]{6});/iu)?.[1];
 
-    expect(promotion).toBe("#075985");
+    expect(promotion).toBe("#105d59");
+    for (const stop of ["#103f3f", "#126b65", "#105653"]) {
+      expect(contrastRatio(stop, foreground!)).toBeGreaterThanOrEqual(4.5);
+    }
     expect(foreground).toBe("#ffffff");
     expect(css).toMatch(/--color-promotion:\s*var\(--promotion\);/u);
     expect(css).toMatch(/--color-promotion-foreground:\s*var\(--promotion-foreground\);/u);

@@ -105,6 +105,8 @@ async function loadBetterAuthIdentity(
   if (!auth) return null;
   const session = await auth.api.getSession({
     headers: await headers(),
+    // Rendering cannot send renewal cookies. HTTP session reads and proxy can.
+    query: { disableRefresh: true },
   });
   if (!session?.user) return null;
   return projectBetterAuthIdentity(session.user);

@@ -1,4 +1,4 @@
-import { ArrowRight, Coins, FileCheck2, FlaskConical, LibraryBig, Share2 } from "lucide-react";
+import { ArrowRight, Coins, FileCheck2, FlaskConical, Handshake, LibraryBig, Share2 } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 
@@ -56,6 +56,7 @@ export function PublicHome({
   homepageContent = emptyHomepageContent,
   loyaltyPolicy = null,
   referralPolicy = null,
+  partnerAvailable = false,
   syntheticLocal = false,
   products,
   variantCount,
@@ -64,6 +65,7 @@ export function PublicHome({
   homepageContent?: ApprovedHomepageContent | undefined;
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
+  partnerAvailable?: boolean;
   syntheticLocal?: boolean;
   products: readonly PublicStorefrontProduct[];
   variantCount: number;
@@ -76,23 +78,32 @@ export function PublicHome({
         ? "Select a product to see its listed details. Pricing and ordering are not available for these items."
         : "Select a product to see its details, pricing, and availability."}`;
   const growthPrograms = [
-    ...(loyaltyPolicy?.status === "active" ? [{
+    {
       title: "Earn points",
-      description: "Review the current rewards program and its eligibility rules.",
+      description: "Rewards from eligible activity, governed by current program terms.",
       href: "/rewards" as const,
       Icon: Coins,
-    }] : []),
-    ...(referralPolicy?.status === "active" ? [{
+      active: loyaltyPolicy?.status === "active",
+    },
+    {
       title: "Refer a lab",
-      description: "Open the private referral dashboard from an eligible account.",
-      href: "/account/referrals" as const,
+      description: "Share an eligible referral and track rewards in your account.",
+      href: "/rewards#referrals" as const,
       Icon: FlaskConical,
+      active: referralPolicy?.status === "active",
     }, {
       title: "Share a research set",
-      description: "Build a neutral set from current public product records.",
+      description: "Keep selected materials together in a shareable research set.",
       href: "/research-sets" as const,
       Icon: Share2,
-    }] : []),
+      active: referralPolicy?.status === "active",
+    }, {
+      title: "Partner with PROPEPTIQ",
+      description: "Explore the formal partner program and application requirements.",
+      href: "/partners" as const,
+      Icon: Handshake,
+      active: partnerAvailable,
+    },
   ];
 
   return (
@@ -236,22 +247,25 @@ export function PublicHome({
           <SectionShell>
             <SectionHeading
               className="max-w-[48rem]"
-              eyebrow="Current active programs"
+              eyebrow="PROPEPTIQ programs"
               id="home-programs-heading"
-              title="Programs appear only from active policy records."
+              title="More ways to connect."
             />
-            <ul className="mt-8 grid list-none gap-4 p-0 md:grid-cols-3">
-              {growthPrograms.map(({ title, description, href, Icon }) => (
+            <ul className="mt-6 grid list-none gap-4 p-0 md:grid-cols-2 xl:grid-cols-4">
+              {growthPrograms.map(({ title, description, href, Icon, active }) => (
                 <li className="min-w-0" key={title}>
                   <RecordPanel className="h-full p-5" interactive>
-                    <Icon aria-hidden="true" className="size-5 text-moss" />
+                    <Icon aria-hidden="true" className="size-6 text-accent-readable" />
+                    <h3>
                     <Link
                       className="record-link mt-4 inline-flex min-h-11 items-center text-lg font-semibold"
                       href={href as Route}
                     >
                       {title}
                     </Link>
+                    </h3>
                     <p className="mt-2 text-base leading-7 text-muted-ink">{description}</p>
+                    {!active ? <p className="mt-3 text-sm font-semibold text-muted-ink">Not currently open</p> : null}
                   </RecordPanel>
                 </li>
               ))}

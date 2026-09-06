@@ -117,7 +117,7 @@ test("homepage FAQ keeps one answer open and structured data matches its visible
   await expect(page.locator("#faq details[open]")).toHaveCount(1);
 
   const visible = await entries.evaluateAll((nodes) => nodes.map((entry) => ({
-    name: entry.querySelector("summary > span")!.textContent,
+    name: entry.querySelector("summary > h3")!.textContent,
     text: entry.querySelector("p")!.textContent,
   })));
   const structured = await page.locator('script[type="application/ld+json"]').evaluateAll((nodes) =>

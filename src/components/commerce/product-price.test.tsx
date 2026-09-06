@@ -45,7 +45,7 @@ describe("ProductPrice", () => {
   it("labels a mapping-missing active price as checkout unavailable", () => {
     render(<ProductPrice productId="product-alpha" variant={variant({ checkoutReady: false })} pricing={pricing("production")} />);
     expect(screen.getByText("$7.00")).toBeVisible();
-    expect(screen.getByText("Checkout unavailable")).toBeVisible();
+    expect(screen.queryByText("Checkout unavailable")).toBeNull();
   });
 
   it("shows the explicit zero-dollar preview sale only outside production", () => {

@@ -85,13 +85,7 @@ describe("public shell growth navigation", () => {
       within(footer).queryByRole("link", { name: "Terms and Conditions" }),
     ).toBeNull();
 
-    const social = screen.getByRole("region", { name: "Social media" });
-    for (const label of ["Instagram", "TikTok", "X", "Facebook"]) {
-      expect(within(social).getByRole("link", { name: label })).toHaveAttribute(
-        "href",
-        "/",
-      );
-    }
+    expect(screen.queryByRole("region", { name: "Social media" })).toBeNull();
   });
 
   it("enhances only the opted-in public header Cart link into a drawer", async () => {

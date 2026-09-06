@@ -262,16 +262,16 @@ test("shared footer exposes the exact links and one disabled newsletter on home 
   for (const route of ["/", "/catalog", "/catalog/items/tirzepatide"] as const) {
     const footer = await openFooter(page, route, 375);
     await expect(page.getByRole("form", { name: "Newsletter signup" })).toHaveCount(1);
-    await expect(footer.getByRole("form", { name: "Newsletter signup" })).toHaveCount(1);
-    await expect(footer.getByRole("textbox", { name: "Email address" })).toHaveCount(1);
-    await expect(footer.getByRole("textbox", { name: "Email address" })).toBeDisabled();
-    await expect(footer.getByRole("checkbox")).not.toBeChecked();
-    const subscribe = footer.getByRole("button", { name: "Subscribe" });
+    await expect(footer.getByRole("form", { name: "Newsletter signup" })).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Email address" })).toHaveCount(1);
+    await expect(page.getByRole("textbox", { name: "Email address" })).toBeDisabled();
+    await expect(page.getByRole("checkbox")).not.toBeChecked();
+    const subscribe = page.getByRole("button", { name: "Subscribe" });
     await expect(subscribe).toBeDisabled();
     await subscribe.evaluate((button) => {
       if (button instanceof HTMLButtonElement) button.click();
     });
-    await expect(footer.getByRole("status")).toHaveText(
+    await expect(page.getByRole("form", { name: "Newsletter signup" }).getByRole("status")).toHaveText(
       "Newsletter signup is temporarily unavailable.",
     );
     expect(await footer.getByRole("navigation", { name: "Footer" }).getByRole("link").evaluateAll(
@@ -472,7 +472,7 @@ test("footer content and native disclosures remain available without JavaScript"
   try {
     await page.goto(new URL("/catalog", baseURL).toString());
     const footer = page.getByRole("contentinfo");
-    await expect(footer.getByRole("form", { name: "Newsletter signup" })).toHaveCount(1);
+    await expect(page.getByRole("form", { name: "Newsletter signup" })).toHaveCount(1);
     const details = footer.locator("details");
     await expect(details).toHaveCount(3);
     await expect(details.first()).toHaveAttribute("open", "");

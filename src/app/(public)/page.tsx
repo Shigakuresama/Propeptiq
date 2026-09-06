@@ -25,6 +25,7 @@ export default async function HomePage() {
         homepageContent={content?.homepage}
         loyaltyPolicy={growth.status === "active" ? growth.projection.loyalty : null}
         referralPolicy={growth.status === "active" ? growth.projection.referral : null}
+        partnerAvailable={growth.status === "active" && growth.projection.affiliate?.status === "active"}
         syntheticLocal={growth.syntheticLocal === true}
         products={storefront.catalog.products}
         variantCount={storefront.catalog.displayConfigurationCount}

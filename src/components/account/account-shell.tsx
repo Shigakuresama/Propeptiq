@@ -6,6 +6,7 @@ import {
   signOutLocalActor,
 } from "@/auth/actions";
 import { ManagedSignOutForm } from "@/components/account/managed-sign-out-form";
+import { GrowthNavigation } from "@/components/growth/growth-navigation";
 import { DataLabel, RecordPanel } from "@/components/design-system/archive-primitives";
 import { BrandLogo } from "@/components/site/brand-mark";
 import { ResearchRestrictionBar } from "@/components/site/research-restriction-bar";
@@ -93,7 +94,7 @@ export function AccountShell({
                   <DataLabel>Account workspace</DataLabel>
                 </div>
                 <p className="mt-2 text-sm leading-6 text-muted-ink">
-                  Owner-scoped records and commerce steps.
+                  Your orders, rewards, referrals and partnerships.
                 </p>
               </div>
               <nav aria-label="Account" className="mt-3 grid gap-1"><NavLinks /></nav>
@@ -107,6 +108,7 @@ export function AccountShell({
             className="site-motion-surface site-motion-surface--quiet py-10 sm:py-16"
             data-motion-surface="private"
           >
+            <GrowthNavigation account />
             {children}
           </main>
           {localDriver ? (

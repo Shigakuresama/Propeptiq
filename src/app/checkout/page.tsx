@@ -4,9 +4,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { accountAccessReason } from "@/account/access";
-import { SIGN_IN_ROUTE } from "@/auth/routes";
+import { authRouteWithDestination, SIGN_IN_ROUTE } from "@/auth/routes";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
-import { isBuyerCheckoutRuntimeReady } from "@/commerce/server-runtime";
+import { isCheckoutPageRuntimeReady } from "@/commerce/server-runtime";
 import { AccountFactsForm } from "@/components/account/account-facts-form";
 import { AccountShell } from "@/components/account/account-shell";
 import { CheckoutCartStatus } from "@/components/account/checkout-cart-status";
@@ -43,7 +43,7 @@ function ClosedState({ reason }: { reason: string }) {
 export default async function CheckoutPage() {
   const request = await getRequestIdentity();
   const reason = accountAccessReason(request);
-  if (reason === "signed_out") redirect(SIGN_IN_ROUTE);
+  if (reason === "signed_out") redirect(authRouteWithDestination(SIGN_IN_ROUTE, "/checkout"));
   const repositories = getRequestRepositories(request);
   const principal = request.principal;
   const [account, attestation] =
@@ -59,7 +59,7 @@ export default async function CheckoutPage() {
     account.acceptedAttestationVersion === attestation.version &&
     (account.status === "active" || account.status === "review");
   const buyerCheckoutReady =
-    checkoutEligible && isBuyerCheckoutRuntimeReady(request);
+    checkoutEligible && isCheckoutPageRuntimeReady(request);
   const browseOnlyPreview = request.environment.APP_ENV === "preview";
   return (
     <AccountShell

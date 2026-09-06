@@ -2,6 +2,12 @@
 
 **Status:** Binding implementation contract.
 
+**September 6, 2026 amendment:** Apply the uppercase heading rule in `AGENTS.md`
+and the storefront amendment in `design-system/MASTER.md`. The newsletter precedes
+the main footer; WINTER30 is presented as automatic; only verified social URLs render;
+the compact growth module exposes four related programs with truthful inactive states.
+Existing route access, responsive, motion, accessibility and server-authority rules remain.
+
 **Handoff:** `responsive-v2`.
 
 **Visual source:** approved Superdesign desktop draft `d5bd0bcf-c086-499d-904c-4eb8581d2bb4`, version `3` (`desktop-v3`).

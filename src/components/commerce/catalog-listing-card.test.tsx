@@ -154,7 +154,7 @@ describe("CatalogListingCard", () => {
 
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
     expect(within(article).getByText("$10.00")).toBeVisible();
-    expect(within(article).getAllByText("Checkout unavailable").length).toBeGreaterThan(0);
+    expect(within(article).queryByText("Checkout unavailable")).toBeNull();
     const unavailable = within(article).getByRole("button", {
       name: /synthetic product alpha unavailable/iu,
     });
@@ -176,7 +176,7 @@ describe("CatalogListingCard", () => {
     );
 
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
-    expect(within(article).getByText("Checkout unavailable")).toBeVisible();
+    expect(within(article).queryByText("Checkout unavailable")).toBeNull();
     const add = within(article).getByRole("button", {
       name: "Add Synthetic Product Alpha to cart",
     });
@@ -262,7 +262,7 @@ describe("CatalogListingCard", () => {
     expect(within(article).getByText("30 mg · 2 bottles")).toBeVisible();
     expect(within(article).getByText("$59.99").tagName).toBe("DEL");
     expect(within(article).getByText("$41.99").tagName).toBe("STRONG");
-    expect(within(article).getByText("Checkout unavailable")).toBeVisible();
+    expect(within(article).queryByText("Checkout unavailable")).toBeNull();
     expect(within(article).queryByText("Available")).toBeNull();
     expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("");
     await user.click(within(article).getByRole("button", { name: "Add Synthetic Product Alpha: choose a variant" }));
