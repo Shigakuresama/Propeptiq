@@ -700,6 +700,14 @@ No row may use “done” without the task-specific evidence required by the com
 
 ## Task 20 — Customer-facing language (owner addition)
 
+### PR #29 delivered; Task 20B in progress
+
+[PR #29](https://github.com/Shigakuresama/Propeptiq/pull/29) merged to `main` as `632ec89cd06b5e7303ac852fe4fee9cf19064a0c`. Production deployment `dpl_2bfvdcVbGAYj6fUptvanLFTG3YxU` reached READY with that exact SHA and the `propeptiq.com` / `www.propeptiq.com` aliases. The merged tree exactly matches the reviewed candidate. This supersedes the historical pending-release statements below, not the unfinished scope.
+
+Live read-back confirmed the WINTER30 banner and sale prices, new cart-state wording, related cards, six Why Choose cards, eight FAQs, and the four added Selank/Semax study links. Phone 375px, tablet 768px and desktop 1440px document widths were contained. Search keyboard navigation and Escape focus restoration, native FAQ Enter/Space toggles, and reduced-motion/automatic-scroll preference checks passed. This bounded smoke check is not a complete production performance or all-route certification. Shared images remain illustrations, 63 prices remain pending, and checkout/newsletter remain disabled.
+
+Task 20B now covers the remaining homepage/catalog/footer descriptions, generated product introductions, neutral FAQ explanations and legacy cart-page text. It preserves price/availability notices, research restrictions, source identities, the bibliography and all commerce behavior. It is not delivered until its own reviewed PR and live release are verified.
+
 ### PR #29 pre-merge verification snapshot
 
 The reviewed [PR #29](https://github.com/Shigakuresama/Propeptiq/pull/29) contains accepted motion/lifecycle, cart layout and cart-language changes plus four verified Selank/Semax bibliography records (22 mapped compounds / 37 studies / two correction notices / zero product claims). The application is unchanged across the final test-only commits through `db991c54a46b565bba40b9d9ba3ec510c20a1f73`.
