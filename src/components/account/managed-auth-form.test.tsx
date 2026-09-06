@@ -30,6 +30,7 @@ describe("ManagedAuthForm", () => {
 
     expect(screen.getByRole("heading", { name: "Create your account" })).toBeInTheDocument();
     expect(screen.getByText("Verify your email after creating your account to continue.")).toBeVisible();
+    expect(screen.queryByText("Email verification is required before private records or checkout become available.")).toBeNull();
     expect(screen.getByLabelText("Name")).toHaveAttribute("autocomplete", "name");
     expect(screen.getByLabelText("Email address")).toHaveAttribute("type", "email");
     expect(screen.getByLabelText("Password")).toHaveAttribute("minlength", "8");
@@ -45,6 +46,7 @@ describe("ManagedAuthForm", () => {
     expect(screen.getByText("Enter the email address and password for your account.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
     expect(screen.queryByText("Use the verified email connected to your private records.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in securely" })).toBeNull();
   });
 
   it("keeps the pending sign-in action disabled without changing its action contract", async () => {
@@ -111,6 +113,7 @@ describe("ManagedAuthForm", () => {
     );
     expect(screen.queryByRole("link", { name: "Back to sign in" })).not.toBeInTheDocument();
     expect(screen.getByText("Verify your email to continue to your account.")).toBeVisible();
+    expect(screen.queryByText("Your account exists, but its email must be verified before private records are available.")).toBeNull();
   });
 
   it("prioritizes a server-supplied verification message over fallback copy", async () => {

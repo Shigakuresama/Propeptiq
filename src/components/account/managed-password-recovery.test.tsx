@@ -67,6 +67,7 @@ describe("Managed password recovery", () => {
       "/research-sets",
     );
     expect(screen.getByText("Use at least 8 characters. After resetting your password, sign in again to continue.")).toBeVisible();
+    expect(screen.queryByText("Use at least 8 characters. After the reset, sign in again to continue to your private page.")).toBeNull();
     expect(screen.getByLabelText("New password")).toHaveAttribute("minlength", "8");
     expect(screen.getByLabelText("New password")).toHaveAttribute("maxlength", "128");
   });

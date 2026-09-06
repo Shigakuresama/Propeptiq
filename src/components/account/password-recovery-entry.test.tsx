@@ -31,6 +31,8 @@ describe("PasswordRecoveryEntry", () => {
 
     expect(screen.getByRole("heading", { name: "Password recovery is currently unavailable." })).toBeVisible();
     expect(screen.getByText("Password recovery is currently unavailable. You can return to sign in.")).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Password recovery is not configured." })).toBeNull();
+    expect(screen.queryByText("Managed password recovery is unavailable because secure recovery has not been fully configured.")).toBeNull();
     expect(screen.getByRole("link", { name: "Return to sign in" })).toHaveAttribute("href", "/sign-in?returnTo=%2Fcheckout");
     expect(screen.queryByText(/Managed reset/)).toBeNull();
   });

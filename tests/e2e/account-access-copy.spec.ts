@@ -1,4 +1,26 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+async function focusByKeyboard(page: Page, target: Locator) {
+  for (let index = 0; index < 10; index += 1) {
+    await page.keyboard.press("Tab");
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+  }
+  throw new Error("Keyboard traversal did not reach the expected account navigation link.");
+}
+
+async function expectVisibleFocusIndicator(target: Locator) {
+  const indicator = await target.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      outlineColor: style.outlineColor,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+    };
+  });
+  expect(indicator.outlineStyle).toBe("solid");
+  expect(indicator.outlineWidth).toBe("3px");
+  expect(indicator.outlineColor).not.toBe("rgba(0, 0, 0, 0)");
+}
 
 const sharedBullets = [
   "Sign in to view your account and orders.",
@@ -57,16 +79,18 @@ test("account access navigation preserves return destination with visible keyboa
   const returnTo = "/account/orders/synthetic-order";
   await page.goto(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`);
   const createAccount = page.getByRole("link", { name: "Create account" });
-  await createAccount.focus();
+  await focusByKeyboard(page, createAccount);
   await expect(createAccount).toBeFocused();
   await expect(createAccount).toBeInViewport();
+  await expectVisibleFocusIndicator(createAccount);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(`/sign-up?returnTo=${encodeURIComponent(returnTo)}`);
 
   const signIn = page.getByRole("link", { name: "Sign in" });
-  await signIn.focus();
+  await focusByKeyboard(page, signIn);
   await expect(signIn).toBeFocused();
   await expect(signIn).toBeInViewport();
+  await expectVisibleFocusIndicator(signIn);
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(`/sign-in?returnTo=${encodeURIComponent(returnTo)}`);
 });
