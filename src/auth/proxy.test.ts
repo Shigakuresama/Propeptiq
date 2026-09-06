@@ -14,7 +14,7 @@ vi.mock("@/auth/better-auth-server", () => ({
   getBetterAuthForEnvironment: mocks.getBetterAuthForEnvironment,
 }));
 
-import proxy, { config } from "../../proxy";
+import proxy, { config } from "../proxy";
 
 describe("application-owned Better Auth proxy", () => {
   beforeEach(() => {
