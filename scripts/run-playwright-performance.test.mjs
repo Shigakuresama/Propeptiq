@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { join } from "node:path";
+import { runInNewContext } from "node:vm";
+import ts from "typescript";
 
 import * as performanceHarness from "./run-playwright-performance.mjs";
 
@@ -339,6 +341,114 @@ test("LCP attribution excludes later repeated URLs and refuses ambiguous or inva
   });
   assert.equal(truncated.classification, "resource-timing-input-truncated");
   assert.equal(truncated.resource, null);
+});
+
+// Minimal test doubles execute the actual pre-navigation init and collection code;
+// they model retained browser entries and event delivery without launching a browser.
+async function resourceTimingDouble() {
+  const source = readFileSync(new URL("../tests/performance/public-storefront.performance.spec.ts", import.meta.url), "utf8");
+  const functions = source.slice(source.indexOf("async function installPerformanceObservers("), source.indexOf("async function initializeObservedContext("));
+  const limitDeclaration = source.match(/^const resourceTimingLimit = .+;$/mu)?.[0];
+  assert.ok(limitDeclaration);
+  const window = {};
+  const events = [];
+  const listeners = new Map();
+  let entries = [];
+  let initScript;
+  let capacity = 250;
+  const page = {
+    addInitScript: async (callback, argument) => { initScript = () => callback(argument); },
+    evaluate: async (callback, argument) => callback(argument),
+  };
+  const performance = {
+    addEventListener: (name, callback) => {
+      events.push(`listen:${name}`);
+      listeners.set(name, callback);
+    },
+    getEntriesByType: (type) => type === "resource" ? entries : [{ responseStart: 80, startTime: 0 }],
+    setResourceTimingBufferSize: (limit) => {
+      events.push(`capacity:${limit}`);
+      capacity = limit;
+    },
+  };
+  const compiled = ts.transpileModule(`${limitDeclaration}\n${functions}\n({ installPerformanceObservers, collectPerformance });`, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
+  }).outputText;
+  const actual = runInNewContext(compiled, {
+    PerformanceObserver: { supportedEntryTypes: [] }, performance, window,
+  });
+  await actual.installPerformanceObservers(page);
+  assert.equal(window.__task18fPerformance, undefined, "installation registers the script for navigation");
+  initScript();
+  const append = (count) => {
+    for (let index = 0; index < count; index += 1) {
+      if (entries.length < capacity) entries.push({
+        name: `https://example.test/resource-${entries.length}`, requestStart: 100, responseEnd: 400, startTime: 90,
+      });
+    }
+  };
+  const collect = async () => JSON.parse(JSON.stringify(await actual.collectPerformance(page)));
+  return { append, collect, events, listeners, replaceRetained: (next) => { entries = next; } };
+}
+
+test("resource timing init sets the native capacity before resource loads; below capacity stays complete", async () => {
+  const browser = await resourceTimingDouble();
+  assert.deepEqual(browser.events, ["listen:resourcetimingbufferfull", "capacity:1000"]);
+  browser.append(999);
+  const raw = await browser.collect();
+  assert.equal(raw.resourceTimings.limit, 1_000);
+  assert.equal(raw.resourceTimings.entries.length, 999);
+  assert.equal(raw.resourceTimings.retainedCount, 999);
+  assert.equal(raw.resourceTimings.serializationOverflow, 0);
+  assert.equal(raw.resourceTimings.resourceBufferFull, false);
+  assert.equal(raw.resourceTimings.upstreamLossPossible, false);
+  assert.equal(raw.resourceTimings.truncated, false);
+  assert.equal(calculateLcpBreakdown({
+    lcp: { startTime: 600, url: raw.resourceTimings.entries[0].name }, navigation: raw.navigation,
+    resources: raw.resourceTimings.entries, resourcesTruncated: raw.resourceTimings.truncated,
+  }).classification, "matched-lcp-resource");
+});
+
+test("resource timing overflow retains a sticky upstream loss flag and null LCP phases", async () => {
+  const browser = await resourceTimingDouble();
+  browser.append(1_001);
+  assert.equal(typeof browser.listeners.get("resourcetimingbufferfull"), "function");
+  browser.listeners.get("resourcetimingbufferfull")();
+  const raw = await browser.collect();
+  assert.equal(raw.resourceTimings.entries.length, 1_000);
+  assert.equal(raw.resourceTimings.retainedCount, 1_000);
+  assert.equal(raw.resourceTimings.serializationOverflow, 0, "upstream dropped count is unknown");
+  assert.equal(raw.resourceTimings.resourceBufferFull, true);
+  assert.equal(raw.resourceTimings.upstreamLossPossible, true);
+  assert.equal(raw.resourceTimings.truncated, true);
+  // Test-double snapshot shrinks to prove completeness cannot reset after the event.
+  browser.replaceRetained([]);
+  const later = await browser.collect();
+  assert.equal(later.resourceTimings.resourceBufferFull, true);
+  assert.equal(later.resourceTimings.upstreamLossPossible, true);
+  assert.deepEqual(calculateLcpBreakdown({
+    lcp: { startTime: 600, url: "https://example.test/unretained-lcp" }, navigation: later.navigation,
+    resources: later.resourceTimings.entries, resourcesTruncated: later.resourceTimings.truncated,
+  }), {
+    classification: "resource-timing-input-truncated", elementRenderDelay: null, resource: null,
+    resourceLoadDelay: null, resourceLoadDuration: null, ttfb: 80,
+  });
+});
+
+test("a full retained resource buffer stays incomplete before a pending full event is delivered", async () => {
+  const browser = await resourceTimingDouble();
+  browser.append(1_000);
+  assert.equal((await browser.collect()).resourceTimings.truncated, true, "exact capacity is conservatively incomplete");
+  browser.append(1);
+  const raw = await browser.collect();
+  assert.equal(raw.resourceTimings.entries.length, 1_000);
+  assert.equal(raw.resourceTimings.resourceBufferFull, false);
+  assert.equal(raw.resourceTimings.upstreamLossPossible, true);
+  assert.equal(raw.resourceTimings.truncated, true);
+  assert.equal(calculateLcpBreakdown({
+    lcp: { startTime: 600, url: "https://example.test/unretained-lcp" }, navigation: raw.navigation,
+    resources: raw.resourceTimings.entries, resourcesTruncated: raw.resourceTimings.truncated,
+  }).classification, "resource-timing-input-truncated");
 });
 
 test("network policy records safe local reads and rejects exact attribution, auth, mutation, and external routes", () => {

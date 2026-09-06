@@ -326,7 +326,7 @@ async function installBoundary(context: BrowserContext, page: Page, record: Boun
 }
 
 async function installPerformanceObservers(page: Page) {
-  await page.addInitScript(() => {
+  await page.addInitScript((limit) => {
     const state = {
       lcp: [] as any[],
       longtasks: [] as any[],
@@ -335,9 +335,14 @@ async function installPerformanceObservers(page: Page) {
         map: (entry: any) => any;
         observer: PerformanceObserver;
       }>,
+      resourceBufferFull: false,
       shifts: [] as any[],
       supported: PerformanceObserver.supportedEntryTypes ?? [],
     };
+    performance.addEventListener("resourcetimingbufferfull", () => {
+      state.resourceBufferFull = true;
+    });
+    performance.setResourceTimingBufferSize(limit);
     const descriptor = (node: Node | null) => {
       if (!(node instanceof Element)) return null;
       const bounds = node.getBoundingClientRect();
@@ -394,7 +399,7 @@ async function installPerformanceObservers(page: Page) {
     }));
     observe("longtask", state.longtasks, (entry) => ({ duration: entry.duration, startTime: entry.startTime }));
     (window as any).__task18fPerformance = state;
-  });
+  }, resourceTimingLimit);
 }
 
 async function collectPerformance(page: Page) {
@@ -417,6 +422,8 @@ async function collectPerformance(page: Page) {
         startTime: resource.startTime,
       };
     });
+    // The full event is queued; capacity alone cannot prove completeness before delivery.
+    const upstreamLossPossible = state.resourceBufferFull || allResources.length >= limit;
     return {
       lcp: state.lcp,
       longtasks: state.longtasks,
@@ -433,9 +440,12 @@ async function collectPerformance(page: Page) {
       resourceTimings: {
         entries: allResources.slice(0, limit),
         limit,
-        overflow: Math.max(0, allResources.length - limit),
-        totalCount: allResources.length,
-        truncated: allResources.length > limit,
+        resourceBufferFull: state.resourceBufferFull,
+        retainedCount: allResources.length,
+        // Only counts retained entries excluded from JSON, never upstream dropped requests.
+        serializationOverflow: Math.max(0, allResources.length - limit),
+        truncated: upstreamLossPossible,
+        upstreamLossPossible,
       },
       shifts: state.shifts as Shift[],
       supported: state.supported as string[],
