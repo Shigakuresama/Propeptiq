@@ -2486,7 +2486,7 @@ const alternateSceneLabels = [
 
 async function expectIndividualAlternateGallery(
   page: Page,
-  product: { slug: string; name: string },
+  product: { slug: string; name: string; variant: string },
 ) {
   for (const width of [375, 768, 1440]) {
     await page.setViewportSize({ width, height: width === 375 ? 812 : 1000 });
@@ -2511,6 +2511,7 @@ async function expectIndividualAlternateGallery(
       })).toBe(`/catalog/individual/${product.slug}/${scene}-v1.webp`);
       await expect(gallery.getByRole("status")).toHaveText(`View ${index + 2} of 6: ${label}`);
       await expect(gallery.locator(".catalog-product-visual__name")).toHaveText(product.name);
+      await expect(gallery.locator(".catalog-product-visual__variant")).toHaveText(product.variant);
       await expect(gallery.getByText("RESEARCH USE ONLY", { exact: true })).toBeVisible();
       await expect(gallery.getByText("AI-generated catalog illustration — not actual product photography.", { exact: true })).toBeVisible();
       const activePanelRect = await clientRect(panel);
@@ -2523,12 +2524,12 @@ async function expectIndividualAlternateGallery(
   }
 }
 
-test("BPC-157 gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "bpc-157", name: "BPC-157" }));
-test("Tirzepatide gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "tirzepatide", name: "Tirzepatide" }));
-test("Retatrutide gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "retatrutide", name: "Retatrutide" }));
-test("NAD+ gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "nad-plus", name: "NAD+" }));
-test("Semax gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "semax", name: "Semax" }));
-test("Selank gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "selank", name: "Selank" }));
+test("BPC-157 gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "bpc-157", name: "BPC-157", variant: "10mg" }));
+test("Tirzepatide gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "tirzepatide", name: "Tirzepatide", variant: "30mg" }));
+test("Retatrutide gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "retatrutide", name: "Retatrutide", variant: "10mg" }));
+test("NAD+ gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "nad-plus", name: "NAD+", variant: "500mg" }));
+test("Semax gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "semax", name: "Semax", variant: "10mg" }));
+test("Selank gallery decodes its five individual alternate scenes", async ({ page }) => expectIndividualAlternateGallery(page, { slug: "selank", name: "Selank", variant: "10mg" }));
 
 test("navigation, homepage trust content, product research, and related records are visibly complete", async ({
   page,
