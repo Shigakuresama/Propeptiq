@@ -111,6 +111,50 @@ async function expectGalleryImageToHaveNoMotion(image: Locator) {
   expect(state.violations, `Gallery image motion state: ${JSON.stringify(state)}`).toEqual([]);
 }
 
+async function waitForPublicMainToSettle(page: Page) {
+  await page.locator("main#main-content").evaluate(async (main) => {
+    const animatedTextTargets = new Set<Element>();
+    let stableFrames = 0;
+    const deadline = performance.now() + 5_000;
+
+    while (performance.now() < deadline) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      const activeFiniteAnimations = document.getAnimations().filter((animation) => {
+        if (!animation.pending && animation.playState !== "running") return false;
+        if (!Number.isFinite(animation.effect?.getComputedTiming().endTime)) return false;
+        const target = animation.effect instanceof KeyframeEffect ? animation.effect.target : null;
+        if (!(target instanceof Element) || (target !== main && !main.contains(target))) return false;
+        const bounds = target.getBoundingClientRect();
+        const style = getComputedStyle(target);
+        const visible = style.display !== "none"
+          && style.visibility !== "hidden"
+          && bounds.bottom > 0
+          && bounds.top < window.innerHeight
+          && bounds.right > 0
+          && bounds.left < window.innerWidth;
+        if (visible && target.textContent?.trim()) animatedTextTargets.add(target);
+        return visible;
+      });
+      const unsettledTextOpacity = [...animatedTextTargets].some((target) => {
+        for (let element: Element | null = target; element; element = element.parentElement) {
+          if (Number.parseFloat(getComputedStyle(element).opacity) < 1) return true;
+          if (element === main) break;
+        }
+        return false;
+      });
+
+      if (activeFiniteAnimations.length === 0 && !unsettledTextOpacity) {
+        stableFrames += 1;
+        if (stableFrames >= 2) return;
+      } else {
+        stableFrames = 0;
+      }
+    }
+
+    throw new Error("Public main did not settle after visible finite motion and text opacity.");
+  });
+}
+
 test("gallery no-motion evaluator rejects nonidentity transforms and active motion [browser-only doubles]", async ({ page }) => {
   await page.setContent(`
     <style>@keyframes active-motion { to { opacity: .5; } }</style>
@@ -1477,9 +1521,26 @@ async function expectPublicRouteRestrictionAndAccessibility(
   await expect(
     page.getByText("For legitimate laboratory and research use only.").first(),
   ).toBeVisible();
+  await waitForPublicMainToSettle(page);
   const accessibility = await new AxeBuilder({ page }).analyze();
   expect(accessibility.violations, `${route} axe violations`).toEqual([]);
 }
+
+test("public route readiness waits for delayed text fades [browser-only double]", async ({ page }) => {
+  await page.setContent(`
+    <style>
+      @keyframes delayed-fade { from { opacity: 0.4; } to { opacity: 1; } }
+      #intro { animation: delayed-fade 240ms linear 120ms both; }
+    </style>
+    <main id="main-content"><section id="intro"><h1>Delayed introduction</h1></section></main>
+  `);
+
+  const intro = page.locator("#intro");
+  await expect.poll(() => intro.evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity)))
+    .toBeLessThan(1);
+  await waitForPublicMainToSettle(page);
+  await expect(intro).toHaveCSS("opacity", "1");
+});
 
 test("public route / renders the shared restriction and passes axe", async ({ page }) => {
   await expectPublicRouteRestrictionAndAccessibility(page, "/");
@@ -2085,18 +2146,27 @@ test("reduced motion disables transition and animation durations", async ({ page
   await card.hover();
   const motion = await page
     .getByRole("link", { name: "View catalog item: Tirzepatide" })
-    .evaluate((element) => ({
-      animationDuration: getComputedStyle(element).animationDuration,
-      transitionDuration: getComputedStyle(element).transitionDuration,
-      scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
-      cardTransform: getComputedStyle(element.closest("article")!).transform,
-    }));
-  expect(motion).toEqual({
+    .evaluate((element) => {
+      const linkStyle = getComputedStyle(element);
+      const cardTransform = getComputedStyle(element.closest("article")!).transform;
+      const cardTransformMatrix = cardTransform === "none"
+        ? new DOMMatrixReadOnly()
+        : new DOMMatrixReadOnly(cardTransform);
+      return {
+        animationDuration: linkStyle.animationDuration,
+        transitionDuration: linkStyle.transitionDuration,
+        scrollBehavior: getComputedStyle(document.documentElement).scrollBehavior,
+        cardTransform,
+        cardTransformIsIdentity: cardTransformMatrix.isIdentity,
+      };
+    });
+  expect(motion).toMatchObject({
     animationDuration: "0s",
     transitionDuration: "0s",
     scrollBehavior: "auto",
-    cardTransform: "none",
+    cardTransformIsIdentity: true,
   });
+  expect(motion.cardTransformIsIdentity, `Reduced-motion card transform: ${motion.cardTransform}`).toBe(true);
 });
 
 test("unknown product slugs fail closed", async ({ page }) => {
