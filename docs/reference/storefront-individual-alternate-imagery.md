@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-Thirty original alternate illustrations for BPC-157, Tirzepatide, Retatrutide, NAD+, Semax and Selank, generated September 6, 2026 with the built-in image-generation tool. Each product receives five views in the existing order: three-quarter, multi-vial-study, copy-space-detail, overhead, ambient-studio. The existing 56 individual front assets and six shared masters are unchanged. This is not completion of all 280 alternate images: 250 alternates for the other 50 products remain shared.
+Thirty original alternate illustrations for BPC-157, Tirzepatide, Retatrutide, NAD+, Semax and Selank, generated September 6, 2026 with the built-in image-generation tool. Each product receives five views in the existing order: three-quarter, multi-vial-study, copy-space-detail, overhead, ambient-studio. The existing 56 individual front assets and six shared masters are unchanged. At this first-batch checkpoint, 250 alternates for the other 50 products remained shared. See the [completion plan](../superpowers/plans/2026-09-04-propeptiq-storefront-completion.md) for current release status and later batches; this provenance record does not claim completion of all 280 alternate images.
 
 These are conceptual product illustrations, not verified photographs of physical packaging, contents, scale or package quantities. The existing gallery disclosure and scene-specific truth notes remain required. No new amount, ingredient, stock, claim, certification or third-party image was introduced. Original generation files and earlier assets were retained; no asset deletion.
 
