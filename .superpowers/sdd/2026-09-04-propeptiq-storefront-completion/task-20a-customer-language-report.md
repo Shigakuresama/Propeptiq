@@ -89,3 +89,21 @@ No obsolete customer-facing preview phrases remain in the six owned implementati
 - Confirmed the changed-facts acknowledgement still stores the same preview token and gates the existing handoff.
 - Confirmed central state calculation is unchanged; only its customer label projection changed.
 - Confirmed root-owned plan changes were not edited or included by this task.
+
+## Browser copy fix round 1
+
+### RED evidence
+
+The release browser run on base `d566c691456cd02dd7e5cada08e452d03460ab38` recorded one stale copy assertion in `.superpowers/artifacts/release-gates/pr29-browser-d566c69/stdout.log`: `tests/e2e/cart-drawer.spec.ts:88` still searched for `final shipping, tax, and payment are not available`. Batch result: 1 failed, 2 passed. The preserved failure artifacts remain under `test-results/run-NfSSZx/batch-01`.
+
+### Fix and inventory
+
+Updated only that E2E assertion to require the exact current disabled-checkout disclosure: `Merchandise discounts are included. Shipping and tax are not yet calculated. Checkout is currently unavailable.` A repository-wide Task 20A E2E wording search found no other stale preview-cart, local-preview, display-preview, server-preview, coming-soon checkout, or old drawer-disclosure expectations.
+
+### GREEN evidence
+
+Command:
+
+`npx playwright test tests/e2e/cart-drawer.spec.ts --output .superpowers/artifacts/release-gates/pr29-copy-fix/playwright-output --reporter=list`
+
+Result: 3 passed in 17.7 seconds using one Chromium worker. The run covered configured cart merge/persistence and no-payment traffic, keyboard/dismissal/mobile/reduced-motion/no-JavaScript behavior, and failure retry/stale-response/short-phone/removal-focus behavior.

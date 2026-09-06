@@ -85,7 +85,10 @@ test("configured BPC-157 and Tirzepatide facts merge, persist, and match the ful
   const checkout = drawer.getByRole("button", { name: "Checkout unavailable" });
   await expect(checkout).toBeDisabled();
   await expect(checkout).toHaveAttribute("aria-disabled", "true");
-  await expect(drawer.getByText(/final shipping, tax, and payment are not available/iu)).toBeVisible();
+  await expect(drawer.getByText(
+    "Merchandise discounts are included. Shipping and tax are not yet calculated. Checkout is currently unavailable.",
+    { exact: true },
+  )).toBeVisible();
 
   const scrollRegion = drawer.locator("[data-cart-drawer-scroll]");
   await page.setViewportSize({ width: 375, height: 900 });
