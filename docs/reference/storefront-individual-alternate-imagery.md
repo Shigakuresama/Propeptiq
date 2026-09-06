@@ -230,4 +230,3 @@ Use case: text-localization / product-mockup. Image 1 is the exact original Prop
 ```text
 Use case: text-localization / product-mockup. Image 1 is the exact original PropeptIQ ambient-studio scene to edit. Change ONLY the product descriptor BPC-157 to SELANK on every vial. Exact label text: PROPEPTIQ / SELANK / RESEARCH USE ONLY. Keep the dark geometric typography, centered product descriptor and generous label margins. Preserve exactly the scene, number of vials, camera angle, crop, glass, silver cap, teal band, warm ivory backdrop, lighting, shadow, all object boundaries and square high resolution. No new text, mg, claims, ingredients, fill, hands, medical props, certification or branding. Original conceptual catalog illustration, not actual packaging documentation. One image, no grid.
 ```
-
