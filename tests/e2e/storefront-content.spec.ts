@@ -48,8 +48,24 @@ async function expectTouchTarget(control: Locator) {
 
 const expectedResearchBySlug = {
   "aod-9604": {
-    evidenceLabel: "Animal research only",
+    evidenceLabel: "Animal research included",
     pmids: ["11146367", "11713213"],
+  },
+  dsip: {
+    evidenceLabel: "Randomized human research included",
+    pmids: ["1299794", "6895513"],
+    rows: [
+      { pmid: "1299794", design: "Randomized controlled trial", context: "Human research" },
+      { pmid: "6895513", design: "Human interventional study", context: "Human research" },
+    ],
+  },
+  epithalon: {
+    evidenceLabel: "Animal research included",
+    pmids: ["40493162", "17955380"],
+    rows: [
+      { pmid: "40493162", design: "In vitro experiment", context: "In vitro research" },
+      { pmid: "17955380", design: "Animal experiment", context: "Animal research" },
+    ],
   },
   selank: {
     evidenceLabel: "Randomized human research included",
@@ -103,6 +119,13 @@ async function verifyResearch(
     await expect(link).toHaveAttribute("rel", "noopener noreferrer");
     await expectTouchTarget(link);
     await expect(disclosure.getByText(`PMID: ${pmid}`, { exact: true })).toBeVisible();
+  }
+  if ("rows" in expectedResearch) {
+    for (const row of expectedResearch.rows) {
+      const studyRow = disclosure.locator("ol > li").filter({ hasText: `PMID: ${row.pmid}` });
+      await expect(studyRow.getByText(row.design, { exact: true })).toBeVisible();
+      await expect(studyRow.getByText(row.context, { exact: true })).toBeVisible();
+    }
   }
   await page.keyboard.press("Tab");
   await expectVisibleFocus(links.first());
@@ -223,6 +246,32 @@ async function verifyCorrectionWithoutJavaScript(
   }
 }
 
+async function verifyEpithalonWithoutJavaScript(browser: Browser) {
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: { width: 375, height: 1000 },
+  });
+  const page = await context.newPage();
+  try {
+    const response = await page.goto("/catalog/items/epithalon");
+    expect(response?.status()).toBe(200);
+    const disclosure = page.locator("#research-references details");
+    const summary = disclosure.locator("summary");
+    await expect(summary).toContainText("2 verified references");
+    await expect(disclosure.getByText("In vitro experiment", { exact: true })).toBeVisible();
+    await expect(disclosure.getByText("In vitro research", { exact: true })).toBeVisible();
+    await expect(disclosure.locator('a[href="https://pubmed.ncbi.nlm.nih.gov/40493162/"]')).toHaveCount(1);
+    await expect(summary).not.toHaveAttribute("role");
+    await expect(summary).not.toHaveAttribute("onclick");
+    await summary.focus();
+    await page.keyboard.press("Enter");
+    await expect(disclosure).toHaveAttribute("open", "");
+    await expectNoHorizontalOverflow(page);
+  } finally {
+    await context.close();
+  }
+}
+
 async function verifyWhyChoose(page: Page, width: number, columns: number) {
   await openPublicPage(page, "/", width);
   const section = page.getByRole("region", { name: "Why choose PropeptIQ", exact: true });
@@ -292,6 +341,9 @@ test("Thymosin Alpha-1 route keeps its correction with the exact parent at all w
 test("server HTML keeps a native corrected bibliography disclosure without JavaScript", async ({ browser }) => { await verifyCorrectionWithoutJavaScript(browser, { slug: "thymosin-alpha-1", parentPmid: "39814420", correctionPmid: "40447307", siblingPmid: "35713670" }); });
 test("Selank bibliography is keyboard usable at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyResearch(page, width, "selank"); });
 test("Semax bibliography is keyboard usable at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyResearch(page, width, "semax"); });
+test("DSIP bibliography is keyboard usable at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyResearch(page, width, "dsip"); });
+test("Epithalon bibliography keeps in-vitro and animal rows distinct at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) { await verifyResearch(page, width, "epithalon"); const disclosure = page.locator("#research-references details"); const cellRow = disclosure.locator("ol > li").filter({ hasText: "PMID: 40493162" }); const animalRow = disclosure.locator("ol > li").filter({ hasText: "PMID: 17955380" }); await expect(cellRow.getByText("In vitro experiment", { exact: true })).toBeVisible(); await expect(cellRow.getByText("In vitro research", { exact: true })).toBeVisible(); await expect(animalRow.getByText("Animal experiment", { exact: true })).toBeVisible(); await expect(animalRow.getByText("Animal research", { exact: true })).toBeVisible(); await expect(disclosure.getByText("Human research", { exact: true })).toHaveCount(0); } });
+test("Epithalon bibliography remains available without JavaScript", async ({ browser }) => { await verifyEpithalonWithoutJavaScript(browser); });
 test("unmapped Semax + Selank blend has no inferred bibliography at 375px, 768px, and 1440px", async ({ page }) => { for (const width of [375, 768, 1440]) await verifyUnmappedProduct(page, width, { slug: "semax-selank", name: "Semax + Selank" }); });
 test("unmapped Pinealon has no inferred bibliography at 375px", async ({ page }) => { await verifyUnmappedProduct(page, 375); });
 test("unmapped Pinealon has no inferred bibliography at 768px", async ({ page }) => { await verifyUnmappedProduct(page, 768); });

@@ -212,6 +212,8 @@ describe("retained catalog item route", () => {
     ["bpc-157", "bpc-157"],
     ["cargrilintide", "cagrilintide"],
     ["cjc-1295-with-dac", "cjc-1295-with-dac"],
+    ["dsip", "dsip"],
+    ["epithalon", "epithalon"],
     ["ghk-cu", "ghk-cu"],
     ["hcg", "hcg"],
     ["igf-1-lr3", "igf-1-lr3"],

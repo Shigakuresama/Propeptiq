@@ -2,6 +2,7 @@ export const compoundStudyDesignLabels = Object.freeze({
   animal_experimental: "Animal experiment",
   human_interventional: "Human interventional study",
   human_observational: "Human observational study",
+  in_vitro_experimental: "In vitro experiment",
   human_pharmacokinetic_pharmacodynamic: "Human pharmacokinetic/pharmacodynamic study",
   human_pilot: "Human pilot study",
   human_safety_pilot: "Human safety pilot study",
@@ -20,7 +21,7 @@ export const compoundEvidenceContextLabels = Object.freeze({
 } as const);
 
 export const compoundEvidenceLabels = Object.freeze({
-  animal_only: "Animal research only",
+  animal_only: "Animal research included",
   human_meta: "Human evidence synthesis included",
   human_observational: "Human research included",
   human_rct: "Randomized human research included",
