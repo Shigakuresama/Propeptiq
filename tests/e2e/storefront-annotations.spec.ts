@@ -54,6 +54,9 @@ test("annotated product controls, stacked bundles and matched imagery work toget
   }));
   expect(new Set(images).size).toBe(1);
   expect((await new AxeBuilder({ page }).include(".product-detail-grid").include(".compound-information").analyze()).violations).toEqual([]);
+  await add.click();
+  await expect(add).toContainText("Added");
+  await expect(page.getByRole("status", { name: "Cart updates" })).toContainText("Tirzepatide, 30mg: 1 unit");
 });
 
 test("annotated storefront reflows and preserves usable footer, contact and rewards controls", async ({ page }) => {
@@ -73,6 +76,14 @@ test("annotated storefront reflows and preserves usable footer, contact and rewa
       const home = (await page.locator(".site-header-row > a[href='/']").boundingBox())!;
       const menu = (await page.getByRole("button", { name: "Open navigation", exact: true }).boundingBox())!;
       expect(Math.abs(home.y + home.height / 2 - menu.y - menu.height / 2), `${width}px header row`).toBeLessThanOrEqual(2);
+    }
+    if (width === 375) {
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      const banner = page.getByRole("complementary", { name: "Promotion", exact: true });
+      const height = (await banner.boundingBox())!.height;
+      await page.getByRole("button", { name: "Copy promotion code WINTER30", exact: true }).click();
+      await expect(banner.getByRole("status")).toHaveText("WINTER30 copied");
+      expect((await banner.boundingBox())!.height).toBe(height);
     }
     await page.screenshot({ path: path.join(directory, `product-${width}.png`), fullPage: true });
   }
