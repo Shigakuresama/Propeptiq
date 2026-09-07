@@ -2515,6 +2515,7 @@ test("navigation, homepage trust content, product research, and related records 
   })).toBe("/catalog/individual/bpc-157/front-v1.webp");
   await expect(page.getByText("Explore BPC-157 amounts, pricing, and product information.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Compound information" })).toBeVisible();
+  await page.locator(".compound-information__references summary").click();
   await expect(page.getByRole("link", { name: "Explore the PubChem record" })).toHaveAttribute(
     "href",
     "https://pubchem.ncbi.nlm.nih.gov/compound/9941957",
@@ -2541,6 +2542,7 @@ test("preview item keeps the calculator gated while product information and rela
   await expect(page.getByRole("button", { name: "Calculate", exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Compound information", exact: true })).toBeVisible();
   await expect(page.locator(".compound-information")).toContainText("C225H348N48O68");
+  await page.locator(".compound-information__references summary").click();
   await expect(page.getByRole("link", { name: "Explore the PubChem record" })).toHaveAttribute(
     "href",
     "https://pubchem.ncbi.nlm.nih.gov/compound/156588324",

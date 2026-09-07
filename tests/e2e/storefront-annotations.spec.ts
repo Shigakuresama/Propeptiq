@@ -14,6 +14,8 @@ test("annotated product controls, stacked bundles and matched imagery work toget
   await expect(page.getByRole("heading", { name: "Compound information", exact: true })).toBeVisible();
   await expect(page.locator("main")).not.toContainText("Price unavailable");
   await expect(quantity).toHaveValue("1");
+  await expect(page.locator(".catalog-detail-price strong")).toHaveText("$41.99");
+  await expect(page.locator(".catalog-detail-price")).toContainText("Save $18.00 per unit");
   await expect(page.getByRole("button", { name: "Decrease quantity", exact: true })).toBeDisabled();
 
   for (const [bottles, extra, total] of [[2, 3, "$81.46"], [4, 6, "$157.88"], [11, 30, "$323.29"]] as const) {
@@ -24,6 +26,7 @@ test("annotated product controls, stacked bundles and matched imagery work toget
     await expect(summary.locator("strong")).toHaveText(total);
     await expect(summary).toContainText(`Bundle −${extra}% extra`);
     await expect(summary).toContainText("WINTER30 −30%");
+    await expect(page.locator(".catalog-detail-price strong")).toHaveText(bottles === 2 ? "$40.73" : bottles === 4 ? "$39.47" : "$29.39");
   }
   await quantity.fill("26");
   await expect(quantity).toHaveAttribute("aria-invalid", "true");
@@ -44,12 +47,16 @@ test("annotated product controls, stacked bundles and matched imagery work toget
   expect(Math.abs(left.y - header.y)).toBeLessThanOrEqual(2);
   expect(Math.abs(left.y + left.height - content.y - content.height)).toBeLessThanOrEqual(2);
   const bundleBounds = (await page.locator(".bundle-options").boundingBox())!;
+  expect(bundleBounds.y + bundleBounds.height).toBeLessThanOrEqual((await quantity.boundingBox())!.y);
   expect(bundleBounds.y + bundleBounds.height).toBeLessThanOrEqual((await add.boundingBox())!.y);
   const images = await page.locator(".bundle-option__bottle, .catalog-detail-image img").evaluateAll((nodes) => nodes.map((node) => {
     const url = new URL((node as HTMLImageElement).src); return url.searchParams.get("url") ?? url.pathname;
   }));
   expect(new Set(images).size).toBe(1);
   expect((await new AxeBuilder({ page }).include(".product-detail-grid").include(".compound-information").analyze()).violations).toEqual([]);
+  await add.click();
+  await expect(add).toContainText("Added");
+  await expect(page.getByRole("status", { name: "Cart updates" })).toContainText("Tirzepatide, 30mg: 1 unit");
 });
 
 test("annotated storefront reflows and preserves usable footer, contact and rewards controls", async ({ page }) => {
@@ -65,9 +72,27 @@ test("annotated storefront reflows and preserves usable footer, contact and rewa
     const increment = (await page.getByRole("button", { name: "Increase quantity", exact: true }).boundingBox())!;
     expect(increment.width).toBeGreaterThanOrEqual(44);
     expect(increment.height).toBeGreaterThanOrEqual(44);
+    if (width === 375 || width === 768 || width === 1045) {
+      const home = (await page.locator(".site-header-row > a[href='/']").boundingBox())!;
+      const menu = (await page.getByRole("button", { name: "Open navigation", exact: true }).boundingBox())!;
+      expect(Math.abs(home.y + home.height / 2 - menu.y - menu.height / 2), `${width}px header row`).toBeLessThanOrEqual(2);
+    }
+    if (width === 375) {
+      await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+      const banner = page.getByRole("complementary", { name: "Promotion", exact: true });
+      const height = (await banner.boundingBox())!.height;
+      await page.getByRole("button", { name: "Copy promotion code WINTER30", exact: true }).click();
+      await expect(banner.getByRole("status")).toHaveText("WINTER30 copied");
+      expect((await banner.boundingBox())!.height).toBe(height);
+    }
     await page.screenshot({ path: path.join(directory, `product-${width}.png`), fullPage: true });
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
+  const references = page.locator(".compound-information__references");
+  await expect(references).not.toHaveAttribute("open");
+  await references.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(references.getByRole("link", { name: "Explore the PubChem record" })).toBeVisible();
   await page.locator("footer").scrollIntoViewIfNeeded();
   const ssl = (await page.getByRole("link", { name: "SSL secured connection to propeptiq.com" }).boundingBox())!;
   const methods = (await page.locator(".footer-payment-methods").boundingBox())!;

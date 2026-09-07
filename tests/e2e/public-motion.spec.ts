@@ -189,7 +189,7 @@ test("public controls and catalog records keep restrained transitions without ca
   const action = page.getByRole("button", { name: /^Add .+ to cart$/iu }).first();
   await action.hover();
   await expect.poll(() => action.evaluate((element) => getComputedStyle(element).transform))
-    .toBe("none");
+    .toBe("matrix(1, 0, 0, 1, 0, -1)");
 
   const launcher = page.getByRole("button", { name: "Search PropeptIQ" });
   await expect(page.locator("header").getByRole("button", { name: "Search PropeptIQ" })).toHaveCount(1);
@@ -207,7 +207,12 @@ test("public controls and catalog records keep restrained transitions without ca
   const disabledBounds = (await disabledAction.boundingBox())!;
   await page.mouse.move(disabledBounds.x + disabledBounds.width / 2, disabledBounds.y + disabledBounds.height / 2);
   await expect(disabledAction).toHaveCSS("transform", disabledTransform);
-  expect(await disabledAction.boundingBox()).toEqual(disabledBounds);
+  const afterDisabledBounds = (await disabledAction.boundingBox())!;
+  expect(afterDisabledBounds.x).toBe(disabledBounds.x);
+  expect(afterDisabledBounds.width).toBe(disabledBounds.width);
+  expect(afterDisabledBounds.height).toBe(disabledBounds.height);
+  // Subpixel scroll settling is allowed; a one-pixel hover translation is not.
+  expect(Math.abs(afterDisabledBounds.y - disabledBounds.y)).toBeLessThanOrEqual(0.5);
 
 });
 

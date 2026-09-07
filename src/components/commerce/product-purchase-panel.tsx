@@ -51,14 +51,10 @@ export function ProductPurchasePanel(props: ProductPurchasePanelProps) {
     <h2 id="purchase-heading" tabIndex={-1} className="product-purchase-heading w-fit text-xs font-semibold tracking-wider text-muted-ink">Select your product</h2>
     <VariantSelector productId={product.id} productName={product.name} variants={product.variants} selectedVariantId={selectedVariantId} quantity={quantity} pricing={pricing}
       onSelectedVariantIdChange={(variantId) => (props.onSelectedVariantIdChange ?? setInternalSelectedVariantId)(variantId)} />
+    {selected ? <BundleOptions product={product} variant={selected} pricing={pricing} quantity={quantity} onSelect={chooseQuantity} /> : null}
     <div ref={inlineSummaryRef} className="purchase-summary">
-      <div className="purchase-quantity-price">
-        <div>
-          <QuantityStepper quantity={quantity} maximum={MAX_CART_ITEM_QUANTITY} onChange={chooseQuantity} />
-          {selected && selected.packageQuantity > 1 ? <p className="mt-1 text-xs text-muted-ink">{selected.packageQuantity} bottles per unit</p> : null}
-        </div>
         <div className="purchase-price" role="status" aria-label="Purchase summary" aria-live="polite" aria-atomic="true">
-          <p className="text-xs font-medium text-muted-ink">{selected?.label ?? "No amount selected"} · {quantity} unit{quantity === 1 ? "" : "s"}</p>
+          <p className="text-xs font-medium text-muted-ink">{selected?.label ?? "No amount selected"} · {quantity} unit{quantity === 1 ? "" : "s"} · Total</p>
           {price ? <>
             <div className="mt-1 flex flex-wrap items-baseline justify-end gap-2">
               <strong className="text-2xl tabular-nums">{formatStorefrontMoney(price.lineSubtotalMinor)}</strong>
@@ -74,9 +70,13 @@ export function ProductPurchasePanel(props: ProductPurchasePanelProps) {
             {price.volumeDiscountBps > 0 ? <p className="mt-1 text-xs text-accent-readable">Bundle −{price.volumeDiscountBps / 100}% extra: save {formatStorefrontMoney(price.lineVolumeSavingsMinor)}</p> : null}
           </> : <p className="mt-3 text-sm">{status}</p>}
         </div>
+      <div className="purchase-action-row mt-4">
+        <div>
+          <QuantityStepper quantity={quantity} maximum={MAX_CART_ITEM_QUANTITY} onChange={chooseQuantity} />
+        </div>
+        <div className="min-w-0"><AddToCartButton {...addToCartProps} className="w-full uppercase" /></div>
       </div>
-      {selected ? <BundleOptions product={product} variant={selected} pricing={pricing} quantity={quantity} onSelect={chooseQuantity} /> : null}
-      <div className="mt-4"><AddToCartButton {...addToCartProps} className="w-full uppercase" /></div>
+      {selected && selected.packageQuantity > 1 ? <p className="mt-1 text-xs text-muted-ink">{selected.packageQuantity} bottles per unit</p> : null}
       {orderingPaused ? <p className="mt-2 text-xs leading-5 text-muted-ink">{canAdd ? "Save your selection in the cart. " : ""}Ordering is not open. <Link className="record-link" href="/contact">Contact us</Link> for availability.</p> : null}
       <p className="mt-2 text-xs leading-5 text-muted-ink">For laboratory research only. Not for human or veterinary use. <Link className="record-link" href="/research-use-policy">Research-use policy</Link>.</p>
     </div>

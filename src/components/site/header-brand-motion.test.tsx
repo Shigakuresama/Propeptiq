@@ -117,6 +117,9 @@ describe("HeaderBrandMotion", () => {
     expect(wrapper?.querySelectorAll("svg")).toHaveLength(1);
     expect(wrapper?.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
     expect(wrapper?.querySelector("svg")).toHaveAttribute("focusable", "false");
+    expect(wrapper?.querySelectorAll(".header-brand-motion__bonds path")).toHaveLength(3);
+    expect(wrapper?.querySelectorAll(".header-brand-motion__nodes circle")).toHaveLength(7);
+    expect(wrapper?.querySelector(".header-brand-motion__content svg")).toBeNull();
     expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
   });
 

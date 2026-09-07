@@ -27,6 +27,7 @@ describe("CompoundResearchSection", () => {
     expect(summary).toHaveTextContent("Tirzepatide");
     expect(summary).toHaveTextContent("2 verified references");
     expect(section.querySelectorAll("details")).toHaveLength(1);
+    expect(section.querySelector("details")).not.toHaveAttribute("open");
     expect(summary).not.toHaveAttribute("role");
     expect(summary).not.toHaveAttribute("aria-expanded");
     expect(within(section).getByText("Randomized human research included")).toBeVisible();
