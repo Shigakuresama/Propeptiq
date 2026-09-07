@@ -192,14 +192,11 @@ test("public controls and catalog records keep restrained transitions without ca
     .toBe("none");
 
   const launcher = page.getByRole("button", { name: "Search PropeptIQ" });
-  const lane = page.locator(".site-search-launcher-lane");
-  const laneCenter = await lane.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return rect.left + rect.width / 2;
-  });
+  await expect(page.locator("header").getByRole("button", { name: "Search PropeptIQ" })).toHaveCount(1);
+  const launcherBounds = await launcher.boundingBox();
   await launcher.hover();
   await expect(launcher).toHaveCSS("transform", "none");
-  expect(Math.abs(laneCenter - (await page.evaluate(() => innerWidth / 2)))).toBeLessThanOrEqual(1);
+  expect(await launcher.boundingBox()).toEqual(launcherBounds);
 
   await expect(page.getByRole("button", { name: "Subscribe" })).toHaveCount(0);
   await page.goto("/catalog/items/tirzepatide");
@@ -313,11 +310,7 @@ test("reduced motion neutralizes decorative individual transforms without shifti
   }
 
   const trigger = page.getByRole("button", { name: "Search PropeptIQ" });
-  const lane = page.locator(".site-search-launcher-lane");
-  expect(await lane.evaluate((element) => {
-    const rect = element.getBoundingClientRect();
-    return Math.abs(rect.left + rect.width / 2 - innerWidth / 2);
-  })).toBeLessThanOrEqual(1);
+  await expect(page.locator("header").getByRole("button", { name: "Search PropeptIQ" })).toHaveCount(1);
   await trigger.click();
   const search = page.getByRole("dialog", { name: "Search PropeptIQ" });
   const overlay = page.locator('[data-slot="sheet-overlay"][data-motion-scope="public"]');

@@ -36,12 +36,12 @@ function readyLine(overrides: Partial<CartPreviewItem> = {}): CartPreviewItem {
     name: "Synthetic local test only — Alpha",
     variantLabel: "Synthetic 5 mg",
     sku: "SYNTHETIC-5MG",
-    packageForm: "1 bottle",
+    packageQuantity: 1, packageForm: "1 bottle",
     baseUnitMinor: 2_400,
-    unitAmountMinor: 2_208,
-    lineSubtotalMinor: 4_416,
-    lineSavingsMinor: 384,
-    effectiveDiscountBps: 800,
+    unitAmountMinor: 2_328,
+    lineSubtotalMinor: 4_656,
+    lineSavingsMinor: 144,
+    effectiveDiscountBps: 300, campaignDiscountBps: 0, volumeDiscountBps: 300, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 144,
     appliedPromotions: [],
     currency: "USD",
     ...overrides,
@@ -57,7 +57,7 @@ function stateLine(purchaseState: CartPreviewPurchaseState): CartPreviewItem {
       baseUnitMinor: 0,
       unitAmountMinor: 0,
       lineSubtotalMinor: 0,
-      lineSavingsMinor: 0,
+      lineSavingsMinor: 0, campaignUnitMinor: 0, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0,
     });
   }
   if (purchaseState === "checkout_unavailable" || purchaseState === "insufficient_quantity") {
@@ -70,7 +70,7 @@ function stateLine(purchaseState: CartPreviewPurchaseState): CartPreviewItem {
     unitAmountMinor: null,
     lineSubtotalMinor: null,
     lineSavingsMinor: null,
-    effectiveDiscountBps: null,
+    effectiveDiscountBps: null, campaignDiscountBps: null, volumeDiscountBps: null, campaignUnitMinor: null, lineCampaignSavingsMinor: null, lineVolumeSavingsMinor: null,
     appliedPromotions: [],
     currency: null,
   } as const;
@@ -80,7 +80,7 @@ function stateLine(purchaseState: CartPreviewPurchaseState): CartPreviewItem {
       name: null,
       variantLabel: null,
       sku: null,
-      packageForm: null,
+      packageQuantity: null, packageForm: null,
     });
   }
   return readyLine(unpriced);
@@ -210,9 +210,9 @@ describe("CheckoutCartStatus", () => {
 
   it.each([
     ["missing row", [readyLine()]],
-    ["extra row", [readyLine(), readyLine({ variantId: secondVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, effectiveDiscountBps: 0 }), readyLine({ variantId: thirdVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, effectiveDiscountBps: 0 })]],
-    ["reordered rows", [readyLine({ variantId: secondVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, effectiveDiscountBps: 0 }), readyLine()]],
-    ["different ID", [readyLine(), readyLine({ variantId: thirdVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, effectiveDiscountBps: 0 })]],
+    ["extra row", [readyLine(), readyLine({ variantId: secondVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0, volumeDiscountBps: 0, effectiveDiscountBps: 0 }), readyLine({ variantId: thirdVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0, volumeDiscountBps: 0, effectiveDiscountBps: 0 })]],
+    ["reordered rows", [readyLine({ variantId: secondVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0, volumeDiscountBps: 0, effectiveDiscountBps: 0 }), readyLine()]],
+    ["different ID", [readyLine(), readyLine({ variantId: thirdVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0, volumeDiscountBps: 0, effectiveDiscountBps: 0 })]],
     ["different quantity", [readyLine(), readyLine({ variantId: secondVariantId, quantity: 2 })]],
   ] as const)("rejects a parser-valid response with a %s", async (_label, responseItems) => {
     useCart.mockReturnValue(cart([
@@ -249,7 +249,7 @@ describe("CheckoutCartStatus", () => {
           baseUnitMinor: 2_400,
           unitAmountMinor: 2_400,
           lineSubtotalMinor: 2_400,
-          lineSavingsMinor: 0,
+          lineSavingsMinor: 0, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0, volumeDiscountBps: 0,
           effectiveDiscountBps: 0,
         }),
       ])));

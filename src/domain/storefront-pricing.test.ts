@@ -11,144 +11,72 @@ import {
 } from "./storefront-pricing";
 
 describe("quantityDiscountBps", () => {
-  it.each([
-    [1, 0],
-    [2, 800],
-    [3, 1000],
-    [4, 1000],
-    [9, 1000],
-    [10, 3000],
-    [11, 3000],
-    [25, 3000],
-  ])("prices quantity %i at %i basis points", (quantity, expected) => {
-    expect(quantityDiscountBps(quantity)).toBe(expected);
-  });
-
-  it.each([0, -1, 26, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
-    "rejects invalid quantity %s",
-    (quantity) => expect(() => quantityDiscountBps(quantity)).toThrow(RangeError),
+  it.each([[1, 0], [2, 300], [3, 300], [4, 600], [9, 600], [10, 600], [11, 3000], [25, 3000]])(
+    "prices %i bottles at %i basis points", (quantity, expected) => expect(quantityDiscountBps(quantity)).toBe(expected),
   );
-
+  it.each([[1, 2, 300], [1, 3, 300], [2, 2, 600], [5, 2, 600], [6, 2, 3000], [1, 10, 600], [2, 10, 3000]])(
+    "counts %i packages of %i bottles", (quantity, packageQuantity, expected) => expect(quantityDiscountBps(quantity, packageQuantity)).toBe(expected),
+  );
+  it.each([0, -1, 26, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid quantity %s", (quantity) => expect(() => quantityDiscountBps(quantity)).toThrow(RangeError),
+  );
+  it.each([0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid package size %s", (packageQuantity) => expect(() => quantityDiscountBps(1, packageQuantity)).toThrow(RangeError),
+  );
+  it("rejects an unsafe bottle count", () => expect(() => quantityDiscountBps(2, Number.MAX_SAFE_INTEGER)).toThrow(RangeError));
   it("keeps exported quantity tiers immutable", () => {
-    try {
-      (QUANTITY_TIERS[0] as { discountBps: number }).discountBps = 9_999;
-    } catch {
-      // Strict-mode assignment to a frozen tier is expected to throw.
-    }
-    expect(Object.isFrozen(QUANTITY_TIERS[0])).toBe(true);
-    expect(quantityDiscountBps(1)).toBe(0);
+    expect(Object.isFrozen(QUANTITY_TIERS)).toBe(true);
+    expect(QUANTITY_TIERS.every(Object.isFrozen)).toBe(true);
   });
 });
 
-describe("nonstacking discounts", () => {
+describe("campaign then volume discounts", () => {
+  it.each([[1, 3000], [2, 3210], [3, 3210], [4, 3420], [10, 3420], [11, 5100]])(
+    "stacks WINTER30 with the bottle tier at quantity %i", (quantity, expected) => {
+      expect(resolveEffectiveDiscount({ quantityDiscountBps: quantityDiscountBps(quantity), eligiblePromotions: [{ id: "winter30", discountBps: 3000 }] }).discountBps).toBe(expected);
+    },
+  );
+  it("selects only the highest campaign with deterministic attribution before volume", () => {
+    expect(resolveEffectiveDiscount({ quantityDiscountBps: 600, eligiblePromotions: [
+      { id: "alpha", discountBps: 2000 }, { id: "winter30", discountBps: 3000 }, { id: "zulu", discountBps: 3000 },
+    ] })).toEqual({ source: "stacked", discountBps: 3420, promotionId: "winter30", campaignDiscountBps: 3000, volumeDiscountBps: 600 });
+  });
+  it("stacks equal campaign and volume percentages multiplicatively", () => {
+    expect(resolveEffectiveDiscount({ quantityDiscountBps: 3000, eligiblePromotions: [{ id: "winter30", discountBps: 3000 }] })).toEqual({ source: "stacked", discountBps: 5100, promotionId: "winter30", campaignDiscountBps: 3000, volumeDiscountBps: 3000 });
+  });
+  it("uses the bottle tier when no campaign is eligible", () => {
+    expect(resolveEffectiveDiscount({ quantityDiscountBps: 600, eligiblePromotions: [] })).toEqual({ source: "quantity", discountBps: 600, promotionId: null, campaignDiscountBps: 0, volumeDiscountBps: 600 });
+  });
   it.each([
-    [1, 3000],
-    [2, 3000],
-    [3, 3000],
-    [10, 3000],
-  ])("applies WINTER30 once at quantity %i", (quantity, expected) => {
-    expect(
-      resolveEffectiveDiscount({
-        quantityDiscountBps: quantityDiscountBps(quantity),
-        eligiblePromotions: [{ id: "winter30", discountBps: 3000 }],
-      }).discountBps,
-    ).toBe(expected);
-  });
-
-  it("selects the highest overlapping promotion with deterministic attribution", () => {
-    expect(
-      resolveEffectiveDiscount({
-        quantityDiscountBps: 1000,
-        eligiblePromotions: [
-          { id: "alpha", discountBps: 2000 },
-          { id: "winter30", discountBps: 3000 },
-          { id: "zulu", discountBps: 3000 },
-        ],
-      }),
-    ).toEqual({ source: "promotion", discountBps: 3000, promotionId: "winter30" });
-  });
-
-  it("gives a tied promotion attribution without stacking its percentage", () => {
-    expect(
-      resolveEffectiveDiscount({
-        quantityDiscountBps: 3000,
-        eligiblePromotions: [{ id: "winter30", discountBps: 3000 }],
-      }),
-    ).toEqual({ source: "promotion", discountBps: 3000, promotionId: "winter30" });
-  });
-
-  it("uses the quantity tier when no promotion is eligible", () => {
-    expect(resolveEffectiveDiscount({ quantityDiscountBps: 1000, eligiblePromotions: [] })).toEqual({
-      source: "quantity",
-      discountBps: 1000,
-      promotionId: null,
-    });
-  });
-
-  it.each([
-    [{ quantityDiscountBps: -1, eligiblePromotions: [] }, "quantityDiscountBps"],
-    [{ quantityDiscountBps: 0, eligiblePromotions: [{ id: "bad", discountBps: 10_001 }] }, "eligiblePromotions[0].discountBps"],
-    [{ quantityDiscountBps: 0, eligiblePromotions: [{ id: "", discountBps: 1 }] }, "eligiblePromotions[0].id"],
-  ])("rejects invalid effective discount values (%j)", (input) => {
-    expect(() => resolveEffectiveDiscount(input)).toThrow(RangeError);
-  });
-
-  it("compares storefront savings with referral without reward stacking", () => {
-    expect(
-      selectBestAcquisitionDiscount({
-        candidates: [
-          { source: "promotion", discountMinor: 3_000 },
-          { source: "referral", discountMinor: 5_000 },
-        ],
-      }),
-    ).toMatchObject({ ok: true, value: { source: "referral", discountMinor: 5_000 } });
+    { quantityDiscountBps: -1, eligiblePromotions: [] },
+    { quantityDiscountBps: 0, eligiblePromotions: [{ id: "bad", discountBps: 10_001 }] },
+    { quantityDiscountBps: 0, eligiblePromotions: [{ id: "", discountBps: 1 }] },
+  ])("rejects invalid effective discounts %j", (input) => expect(() => resolveEffectiveDiscount(input)).toThrow(RangeError));
+  it("compares combined storefront savings with referral without reward stacking", () => {
+    expect(selectBestAcquisitionDiscount({ candidates: [{ source: "promotion", discountMinor: 3_000 }, { source: "referral", discountMinor: 5_000 }] })).toMatchObject({ ok: true, value: { source: "referral", discountMinor: 5_000 } });
   });
 });
 
 describe("integer line pricing", () => {
-  it("rounds the discounted unit once and then multiplies", () => {
-    expect(
-      calculateVariantLinePrice({
-        variantId: "fixture",
-        baseUnitMinor: 999,
-        quantity: 2,
-        effectiveDiscount: { source: "quantity", discountBps: 800, promotionId: null },
-      }),
-    ).toMatchObject({ effectiveUnitMinor: 919, lineSubtotalMinor: 1838, lineSavingsMinor: 160 });
+  it("rounds each sequential unit discount half up, then multiplies; savings reconcile", () => {
+    expect(calculateVariantLinePrice({ variantId: "fixture", baseUnitMinor: 1005, quantity: 2,
+      effectiveDiscount: resolveEffectiveDiscount({ quantityDiscountBps: 300, eligiblePromotions: [{ id: "winter30", discountBps: 3000 }] }),
+    })).toMatchObject({ campaignUnitMinor: 704, effectiveUnitMinor: 683, lineSubtotalMinor: 1366, lineCampaignSavingsMinor: 602, lineVolumeSavingsMinor: 42, lineSavingsMinor: 644 });
   });
-
-  it("keeps zero-dollar preview math at zero without declaring checkout readiness", () => {
-    expect(
-      calculateVariantLinePrice({
-        variantId: "fixture",
-        baseUnitMinor: 0,
-        quantity: 11,
-        effectiveDiscount: { source: "promotion", discountBps: 3000, promotionId: "winter30" },
-      }),
-    ).toMatchObject({ effectiveUnitMinor: 0, lineSubtotalMinor: 0, checkoutReady: false });
+  it("keeps zero preview math out of checkout", () => {
+    expect(calculateVariantLinePrice({ variantId: "fixture", baseUnitMinor: 0, quantity: 11,
+      effectiveDiscount: resolveEffectiveDiscount({ quantityDiscountBps: 3000, eligiblePromotions: [{ id: "winter30", discountBps: 3000 }] }),
+    })).toMatchObject({ effectiveUnitMinor: 0, lineSubtotalMinor: 0, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0, checkoutReady: false });
   });
-
-  it("keeps pending prices out of checkout while preserving preview math", () => {
-    expect(
-      calculateVariantLinePrice({
-        variantId: "fixture",
-        baseUnitMinor: 999,
-        quantity: 1,
-        priceStatus: "pending",
-        effectiveDiscount: { source: "quantity", discountBps: 0, promotionId: null },
-      }).checkoutReady,
-    ).toBe(false);
+  it("keeps pending prices out of checkout", () => {
+    expect(calculateVariantLinePrice({ variantId: "fixture", baseUnitMinor: 999, quantity: 1, priceStatus: "pending",
+      effectiveDiscount: resolveEffectiveDiscount({ quantityDiscountBps: 0, eligiblePromotions: [] }),
+    }).checkoutReady).toBe(false);
   });
-
-  it("rejects a line whose gross or discounted subtotal exceeds safe integer range", () => {
-    expect(() =>
-      calculateVariantLinePrice({
-        variantId: "fixture",
-        baseUnitMinor: Number.MAX_SAFE_INTEGER,
-        quantity: 2,
-        effectiveDiscount: { source: "quantity", discountBps: 0, promotionId: null },
-      }),
-    ).toThrow(RangeError);
+  it("rejects a subtotal exceeding the safe integer range", () => {
+    expect(() => calculateVariantLinePrice({ variantId: "fixture", baseUnitMinor: Number.MAX_SAFE_INTEGER, quantity: 2,
+      effectiveDiscount: resolveEffectiveDiscount({ quantityDiscountBps: 0, eligiblePromotions: [] }),
+    })).toThrow(RangeError);
   });
 });
 

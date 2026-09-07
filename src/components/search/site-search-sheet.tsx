@@ -210,7 +210,7 @@ export function SiteSearchSheet({
         <SheetTrigger asChild>
           <button
             aria-label="Search PropeptIQ"
-            className="action-primary inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold"
+            className="site-search-trigger action-primary inline-flex min-h-11 items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold"
             type="button"
           >
             <SearchIcon aria-hidden="true" className="size-4" />

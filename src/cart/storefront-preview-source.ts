@@ -207,6 +207,7 @@ function activePromotionSnapshot(
 function freezeVariant(row: CartPreviewVariant): CartPreviewVariant {
   requireFact(!!row && identifier(row.variantId) && identifier(row.productId) && text(row.name) &&
     text(row.variantLabel) && text(row.sku, MAX_CART_PREVIEW_IDENTIFIER_LENGTH) && text(row.packageForm) &&
+    Number.isSafeInteger(row.packageQuantity) && row.packageQuantity > 0 &&
     (row.baseUnitMinor === null || nonnegative(row.baseUnitMinor)) &&
     (row.currency === null || row.currency === "USD") &&
     ["pending", "active", "unavailable"].includes(row.priceStatus) &&
@@ -224,6 +225,7 @@ function freezeVariant(row: CartPreviewVariant): CartPreviewVariant {
   return Object.freeze({
     variantId: row.variantId, productId: row.productId, name: row.name,
     variantLabel: row.variantLabel, sku: row.sku, packageForm: row.packageForm,
+    packageQuantity: row.packageQuantity,
     baseUnitMinor: row.baseUnitMinor, currency: row.currency, priceStatus: row.priceStatus,
     availability: row.availability, checkoutReady: row.checkoutReady, availableQuantity: row.availableQuantity,
     eligiblePromotions: Object.freeze(eligiblePromotions),
@@ -270,6 +272,7 @@ export function projectPublicStorefrontPreviewSource(view: PublicStorefrontView)
           variantId: variant.id, productId: product.id, name: product.name,
           variantLabel: variant.label, sku: variant.sku,
           packageForm: `${variant.packageQuantity} ${variant.packageQuantity === 1 ? "bottle" : "bottles"}`,
+          packageQuantity: variant.packageQuantity,
           baseUnitMinor: variant.baseUnitMinor, currency: variant.currency, priceStatus: variant.priceStatus,
           availability: variant.availability === "unavailable" || variant.priceStatus === "unavailable" ? "unavailable" : "preview_only",
           availableQuantity: null, checkoutReady: false,

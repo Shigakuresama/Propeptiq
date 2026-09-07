@@ -144,13 +144,13 @@ describe("public variant purchase labels", () => {
     ["cart_preview", "availability", "Ordering not open"],
     ["checkout_unavailable", "availability", "Ordering not open"],
     ["local_preview", "availability", "Test mode — no payments"],
-    ["pricing_pending", "availability", "Price unavailable"],
+    ["pricing_pending", "availability", "Currently unavailable"],
     ["unavailable", "availability", "Unavailable"],
     ["ready", "purchase_summary", "Ready to purchase"],
     ["cart_preview", "purchase_summary", "Ordering not open"],
     ["checkout_unavailable", "purchase_summary", "Ordering not open"],
     ["local_preview", "purchase_summary", "Test mode — no payments"],
-    ["pricing_pending", "purchase_summary", "Price unavailable"],
+    ["pricing_pending", "purchase_summary", "Currently unavailable"],
     ["unavailable", "purchase_summary", "Unavailable"],
   ] as const)(
     "projects %s in the %s context as %s",
@@ -183,11 +183,12 @@ describe("public variant purchase labels", () => {
 describe("resolvePublicVariantPrice", () => {
   it("shares the narrow price-facts primitive without requiring catalog identity metadata", () => {
     expect(resolveVariantPricePresentation({
-      variant: { id: "synthetic-line", baseUnitMinor: 1_005, currency: "USD", priceStatus: "active", availability: "preview_only", checkoutReady: false },
+      variant: { id: "synthetic-line", packageQuantity: 1, baseUnitMinor: 1_005, currency: "USD", priceStatus: "active", availability: "preview_only", checkoutReady: false },
       quantity: 2, mode: "production", eligiblePromotions: [{ id: "winter30", discountBps: 3_000 }],
     })).toEqual({ state: "priced", purchaseState: "cart_preview", price: {
-      variantId: "synthetic-line", quantity: 2, baseUnitMinor: 1_005, effectiveDiscountBps: 3_000,
-      effectiveUnitMinor: 704, lineSubtotalMinor: 1_408, lineSavingsMinor: 602, appliedPromotionIds: ["winter30"],
+      variantId: "synthetic-line", quantity: 2, baseUnitMinor: 1_005, effectiveDiscountBps: 3_210,
+      campaignDiscountBps: 3000, volumeDiscountBps: 300, campaignUnitMinor: 704, lineCampaignSavingsMinor: 602, lineVolumeSavingsMinor: 42,
+      effectiveUnitMinor: 683, lineSubtotalMinor: 1_366, lineSavingsMinor: 644, appliedPromotionIds: ["winter30"],
     } });
   });
   it("renders a valid active price once with a ready purchase state", () => {
@@ -199,6 +200,7 @@ describe("resolvePublicVariantPrice", () => {
       price: {
         variantId: "variant-5mg", quantity: 1, baseUnitMinor: 1_005,
         effectiveDiscountBps: 0, effectiveUnitMinor: 1_005,
+        campaignDiscountBps: 0, volumeDiscountBps: 0, campaignUnitMinor: 1_005, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0,
         lineSubtotalMinor: 1_005, lineSavingsMinor: 0,
         appliedPromotionIds: [],
       },
@@ -282,7 +284,7 @@ describe("resolvePublicVariantPrice", () => {
     })).toEqual({ state: "unavailable", purchaseState: "unavailable", reason: "unavailable" });
   });
 
-  it("uses only applicable projected promotions and never stacks them", () => {
+  it("uses only the best applicable campaign before volume", () => {
     const excluded = { ...winter30, id: "other-product", discountBps: 4_000, scope: { kind: "products" as const, productIds: ["product-beta"] } };
     const applicable = { ...winter30, id: "variant35", discountBps: 3_500, scope: { kind: "variants" as const, variantIds: ["variant-5mg"] } };
     expect(resolvePublicVariantPrice({
@@ -290,7 +292,7 @@ describe("resolvePublicVariantPrice", () => {
       pricing: pricing("production", [excluded, winter30, applicable]),
     })).toMatchObject({
       state: "priced",
-      price: { effectiveDiscountBps: 3_500, effectiveUnitMinor: 650, lineSubtotalMinor: 1_300, appliedPromotionIds: ["variant35"] },
+      price: { effectiveDiscountBps: 3_695, effectiveUnitMinor: 631, lineSubtotalMinor: 1_262, appliedPromotionIds: ["variant35"] },
     });
   });
 

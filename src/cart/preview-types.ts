@@ -6,6 +6,7 @@ export type CartPreviewPurchaseState = "ready" | "checkout_unavailable" | "local
 export type CartPreviewItem = Readonly<{
   variantId: string;
   quantity: number;
+  packageQuantity: number | null;
   available: boolean;
   purchaseState: CartPreviewPurchaseState;
   name: string | null;
@@ -17,6 +18,11 @@ export type CartPreviewItem = Readonly<{
   lineSubtotalMinor: number | null;
   lineSavingsMinor: number | null;
   effectiveDiscountBps: number | null;
+  campaignDiscountBps: number | null;
+  volumeDiscountBps: number | null;
+  campaignUnitMinor: number | null;
+  lineCampaignSavingsMinor: number | null;
+  lineVolumeSavingsMinor: number | null;
   appliedPromotions: readonly Readonly<{ id: string; label: string }>[];
   currency: string | null;
 }>;

@@ -133,14 +133,14 @@ During migration, the existing browse catalog is an input, not a second long-ter
 
 ## Canonical pricing and promotion contract
 
-Quantity pricing applies independently to one exact `variantId` cart line:
+Owner-confirmed bottle pricing supersedes the original non-stacking quantity policy. It applies independently to one exact `variantId` cart line for every product. Bottle count is `quantity * packageQuantity`, using the canonical package fact, never parsed label text:
 
-- 1: 0%
-- 2: 8%
-- 3 through 9: 10%
-- 10 through the retained repository maximum of 25: 30%
+- 1 bottle: no extra discount.
+- 2–3 bottles: 3% extra after the eligible automatic campaign.
+- 4–10 bottles: 6% extra after the eligible automatic campaign.
+- 11+ bottles: 30% extra after the eligible automatic campaign.
 
-The repository maximum of 25 remains unless the owner asks to change it; the new requirement defines the 10+ tier but does not require removing the existing safety limit.
+The repository maximum remains 25 package units per line. Different products or amounts do not combine toward a tier. A two-bottle package at quantity one qualifies for 3%; a ten-bottle package at quantity one qualifies for 6%. Bundle choices round up to whole packages and omit tiers that a package cannot reach without crossing their maximum.
 
 ```ts
 export type StorefrontPromotion = Readonly<{
@@ -163,7 +163,12 @@ export type EffectiveLinePrice = Readonly<{
   variantId: string;
   quantity: number;
   baseUnitMinor: number;
-  effectiveDiscountPct: number;
+  effectiveDiscountBps: number;
+  campaignDiscountBps: number;
+  volumeDiscountBps: number;
+  campaignUnitMinor: number;
+  lineCampaignSavingsMinor: number;
+  lineVolumeSavingsMinor: number;
   effectiveUnitMinor: number;
   lineSubtotalMinor: number;
   lineSavingsMinor: number;
@@ -171,26 +176,28 @@ export type EffectiveLinePrice = Readonly<{
 }>;
 ```
 
-For positive integer money values, round the unit amount once with integer arithmetic, then multiply by quantity:
+Round the campaign-adjusted package-unit amount half-up to cents, then round the volume-adjusted package-unit amount half-up to cents, then multiply by quantity:
 
 ```text
-effectiveDiscountPct = max(quantityDiscountPct, highestEligiblePromotionPct)
-effectiveUnitMinor = roundHalfUp(baseUnitMinor * (100 - effectiveDiscountPct) / 100)
+campaignUnitMinor = roundHalfUp(baseUnitMinor * (100 - highestEligiblePromotionPct) / 100)
+effectiveUnitMinor = roundHalfUp(campaignUnitMinor * (100 - volumeDiscountPct) / 100)
 lineSubtotalMinor = effectiveUnitMinor * quantity
 lineSavingsMinor = baseUnitMinor * quantity - lineSubtotalMinor
+lineCampaignSavingsMinor = (baseUnitMinor - campaignUnitMinor) * quantity
+lineVolumeSavingsMinor = (campaignUnitMinor - effectiveUnitMinor) * quantity
 ```
 
-Promotion activation uses the server clock. `startAt` is inclusive, `endAt` is exclusive, and null means no boundary. The configured IANA timezone is for campaign authoring/display; timestamps are stored as ISO 8601 instants. Overlapping campaigns contribute only the highest eligible percentage. Mixed-currency carts remain rejected.
+WINTER30 remains automatic: its 30% campaign discount is followed by the 3%/6%/30% extra volume discount (32.1%/34.2%/51% nominal combined savings). Separate campaign and volume amounts must add exactly to total cent savings. Promotion activation uses the server clock. `startAt` is inclusive, `endAt` is exclusive, and null means no boundary. The configured IANA timezone is for campaign authoring/display; timestamps are stored as ISO 8601 instants. Overlapping campaigns still contribute only the highest eligible campaign percentage before volume pricing. Mixed-currency carts remain rejected.
 
 WINTER30 is configured as enabled, sitewide, 30%, automatic, no start, no end, and `America/Los_Angeles` unless a verified business timezone supersedes it. The banner disappears when it is disabled or inactive. The Stripe customer-entered promotion-code field remains disabled.
 
 ## Public cart display-preview contract
 
-`src/cart/storefront-preview-source.ts` converts `PublicStorefrontView` rows into presentation-only cart inputs. It may carry only already-public product and variant identity, SKU, package summary, price status, base display amount, currency, and eligible public promotion labels. It forces public inventory to unknown (`availableQuantity: null`) and cannot produce checkout readiness. `src/cart/preview.ts` reuses the canonical quantity/promotion calculation and returns the explicit version-2 display DTO; `src/cart/preview-presentation.ts` strictly validates that DTO and its version-2 same-tab storage envelope before any client renders it.
+`src/cart/storefront-preview-source.ts` converts `PublicStorefrontView` rows into presentation-only cart inputs. It may carry only already-public product and variant identity, SKU, package summary and canonical package bottle count, price status, base display amount, currency, and eligible public promotion labels. It forces public inventory to unknown (`availableQuantity: null`) and cannot produce checkout readiness. `src/cart/preview.ts` reuses the canonical quantity/promotion calculation and returns the explicit version-2 display DTO; `src/cart/preview-presentation.ts` strictly validates that DTO and its version-2 same-tab storage envelope before any client renders it. Prior display snapshots lacking the package count or separate savings fields are discarded and refetched; the browser cart remains IDs and quantities only.
 
 The preview request contains only the normalized ordered `{ variantId, quantity }` lines plus an optional prior display token. After parsing, each client requires the response count, order, variant ID, and quantity to match the initiating cart exactly. The display token commits to the visible line facts for change detection, but it is not authentication, inventory, quote, session, or payment authority.
 
-A reviewed positive `preview_only` variant may be added to the Production browser cart and display server-calculated standard/effective unit prices, the single winning quantity or automatic-promotion discount, savings, promotion label, and line subtotal. Its state is `checkout_unavailable`, `available` is false, and the cart action stays disabled. A pending Production row remains non-addable and displays `Pricing coming soon`; `$0.00` pending layout previews remain limited to local, test, or explicitly marked Preview modes.
+A reviewed positive `preview_only` variant may be added to the Production browser cart and display server-calculated standard/effective unit prices, the best automatic campaign followed by its bottle-volume discount, separate campaign and volume savings, promotion label, and line subtotal. Its state is `checkout_unavailable`, `available` is false, and the cart action stays disabled. A pending Production row remains non-addable and displays `Pricing coming soon`; `$0.00` pending layout previews remain limited to local, test, or explicitly marked Preview modes.
 
 The public display projection never claims stock: its quantity is unknown, and only a separately authoritative source with a known count may report insufficient quantity. `SafeCartPreview` and the exact checkout `PRICE_CHANGED` DTO remain separate and unchanged. No display DTO or acknowledged display token can request a quote/session or satisfy provider capability checks. Production inventory, Stripe mapping, tax, shipping, fulfillment, legal, and launch gates therefore remain closed.
 

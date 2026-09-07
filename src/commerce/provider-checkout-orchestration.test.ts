@@ -632,6 +632,7 @@ function canonicalSetup(
         productActive: true,
         policyGroupActive: true,
         variantActive: true,
+    packageQuantity: 1,
         availabilityRevision: "variant-b-revision-1",
         inventoryRevision: "inventory-b-revision-1",
         price: Object.freeze({
@@ -658,6 +659,7 @@ function canonicalSetup(
         productActive: true,
         policyGroupActive: true,
         variantActive: true,
+    packageQuantity: 1,
         availabilityRevision: "variant-a-revision-1",
         inventoryRevision: "inventory-a-revision-1",
         price: Object.freeze({
@@ -813,11 +815,11 @@ function canonicalSetup(
 describe("canonical variant provider state machine", () => {
   it.each([
     [1, 0, 2_000, 2_000],
-    [2, 8, 1_840, 3_680],
-    [3, 10, 1_800, 5_400],
-    [4, 10, 1_800, 7_200],
-    [9, 10, 1_800, 16_200],
-    [10, 30, 1_400, 14_000],
+    [2, 3, 1_940, 3_880],
+    [3, 3, 1_940, 5_820],
+    [4, 6, 1_880, 7_520],
+    [9, 6, 1_880, 16_920],
+    [10, 6, 1_880, 18_800],
     [11, 30, 1_400, 15_400],
   ])("keeps quantity %i in the authoritative quote and inline provider line (%i%% tier)", async (
     quantity,
@@ -927,7 +929,7 @@ describe("canonical variant provider state machine", () => {
       expect(exactRequest).toMatchObject({
         allow_promotion_codes: false,
         line_items: [
-          { quantity: 1, price_data: { product: "prod_synthetic_parent", unit_amount: 3_680 } },
+          { quantity: 1, price_data: { product: "prod_synthetic_parent", unit_amount: 3_880 } },
           { quantity: 1, price_data: { product: "prod_synthetic_parent", unit_amount: 2_500 } },
           { quantity: 1, price_data: { product_data: { name: "Shipping" }, unit_amount: 700 } },
           { quantity: 1, price_data: { product_data: { name: "Sales tax" }, unit_amount: 325 } },

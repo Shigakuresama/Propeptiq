@@ -230,7 +230,6 @@ async function expectFooterColumns(
       style: `
         .skip-link,
         .public-layout > header,
-        .site-search-launcher-lane,
         .mobile-purchase-bar {
           visibility: hidden !important;
         }
@@ -408,12 +407,7 @@ test("footer clears fixed public controls and passes Axe under reduced motion", 
   await expect(search).toBeVisible();
   await expect.poll(async () => {
     const geometry = await footerDockGeometry(page);
-    const purchaseHeight = geometry.purchase?.height ?? 0;
-    const searchHeight = geometry.search?.height ?? 0;
-    const searchBottom = geometry.search?.bottom ?? geometry.clientHeight;
-    const occupiedHeight = Math.ceil(
-      purchaseHeight + 8 + searchHeight + geometry.clientHeight - searchBottom,
-    );
+    const occupiedHeight = Math.ceil(geometry.clientHeight - (geometry.purchase?.top ?? geometry.clientHeight));
     const reservation = Number.parseFloat(geometry.reservation);
     const footerPadding = Number.parseFloat(geometry.footerPaddingBottom);
     return {
@@ -457,7 +451,7 @@ test("footer clears fixed public controls and passes Axe under reduced motion", 
       purchaseBounds!.y < rowBounds!.y + rowBounds!.height &&
       purchaseBounds!.y + purchaseBounds!.height > rowBounds!.y,
   ).toBe(false);
-  expect(purchaseBounds!.y + purchaseBounds!.height).toBeLessThan(searchBounds!.y);
+  expect(searchBounds!.y + searchBounds!.height).toBeLessThan(purchaseBounds!.y);
   expect((await new AxeBuilder({ page }).include("footer").analyze()).violations).toEqual([]);
 });
 

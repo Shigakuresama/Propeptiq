@@ -22,6 +22,7 @@ function line(
   name = "Synthetic cart Alpha",
   variantLabel = "Synthetic 10 mg",
 ): CartPreviewItem {
+  const unit = quantity === 1 ? 2799 : 2715;
   return {
     variantId,
     quantity,
@@ -30,12 +31,13 @@ function line(
     name,
     variantLabel,
     sku: variantId === alphaId ? "SYN-ALPHA-10" : "SYN-BETA-20",
-    packageForm: "1 bottle",
+    packageForm: "1 bottle", packageQuantity: 1,
     baseUnitMinor: 3_999,
-    unitAmountMinor: 2_799,
-    lineSubtotalMinor: 2_799 * quantity,
-    lineSavingsMinor: 1_200 * quantity,
-    effectiveDiscountBps: 3_000,
+    unitAmountMinor: unit,
+    lineSubtotalMinor: unit * quantity,
+    lineSavingsMinor: (3999 - unit) * quantity,
+    effectiveDiscountBps: quantity === 1 ? 3000 : 3210,
+    campaignDiscountBps: 3000, volumeDiscountBps: quantity === 1 ? 0 : 300, campaignUnitMinor: 2799, lineCampaignSavingsMinor: 1200 * quantity, lineVolumeSavingsMinor: (2799 - unit) * quantity,
     appliedPromotions: [{ id: "winter30", label: "WINTER30" }],
     currency: "USD",
   };
@@ -142,10 +144,10 @@ describe("CartDrawer accessible progressive enhancement", () => {
     expect(within(cartLine).getByText("Synthetic 10 mg", { exact: true })).toBeVisible();
     expect(within(cartLine).getByText("SKU SYN-ALPHA-10", { exact: true })).toBeVisible();
     expect(within(cartLine).getByText("$39.99", { selector: "del" })).toBeVisible();
-    expect(within(cartLine).getByText("$27.99", { selector: "strong" })).toBeVisible();
-    expect(within(cartLine).getByText("$55.98", { exact: true })).toBeVisible();
+    expect(within(cartLine).getByText("$27.15", { selector: "strong" })).toBeVisible();
+    expect(within(cartLine).getByText("$54.30", { exact: true })).toBeVisible();
     expect(within(dialog).getByRole("complementary", { name: "Order summary" }))
-      .toHaveTextContent("$55.98");
+      .toHaveTextContent("$54.30");
   });
 
   it("keeps drawer checkout disabled even when authoritative facts say ready", async () => {

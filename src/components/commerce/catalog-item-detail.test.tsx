@@ -52,7 +52,7 @@ vi.mock("./product-purchase-panel", () => ({
             {variant.label}
           </button>
         ))}
-        {[2, 3, 10].map((quantity) => (
+        {[2, 3, 4, 10, 11].map((quantity) => (
           <button
             aria-label={`Select visual quantity ${quantity}`}
             key={quantity}
@@ -85,7 +85,7 @@ describe("CatalogItemDetail", () => {
     verifiedImageMetadata: storefrontImageMetadata,
   });
 
-  it("shows every supplied variant and exposes a normalized source label", () => {
+  it("shows selectable amounts and sourced compound information without duplicate specifications", () => {
     const product = findPublicStorefrontProduct(catalog, "pinealon")!;
     expect(product.kind).toBe("canonical");
     if (product.kind !== "canonical") throw new Error("Expected canonical fixture");
@@ -107,14 +107,14 @@ describe("CatalogItemDetail", () => {
     const image = screen.getByRole("img", {
       name: "Front view of Pinealon",
     });
-    const suppliedConfigurations = screen.getByText("Product specifications");
-    expect(suppliedConfigurations.closest("details")).not.toHaveAttribute("open");
+    const information = screen.getByRole("heading", { name: "Compound information" });
+    expect(screen.queryByText("Product specifications")).toBeNull();
     expect(image).toBeVisible();
     expect(
       heading.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      image.compareDocumentPosition(suppliedConfigurations) &
+      image.compareDocumentPosition(information) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(image.closest(".catalog-detail-image")).toHaveClass(
@@ -124,27 +124,18 @@ describe("CatalogItemDetail", () => {
       "lg:row-span-2",
       "lg:mt-0",
     );
-    expect(suppliedConfigurations.closest(".catalog-detail-content")).not.toHaveClass(
-      "pt-16",
-    );
-    expect(suppliedConfigurations.closest(".catalog-detail-content")).toHaveClass(
-      "min-w-0",
-      "[overflow-wrap:anywhere]",
-      "lg:col-start-2",
-      "lg:row-start-2",
-      "lg:pt-0",
-    );
+    expect(screen.getByTestId("purchase-panel").closest(".catalog-detail-content")).toHaveClass("min-w-0", "lg:col-start-2", "lg:row-start-2");
     expect(screen.getByText("Also listed as Pinealon10mg")).toBeVisible();
     expect(screen.getByText("Product details")).toBeVisible();
-    expect(screen.getByText("PN5")).toBeInTheDocument();
-    expect(within(suppliedConfigurations.closest("details")!).getByText("5mg")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select visual variant 5mg" })).toBeVisible();
+    expect(screen.getByText("Catalog identity").nextElementSibling).toHaveTextContent(product.sourceName);
     expect(screen.queryByText("5mg × 10 vials")).not.toBeInTheDocument();
     expect(screen.queryByText("AI-generated catalog illustration — not actual product photography.")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
     expect(document.body).not.toHaveTextContent(/\$|usd/i);
   });
 
-  it("puts canonical purchase before supplied configurations and approved information", () => {
+  it("puts canonical purchase before approved information without duplicate specifications", () => {
     const product = testCanonicalProduct([], {
       content: [{
         id: "approved-info",
@@ -158,10 +149,27 @@ describe("CatalogItemDetail", () => {
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
     const purchase = screen.getByRole("heading", { name: "Purchase" });
-    const configurations = screen.getByText("Product specifications");
+    expect(screen.queryByText("Product specifications")).toBeNull();
     const information = screen.getByRole("heading", { name: "Approved product information" });
-    expect(purchase.compareDocumentPosition(configurations) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(configurations.compareDocumentPosition(information) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(purchase.compareDocumentPosition(information) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("replaces only untouched generic records while preserving substantive and edited known-product information", () => {
+    const common = { kind: "product_information" as const, status: "approved" as const, literatureReferences: [] };
+    const product = testCanonicalProduct([], { slug: "pinealon", name: "Pinealon", content: [
+      { ...common, id: "generic-details", title: "Product details", body: "Compare the listed amounts for Pinealon. Select an amount to view its price and availability." },
+      { ...common, id: "generic-discovery", title: "PubMed literature discovery", body: "Search PubMed for literature about Pinealon. Search results are provided for literature discovery only. They are not a curated study list, endorsement, product claim, or use guidance." },
+      { ...common, id: "substantive", title: "Approved reference note", body: "Separate approved product information." },
+      { ...common, id: "edited-generated-record", title: "Product details", body: "Owner-edited approved details." },
+      { ...common, kind: "legal_notice", id: "legal", title: "Approved notice", body: "Separate approved legal notice." },
+    ] });
+    render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
+    expect(screen.getByRole("heading", { name: "Compound information" })).toBeVisible();
+    expect(screen.queryByText(/Compare the listed amounts for Pinealon/)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "PubMed literature discovery" })).toBeNull();
+    expect(screen.getByText("Separate approved product information.")).toBeVisible();
+    expect(screen.getByText("Owner-edited approved details.")).toBeVisible();
+    expect(screen.getByText("Separate approved legal notice.")).toBeVisible();
   });
 
   it("keeps the hero variant label and sale badge synchronized with purchase selection", () => {
@@ -225,19 +233,22 @@ describe("CatalogItemDetail", () => {
     expect(within(visual).queryByLabelText(/^-\d+%$/u)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 2" }));
-    expect(within(visual).getByLabelText("-8%")).toBeVisible();
+    expect(within(visual).getByLabelText("-3%")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 3" }));
-    expect(within(visual).getByLabelText("-10%")).toBeVisible();
+    expect(within(visual).getByLabelText("-3%")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 10" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 4" }));
+    expect(within(visual).getByLabelText("-6%")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 11" }));
     expect(within(visual).getByLabelText("-30%")).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Invalidate visual quantity" }));
     expect(within(visual).queryByLabelText(/^-\d+%$/u)).toBeNull();
   });
 
-  it("keeps browse-only configurations before its notice without purchase controls", () => {
+  it("keeps browse-only compound information with its ordering notice and no purchase controls", () => {
     const browseOnlyCatalog = buildPublicStorefrontCatalog({
       configuredPublicationId: browseCatalogPublicationId,
       catalogData: { products: [], bindings: parseStorefrontBindings({ products: [], variants: [] }) },
@@ -248,9 +259,10 @@ describe("CatalogItemDetail", () => {
     const product = findPublicStorefrontProduct(browseOnlyCatalog, "pinealon")!;
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
-    const configurations = screen.getByText("Product specifications");
+    const information = screen.getByRole("heading", { name: "Compound information" });
+    expect(screen.queryByText("Product specifications")).toBeNull();
     const notice = screen.getByText("Product details are shown above. Pricing and ordering are not available for this item.");
-    expect(configurations.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.compareDocumentPosition(information) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Purchase" })).toBeNull();
   });
 
@@ -264,9 +276,9 @@ describe("CatalogItemDetail", () => {
     const product = findPublicStorefrontProduct(catalog, slug)!;
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
-    const variantRow = screen.getByText(code).closest("li");
-    expect(variantRow).not.toBeNull();
-    expect(within(variantRow!).getByText(`Also listed as ${sourceName}`)).toBeInTheDocument();
+    expect(product.displayConfigurations.some((configuration) => configuration.displayCode === code)).toBe(true);
+    expect(screen.getByText("Catalog identity").nextElementSibling).toHaveTextContent(sourceName);
+    expect(screen.queryByText("Product specifications")).toBeNull();
   });
 
   it("renders only approved allowed content literally and forwards exact pricing", () => {
@@ -286,7 +298,7 @@ describe("CatalogItemDetail", () => {
     expect(screen.queryByText("DRAFT")).toBeNull(); expect(screen.queryByText("FAQ")).toBeNull(); expect(screen.queryByText("private")).toBeNull(); expect(screen.queryByText("secret")).toBeNull(); expect(screen.queryByText("2026")).toBeNull(); expect(screen.queryByText("Browse-only catalog item")).toBeNull(); expect(screen.queryByText(/not represented/u)).toBeNull(); expect(screen.getByText("Approved info").compareDocumentPosition(screen.getByText("Legal")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("keeps a synthetic browse-only item entirely purchase-free with all configurations", () => {
+  it("keeps a synthetic browse-only item purchase-free without repeating configuration rows", () => {
     const browseOnlyCatalog = buildPublicStorefrontCatalog({
       configuredPublicationId: browseCatalogPublicationId,
       catalogData: {
@@ -301,7 +313,7 @@ describe("CatalogItemDetail", () => {
     expect(base.kind).toBe("browse_only");
     const browse = { ...base, displayConfigurations: [{ displayCode: "A", packageForm: "one" }, { displayCode: "B", packageForm: "two" }, { displayCode: "C", packageForm: "three" }] };
     render(<CatalogItemDetail product={browse} pricing={testPricingContext()} relatedProducts={[]} calculator={calculator} />);
-    expect(screen.getByText("A")).toBeInTheDocument(); expect(screen.getByText("B")).toBeInTheDocument(); expect(screen.getByText("C")).toBeInTheDocument(); expect(screen.getByText("Product specifications").closest("details")).not.toHaveAttribute("open"); expect(screen.queryByRole("radio")).toBeNull(); expect(screen.queryByRole("spinbutton")).toBeNull(); expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull(); expect(screen.queryByRole("status", { name: "Purchase summary" })).toBeNull(); expect(screen.queryByText(/approved information/i)).toBeNull(); expect(document.body).not.toHaveTextContent(/\$|usd/i);
+    expect(screen.queryByText("A")).toBeNull(); expect(screen.queryByText("B")).toBeNull(); expect(screen.queryByText("C")).toBeNull(); expect(screen.queryByText("Product specifications")).toBeNull(); expect(screen.getByRole("heading", { name: "Compound information" })).toBeVisible(); expect(screen.queryByRole("radio")).toBeNull(); expect(screen.queryByRole("spinbutton")).toBeNull(); expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull(); expect(screen.queryByRole("status", { name: "Purchase summary" })).toBeNull(); expect(screen.queryByText(/approved information/i)).toBeNull(); expect(document.body).not.toHaveTextContent(/\$|usd/i);
     expect(screen.queryByRole("heading", { name: calculator.title })).toBeNull();
   });
 

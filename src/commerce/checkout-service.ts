@@ -129,6 +129,7 @@ export type AuthoritativeVariantCheckoutItemFact = Readonly<{
   variantLabel: string;
   productName: string;
   packageForm: string;
+  packageQuantity: number;
   policyGroupId: string;
   productActive: boolean;
   policyGroupActive: boolean;
@@ -948,6 +949,7 @@ function isVariantFactsValid(
   for (const item of facts.items) {
     if (
       !isCanonicalUuid(item.variantId) ||
+      !safePositive(item.packageQuantity) ||
       !isCanonicalUuid(item.productId) ||
       seen.has(item.variantId) ||
       !requested.has(item.variantId) ||
@@ -1325,7 +1327,7 @@ export function createCheckoutService(dependencies: Readonly<{
         );
         activeByVariant.set(fact.variantId, active);
         const effectiveDiscount = resolveEffectiveDiscount({
-          quantityDiscountBps: quantityDiscountBps(requested.quantity),
+          quantityDiscountBps: quantityDiscountBps(requested.quantity, fact.packageQuantity),
           eligiblePromotions: active.map((promotion) => ({
             id: promotion.id,
             discountBps: promotion.discountBps!,
@@ -1365,6 +1367,7 @@ export function createCheckoutService(dependencies: Readonly<{
           priceVersion: fact.price.version,
           baseUnitMinor: fact.price.amountMinor,
           currency: fact.price.currency,
+          packageQuantity: fact.packageQuantity,
           availabilityRevision: fact.availabilityRevision,
           quantity: requested.quantity,
           activeAutomaticPromotions: line.activePromotions.map((promotion) => ({

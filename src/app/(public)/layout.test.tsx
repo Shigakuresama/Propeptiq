@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,9 +6,8 @@ import type { Winter30PromotionView } from "@/catalog/storefront-promotion-banne
 const { getStorefrontPromotionBannerViewMock, scrollRevealControllerMock, siteHeaderMock } = vi.hoisted(() => ({
   getStorefrontPromotionBannerViewMock: vi.fn(),
   scrollRevealControllerMock: vi.fn(() => null),
-  siteHeaderMock: vi.fn((props: Readonly<{ cartDrawer?: boolean }>) => {
-    void props;
-    return <header>Site header</header>;
+  siteHeaderMock: vi.fn((props: Readonly<{ cartDrawer?: boolean; search?: ReactNode }>) => {
+    return <header>Site header{props.search}</header>;
   }),
 }));
 
@@ -61,14 +58,13 @@ describe("public layout promotion composition", () => {
       "ASIDE",
       "MAIN",
       "FOOTER",
-      "DIV",
     ]);
     expect(screen.getByRole("link", { name: "Skip to main content" })).toHaveAttribute(
       "href",
       "#main-content",
     );
     expect(screen.getByRole("banner")).toHaveTextContent("Site header");
-    expect(siteHeaderMock.mock.calls[0]?.[0]).toEqual({ cartDrawer: true });
+    expect(siteHeaderMock.mock.calls[0]?.[0]).toMatchObject({ cartDrawer: true });
     expect(screen.getByRole("complementary", { name: "Promotion" })).toHaveTextContent(
       "WINTER SALE: 30% OFF SITEWIDE",
     );
@@ -78,10 +74,12 @@ describe("public layout promotion composition", () => {
     const footer = screen.getByRole("contentinfo");
     expect(footer).toHaveTextContent("Site footer");
     expect(footer.parentElement).toBe(root);
-    const lanes = root!.querySelectorAll(":scope > .site-search-launcher-lane");
-    expect(lanes).toHaveLength(1);
-    expect(lanes[0]).toBe(root!.lastElementChild);
-    expect(screen.getByRole("button", { name: "Search PropeptIQ" })).toBeVisible();
+    expect(root!.lastElementChild).toBe(footer);
+    const trigger = screen.getByRole("button", { name: "Search PropeptIQ" });
+    expect(trigger).toBeVisible();
+    expect(trigger.closest("header")).toBe(screen.getByRole("banner"));
+    expect(trigger.closest("main")).toBeNull();
+    expect(root!.querySelectorAll("#public-mobile-purchase-slot")).toHaveLength(1);
     expect(scrollRevealControllerMock).toHaveBeenCalledOnce();
     expect(root!.querySelectorAll("[data-scroll-reveal-controller]")).toHaveLength(0);
   });
@@ -102,12 +100,12 @@ describe("public layout promotion composition", () => {
       "HEADER",
       "MAIN",
       "FOOTER",
-      "DIV",
     ]);
     expect(screen.queryByRole("complementary", { name: "Promotion" })).toBeNull();
     expect(screen.queryByText(/WINTER30/u)).toBeNull();
     expect(screen.getByRole("main")).toHaveTextContent("Information remains available");
-    expect(root!.lastElementChild).toHaveClass("site-search-launcher-lane");
+    expect(root!.lastElementChild).toBe(screen.getByRole("contentinfo"));
+    expect(screen.getByRole("button", { name: "Search PropeptIQ" }).closest("header")).toBe(screen.getByRole("banner"));
     expect(scrollRevealControllerMock).toHaveBeenCalledOnce();
   });
 
@@ -136,18 +134,4 @@ describe("public layout promotion composition", () => {
     }
   });
 
-  it("keeps the launcher scoped to the public route-group layout", () => {
-    const nonPublicLayouts = [
-      "src/app/layout.tsx",
-      "src/app/account/layout.tsx",
-      "src/app/admin/layout.tsx",
-      "src/app/research-sets/layout.tsx",
-    ];
-    for (const path of nonPublicLayouts) {
-      expect(
-        readFileSync(resolve(process.cwd(), path), "utf8"),
-        path,
-      ).not.toMatch(/SiteSearchLauncher|site-search-launcher/iu);
-    }
-  });
 });

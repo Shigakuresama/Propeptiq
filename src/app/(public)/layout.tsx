@@ -15,13 +15,12 @@ export default async function PublicLayout({ children }: { children: ReactNode }
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <SiteHeader cartDrawer />
+      <SiteHeader cartDrawer search={<SiteSearchLauncher />} />
       <PromotionBar promotion={promotion} />
       <main id="main-content" tabIndex={-1}>
         {children}
       </main>
       <SiteFooter />
-      <SiteSearchLauncher />
       <ScrollRevealController />
     </div>
   );

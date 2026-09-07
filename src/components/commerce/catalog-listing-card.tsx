@@ -38,7 +38,7 @@ export function CatalogListingCard({ product, priority = false, pricing, heading
       </Link>
       <div className="flex min-w-0 flex-1 flex-col p-5">
         <Heading id={headingId} className="catalog-card-title font-heading text-ink">
-          <Link className="rounded-sm hover:text-accent-readable focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring" href={href}>{product.name}</Link>
+          <Link className="catalog-card-title__link rounded-sm hover:text-accent-readable focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring" href={href}>{product.name}</Link>
         </Heading>
         {product.kind === "canonical" ? (
           <VariantDropdown product={product} selectedVariantId={selected?.id ?? null} pricing={pricing}
@@ -56,7 +56,7 @@ export function CatalogListingCard({ product, priority = false, pricing, heading
               {presentation.state !== "priced" ? <p className="text-sm text-muted-ink">{publicVariantPurchaseLabel(presentation.purchaseState)}</p> : null}
               {presentation.purchaseState === "local_preview" ? <p className="text-xs text-muted-ink">{publicVariantPurchaseLabel(presentation.purchaseState)}</p> : null}
             </>
-          ) : <p className="text-sm text-muted-ink">Pricing not available</p>}
+          ) : <p className="text-sm text-muted-ink">Currently unavailable</p>}
         </div>
         <div className="catalog-card-action">
           {product.kind === "canonical" && selected ? (

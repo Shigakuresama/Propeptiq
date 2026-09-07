@@ -5,10 +5,11 @@ import type { CartPreviewItem } from "./preview-types";
 import { createCartPreviewToken, sha256Hex } from "./preview-token";
 
 const line: CartPreviewItem = Object.freeze({
-  variantId: "synthetic-unicode", quantity: 2, available: false, purchaseState: "local_preview",
+  variantId: "synthetic-unicode", quantity: 2, packageQuantity: 1, available: false, purchaseState: "local_preview",
   name: "Synthetic café — α 🧪", variantLabel: "Synthetic 5 μg", sku: "SYNTHETIC-5",
-  packageForm: "1 bottle", baseUnitMinor: 2400, unitAmountMinor: 1680,
-  lineSubtotalMinor: 3360, lineSavingsMinor: 1440, effectiveDiscountBps: 3000,
+  packageForm: "1 bottle", baseUnitMinor: 2400, unitAmountMinor: 1630,
+  lineSubtotalMinor: 3260, lineSavingsMinor: 1540, effectiveDiscountBps: 3210,
+  campaignDiscountBps: 3000, volumeDiscountBps: 300, campaignUnitMinor: 1680, lineCampaignSavingsMinor: 1440, lineVolumeSavingsMinor: 100,
   appliedPromotions: Object.freeze([Object.freeze({ id: "winter30", label: "WINTER30" })]), currency: "USD",
 });
 
@@ -54,7 +55,7 @@ describe("canonical display preview token", () => {
 
   it.each([
     { variantId: "synthetic-other" }, { quantity: 3 }, { name: "Synthetic new name" }, { variantLabel: "Synthetic 10 μg" },
-    { sku: "SYNTHETIC-NEW" }, { packageForm: "2 bottles" },
+    { packageQuantity: 2 }, { campaignDiscountBps: 2000 }, { volumeDiscountBps: 600 }, { campaignUnitMinor: 1700 }, { lineCampaignSavingsMinor: 1400 }, { lineVolumeSavingsMinor: 200 }, { sku: "SYNTHETIC-NEW" }, { packageForm: "2 bottles" },
     { purchaseState: "checkout_unavailable" as const }, { available: true },
     { baseUnitMinor: 2500 }, { unitAmountMinor: 1700 }, { lineSubtotalMinor: 3400 },
     { lineSavingsMinor: 1400 }, { effectiveDiscountBps: 3500 }, { currency: null },

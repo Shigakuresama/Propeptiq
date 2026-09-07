@@ -2,6 +2,7 @@
 
 import { Menu, UserRound } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { useSessionNavigation } from "@/auth/session-navigation";
@@ -27,7 +28,7 @@ import {
   siteName,
 } from "@/lib/site-content";
 
-export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boolean }>) {
+export function SiteHeader({ cartDrawer = false, search }: Readonly<{ cartDrawer?: boolean; search?: ReactNode }>) {
   const { itemCount } = useCart();
   const session = useSessionNavigation();
   const accountHref = session === "signed-out" ? SIGN_IN_ROUTE : "/account";
@@ -38,7 +39,7 @@ export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boole
     <header className="persistent-chrome">
       <ResearchRestrictionBar />
       <div className="border-b border-border bg-canvas">
-        <div className="site-container flex min-h-[4.75rem] items-center gap-2 py-2 sm:gap-3">
+        <div className="site-container site-header-row flex min-h-[4.75rem] flex-wrap items-center gap-2 py-2 sm:gap-3">
           <Link
             href="/"
             aria-label={`${siteName} home`}
@@ -65,11 +66,12 @@ export function SiteHeader({ cartDrawer = false }: Readonly<{ cartDrawer?: boole
             ))}
           </nav>
 
+          {search}
           <CartDrawer enabled={cartDrawer} itemCount={itemCount} />
 
           <Link
             href={accountHref}
-            className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-3"
+            className="site-header-account inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full px-2 text-sm font-medium text-ink transition-colors duration-200 hover:bg-moss-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-3"
           >
             <UserRound aria-hidden="true" className="size-4" />
             <span>{accountLabel}</span>

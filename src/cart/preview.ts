@@ -24,6 +24,7 @@ export type CartPreviewVariant = Readonly<{
   productId: string;
   name: string;
   packageForm: string;
+  packageQuantity: number;
   variantLabel: string;
   sku: string;
   baseUnitMinor: number | null;
@@ -53,6 +54,7 @@ export function buildCartPreview(
     const unpriced: CartPreviewItem = {
       variantId: line.variantId,
       quantity: line.quantity,
+      packageQuantity: variant?.packageQuantity ?? null,
       available: false,
       purchaseState: "unknown_variant",
       name: variant?.name ?? null,
@@ -64,6 +66,11 @@ export function buildCartPreview(
       lineSubtotalMinor: null,
       lineSavingsMinor: null,
       effectiveDiscountBps: null,
+      campaignDiscountBps: null,
+      volumeDiscountBps: null,
+      campaignUnitMinor: null,
+      lineCampaignSavingsMinor: null,
+      lineVolumeSavingsMinor: null,
       appliedPromotions: Object.freeze([]),
       currency: null,
     };
@@ -92,6 +99,11 @@ export function buildCartPreview(
       lineSubtotalMinor: price.lineSubtotalMinor,
       lineSavingsMinor: price.lineSavingsMinor,
       effectiveDiscountBps: price.effectiveDiscountBps,
+      campaignDiscountBps: price.campaignDiscountBps,
+      volumeDiscountBps: price.volumeDiscountBps,
+      campaignUnitMinor: price.campaignUnitMinor,
+      lineCampaignSavingsMinor: price.lineCampaignSavingsMinor,
+      lineVolumeSavingsMinor: price.lineVolumeSavingsMinor,
       appliedPromotions: Object.freeze(price.appliedPromotionIds.map((id) => Object.freeze({
         id, label: variant.eligiblePromotions.find((promotion) => promotion.id === id)!.displayLabel,
       }))),

@@ -44,7 +44,7 @@ function Fixture({ product = testCanonicalProduct(), pricing = testPricingContex
   product?: ReturnType<typeof testCanonicalProduct>;
   pricing?: ReturnType<typeof testPricingContext>;
 }) {
-  return <CartProvider><div className="public-layout"><header className="persistent-chrome">Site navigation</header><main><ProductPurchasePanel key={product.slug} product={product} pricing={pricing} /></main><SiteSearchLauncher /></div></CartProvider>;
+  return <CartProvider><div className="public-layout"><header className="persistent-chrome">Site navigation<SiteSearchLauncher /></header><main><ProductPurchasePanel key={product.slug} product={product} pricing={pricing} /></main></div></CartProvider>;
 }
 
 beforeEach(() => {
@@ -76,6 +76,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     if (this.classList.contains("mobile-purchase-bar")) return rect(600, rowHeight);
     if (this.classList.contains("public-action-dock")) return rect(736, 44);
+    if (this.classList.contains("public-action-dock__purchase-slot")) return rect(viewportHeight - 16 - rowHeight, rowHeight);
     if (this.classList.contains("persistent-chrome")) return rect(0, 141);
     if (this.classList.contains("purchase-summary")) return rect(summaryBottom - 200, 200);
     return rect(900, 200);
@@ -99,15 +100,16 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
     expect(bar.parentElement).toHaveAttribute("id", "public-mobile-purchase-slot");
     const layout = view.container.querySelector<HTMLElement>(".public-layout")!;
     const reserve = layout.style.getPropertyValue("--public-action-dock-reserved-height");
-    expect(Number.parseFloat(reserve)).toBeGreaterThanOrEqual(208);
+    expect(reserve).toBe("140px");
+    expect(screen.getByRole("button", { name: "Search PropeptIQ" }).closest("header")).not.toBeNull();
     reportSummary(200, true);
     await waitFor(() => expect(screen.queryByRole("region", { name: "Mobile purchase controls" })).toBeNull());
     expect(layout.style.getPropertyValue("--public-action-dock-reserved-height")).toBe(reserve);
   });
 
-  it.each([[1, "$7.00"], [2, "$14.00"], [3, "$21.00"], [4, "$28.00"], [9, "$63.00"], [10, "$70.00"], [11, "$77.00"], [25, "$175.00"]] as const)("mirrors exact quantity %s and its existing WINTER30 subtotal", async (quantity, subtotal) => {
+  it.each([[1, "$7.00"], [2, "$13.58"], [3, "$20.37"], [4, "$26.32"], [9, "$59.22"], [10, "$65.80"], [11, "$53.90"], [25, "$122.50"]] as const)("mirrors exact quantity %s and its existing WINTER30 subtotal", async (quantity, subtotal) => {
     render(<Fixture />);
-    fireEvent.change(screen.getByRole("combobox", { name: "Quantity" }), { target: { value: String(quantity) } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Quantity" }), { target: { value: String(quantity) } });
     const bar = await showBar();
     expect(bar).toHaveTextContent("Synthetic Product Alpha");
     expect(bar).toHaveTextContent("5 mg");
@@ -148,9 +150,9 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
   it("uses the selected canonical variant for repeated adds and persists the merged line without double announcements", async () => {
     render(<Fixture product={testCanonicalProduct([testPublicVariant(), testPublicVariant({ id: "variant-10mg", label: "10 mg", baseUnitMinor: 2000, availability: "preview_only", checkoutReady: false })])} />);
     fireEvent.click(screen.getByRole("radio", { name: /10 mg/u }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Quantity" }), { target: { value: "2" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Quantity" }), { target: { value: "2" } });
     const bar = await showBar();
-    expect(bar).toHaveTextContent("$28.00");
+    expect(bar).toHaveTextContent("$27.16");
     expect(bar).toHaveTextContent("Ordering not open");
     const add = within(bar).getByRole("button", { name: "Add Synthetic Product Alpha to cart" });
     fireEvent.click(add);
@@ -161,7 +163,7 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
   });
 
   it.each([
-    ["pending", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "Price unavailable"],
+    ["pending", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "Currently unavailable"],
     ["unavailable", testPublicVariant({ availability: "unavailable", checkoutReady: false }), "Unavailable"],
   ] as const)("preserves %s status without a price or enabled add", async (_label, variant, status) => {
     render(<Fixture product={testCanonicalProduct([variant])} />);
@@ -173,10 +175,10 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
 
   it("offers only bounded numeric quantity choices", () => {
     render(<Fixture />);
-    const quantity = screen.getByRole("combobox", { name: "Quantity" });
-    expect(within(quantity).getAllByRole("option")).toHaveLength(25);
-    expect(within(quantity).getByRole("option", { name: "1" })).toBeInTheDocument();
-    expect(within(quantity).getByRole("option", { name: "25" })).toBeInTheDocument();
+    const quantity = screen.getByRole("spinbutton", { name: "Quantity" });
+    expect(quantity).toHaveAttribute("min", "1");
+    expect(quantity).toHaveAttribute("max", "25");
+    expect(quantity).toHaveAttribute("step", "1");
   });
 
   it("mirrors the permitted preview-zero state without turning it into checkout authority", async () => {
@@ -294,12 +296,12 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
     const layout = view.container.querySelector<HTMLElement>(".public-layout")!;
     rowHeight = 200;
     act(() => resizes.at(-1)!.callback([], {} as ResizeObserver));
-    await waitFor(() => expect(layout.style.getPropertyValue("--public-action-dock-reserved-height")).toBe("284px"));
+    await waitFor(() => expect(layout.style.getPropertyValue("--public-action-dock-reserved-height")).toBe("216px"));
     rowHeight = 124;
     act(() => resizes.at(-1)!.callback([], {} as ResizeObserver));
     reportSummary(1100);
     await waitFor(() => expect(screen.queryByRole("region", { name: "Mobile purchase controls" })).toBeNull());
-    expect(layout.style.getPropertyValue("--public-action-dock-reserved-height")).toBe("284px");
+    expect(layout.style.getPropertyValue("--public-action-dock-reserved-height")).toBe("216px");
   });
 
   it("does not add a sticky enhancement when IntersectionObserver is unavailable", async () => {

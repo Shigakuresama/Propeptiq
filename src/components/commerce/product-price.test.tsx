@@ -56,16 +56,16 @@ describe("ProductPrice", () => {
     expect(screen.getByText("Test mode — no payments")).toBeVisible();
 
     rerender(<ProductPrice productId="product-alpha" variant={pendingZero} pricing={pricing("production")} />);
-    expect(screen.getByText("Price unavailable")).toBeVisible();
+    expect(screen.getByText("Currently unavailable")).toBeVisible();
     expect(screen.queryByText("-30%")).toBeNull();
     expect(screen.queryByText("$0.00")).toBeNull();
   });
 
   it.each([
     ["unavailable", variant({ availability: "unavailable", checkoutReady: false }), "Unavailable"],
-    ["pending positive", variant({ priceStatus: "pending", availability: "preview_only", checkoutReady: false }), "Price unavailable"],
-    ["pending null", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: null, currency: null, checkoutReady: false }), "Price unavailable"],
-    ["active zero", variant({ baseUnitMinor: 0, checkoutReady: false }), "Price unavailable"],
+    ["pending positive", variant({ priceStatus: "pending", availability: "preview_only", checkoutReady: false }), "Currently unavailable"],
+    ["pending null", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: null, currency: null, checkoutReady: false }), "Currently unavailable"],
+    ["active zero", variant({ baseUnitMinor: 0, checkoutReady: false }), "Currently unavailable"],
   ] as const)("renders honest status for %s", (_label, input, copy) => {
     const { unmount } = render(<ProductPrice productId="product-alpha" variant={input} pricing={pricing("preview")} />);
     expect(screen.getByText(copy)).toBeVisible();

@@ -391,6 +391,25 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     };
   }
 
+  it("loads persisted package bottle counts and invalidates stale package pricing before writes", async () => {
+    await seedCheckoutReadyVariant();
+    const { repository, service } = setup();
+    const key = "30000000-0000-4000-8000-000000000161";
+    const input = { buyerUserId: ids.buyer, idempotencyKey: key, paymentProviderAvailable: true, request: variantRequest };
+    const original = await service.quote(input);
+    if (original.status !== "quoted" || original.pricingRevision === undefined) throw new Error("expected synthetic quote");
+    expect(original.quote.lines[0]?.totalMinor).toBe(6790);
+    await client.query("UPDATE product_variants SET package_quantity = 10 WHERE id = $1::uuid", [ids.variantA]);
+    await expect(repository.loadVariantFacts!({ ...input, now })).resolves.toMatchObject({
+      ok: true, value: { items: [{ variantId: ids.variantA, packageQuantity: 10 }] },
+    });
+    await expect(service.quoteForSession({ ...input, request: { ...variantRequest, pricingRevision: original.pricingRevision } }))
+      .resolves.toMatchObject({ status: "PRICE_CHANGED", cart: { items: [{ variantId: ids.variantA, unitAmountMinor: 2450, lineSubtotalMinor: 4900 }] } });
+    expect((await client.query<{ orders: number; reservations: number }>(
+      "SELECT (SELECT count(*)::int FROM orders) AS orders, (SELECT count(*)::int FROM inventory_reservations) AS reservations",
+    )).rows).toEqual([{ orders: 0, reservations: 0 }]);
+  });
+
   it("returns PRICE_CHANGED before writes when locked canonical variant price facts change", async () => {
     await seedCheckoutReadyVariant();
     const { service } = setup();
@@ -417,7 +436,7 @@ describe("authoritative checkout PostgreSQL repository on PGlite", () => {
     });
     expect(stale).toMatchObject({
       status: "PRICE_CHANGED",
-      cart: { items: [{ variantId: ids.variantA, unitAmountMinor: 3640 }] },
+      cart: { items: [{ variantId: ids.variantA, unitAmountMinor: 3531 }] },
     });
     const writes = await client.query<{ orders: number; reservations: number }>(`
       SELECT (SELECT count(*)::int FROM orders) AS orders,

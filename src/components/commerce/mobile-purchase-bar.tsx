@@ -81,9 +81,8 @@ export function MobilePurchaseBar({ productSlug, inlineSummaryRef, quantity, pre
 
   useEffect(() => {
     const row = rowRef.current;
-    const dock = slot?.parentElement;
-    const layout = dock?.closest<HTMLElement>(".public-layout");
-    if (!activeRoute || !row || !dock || !layout) return;
+    const layout = slot?.closest<HTMLElement>(".public-layout");
+    if (!activeRoute || !row || !slot || !layout) return;
     const header = layout.querySelector<HTMLElement>(".persistent-chrome");
     const previousReserve = layout.style.getPropertyValue(RESERVE_PROPERTY);
     const previousHeader = layout.style.getPropertyValue(HEADER_PROPERTY);
@@ -96,8 +95,8 @@ export function MobilePurchaseBar({ productSlug, inlineSummaryRef, quantity, pre
       if (!alive) return;
       const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
       const headerHeight = header?.getBoundingClientRect().height ?? 0;
-      const bottom = Number.parseFloat(getComputedStyle(dock).bottom) || 32;
-      const occupied = Math.ceil(row.getBoundingClientRect().height + dock.getBoundingClientRect().height + 8 + bottom);
+      const bottom = Number.parseFloat(getComputedStyle(slot).bottom) || 16;
+      const occupied = Math.ceil(slot.getBoundingClientRect().height + bottom);
       const hasRoom = mobile && occupied <= Math.min(viewportHeight / 2, viewportHeight - headerHeight - 96);
       layout.style.setProperty(HEADER_PROPERTY, `${headerHeight}px`);
       if (!hasRoom && row.contains(document.activeElement)) {
@@ -120,7 +119,7 @@ export function MobilePurchaseBar({ productSlug, inlineSummaryRef, quantity, pre
     const schedule = () => { if (alive && frame === 0) frame = requestAnimationFrame(measure); };
     const observer = typeof ResizeObserver === "function" ? new ResizeObserver(schedule) : null;
     observer?.observe(row);
-    observer?.observe(dock);
+    observer?.observe(slot);
     if (header) observer?.observe(header);
     window.addEventListener("resize", schedule);
     window.visualViewport?.addEventListener("resize", schedule);

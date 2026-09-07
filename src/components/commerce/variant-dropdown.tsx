@@ -18,9 +18,8 @@ export function VariantDropdown({ product, selectedVariantId, pricing, onChange 
       {!selectedVariantId ? <option value="" disabled>Select amount</option> : null}
       {product.variants.map((variant) => {
         const state = publicVariantPurchaseState(variant, pricing.mode);
-        const suffix = state === "unavailable" ? " — Unavailable" : state === "pricing_pending" ? " — Price unavailable" : "";
-        return <option key={variant.id} value={variant.id} disabled={state === "unavailable"}>
-          {variant.label}{variant.packageQuantity > 1 ? ` · ${variant.packageQuantity} bottles per unit` : ""}{suffix}
+        return <option key={variant.id} value={variant.id} disabled={state === "unavailable" || state === "pricing_pending"}>
+          {variant.label}{variant.packageQuantity > 1 ? ` · ${variant.packageQuantity} bottles per unit` : ""}
         </option>;
       })}
     </select>

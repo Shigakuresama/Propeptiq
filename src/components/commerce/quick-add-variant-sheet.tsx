@@ -27,7 +27,7 @@ import { ProductPrice } from "./product-price";
 type CanonicalProduct = Extract<PublicStorefrontProduct, { kind: "canonical" }>;
 
 function disabledReason(presentation: PricePresentation): string {
-  if (presentation.state === "pending") return "Price unavailable.";
+  if (presentation.state === "pending") return "Currently unavailable.";
   if (presentation.state === "unavailable") return "This variant is unavailable.";
   return "This variant cannot be added to the cart.";
 }

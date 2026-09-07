@@ -32,8 +32,9 @@ function preview({
   reasons = [],
   requiresAcknowledgement = false,
 }: PreviewOptions = {}): CartPreview {
-  const unitAmountMinor = quantity === 2 ? 2_208 : 2_160;
-  const items: CartPreviewItem[] = [{ variantId, quantity, available, purchaseState: available ? "ready" : "unavailable", name, variantLabel: "Synthetic 5 mg", sku: "SYNTHETIC-5MG", packageForm: "Research vial", baseUnitMinor: 2400, unitAmountMinor, lineSubtotalMinor: quantity * unitAmountMinor, lineSavingsMinor: quantity * (2400 - unitAmountMinor), effectiveDiscountBps: quantity === 2 ? 800 : 1000, appliedPromotions: [], currency: "USD" }];
+  const unitAmountMinor = quantity <= 3 ? 2328 : 2256;
+  const volumeDiscountBps = quantity <= 3 ? 300 : 600;
+  const items: CartPreviewItem[] = [{ variantId, quantity, available, purchaseState: available ? "ready" : "unavailable", name, variantLabel: "Synthetic 5 mg", sku: "SYNTHETIC-5MG", packageQuantity: 1, packageForm: "Research vial", baseUnitMinor: 2400, unitAmountMinor, lineSubtotalMinor: quantity * unitAmountMinor, lineSavingsMinor: quantity * (2400 - unitAmountMinor), effectiveDiscountBps: volumeDiscountBps, campaignDiscountBps: 0, volumeDiscountBps, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: quantity * (2400 - unitAmountMinor), appliedPromotions: [], currency: "USD" }];
   return {
     schemaVersion: 2,
     items,
@@ -54,12 +55,12 @@ function displayPreview(purchaseState: Exclude<CartPreviewPurchaseState, "ready"
     name: unknown ? null : "Synthetic local test only — Alpha",
     variantLabel: unknown ? null : "Synthetic 5 mg",
     sku: unknown ? null : "SYNTHETIC-5MG",
-    packageForm: unknown ? null : "1 bottle",
+    packageQuantity: unknown ? null : 1, packageForm: unknown ? null : "1 bottle",
     baseUnitMinor: priced ? (local ? 0 : 2_400) : null,
-    unitAmountMinor: priced ? (local ? 0 : 2_208) : null,
-    lineSubtotalMinor: priced ? (local ? 0 : 4_416) : null,
-    lineSavingsMinor: priced ? (local ? 0 : 384) : null,
-    effectiveDiscountBps: priced ? 800 : null,
+    unitAmountMinor: priced ? (local ? 0 : 2_328) : null,
+    lineSubtotalMinor: priced ? (local ? 0 : 4_656) : null,
+    lineSavingsMinor: priced ? (local ? 0 : 144) : null,
+    effectiveDiscountBps: priced ? 300 : null, campaignDiscountBps: priced ? 0 : null, volumeDiscountBps: priced ? 300 : null, campaignUnitMinor: priced ? (local ? 0 : 2400) : null, lineCampaignSavingsMinor: priced ? 0 : null, lineVolumeSavingsMinor: priced ? (local ? 0 : 144) : null,
     appliedPromotions: [],
     currency: priced ? "USD" : null,
   }];
@@ -411,7 +412,7 @@ describe("CheckoutForm", () => {
             ...item,
             purchaseState: "checkout_unavailable",
             baseUnitMinor: 2_400,
-            lineSavingsMinor: 0,
+            lineSavingsMinor: 0, campaignUnitMinor: 0, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0,
             effectiveDiscountBps: 0,
             appliedPromotions: [],
           })),
@@ -442,7 +443,7 @@ describe("CheckoutForm", () => {
 
   it("retains accessible required destination controls", async () => {
     render(<CheckoutForm />);
-    await screen.findByRole("status");
+    await screen.findByText("Your cart details are up to date.");
     for (const label of ["Recipient name", "Address line 1", "Address line 2 (optional)", "City", "State or district", "Postal code"]) {
       expect(screen.getByLabelText(label)).toBeVisible();
     }

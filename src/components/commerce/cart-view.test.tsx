@@ -59,12 +59,12 @@ function readyLine(overrides: Partial<CartPreviewItem> = {}): CartPreviewItem {
     name: "Synthetic local test only — Alpha",
     variantLabel: "Synthetic 5 mg",
     sku: "SYNTHETIC-5MG",
-    packageForm: "1 bottle",
+    packageQuantity: 1, packageForm: "1 bottle",
     baseUnitMinor: 2_400,
-    unitAmountMinor: 2_208,
-    lineSubtotalMinor: 4_416,
-    lineSavingsMinor: 384,
-    effectiveDiscountBps: 800,
+    unitAmountMinor: 2_328,
+    lineSubtotalMinor: 4_656,
+    lineSavingsMinor: 144,
+    effectiveDiscountBps: 300, campaignDiscountBps: 0, volumeDiscountBps: 300, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 144,
     appliedPromotions: [],
     currency: "USD",
     ...overrides,
@@ -79,12 +79,12 @@ const tr30QuantityTwo: CartPreviewItem = {
   name: "Tirzepatide",
   variantLabel: "30mg",
   sku: "PPQ-TIRZEPATIDE-TR30",
-  packageForm: "1 bottle",
+  packageQuantity: 1, packageForm: "1 bottle",
   baseUnitMinor: 5_999,
-  unitAmountMinor: 4_199,
-  lineSubtotalMinor: 8_398,
-  lineSavingsMinor: 3_600,
-  effectiveDiscountBps: 3_000,
+  unitAmountMinor: 4_073,
+  lineSubtotalMinor: 8_146,
+  lineSavingsMinor: 3_852,
+  effectiveDiscountBps: 3_210, campaignDiscountBps: 3000, volumeDiscountBps: 300, campaignUnitMinor: 4199, lineCampaignSavingsMinor: 3600, lineVolumeSavingsMinor: 252,
   appliedPromotions: [{ id: "winter30", label: "WINTER30" }],
   currency: "USD",
 };
@@ -92,6 +92,7 @@ const tr30QuantityTwo: CartPreviewItem = {
 const tr30QuantityOne: CartPreviewItem = {
   ...tr30QuantityTwo,
   quantity: 1,
+  unitAmountMinor: 4_199, effectiveDiscountBps: 3000, volumeDiscountBps: 0, lineCampaignSavingsMinor: 1800, lineVolumeSavingsMinor: 0,
   lineSubtotalMinor: 4_199,
   lineSavingsMinor: 1_800,
 };
@@ -103,6 +104,7 @@ const tr60QuantityOne: CartPreviewItem = {
   variantLabel: "60mg",
   sku: "PPQ-TIRZEPATIDE-TR60",
   baseUnitMinor: 10_999,
+  effectiveDiscountBps: 3000, volumeDiscountBps: 0, campaignUnitMinor: 7699, lineCampaignSavingsMinor: 3300, lineVolumeSavingsMinor: 0,
   unitAmountMinor: 7_699,
   lineSubtotalMinor: 7_699,
   lineSavingsMinor: 3_300,
@@ -117,7 +119,7 @@ function stateLine(purchaseState: CartPreviewPurchaseState): CartPreviewItem {
       baseUnitMinor: 0,
       unitAmountMinor: 0,
       lineSubtotalMinor: 0,
-      lineSavingsMinor: 0,
+      lineSavingsMinor: 0, campaignUnitMinor: 0, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0,
     });
   }
   if (purchaseState === "checkout_unavailable" || purchaseState === "insufficient_quantity") {
@@ -130,7 +132,7 @@ function stateLine(purchaseState: CartPreviewPurchaseState): CartPreviewItem {
     unitAmountMinor: null,
     lineSubtotalMinor: null,
     lineSavingsMinor: null,
-    effectiveDiscountBps: null,
+    effectiveDiscountBps: null, campaignDiscountBps: null, volumeDiscountBps: null, campaignUnitMinor: null, lineCampaignSavingsMinor: null, lineVolumeSavingsMinor: null,
     appliedPromotions: [],
     currency: null,
   } as const;
@@ -140,7 +142,7 @@ function stateLine(purchaseState: CartPreviewPurchaseState): CartPreviewItem {
       name: null,
       variantLabel: null,
       sku: null,
-      packageForm: null,
+      packageQuantity: null, packageForm: null,
     });
   }
   return readyLine(unpriced);
@@ -221,7 +223,7 @@ describe("CartView", () => {
       expect(within(line).getByRole("heading", { name: "Tirzepatide" })).toBeVisible();
       expect(within(line).getByText("1 bottle", { exact: true })).toBeVisible();
       expect(within(line).getByText("WINTER30", { exact: true })).toBeVisible();
-      expect(within(line).getByText("-30%", { exact: true })).toBeVisible();
+      expect(within(line).getByText(line === tr30 ? "-32.1%" : "-30%", { exact: true })).toBeVisible();
       expect(within(line).getByText(
         "Checkout is not available for this item yet.",
         { exact: true },
@@ -229,9 +231,9 @@ describe("CartView", () => {
     }
     expect(within(tr30!).getByText("SKU PPQ-TIRZEPATIDE-TR30", { exact: true })).toBeVisible();
     expect(within(tr30!).getByText("$59.99", { selector: "del" })).toBeVisible();
-    expect(within(tr30!).getByText("$41.99", { selector: "strong" })).toBeVisible();
-    expect(within(tr30!).getByText("Save $36.00", { exact: true })).toBeVisible();
-    expect(within(tr30!).getByText("$83.98", { exact: true })).toBeVisible();
+    expect(within(tr30!).getByText("$40.73", { selector: "strong" })).toBeVisible();
+    expect(within(tr30!).getByText("Save $38.52", { exact: true })).toBeVisible();
+    expect(within(tr30!).getByText("$81.46", { exact: true })).toBeVisible();
     expect(within(tr60!).getByText("SKU PPQ-TIRZEPATIDE-TR60", { exact: true })).toBeVisible();
     expect(within(tr60!).getByText("$109.99", { selector: "del" })).toBeVisible();
     expect(within(tr60!).getByText("$76.99", { selector: "strong" })).toBeVisible();
@@ -240,7 +242,7 @@ describe("CartView", () => {
     expect(screen.queryByText(/30mg\s*[·|]\s*1 bottle/iu)).toBeNull();
 
     const summary = screen.getByRole("complementary", { name: "Order summary" });
-    expect(within(summary).getByText("$160.97", { exact: true })).toBeVisible();
+    expect(within(summary).getByText("$158.45", { exact: true })).toBeVisible();
     expect(within(summary).getByText("Included in displayed merchandise prices", { exact: true })).toBeVisible();
     expect(within(summary).getByRole("heading", { name: "Checkout is currently unavailable" })).toBeVisible();
     expect(within(summary).getByText(/Orders and payments cannot be submitted yet/iu)).toBeVisible();
@@ -255,7 +257,7 @@ describe("CartView", () => {
       baseUnitMinor: 2_400,
       unitAmountMinor: 2_400,
       lineSubtotalMinor: 2_400,
-      lineSavingsMinor: 0,
+      lineSavingsMinor: 0, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0, volumeDiscountBps: 0,
       effectiveDiscountBps: 0,
     });
     useCart.mockReturnValue(cart([{ variantId, quantity: 1 }]));
@@ -276,8 +278,8 @@ describe("CartView", () => {
 
     await screen.findByText("Synthetic 5 mg", { exact: true });
     expect(screen.getByText("Quantity discount included in displayed prices", { exact: true })).toBeVisible();
-    expect(screen.getByText("Save $3.84", { exact: true })).toBeVisible();
-    expect(screen.getByText("-8%", { exact: true })).toBeVisible();
+    expect(screen.getByText("Save $1.44", { exact: true })).toBeVisible();
+    expect(screen.getByText("-3%", { exact: true })).toBeVisible();
   });
 
   it.each([
@@ -356,7 +358,7 @@ describe("CartView", () => {
 
   it.each([
     ["missing row", [tr30QuantityTwo]],
-    ["extra row", [tr30QuantityTwo, tr60QuantityOne, readyLine({ variantId: thirdVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, effectiveDiscountBps: 0 })]],
+    ["extra row", [tr30QuantityTwo, tr60QuantityOne, readyLine({ variantId: thirdVariantId, quantity: 1, baseUnitMinor: 2_400, unitAmountMinor: 2_400, lineSubtotalMinor: 2_400, lineSavingsMinor: 0, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0, volumeDiscountBps: 0, effectiveDiscountBps: 0 })]],
     ["reordered rows", [tr60QuantityOne, tr30QuantityTwo]],
     ["different variant ID", [{ ...tr30QuantityTwo, variantId: secondVariantId }, tr60QuantityOne]],
     ["different quantity", [tr30QuantityOne, tr60QuantityOne]],
@@ -408,7 +410,7 @@ describe("CartView", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(requestBody(1)).toEqual(first);
-    expect(await screen.findAllByText("$44.16", { exact: true })).toHaveLength(2);
+    expect(await screen.findAllByText("$46.56", { exact: true })).toHaveLength(2);
   });
 
   it("clears successful same-cart facts when revalidation and its retry fail", async () => {
@@ -472,7 +474,7 @@ describe("CartView", () => {
       .mockResolvedValueOnce(response(preview()))
       .mockRejectedValueOnce(new Error("changed preview failure"))
       .mockResolvedValueOnce(response(preview([
-        readyLine({ quantity: 3, unitAmountMinor: 2_160, lineSubtotalMinor: 6_480, lineSavingsMinor: 720, effectiveDiscountBps: 1_000 }),
+        readyLine({ quantity: 3, unitAmountMinor: 2_328, lineSubtotalMinor: 6_984, lineSavingsMinor: 216, lineVolumeSavingsMinor: 216, effectiveDiscountBps: 300 }),
       ])));
     const { rerender } = render(<CartView checkoutIntent={null} />);
     expect(await screen.findByText("Synthetic 5 mg", { exact: true })).toBeVisible();

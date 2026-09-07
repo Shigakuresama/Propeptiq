@@ -74,7 +74,7 @@ const PUBLIC_VARIANT_PURCHASE_LABELS = Object.freeze({
   cart_preview: "Ordering not open",
   checkout_unavailable: "Ordering not open",
   local_preview: "Test mode — no payments",
-  pricing_pending: "Price unavailable",
+  pricing_pending: "Currently unavailable",
   unavailable: "Unavailable",
 } satisfies Readonly<Record<PublicVariantPurchaseState, string>>);
 
@@ -128,7 +128,7 @@ export function resolvePublicVariantPrice(input: Readonly<{
 
 /** Shared display calculation. Eligibility is resolved by the owning source. */
 export function resolveVariantPricePresentation(input: Readonly<{
-  variant: Pick<PublicStorefrontVariant, "id" | "availability" | "priceStatus" | "baseUnitMinor" | "currency" | "checkoutReady">;
+  variant: Pick<PublicStorefrontVariant, "id" | "packageQuantity" | "availability" | "priceStatus" | "baseUnitMinor" | "currency" | "checkoutReady">;
   quantity: number;
   mode: PricePresentationMode;
   eligiblePromotions: readonly EligiblePromotion[];
@@ -167,7 +167,7 @@ export function resolveVariantPricePresentation(input: Readonly<{
   }
 
   const effectiveDiscount = resolveEffectiveDiscount({
-    quantityDiscountBps: quantityDiscountBps(input.quantity),
+    quantityDiscountBps: quantityDiscountBps(input.quantity, variant.packageQuantity),
     eligiblePromotions: input.eligiblePromotions,
   });
   const calculated = calculateVariantLinePrice({
@@ -182,6 +182,11 @@ export function resolveVariantPricePresentation(input: Readonly<{
     quantity: calculated.quantity,
     baseUnitMinor: calculated.baseUnitMinor,
     effectiveDiscountBps: calculated.effectiveDiscountBps,
+    campaignDiscountBps: calculated.campaignDiscountBps,
+    volumeDiscountBps: calculated.volumeDiscountBps,
+    campaignUnitMinor: calculated.campaignUnitMinor,
+    lineCampaignSavingsMinor: calculated.lineCampaignSavingsMinor,
+    lineVolumeSavingsMinor: calculated.lineVolumeSavingsMinor,
     effectiveUnitMinor: calculated.effectiveUnitMinor,
     lineSubtotalMinor: calculated.lineSubtotalMinor,
     lineSavingsMinor: calculated.lineSavingsMinor,

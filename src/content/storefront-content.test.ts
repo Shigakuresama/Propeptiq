@@ -202,14 +202,14 @@ describe("storefront controlled content", () => {
       { question: "What information is in the catalog?", answer: "Explore product names, amounts, and details. Each listing shows current pricing and availability." },
       { question: "How does storefront search work?", answer: "Search by product name, category, SKU, or amount. Use the search button at the bottom of the page to find products, pages, and FAQs." },
       { question: "How do I choose a product amount?", answer: "Choose an amount before adding a product to your cart. Different amounts stay on separate cart lines." },
-      { question: "How do quantity discounts work?", answer: "One item has no volume discount; two receive 8%; three through nine receive 10%; and ten or more receive 30%. If an eligible promotion is higher, only the single higher percentage applies." },
+      { question: "How do quantity discounts work?", answer: "Bundle discounts apply after the sale price: two or three bottles receive an extra 3%; four through ten receive an extra 6%; and eleven or more receive an extra 30%. Bottles of the same product and amount count together." },
       { question: "Does the cart combine different amounts?", answer: "Adding the same product and amount again combines its quantity and updates its discount. Different amounts stay separate and do not combine for quantity discounts." },
-      { question: "What does Price unavailable mean?", answer: "There is no current price for that amount. You can view its details and contact us for availability, but it cannot be purchased." },
+      { question: "Why can’t I select an amount?", answer: "Some amounts are not currently available or do not have a confirmed price. Contact us for availability; only selectable amounts can be added to your cart." },
       { question: "How are prices and availability confirmed?", answer: "Prices, discounts, and availability are checked again before checkout. If anything changes, you will be asked to review your cart. Orders can only be placed when purchasing is open." },
       { question: "Where can I review the research-use restrictions?", answer: "Open the Research-Use Policy from the site navigation or footer. It lists the permitted nonclinical research contexts and purchaser responsibilities." },
     ]);
     expect(serialized).toContain("Different amounts stay on separate cart lines");
-    expect(serialized).toContain("single higher percentage");
+    expect(serialized).toContain("Bundle discounts apply after the sale price");
     expect(serialized).toContain("Research-Use Policy");
     expect(serialized).not.toMatch(
       /Amino Club|purity|steril|tested|testing|shipment|delivery speed|guarantee|dose|dosage|administer|inject|treat|patient|medical advice/iu,

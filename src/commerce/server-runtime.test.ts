@@ -168,10 +168,10 @@ describe("commerce server composition", () => {
       status: "quoted",
       quote: {
         subtotalMinor: 4_800,
-        discountMinor: 384,
+        discountMinor: 144,
         shippingMinor: 500,
         taxMinor: 321,
-        totalMinor: 5_237,
+        totalMinor: 5_477,
       },
     });
     expect(quoted.status).toBe("quoted");
@@ -212,10 +212,10 @@ describe("commerce server composition", () => {
       status: "quoted",
       quote: {
         subtotalMinor: 4_800,
-        discountMinor: 384,
+        discountMinor: 144,
         shippingMinor: 500,
         taxMinor: 321,
-        totalMinor: 5_237,
+        totalMinor: 5_477,
         lines: [{
           variantId: "55000000-0000-4000-8000-000000000001",
           productId: "61000000-0000-4000-8000-000000000001",

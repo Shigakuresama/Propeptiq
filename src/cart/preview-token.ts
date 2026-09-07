@@ -72,6 +72,7 @@ export function createCartPreviewToken(items: readonly CartPreviewItem[]): strin
   const canonicalItems = items.map((item) => ({
     variantId: item.variantId,
     quantity: item.quantity,
+    packageQuantity: item.packageQuantity,
     available: item.available,
     purchaseState: item.purchaseState,
     name: item.name,
@@ -83,6 +84,11 @@ export function createCartPreviewToken(items: readonly CartPreviewItem[]): strin
     lineSubtotalMinor: item.lineSubtotalMinor,
     lineSavingsMinor: item.lineSavingsMinor,
     effectiveDiscountBps: item.effectiveDiscountBps,
+    campaignDiscountBps: item.campaignDiscountBps,
+    volumeDiscountBps: item.volumeDiscountBps,
+    campaignUnitMinor: item.campaignUnitMinor,
+    lineCampaignSavingsMinor: item.lineCampaignSavingsMinor,
+    lineVolumeSavingsMinor: item.lineVolumeSavingsMinor,
     appliedPromotions: item.appliedPromotions.map((promotion) => ({ id: promotion.id, label: promotion.label })),
     currency: item.currency,
   }));

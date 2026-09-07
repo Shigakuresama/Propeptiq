@@ -130,7 +130,7 @@ const homepageContentRecords: readonly ControlledContentRecord[] = Object.freeze
     "how-do-quantity-discounts-work",
     "faq",
     "How do quantity discounts work?",
-    "One item has no volume discount; two receive 8%; three through nine receive 10%; and ten or more receive 30%. If an eligible promotion is higher, only the single higher percentage applies.",
+    "Bundle discounts apply after the sale price: two or three bottles receive an extra 3%; four through ten receive an extra 6%; and eleven or more receive an extra 30%. Bottles of the same product and amount count together.",
     ["/catalog", "/cart"],
   ),
   homepageRecord(
@@ -143,8 +143,8 @@ const homepageContentRecords: readonly ControlledContentRecord[] = Object.freeze
   homepageRecord(
     "what-does-pricing-coming-soon-mean",
     "faq",
-    "What does Price unavailable mean?",
-    "There is no current price for that amount. You can view its details and contact us for availability, but it cannot be purchased.",
+    "Why can’t I select an amount?",
+    "Some amounts are not currently available or do not have a confirmed price. Contact us for availability; only selectable amounts can be added to your cart.",
     ["/catalog"],
   ),
   homepageRecord(

@@ -8,10 +8,10 @@ const BASIS_POINT_DENOMINATOR = 10_000n;
 const MAX_QUANTITY = 25;
 
 export const QUANTITY_TIERS = Object.freeze([
-  Object.freeze({ minQuantity: 1, discountBps: 0 }),
-  Object.freeze({ minQuantity: 2, discountBps: 800 }),
-  Object.freeze({ minQuantity: 3, discountBps: 1000 }),
-  Object.freeze({ minQuantity: 10, discountBps: 3000 }),
+  Object.freeze({ minBottleCount: 1, maxBottleCount: 1, discountBps: 0 }),
+  Object.freeze({ minBottleCount: 2, maxBottleCount: 3, discountBps: 300 }),
+  Object.freeze({ minBottleCount: 4, maxBottleCount: 10, discountBps: 600 }),
+  Object.freeze({ minBottleCount: 11, maxBottleCount: null, discountBps: 3000 }),
 ] as const);
 
 export type StorefrontPromotionScope =
@@ -42,9 +42,11 @@ export type EligiblePromotion = Readonly<{
 }>;
 
 export type EffectiveDiscount = Readonly<{
-  source: "quantity" | "promotion";
+  source: "quantity" | "promotion" | "stacked";
   discountBps: number;
   promotionId: string | null;
+  campaignDiscountBps: number;
+  volumeDiscountBps: number;
 }>;
 
 export type EffectiveDiscountInput = Readonly<{
@@ -70,6 +72,11 @@ export type EffectiveLinePrice = Readonly<{
   quantity: number;
   baseUnitMinor: number;
   effectiveDiscountBps: number;
+  campaignDiscountBps: number;
+  volumeDiscountBps: number;
+  campaignUnitMinor: number;
+  lineCampaignSavingsMinor: number;
+  lineVolumeSavingsMinor: number;
   effectiveUnitMinor: number;
   lineSubtotalMinor: number;
   lineSavingsMinor: number;
@@ -106,12 +113,16 @@ function roundHalfUp(numerator: bigint, denominator: bigint): bigint {
   return (numerator + denominator / 2n) / denominator;
 }
 
-export function quantityDiscountBps(quantity: number): number {
+export function quantityDiscountBps(quantity: number, packageQuantity = 1): number {
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) {
     throw new RangeError("quantity must be an integer from 1 through 25");
   }
+  const bottleCount = quantity * packageQuantity;
+  if (!Number.isSafeInteger(packageQuantity) || packageQuantity < 1 || !Number.isSafeInteger(bottleCount)) {
+    throw new RangeError("packageQuantity and bottle count must be positive safe integers");
+  }
   return QUANTITY_TIERS.reduce(
-    (discount, tier) => (quantity >= tier.minQuantity ? tier.discountBps : discount),
+    (discount, tier) => (bottleCount >= tier.minBottleCount ? tier.discountBps : discount),
     0,
   );
 }
@@ -201,17 +212,24 @@ export function resolveEffectiveDiscount(input: EffectiveDiscountInput): Effecti
   );
 
   const bestPromotion = eligiblePromotions[0];
-  if (bestPromotion !== undefined && bestPromotion.discountBps >= input.quantityDiscountBps) {
+  if (bestPromotion !== undefined) {
     return Object.freeze({
-      source: "promotion",
-      discountBps: bestPromotion.discountBps,
+      source: input.quantityDiscountBps > 0 ? "stacked" : "promotion",
+      discountBps: 10_000 - Number(roundHalfUp(
+        BigInt(10_000 - bestPromotion.discountBps) * BigInt(10_000 - input.quantityDiscountBps),
+        BASIS_POINT_DENOMINATOR,
+      )),
       promotionId: bestPromotion.id,
+      campaignDiscountBps: bestPromotion.discountBps,
+      volumeDiscountBps: input.quantityDiscountBps,
     });
   }
   return Object.freeze({
     source: "quantity",
     discountBps: input.quantityDiscountBps,
     promotionId: null,
+    campaignDiscountBps: 0,
+    volumeDiscountBps: input.quantityDiscountBps,
   });
 }
 
@@ -226,6 +244,8 @@ export function calculateVariantLinePrice(input: LinePriceInput): EffectiveLineP
     input.quantity > MAX_QUANTITY ||
     !isRecord(input.effectiveDiscount) ||
     !isValidBasisPoints(input.effectiveDiscount.discountBps, true) ||
+    !isValidBasisPoints(input.effectiveDiscount.campaignDiscountBps, true) ||
+    !isValidBasisPoints(input.effectiveDiscount.volumeDiscountBps, true) ||
     (input.priceStatus !== undefined &&
       input.priceStatus !== "pending" &&
       input.priceStatus !== "active" &&
@@ -235,17 +255,25 @@ export function calculateVariantLinePrice(input: LinePriceInput): EffectiveLineP
   }
   const effectiveDiscount = input.effectiveDiscount;
   if (
-    (effectiveDiscount.source !== "quantity" && effectiveDiscount.source !== "promotion") ||
+    (effectiveDiscount.source !== "quantity" && effectiveDiscount.source !== "promotion" && effectiveDiscount.source !== "stacked") ||
     (effectiveDiscount.promotionId !== null && !isNonBlankString(effectiveDiscount.promotionId)) ||
     (effectiveDiscount.source === "quantity" && effectiveDiscount.promotionId !== null) ||
-    (effectiveDiscount.source === "promotion" && effectiveDiscount.promotionId === null) ||
-    (effectiveDiscount.source === "promotion" && effectiveDiscount.discountBps === 0)
+    (effectiveDiscount.source !== "quantity" && effectiveDiscount.promotionId === null) ||
+    (effectiveDiscount.source === "quantity" && effectiveDiscount.campaignDiscountBps !== 0) ||
+    (effectiveDiscount.source !== "quantity" && effectiveDiscount.campaignDiscountBps === 0) ||
+    (effectiveDiscount.source === "promotion" && effectiveDiscount.volumeDiscountBps !== 0) ||
+    (effectiveDiscount.source === "stacked" && effectiveDiscount.volumeDiscountBps === 0)
   ) {
     throw new RangeError("invalid effective discount");
   }
 
-  const factor = BigInt(10_000 - effectiveDiscount.discountBps);
-  const unit = roundHalfUp(BigInt(input.baseUnitMinor) * factor, BASIS_POINT_DENOMINATOR);
+  const resolved = resolveEffectiveDiscount({
+    quantityDiscountBps: effectiveDiscount.volumeDiscountBps,
+    eligiblePromotions: effectiveDiscount.promotionId === null ? [] : [{ id: effectiveDiscount.promotionId, discountBps: effectiveDiscount.campaignDiscountBps }],
+  });
+  if (resolved.discountBps !== effectiveDiscount.discountBps) throw new RangeError("inconsistent effective discount");
+  const campaignUnit = roundHalfUp(BigInt(input.baseUnitMinor) * BigInt(10_000 - effectiveDiscount.campaignDiscountBps), BASIS_POINT_DENOMINATOR);
+  const unit = roundHalfUp(campaignUnit * BigInt(10_000 - effectiveDiscount.volumeDiscountBps), BASIS_POINT_DENOMINATOR);
   const subtotal = unit * BigInt(input.quantity);
   const gross = BigInt(input.baseUnitMinor) * BigInt(input.quantity);
   const maximum = BigInt(Number.MAX_SAFE_INTEGER);
@@ -259,6 +287,11 @@ export function calculateVariantLinePrice(input: LinePriceInput): EffectiveLineP
     quantity: input.quantity,
     baseUnitMinor: input.baseUnitMinor,
     effectiveDiscountBps: effectiveDiscount.discountBps,
+    campaignDiscountBps: effectiveDiscount.campaignDiscountBps,
+    volumeDiscountBps: effectiveDiscount.volumeDiscountBps,
+    campaignUnitMinor: Number(campaignUnit),
+    lineCampaignSavingsMinor: Number((BigInt(input.baseUnitMinor) - campaignUnit) * BigInt(input.quantity)),
+    lineVolumeSavingsMinor: Number((campaignUnit - unit) * BigInt(input.quantity)),
     effectiveUnitMinor: Number(unit),
     lineSubtotalMinor: Number(subtotal),
     lineSavingsMinor: Number(gross - subtotal),
