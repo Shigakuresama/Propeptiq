@@ -105,7 +105,7 @@ describe("CatalogItemDetail", () => {
     );
     if (product.description) expect(screen.getByText(product.description)).toBeVisible();
     const image = screen.getByRole("img", {
-      name: "Front AI-generated catalog illustration for Pinealon",
+      name: "Front view of Pinealon",
     });
     const suppliedConfigurations = screen.getByText("Product specifications");
     expect(suppliedConfigurations.closest("details")).not.toHaveAttribute("open");
@@ -139,7 +139,7 @@ describe("CatalogItemDetail", () => {
     expect(screen.getByText("PN5")).toBeInTheDocument();
     expect(within(suppliedConfigurations.closest("details")!).getByText("5mg")).toBeInTheDocument();
     expect(screen.queryByText("5mg × 10 vials")).not.toBeInTheDocument();
-    expect(screen.getByText("AI-generated catalog illustration — not actual product photography.")).toBeVisible();
+    expect(screen.queryByText("AI-generated catalog illustration — not actual product photography.")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
     expect(document.body).not.toHaveTextContent(/\$|usd/i);
   });

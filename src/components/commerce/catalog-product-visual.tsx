@@ -4,7 +4,6 @@ import type { CSSProperties } from "react";
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import { resolveProductPhotograph } from "@/catalog/product-photography";
 import {
-  catalogIllustrationDisclosure,
   getCatalogProductVisualScenes,
   getCatalogVisualIdentity,
   type CatalogProductVisualScene,
@@ -46,7 +45,7 @@ export function CatalogProductVisual({
     >
       <div className="catalog-product-visual__image">
         <Image
-          alt={photograph?.alt ?? `${resolvedScene.sceneLabel} AI-generated catalog illustration for ${product.name}`}
+          alt={photograph?.alt ?? `${resolvedScene.sceneLabel} view of ${product.name}`}
           className="catalog-product-visual__base"
           width={photograph?.width ?? resolvedScene.width}
           height={photograph?.height ?? resolvedScene.height}
@@ -63,7 +62,6 @@ export function CatalogProductVisual({
         ) : null}
         <span className="catalog-product-visual__notice">RESEARCH USE ONLY</span>
       </div>
-      {photograph ? null : <span className="catalog-image-disclosure">{catalogIllustrationDisclosure}</span>}
       {discountPercent && discountPercent > 0 ? (
         <span
           aria-label={`-${discountPercent}%`}

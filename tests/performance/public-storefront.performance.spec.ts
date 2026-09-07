@@ -1064,8 +1064,8 @@ async function waitForFooterReadiness(page: Page, expectReservedPurchase: boolea
 function expectedHiddenImages(routeLabel: string, width: number) {
   return routeLabel === "home" && width < 640
     ? [
-      "Front AI-generated catalog illustration for Retatrutide",
-      "Front AI-generated catalog illustration for NAD+",
+      "Front view of Retatrutide",
+      "Front view of NAD+",
     ]
     : [];
 }

@@ -619,7 +619,7 @@ describe("CartView", () => {
     expect(navigate).not.toHaveBeenCalled();
     expect(screen.getByText(/Shipping and tax are not yet calculated/iu)).toBeVisible();
     expect(screen.getByRole("img", {
-      name: "AI-generated catalog illustration beside Synthetic local test only — Alpha, Synthetic 5 mg",
+      name: "Catalog image beside Synthetic local test only — Alpha, Synthetic 5 mg",
     })).toHaveAttribute("loading", "lazy");
   });
 

@@ -52,7 +52,7 @@ describe("CatalogProductGallery", () => {
     expect(within(gallery).getAllByRole("img")).toHaveLength(1);
     expect(
       within(gallery).getByRole("img", {
-        name: "Front AI-generated catalog illustration for Synthetic Product Alpha",
+        name: "Front view of Synthetic Product Alpha",
       }),
     ).toBeVisible();
     expect(within(gallery).getByText("Synthetic Product Alpha")).toBeVisible();
@@ -60,10 +60,10 @@ describe("CatalogProductGallery", () => {
     expect(within(gallery).getByText("RESEARCH USE ONLY")).toBeVisible();
     expect(within(gallery).getByLabelText("-30%")).toBeVisible();
     expect(
-      within(gallery).getByText(
+      within(gallery).queryByText(
         "AI-generated catalog illustration — not actual product photography.",
       ),
-    ).toBeVisible();
+    ).not.toBeInTheDocument();
     expect(within(gallery).getAllByRole("status")).toHaveLength(1);
     expect(within(gallery).getByRole("status")).toHaveTextContent(
       "View 1 of 6: Front",
@@ -165,11 +165,11 @@ describe("CatalogProductGallery", () => {
       }),
     );
     expect(markup).toContain("View 1 of 6: Front");
-    expect(markup).toContain("Front AI-generated catalog illustration");
-    expect(markup).toContain(
+    expect(markup).toContain("Front view of");
+    expect(markup).not.toContain(
       "AI-generated catalog illustration — not actual product photography.",
     );
-    expect(markup).not.toContain("Multi-vial study AI-generated catalog illustration");
+    expect(markup).not.toContain("Multi-vial study view of");
 
     const source = readFileSync(
       resolve(process.cwd(), "src/components/commerce/catalog-product-gallery.tsx"),

@@ -96,7 +96,7 @@ describe("CatalogListingCard", () => {
 
     const article = screen.getByRole("article", { name: product.name });
     const image = within(article).getByRole("img", {
-      name: `Front AI-generated catalog illustration for ${product.name}`,
+      name: `Front view of ${product.name}`,
     });
     expect(image).toBeVisible();
     expect(image).toHaveAttribute(
@@ -116,7 +116,7 @@ describe("CatalogListingCard", () => {
     expect(within(article).getByRole("heading", { name: product.name })).toBeVisible();
     expect(within(article).queryByText("TR5")).not.toBeInTheDocument();
     expect(within(article).queryByText("5mg")).not.toBeInTheDocument();
-    expect(within(article).getByText("AI-generated catalog illustration — not actual product photography.")).toBeVisible();
+    expect(within(article).queryByText("AI-generated catalog illustration — not actual product photography.")).not.toBeInTheDocument();
     expect(within(article).getByText("Pricing not available")).toBeVisible();
     expect(
       within(article).getByRole("link", {
@@ -154,7 +154,7 @@ describe("CatalogListingCard", () => {
 
     const article = screen.getByRole("article", { name: "BPC-157" });
     const image = within(article).getByRole("img", {
-      name: "Front AI-generated catalog illustration for BPC-157",
+      name: "Front view of BPC-157",
     });
     expect(image.getAttribute("src")).toContain(
       encodeURIComponent("/catalog/individual/bpc-157/front-v1.webp"),

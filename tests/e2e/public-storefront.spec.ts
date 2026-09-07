@@ -194,7 +194,7 @@ test("six-view product gallery loads all scenes and keeps keyboard, focus, and g
     await page.goto("/catalog");
     const card = page.getByRole("article", { name: "Tirzepatide", exact: true });
     const cardImage = card.getByRole("img", {
-      name: "Front AI-generated catalog illustration for Tirzepatide",
+      name: "Front view of Tirzepatide",
     });
     await cardImage.scrollIntoViewIfNeeded();
     await expect.poll(() => cardImage.evaluate((node) => {
@@ -211,7 +211,7 @@ test("six-view product gallery loads all scenes and keeps keyboard, focus, and g
     await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide$/u);
     const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
     const pdpFront = gallery.getByRole("img", {
-      name: "Front AI-generated catalog illustration for Tirzepatide",
+      name: "Front view of Tirzepatide",
     });
     await expect.poll(() => pdpFront.evaluate((node) => {
       const image = node as HTMLImageElement;
@@ -234,13 +234,13 @@ test("six-view product gallery loads all scenes and keeps keyboard, focus, and g
       await gallery.getByRole("tab", { name: scenes[index]!, exact: true }).click();
       const image = gallery.getByRole("img");
       await expect(image).toHaveCount(1);
-      await expect(image).toHaveAttribute("alt", `${scenes[index]} AI-generated catalog illustration for Tirzepatide`);
+      await expect(image).toHaveAttribute("alt", `${scenes[index]} view of Tirzepatide`);
       await expect.poll(() => image.evaluate((node) => (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0)).toBe(true);
       sources.add(await image.getAttribute("src") ?? "");
       await expect(gallery.getByRole("status")).toHaveText(`View ${index + 1} of 6: ${scenes[index]}`);
       expect((await panel.boundingBox())!.height).toBeCloseTo(before!.height, 1);
       await expect(gallery.locator(".catalog-product-visual__discount")).toHaveCount(1);
-      await expect(gallery.getByText("AI-generated catalog illustration — not actual product photography.", { exact: true })).toHaveCount(1);
+      await expect(gallery.getByText("AI-generated catalog illustration — not actual product photography.", { exact: true })).toHaveCount(0);
     }
     expect(sources.size).toBe(6);
     const front = gallery.getByRole("tab", { name: "Front", exact: true });
@@ -1041,7 +1041,6 @@ test("fixed mobile search stays compact and clear of product identity and purcha
 
     for (const [label, locator] of [
       ["product title", page.getByRole("heading", { level: 1, name: "Tirzepatide" })],
-      ["image disclosure", page.locator(".catalog-detail-image .catalog-image-disclosure")],
       ["configuration heading", page.getByRole("heading", { name: "Product configurations" })],
       ["purchase heading", page.getByRole("heading", { name: "Purchase" })],
     ] as const) {
@@ -1089,16 +1088,6 @@ test("fixed mobile search stays compact and clear of product identity and purcha
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
-  const desktopTriggerBounds = await clientRect(
-    page.getByRole("button", { name: "Search PropeptIQ" }),
-  );
-  const desktopDisclosureBounds = await clientRect(
-    page.locator(".catalog-detail-image .catalog-image-disclosure"),
-  );
-  expect(
-    rectanglesIntersect(desktopTriggerBounds, desktopDisclosureBounds),
-    `1440x900 search/image disclosure collision: ${JSON.stringify({ desktopDisclosureBounds, desktopTriggerBounds })}`,
-  ).toBe(false);
   const desktopImageBounds = await clientRect(page.locator(".catalog-product-gallery__panel"));
   const desktopTitleBounds = await clientRect(
     page.getByRole("heading", { level: 1, name: "Tirzepatide" }),
@@ -2264,7 +2253,7 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
   await expect(page.locator("main")).toContainText("Test mode — no payments");
 
   const imageLoaded = await page.getByRole("img", {
-    name: "Front AI-generated catalog illustration for Tirzepatide",
+    name: "Front view of Tirzepatide",
   }).evaluate((image) => {
     const element = image as HTMLImageElement;
     return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0;
@@ -2297,7 +2286,7 @@ test("catalog product hierarchy keeps visual layers and longest labels inside re
       const frame = card.locator(".catalog-image-frame");
       const visual = frame.locator(".catalog-product-visual");
       const base = visual.getByRole("img", {
-        name: `Front AI-generated catalog illustration for ${name}`,
+        name: `Front view of ${name}`,
       });
       const labelName = visual.locator(".catalog-product-visual__name");
       const variant = visual.locator(".catalog-product-visual__variant");
@@ -2310,7 +2299,7 @@ test("catalog product hierarchy keeps visual layers and longest labels inside re
       await frame.scrollIntoViewIfNeeded();
       await expect(card.getByRole("heading", { name, exact: true })).toBeVisible();
       await expect(base).toBeVisible();
-      await expect(disclosure).toBeVisible();
+      await expect(disclosure).toHaveCount(0);
       await expect(visual.getByRole("img")).toHaveCount(1);
       await expect(variant).toBeVisible();
       await expect(notice).toBeVisible();
@@ -2323,7 +2312,6 @@ test("catalog product hierarchy keeps visual layers and longest labels inside re
         ["name", labelName],
         ["variant", variant],
         ["RUO notice", notice],
-        ["disclosure", disclosure],
         ...(expectsSale ? [["sale badge", sale] as const] : []),
       ] as const) {
         expect(
@@ -2335,20 +2323,15 @@ test("catalog product hierarchy keeps visual layers and longest labels inside re
       const nameRect = await clientRect(labelName);
       const variantRect = await clientRect(variant);
       const noticeRect = await clientRect(notice);
-      const disclosureRect = await clientRect(disclosure);
       expect(rectanglesIntersect(nameRect, variantRect), `${width}px ${name} name/variant overlap`).toBe(false);
       expect(rectanglesIntersect(nameRect, noticeRect), `${width}px ${name} name/RUO overlap`).toBe(false);
-      expect(rectanglesIntersect(nameRect, disclosureRect), `${width}px ${name} name/disclosure overlap`).toBe(false);
       expect(rectanglesIntersect(variantRect, noticeRect), `${width}px ${name} variant/RUO overlap`).toBe(false);
-      expect(rectanglesIntersect(variantRect, disclosureRect), `${width}px ${name} variant/disclosure overlap`).toBe(false);
-      expect(rectanglesIntersect(noticeRect, disclosureRect), `${width}px ${name} RUO/disclosure overlap`).toBe(false);
       if (expectsSale) {
         const saleRect = await clientRect(sale);
         for (const [label, rect] of [
           ["name", nameRect],
           ["variant", variantRect],
           ["RUO notice", noticeRect],
-          ["disclosure", disclosureRect],
         ] as const) {
           expect(rectanglesIntersect(saleRect, rect), `${width}px ${name} sale/${label} overlap`).toBe(false);
         }
@@ -2402,7 +2385,7 @@ test("long CP20 front loads from its exact individual source on card and PDP at 
     const cardFrame = card.locator(".catalog-image-frame");
     const cardVisual = cardFrame.locator(".catalog-product-visual");
     const cardImage = cardVisual.getByRole("img", {
-      name: `Front AI-generated catalog illustration for ${name}`,
+      name: `Front view of ${name}`,
     });
     await cardFrame.scrollIntoViewIfNeeded();
     await expect.poll(async () => {
@@ -2422,7 +2405,7 @@ test("long CP20 front loads from its exact individual source on card and PDP at 
     const gallery = page.getByRole("region", { name: `${name} product illustration gallery` });
     const panel = gallery.getByRole("tabpanel");
     const pdpImage = gallery.getByRole("img", {
-      name: `Front AI-generated catalog illustration for ${name}`,
+      name: `Front view of ${name}`,
     });
     await expect.poll(async () => {
       const image = await loadedSource(pdpImage);
@@ -2467,7 +2450,7 @@ async function expectIndividualAlternateGallery(
     for (const [index, [scene, label]] of alternateSceneLabels.entries()) {
       await gallery.getByRole("tab", { name: label, exact: true }).click();
       const image = gallery.getByRole("img", {
-        name: `${label} AI-generated catalog illustration for ${product.name}`,
+        name: `${label} view of ${product.name}`,
       });
       await expect.poll(() => image.evaluate((node) => {
         const entry = node as HTMLImageElement;
@@ -2481,7 +2464,7 @@ async function expectIndividualAlternateGallery(
       await expect(gallery.locator(".catalog-product-visual__name")).toHaveText(product.name);
       await expect(gallery.locator(".catalog-product-visual__variant")).toHaveText(product.variant);
       await expect(gallery.getByText("RESEARCH USE ONLY", { exact: true })).toBeVisible();
-      await expect(gallery.getByText("AI-generated catalog illustration — not actual product photography.", { exact: true })).toBeVisible();
+      await expect(gallery.getByText("AI-generated catalog illustration — not actual product photography.", { exact: true })).toHaveCount(0);
       const activePanelRect = await clientRect(panel);
       expect(activePanelRect.width).toBeCloseTo(initialPanelRect.width, 3);
       expect(activePanelRect.height).toBeCloseTo(initialPanelRect.height, 3);
@@ -2523,7 +2506,7 @@ test("navigation, homepage trust content, product research, and related records 
 
   await page.goto("/catalog/items/bpc-157");
   const heroImage = page.getByRole("img", {
-    name: "Front AI-generated catalog illustration for BPC-157",
+    name: "Front view of BPC-157",
   });
   await expect(heroImage).toBeVisible();
   expect(await heroImage.evaluate((image) => {

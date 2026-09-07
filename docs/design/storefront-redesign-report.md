@@ -13,8 +13,8 @@ Contact Us page are implemented.
 
 **Overall status: partially complete.** Real photography, approved guarantee terms,
 live purchasing prerequisites, verified payment methods, and contact activation
-remain external dependencies. Existing AI bottle illustrations retain their
-disclosure; they are not presented as photographs.
+remain external dependencies. Existing bottle assets are preserved. Per the owner's
+follow-up request, the customer-facing AI disclosure has been removed.
 
 ## Requirement-by-requirement status
 
@@ -68,7 +68,7 @@ retries reuse the UUID; changed content or an accepted submission starts a new a
 
 The repository's docs/reference/storefront-individual-imagery.md identifies all 56
 front images as AI-generated. No approved real photographs were located. Source
-files and disclosures remain intact. The explicitly empty photography registry in
+files remain intact; the public AI disclosure was removed at the owner's request. The explicitly empty photography registry in
 src/catalog/product-photography.ts accepts owner-verified asset/provenance entries;
 a matching variant photograph will take precedence when supplied.
 
@@ -183,3 +183,14 @@ product images, promotion economics or guarantee policy was copied.
 A separate local production-server launch was rejected by automatic approval review with only “blocked by policy” as its reason. No override was attempted; the successful isolated development-server browser tests supply the functional screenshots. The production build and artifact scan passed independently.
 
 [Open before-and-after screenshot comparisons](storefront-redesign-evidence.md).
+## Owner follow-up: remove AI disclosure
+
+Removed the customer-facing AI caption from product cards, product views and the
+cart, and replaced AI wording in image alternative text with neutral descriptions.
+Images and internal provenance records are preserved. Updated the existing tests
+and removed the now-unused caption layout rules.
+
+Validation: 85 focused unit tests passed across six files; type checking and scoped
+lint passed. Mobile (375px) and desktop (1440px) browser geometry/accessibility
+checks passed across home, product, rewards and contact. Narrow source review found
+no introduced defect. This follow-up has not been deployed.

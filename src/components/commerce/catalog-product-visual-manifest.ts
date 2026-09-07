@@ -1,6 +1,3 @@
-export const catalogIllustrationDisclosure =
-  "AI-generated catalog illustration — not actual product photography.";
-
 export type CatalogProductVisualScene = Readonly<{
   id: string;
   sceneLabel: string;

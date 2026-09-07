@@ -19,10 +19,7 @@ import {
   canContinueFromPreview,
 } from "@/cart/preview-types";
 import { Button } from "@/components/ui/button";
-import {
-  catalogIllustrationDisclosure,
-  catalogProductVisualManifest,
-} from "./catalog-product-visual-manifest";
+import { catalogProductVisualManifest } from "./catalog-product-visual-manifest";
 
 const cartIllustration = catalogProductVisualManifest.find((scene) => scene.id === "front")!;
 
@@ -354,14 +351,13 @@ export function CartView(props: CartViewProps) {
                 {drawer && verifiedIdentity ? (
                   <figure className="cart-line__visual">
                     <Image
-                      alt={`AI-generated catalog illustration beside ${item.name}, ${item.variantLabel}`}
+                      alt={`Catalog image beside ${item.name}, ${item.variantLabel}`}
                       height={cartIllustration.height}
                       loading="lazy"
                       sizes="112px"
                       src={cartIllustration.src}
                       width={cartIllustration.width}
                     />
-                    <figcaption>{catalogIllustrationDisclosure}</figcaption>
                   </figure>
                 ) : null}
                 <div className="cart-line__body grid min-w-0 gap-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
