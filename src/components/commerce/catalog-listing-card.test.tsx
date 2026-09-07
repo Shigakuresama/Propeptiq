@@ -175,7 +175,8 @@ describe("CatalogListingCard", () => {
       name: /synthetic product alpha unavailable/iu,
     });
     expect(unavailable).toBeDisabled();
-    expect(unavailable).toHaveTextContent("Currently unavailable");
+    expect(unavailable).toHaveTextContent("Ordering not open");
+    expect(unavailable).toHaveAttribute("title", "Ordering not open");
     expect(within(article).queryByText(/-\d+%/u)).toBeNull();
   });
 
@@ -218,15 +219,16 @@ describe("CatalogListingCard", () => {
     );
 
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
-    expect(within(article).getByText("Price unavailable")).toBeVisible();
+    expect(within(article).getByText("Price unavailable", { selector: "p" })).toBeVisible();
     expect(within(article).queryByText("$0.00")).toBeNull();
     expect(within(article).queryByText("-30%")).toBeNull();
     expect(within(article).queryByText(/save/iu)).toBeNull();
-    expect(
-      within(article).getByRole("button", {
-        name: /synthetic product alpha unavailable/iu,
-      }),
-    ).toBeDisabled();
+    const unavailable = within(article).getByRole("button", {
+      name: /synthetic product alpha unavailable/iu,
+    });
+    expect(unavailable).toBeDisabled();
+    expect(unavailable).toHaveTextContent("Price unavailable");
+    expect(unavailable).toHaveAttribute("title", "Price unavailable");
   });
 
   it("shows explicit zero-dollar sale layout only in a local cart preview", () => {

@@ -252,7 +252,7 @@ export function SiteFooter({
           <p className="mt-8 border-t border-canvas/20 pt-6 text-sm leading-6 text-canvas/70">
             © {currentYear} {siteName}
           </p>
-          {/* HTTPS certificate validation and HSTS verified 2026-09-06.
+          {/* The release checklist verifies this origin with verify:production-https.
               This describes the linked production origin, not a certification. */}
           <a href="https://propeptiq.com" className={footerLinkClassName}
             aria-label="SSL secured connection to propeptiq.com">

@@ -23,7 +23,7 @@ async function seedLegacyCart(page: Page, nonempty: boolean) {
 async function selectCanonicalVariant(page: Page) {
   await page.goto("/catalog/items/tirzepatide");
   await expect(page.getByRole("heading", { name: "Tirzepatide", exact: true })).toBeVisible();
-  await page.locator(`input[type="radio"][value="${tr30VariantId}"]`).check();
+  await page.locator(`input[type="radio"][value="${tr30VariantId}"]`).locator("..").click();
   await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("$41.99");
 }
 
@@ -57,7 +57,7 @@ test("empty legacy cart allows canonical addition that survives a full reload", 
   await seedLegacyCart(page, false);
   await selectCanonicalVariant(page);
   await expect(page.getByRole("link", { name: "Review cart" })).toHaveCount(0);
-  await page.getByRole("button", { name: "2 bottles", exact: true }).click();
+  await page.getByRole("combobox", { name: "Quantity", exact: true }).selectOption("2");
   await page.getByRole("button", { name: "Add Tirzepatide to cart" }).click();
   await expect(page.getByRole("status", { name: "Cart updates" })).toHaveText("Cart updated. Tirzepatide, 30mg: 2 units in cart.");
   await expect(page.getByRole("link", { name: "Cart, 2 items" })).toBeVisible();
@@ -68,7 +68,7 @@ test("empty legacy cart allows canonical addition that survives a full reload", 
 test("nonempty legacy cart rejects additions until explicit acknowledgement then persists the exact variant", async ({ page }) => {
   const legacy = await seedLegacyCart(page, true);
   await selectCanonicalVariant(page);
-  const purchase = page.getByRole("status", { name: "Purchase summary" });
+  const purchase = page.locator(".purchase-summary");
   const reviewSavedCart = purchase.getByRole("link", { name: "Review cart" });
   await expect(purchase.getByText("Your saved cart needs to be refreshed. Clear it before adding this item.")).toBeVisible();
   await expect(reviewSavedCart).toBeVisible();

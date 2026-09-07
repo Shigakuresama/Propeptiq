@@ -181,6 +181,58 @@ describe("public rewards page", () => {
     expect(document.body).not.toHaveTextContent(publicRewardFactPattern);
   });
 
+  it.each(["anonymous", "unverified", "verified"] as const)
+  ("withholds benefits, status claims, and %s account actions without current rewards terms", async (identityState) => {
+    getRequestIdentityMock.mockResolvedValueOnce({
+      environment: { AUTH_MODE: "test" },
+      identity: identityState === "anonymous" ? null : {
+        clerkUserId: "synthetic-rewards-user",
+        primaryEmail: "researcher@example.test",
+        emailVerifiedAt: identityState === "verified" ? "2026-08-30T00:00:00.000Z" : null,
+        mfaConfigured: false,
+        secondFactorCompleted: false,
+      },
+      principal: null,
+      localDriver: null,
+    });
+    getPublicGrowthProjectionMock.mockResolvedValue({
+      status: "active",
+      projection: {
+        loyalty: {
+          status: "active",
+          pointsPerDollar: 7,
+          redemptionMinorPerPoint: 2,
+          minimumRedemptionPoints: 900,
+          maximumRedemptionBasisPoints: 1_500,
+          expiresAfterDays: null,
+        },
+        referral: {
+          status: "active",
+          attributionDays: 19,
+          referredDiscountBasisPoints: 725,
+          referredDiscountCapMinor: 1_800,
+          referrerPointsPerDollar: 4,
+          referrerRewardCapPoints: 1_700,
+        },
+        affiliate: null,
+        terms: { rewards: null, partner: { version: 3 } },
+      },
+    });
+
+    render(await RewardsPage());
+
+    expect(screen.getByText("Rewards are not currently available.")).toBeVisible();
+    expect(screen.getByRole("complementary", { name: "Rewards policy status" })).toHaveAttribute("data-status", "inactive");
+    expect(screen.queryByText("Program terms available")).toBeNull();
+    expect(screen.queryByRole("list", { name: "Available programs" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Earn points" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Research referrals" })).toBeNull();
+    for (const name of ["Create account", "Verify account", "View your rewards", "Read current rewards terms"]) {
+      expect(screen.queryByRole("link", { name })).toBeNull();
+    }
+    expect(document.body).not.toHaveTextContent(publicRewardFactPattern);
+  });
+
   it("does not offer account creation when managed authentication is disabled", async () => {
     getRequestIdentityMock.mockResolvedValueOnce({
       environment: { AUTH_MODE: "disabled" },

@@ -1,8 +1,10 @@
 # Storefront redesign report — 2026-09-06
 
 Branch: **feat/storefront-redesign-contact**, isolated from origin/main at **baa1fe6**.
-No deployment, production database migration, merchant setting change, charge, or
-provider email was performed.
+The implementation and review evidence is recorded below. Release status and the
+production verification are tracked in [PR #42](https://github.com/Shigakuresama/Propeptiq/pull/42).
+No production database migration, merchant setting change, charge, or provider
+email was performed as part of these checks.
 
 ## Result
 
@@ -135,16 +137,27 @@ a guarantee or its explanatory interaction.
 
 ## Verification results
 
-- npm test: **3,649 passed**, zero failures.
+- npm test: **3,657 passed**, zero failures after review corrections.
 - npm run build: **passed**, including TypeScript and authentication-proxy verification.
 - npm run verify:production-artifacts: **passed**, 1,267 files scanned, zero forbidden matches.
 - npm run db:check: **passed**.
 - npm run verify:workspace-boundary: **passed**.
 - npm run lint and npm run typecheck: **passed**.
-- npm run test:integration: stalled before producing test results using both default
-  and visible reporters; task-owned runs stopped for diagnosis. A full run with the thread pool also stalled before results; root cause is unconfirmed. Focused integration runs with --pool=threads --maxWorkers=1 passed: 25 existing commerce schema tests and 3 new contact journal tests, each applying the full migration chain to disposable PGlite. The full suite remains unverified.
+- npm run test:integration: **555 passed, 3 guarded skips, zero failures**, using
+  the normal script/default process pool in 628.46 seconds. The earlier apparently
+  stalled runs were diagnosed as quiet buffered output during the serial PGlite
+  suite. Two stale schema allowlists were corrected to include the contact table
+  and request hash; no harness change or live database operation was needed.
 - npm run test:e2e -- tests/e2e/storefront-redesign.spec.ts: **12 passed**.
   Final follow-up: 2/2 motion/contact checks passed, including finite animation completion; 1/1 repeated 1440px geometry/accessibility check passed while capturing final viewport images.
+- Expanded existing browser coverage: **100 scenarios passed** across the public
+  storefront, motion, narrow product layout, mobile purchase bar and legacy cart
+  suites, executed in targeted batches after migration to the redesigned controls.
+- HSTS parser: **4 tests with 29 header fixtures passed** using
+  `node --test scripts/hsts-header.test.mjs`; live production HTTPS verification
+  passed with HTTP 200 and HSTS max-age=63072000.
+- The production performance benchmark was not rerun; 34 existing performance
+  harness policy tests passed. No new production performance numbers are claimed.
 - Final read-only code review: all three actionable contact findings fixed and
   re-reviewed; no remaining actionable finding in the scoped re-review.
 - No formatter script exists; lint and git diff whitespace checks are used.
@@ -164,7 +177,8 @@ used as proof of animation.
 
 ## Screenshot evidence
 
-Local evidence is retained in .codex-evidence/redesign and excluded from Git.
+Selected evidence is committed under docs/design/evidence/storefront-redesign;
+additional local evidence is retained in .codex-evidence/redesign and excluded from Git.
 Before images are from production; after images are local test renders, not a release.
 Any synthetic program values in test screenshots come from the existing isolated
 test driver and are not production claims.
@@ -193,4 +207,27 @@ and removed the now-unused caption layout rules.
 Validation: 85 focused unit tests passed across six files; type checking and scoped
 lint passed. Mobile (375px) and desktop (1440px) browser geometry/accessibility
 checks passed across home, product, rewards and contact. Narrow source review found
-no introduced defect. This follow-up has not been deployed.
+no introduced defect. This follow-up is included in PR #42.
+
+## Pull-request review corrections
+
+Contact controls remain disabled while a request is pending so new edits cannot
+be discarded by an earlier response. Settled feedback and field errors clear on
+later edits, and invalid fields regain focus after controls are enabled. Rewards
+benefits and actions require current rewards terms. Disabled purchase controls now
+show the actual server-derived availability reason. These corrections have direct
+regression coverage; the broader contact, commerce and rewards run passed 452 tests.
+
+The expanded existing browser suites were updated for the intended single-image,
+native amount/quantity controls. Their geometry assertions caught two layout
+defects: desktop product columns now reserve enough clearance for the centered
+search control, and decorative header motion stays inside the home link even at
+195px. The HTTPS footer check is now a repeatable release command documented for
+before and after each production release.
+
+Three review suggestions were declined after checking their premises. TRENDING
+PRODUCTS is the owner's requested editorial section and is labeled accordingly;
+it makes no sales-ranking claim. The feature-card focus affordance supplies the
+requested keyboard equivalent of its hover treatment. Contact rate limits remain
+ahead of journal reservation to bound every request; an accepted replay within
+the allowed request window returns the stored result without sending again.

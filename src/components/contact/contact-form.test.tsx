@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { ContactForm } from "@/components/contact/contact-form";
@@ -39,6 +40,54 @@ describe("ContactForm", () => {
     expect(email).toHaveAttribute("aria-describedby", "contact-email-error");
     expect(screen.getByRole("alert")).toHaveAttribute("id", "contact-email-error");
     expect(email).toHaveFocus();
+    fetchMock.mockRestore();
+  });
+
+  it.each([
+    { status: "ACCEPTED" },
+    { status: "UNAVAILABLE" },
+    { status: "INVALID", field: "email" },
+  ] as const)("clears settled $status feedback when the visitor edits the form", async (result) => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: result.status === "ACCEPTED",
+      json: async () => result,
+    } as Response);
+    render(<ContactForm />);
+    fill();
+    fireEvent.submit(screen.getByRole("button").closest("form")!);
+    await screen.findByRole(result.status === "ACCEPTED" ? "status" : "alert");
+
+    const email = screen.getByLabelText("Email");
+    fireEvent.change(email, { target: { value: "updated@example.test" } });
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(email).toHaveAttribute("aria-invalid", "false");
+    expect(email).not.toHaveAttribute("aria-describedby");
+    fetchMock.mockRestore();
+  });
+
+  it.each(["ACCEPTED", "UNAVAILABLE"] as const)
+  ("prevents edits during delivery and enables fields again after %s", async (status) => {
+    const user = userEvent.setup();
+    let resolve!: (response: Response) => void;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>((done) => { resolve = done; }));
+    render(<ContactForm />);
+    fill();
+    const form = screen.getByRole("button").closest("form")!;
+    const message = screen.getByLabelText("Message");
+    const controls = form.querySelectorAll("input, textarea");
+
+    fireEvent.submit(form);
+    for (const control of controls) expect(control).toBeDisabled();
+    await user.type(message, " Additional unsent details");
+    expect(message).toHaveValue("Hello");
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { message: string };
+    expect(payload.message).toBe("Hello");
+
+    resolve({ ok: status === "ACCEPTED", json: async () => ({ status }) } as Response);
+    await screen.findByRole(status === "ACCEPTED" ? "status" : "alert");
+    for (const control of controls) expect(control).toBeEnabled();
+    expect(message).toHaveValue(status === "ACCEPTED" ? "" : "Hello");
     fetchMock.mockRestore();
   });
 

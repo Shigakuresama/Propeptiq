@@ -61,7 +61,7 @@ export function CatalogListingCard({ product, priority = false, pricing, heading
         <div className="catalog-card-action">
           {product.kind === "canonical" && selected ? (
             <AddToCartButton variantId={selected.id} productName={product.name} variantLabel={selected.label}
-              canAdd={canAdd} disabledReason="Currently unavailable" className="w-full min-h-11" />
+              canAdd={canAdd} disabledReason={publicVariantPurchaseLabel(presentation?.purchaseState ?? "unavailable")} className="w-full min-h-11" />
           ) : null}
         </div>
         <Link aria-label={`View catalog item: ${product.name}`} className="record-link mt-2 inline-flex min-h-11 items-center justify-center text-sm" href={href}>View product</Link>

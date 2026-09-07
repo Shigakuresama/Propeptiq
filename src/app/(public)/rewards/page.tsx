@@ -23,7 +23,9 @@ export default async function RewardsPage() {
     getPublicGrowthProjection(),
     getRequestIdentity().catch(() => null),
   ]);
-  const projection = result.status === "active" ? result.projection : null;
+  const projection = result.status === "active" && result.projection.terms.rewards
+    ? result.projection
+    : null;
   const loyalty = projection?.loyalty?.status === "active" ? projection.loyalty : null;
   const referral = projection?.referral?.status === "active" ? projection.referral : null;
   const available = loyalty !== null || referral !== null;

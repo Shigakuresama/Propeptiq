@@ -125,20 +125,26 @@ describe("ProductPurchasePanel", () => {
   });
 
   it.each([
-    testPublicVariant({ availability: "unavailable", checkoutReady: false }),
-    testPublicVariant({ priceStatus: "pending", baseUnitMinor: null, checkoutReady: false }),
-    testPublicVariant({ priceStatus: "pending", baseUnitMinor: 0, availability: "preview_only", checkoutReady: false }),
-    testPublicVariant({ baseUnitMinor: 0, checkoutReady: false }),
-  ])("prevents unsafe production purchasing: %j", (variant) => {
+    [testPublicVariant({ availability: "unavailable", checkoutReady: false }), "Unavailable"],
+    [testPublicVariant({ priceStatus: "pending", baseUnitMinor: null, checkoutReady: false }), "Price unavailable"],
+    [testPublicVariant({ priceStatus: "pending", baseUnitMinor: 0, availability: "preview_only", checkoutReady: false }), "Price unavailable"],
+    [testPublicVariant({ baseUnitMinor: 0, checkoutReady: false }), "Price unavailable"],
+  ] as const)("prevents unsafe production purchasing: %j", (variant, reason) => {
     renderPanel(testCanonicalProduct([variant]), testPricingContext("production", [testWinter30]));
-    expect(screen.getByRole("button", { name: /unavailable/i })).toBeDisabled();
+    const unavailable = screen.getByRole("button", { name: /unavailable/i });
+    expect(unavailable).toBeDisabled();
+    expect(unavailable).toHaveTextContent(reason);
+    expect(unavailable).toHaveAttribute("title", reason);
     expect(summary()).not.toHaveTextContent(/\$|Save|WINTER30/);
     expect(screen.queryByRole("group", { name: "Bundle and save" })).toBeNull();
   });
 
   it("keeps missing checkout mapping closed and supplies a contact link", () => {
     renderPanel(testCanonicalProduct([testPublicVariant({ checkoutReady: false })]), testPricingContext("production"));
-    expect(screen.getByRole("button", { name: /unavailable/i })).toBeDisabled();
+    const unavailable = screen.getByRole("button", { name: /unavailable/i });
+    expect(unavailable).toBeDisabled();
+    expect(unavailable).toHaveTextContent("Ordering not open");
+    expect(unavailable).toHaveAttribute("title", "Ordering not open");
     expect(screen.getByText(/Ordering is not open/)).not.toHaveTextContent("save your selection");
     expect(screen.getByRole("link", { name: "Contact us" })).toHaveAttribute("href", "/contact");
     expect(document.body).not.toHaveTextContent("Checkout unavailable");

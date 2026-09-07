@@ -42,7 +42,7 @@ export function ProductPurchasePanel(props: ProductPurchasePanelProps) {
   const addToCartProps: ComponentProps<typeof AddToCartButton> = {
     variantId: selected?.id ?? null, quantity, productName: product.name,
     ...(selected ? { variantLabel: selected.label } : {}), canAdd,
-    disabledReason: selected ? "Currently unavailable" : "Choose an amount",
+    disabledReason: status,
   };
   return <section className="mt-6 space-y-5" aria-labelledby="purchase-heading">
     <h2 id="purchase-heading" tabIndex={-1} className="product-purchase-heading w-fit font-heading text-xl text-ink">Select your product</h2>

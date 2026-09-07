@@ -84,6 +84,13 @@ profile becomes `active`.
 
 ## Promotion and migration
 
+Run `npm run verify:production-https` before and after every production release.
+It verifies the exact `https://propeptiq.com` origin linked by the SSL SECURED
+footer treatment: the default TLS certificate/hostname checks, a successful HEAD
+response without redirects, and a positive HSTS max-age. A failed check blocks
+release sign-off until the endpoint is repaired or the unsupported indicator is
+removed. This check is separate from the offline build and database checks.
+
 Use reviewed commits, protected production deployment, environment-specific secrets, guarded ordered migrations, and a pre-deploy backup/restore plan. This repository currently exposes `db:generate` and `db:check` for source consistency only; it does **not** provide or authorize a Preview or Production migration-apply command. A future migration apply requires a separately reviewed command, exact target proof, backup/recovery evidence, and post-apply reconciliation. Never infer a passed integration, applied migration, external decision, or live behavior from local lint/tests.
 
 The compatible Better Auth 1.6.23 runtime cutover does not migrate identity

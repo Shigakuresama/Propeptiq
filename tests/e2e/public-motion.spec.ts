@@ -111,7 +111,7 @@ async function closeWithEscape(page: Page, dialog: Locator, trigger: Locator) {
 
 test.describe.configure({ mode: "serial" });
 
-test("all four public sheets opt into the shared drawer motion and restore focus", async ({ page }) => {
+test("public sheets restore focus and native card amounts retain keyboard control", async ({ page }) => {
   await page.setViewportSize({ width: 768, height: 900 });
   await page.goto("/catalog");
 
@@ -136,24 +136,24 @@ test("all four public sheets opt into the shared drawer motion and restore focus
   await expect(cart.getByRole("heading", { name: "Your cart is empty." })).toBeVisible();
   await closeWithEscape(page, cart, cartTrigger);
 
-  const quickAddTrigger = page.getByRole("button", { name: /choose a variant/iu }).first();
-  await quickAddTrigger.click();
-  const quickAdd = page.getByRole("dialog", { name: /Choose a variant for/iu });
-  await expectPublicSheetMotion(page, quickAdd);
-  const enabledVariants = quickAdd.getByRole("radio").and(page.locator(":not(:disabled)"));
-  expect(await enabledVariants.count()).toBeGreaterThan(1);
-  await enabledVariants.nth(1).check();
+  const amount = page.getByRole("combobox", { name: "Tirzepatide amount" });
+  await expect(amount.getByRole("option")).toHaveCount(9);
+  await amount.focus();
+  await page.keyboard.press("ArrowDown");
+  await expect(amount).toBeFocused();
   expect(await page.evaluate(() => {
     const value = localStorage.getItem("propeptiq.cart.v2");
     return value === null ? [] : (JSON.parse(value) as { items: unknown[] }).items;
   })).toEqual([]);
-  await closeWithEscape(page, quickAdd, quickAddTrigger);
+  await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Add Tirzepatide to cart", exact: true })).toBeFocused();
+
 });
 
 test("public controls and catalog records keep restrained transitions without card movement", async ({ page }) => {
   await page.goto("/catalog");
   const representatives = [
-    page.getByRole("button", { name: /choose a variant/iu }).first(),
+    page.getByRole("button", { name: /^Add .+ to cart$/iu }).first(),
     page.getByRole("link", { name: /View catalog item:/iu }).first(),
     page.getByRole("searchbox", { name: "Search catalog" }),
     page.getByRole("combobox", { name: "Sort catalog" }),
@@ -186,7 +186,7 @@ test("public controls and catalog records keep restrained transitions without ca
   expect(after?.width).toBe(before?.width);
   expect(after?.height).toBe(before?.height);
 
-  const action = page.getByRole("button", { name: /choose a variant/iu }).first();
+  const action = page.getByRole("button", { name: /^Add .+ to cart$/iu }).first();
   await action.hover();
   await expect.poll(() => action.evaluate((element) => getComputedStyle(element).transform))
     .toBe("none");
@@ -201,17 +201,17 @@ test("public controls and catalog records keep restrained transitions without ca
   await expect(launcher).toHaveCSS("transform", "none");
   expect(Math.abs(laneCenter - (await page.evaluate(() => innerWidth / 2)))).toBeLessThanOrEqual(1);
 
-  const disabledAction = page.getByRole("button", { name: "Subscribe" });
+  await expect(page.getByRole("button", { name: "Subscribe" })).toHaveCount(0);
+  await page.goto("/catalog/items/tirzepatide");
+  const disabledAction = page.getByRole("button", { name: "Previous related products", exact: true });
   await expect(disabledAction).toBeDisabled();
   await disabledAction.scrollIntoViewIfNeeded();
-  const disabledBox = await disabledAction.boundingBox();
-  expect(disabledBox).not.toBeNull();
-  await page.mouse.move(
-    disabledBox!.x + disabledBox!.width / 2,
-    disabledBox!.y + disabledBox!.height / 2,
-  );
-  await expect(disabledAction).toBeDisabled();
-  await expect(disabledAction).toHaveCSS("transform", "none");
+  const disabledTransform = await disabledAction.evaluate((element) => getComputedStyle(element).transform);
+  const disabledBounds = (await disabledAction.boundingBox())!;
+  await page.mouse.move(disabledBounds.x + disabledBounds.width / 2, disabledBounds.y + disabledBounds.height / 2);
+  await expect(disabledAction).toHaveCSS("transform", disabledTransform);
+  expect(await disabledAction.boundingBox()).toEqual(disabledBounds);
+
 });
 
 test("an unmarked private account sheet retains the generic 200ms behavior", async ({ page }) => {
@@ -408,22 +408,16 @@ test("all public sheets remain contained with reachable controls at target width
     );
     await closeWithEscape(page, cart, cartTrigger);
 
-    const quickAddTrigger = page.getByRole("button", { name: /choose a variant/iu }).first();
-    await quickAddTrigger.click();
-    const quickAdd = page.getByRole("dialog", { name: /Choose a variant for/iu });
-    await expectDocumentContainment(page, quickAdd, `${width}px quick-add`);
-    await expectTargetAtLeast44(
-      quickAdd.getByRole("button", { name: "Close" }),
-      `${width}px quick-add close`,
-    );
-    const enabledVariants = quickAdd.getByRole("radio").and(page.locator(":not(:disabled)"));
-    expect(await enabledVariants.count()).toBeGreaterThan(1);
-    const selectedVariant = enabledVariants.nth(1);
-    await selectedVariant.check();
-    await expectTargetAtLeast44(
-      selectedVariant.locator("xpath=ancestor::label[1]"),
-      `${width}px quick-add associated radio label`,
-    );
-    await closeWithEscape(page, quickAdd, quickAddTrigger);
+    const amount = page.getByRole("combobox", { name: "Tirzepatide amount" });
+    await expectTargetAtLeast44(amount, `${width}px card amount`);
+    await amount.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect(amount).toBeFocused();
+    const bounds = (await amount.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "Add Tirzepatide to cart", exact: true })).toBeFocused();
+
   }
 });

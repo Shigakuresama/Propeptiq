@@ -18,6 +18,7 @@ import {
   checkoutAttemptReviewBindings,
   checkoutAttempts,
   coaDocuments,
+  contactEmailDeliveries,
   destinationPolicies,
   downstreamEffects,
   fulfillmentReleases,
@@ -101,6 +102,7 @@ const expectedLeanTables = [
   [downstreamEffects, "downstream_effects"],
   [adminAudit, "admin_audit"],
   [rateLimitWindows, "rate_limit_windows"],
+  [contactEmailDeliveries, "contact_email_deliveries"],
   // Growth tables from the rewards/referrals plan. Listed explicitly so this
   // guard still fails on an unintended table or a renamed one.
   [loyaltyPolicies, "loyalty_policies"],
@@ -1025,6 +1027,7 @@ describe("lean database migration", () => {
       { table_name: "checkout_attempts", column_name: "provider_request_hash" },
       { table_name: "checkout_attempts", column_name: "request_hash" },
       { table_name: "coa_documents", column_name: "evidence_hash" },
+      { table_name: "contact_email_deliveries", column_name: "request_hash" },
       { table_name: "growth_terms_acceptances", column_name: "content_hash" },
       { table_name: "growth_terms_versions", column_name: "content_hash" },
       { table_name: "provider_events", column_name: "payload_hash" },

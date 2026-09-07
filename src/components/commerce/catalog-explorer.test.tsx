@@ -320,8 +320,8 @@ describe("CatalogExplorer", () => {
     const checkoutCard = screen.getByRole("article", { name: "Checkout-unavailable Product" });
     expect(within(checkoutCard).getByText("$17.50")).toBeVisible();
     expect(within(checkoutCard).queryByText("Checkout unavailable")).toBeNull();
-    expect(within(screen.getByRole("article", { name: "Pending Product" })).getByText("Price unavailable")).toBeVisible();
-    expect(within(screen.getByRole("article", { name: "Unavailable Product" })).getByText("Unavailable")).toBeVisible();
+    expect(within(screen.getByRole("article", { name: "Pending Product" })).getByText("Price unavailable", { selector: "p" })).toBeVisible();
+    expect(within(screen.getByRole("article", { name: "Unavailable Product" })).getByText("Unavailable", { selector: "p" })).toBeVisible();
   });
 
   it("sorts and renders a local zero-preview row as an active zero price", () => {
