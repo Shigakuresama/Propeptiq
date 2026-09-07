@@ -17,17 +17,20 @@ try {
   await client.connect();
   await client.query("BEGIN");
   for (const variant of storefrontCatalogDecisionManifest.variants) {
-    if(variant.decisionStatus !== "approved_candidate") continue;
     const mappings = report.variants.filter((entry: {variantId:string}) => entry.variantId === variant.id);
     if(mappings.length !== 1) throw new Error("Mapping missing or duplicated");
     const mapping=mappings[0];
     if(typeof mapping.stripeProductId !== "string" || !mapping.stripeProductId.startsWith("prod_") ||
-      typeof mapping.stripePriceId !== "string" || !mapping.stripePriceId.startsWith("price_")) throw new Error("Invalid provider binding");
+      (variant.decisionStatus === "approved_candidate"
+        ? typeof mapping.stripePriceId !== "string" || !mapping.stripePriceId.startsWith("price_")
+        : mapping.stripePriceId !== null)) throw new Error("Invalid provider binding");
     const locked=await client.query(`SELECT v.sku,v.package_quantity,v.stripe_product_id,v.stripe_price_id
       FROM product_variants v WHERE v.id=$1::uuid FOR UPDATE`,[variant.id]);
     if(locked.rows.length!==1 || locked.rows[0].sku!==variant.sku || locked.rows[0].package_quantity!==variant.packageQuantity) throw new Error("Database catalog identity mismatch");
     const price=await client.query(`SELECT amount_minor,currency FROM product_prices WHERE variant_id=$1::uuid AND superseded_at IS NULL AND effective_at<=now() FOR UPDATE`,[variant.id]);
-    if(price.rows.length!==1 || Number(price.rows[0].amount_minor)!==variant.baseUnitMinor || price.rows[0].currency!=="USD") throw new Error("Database price mismatch");
+    if(variant.decisionStatus === "approved_candidate"
+      ? price.rows.length!==1 || Number(price.rows[0].amount_minor)!==variant.baseUnitMinor || price.rows[0].currency!=="USD"
+      : price.rows.length!==0) throw new Error("Database price mismatch");
     const previous=locked.rows[0];
     if((previous.stripe_product_id && previous.stripe_product_id!==mapping.stripeProductId) || (previous.stripe_price_id && previous.stripe_price_id!==mapping.stripePriceId)) throw new Error("Existing mapping conflict");
     if(previous.stripe_product_id===mapping.stripeProductId && previous.stripe_price_id===mapping.stripePriceId)continue;
