@@ -1508,6 +1508,10 @@ footer a,
   margin-top: 2rem;
 }
 
+.rewards-page .growth-navigation a {
+  text-transform: uppercase;
+}
+
 .rewards-action {
   display: inline-flex;
   min-height: 48px;
