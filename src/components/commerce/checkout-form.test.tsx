@@ -32,13 +32,25 @@ function preview({
   reasons = [],
   requiresAcknowledgement = false,
 }: PreviewOptions = {}): CartPreview {
-  const unitAmountMinor = quantity <= 3 ? 2328 : 2256;
-  const volumeDiscountBps = quantity <= 3 ? 300 : 600;
-  const items: CartPreviewItem[] = [{ variantId, quantity, available, purchaseState: available ? "ready" : "unavailable", name, variantLabel: "Synthetic 5 mg", sku: "SYNTHETIC-5MG", packageQuantity: 1, packageForm: "Research vial", baseUnitMinor: 2400, unitAmountMinor, lineSubtotalMinor: quantity * unitAmountMinor, lineSavingsMinor: quantity * (2400 - unitAmountMinor), effectiveDiscountBps: volumeDiscountBps, campaignDiscountBps: 0, volumeDiscountBps, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: quantity * (2400 - unitAmountMinor), appliedPromotions: [], currency: "USD" }];
+  // Synthetic one-bottle units with no campaign: only the volume tiers apply.
+  const baseUnitMinor = 2400;
+  const volumeDiscountBps = quantity >= 11 ? 3000 : quantity >= 4 ? 600 : quantity >= 2 ? 300 : 0;
+  const unitAmountMinor = Math.round(baseUnitMinor * (10_000 - volumeDiscountBps) / 10_000);
+  const lineSubtotalMinor = quantity * unitAmountMinor;
+  const lineVolumeSavingsMinor = quantity * (baseUnitMinor - unitAmountMinor);
+  const items: CartPreviewItem[] = [{
+    variantId, quantity, available, purchaseState: available ? "ready" : "unavailable",
+    name, variantLabel: "Synthetic 5 mg", sku: "SYNTHETIC-5MG",
+    packageQuantity: 1, packageForm: "Research vial",
+    baseUnitMinor, unitAmountMinor, lineSubtotalMinor, lineSavingsMinor: lineVolumeSavingsMinor,
+    effectiveDiscountBps: volumeDiscountBps, campaignDiscountBps: 0, volumeDiscountBps,
+    campaignUnitMinor: baseUnitMinor, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor,
+    appliedPromotions: [], currency: "USD",
+  }];
   return {
     schemaVersion: 2,
     items,
-    subtotalMinor: quantity * unitAmountMinor, currency: "USD", taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
+    subtotalMinor: lineSubtotalMinor, currency: "USD", taxMinor: null, shippingMinor: null, finalDiscountMinor: null,
     previewToken: createCartPreviewToken(items), requiresAcknowledgement, reasons,
   };
 }
@@ -306,16 +318,34 @@ describe("CheckoutForm", () => {
       url === "/api/checkout/quote" || url === "/api/checkout/sessions")).toEqual([]);
   });
 
-  it("shows changed variant preview copy without replacing the v2 cart identity", async () => {
+  it.each([
+    [1, 0, 2400, 2400, 0],
+    [3, 300, 2328, 6984, 216],
+    [4, 600, 2256, 9024, 576],
+    [10, 600, 2256, 22560, 1440],
+    [11, 3000, 1680, 18480, 7920],
+    [25, 3000, 1680, 42000, 18000],
+  ])("retains the coherent preview for %i bottles without replacing the v2 cart identity", async (quantity, volumeDiscountBps, unitAmountMinor, subtotalMinor, lineSavingsMinor) => {
     fetchMock.mockReset()
       .mockResolvedValueOnce(response(preview()))
-      .mockResolvedValueOnce(response(preview({ quantity: 3, requiresAcknowledgement: true, reasons: ["server_facts_changed"] })));
+      .mockResolvedValueOnce(response(preview({ quantity, requiresAcknowledgement: true, reasons: ["server_facts_changed"] })));
     const { rerender } = render(<CheckoutForm />);
     await screen.findByText("Your cart details are up to date.");
-    useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity: 3 }] });
+    useCart.mockReturnValue({ hydrated: true, items: [{ variantId, quantity }] });
     rerender(<CheckoutForm />);
     expect(await screen.findByRole("heading", { name: "Your cart has changed." })).toBeVisible();
     expect(screen.getByText("Your saved items and quantities have not been replaced. Review the latest price and availability before continuing.")).toBeVisible();
+    const retained = JSON.parse(window.sessionStorage.getItem(PREVIEW_PRESENTATION_STORAGE_KEY)!).preview;
+    expect(retained.subtotalMinor).toBe(subtotalMinor);
+    expect(retained.items).toEqual([expect.objectContaining({
+      variantId, quantity, unitAmountMinor, lineSubtotalMinor: subtotalMinor,
+      effectiveDiscountBps: volumeDiscountBps, campaignDiscountBps: 0, volumeDiscountBps,
+      campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0,
+      lineVolumeSavingsMinor: lineSavingsMinor, lineSavingsMinor,
+    })]);
+    expect(JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body))).toMatchObject({
+      items: [{ variantId, quantity }],
+    });
   });
 
   it("requires a fresh reviewed quote after the session boundary reports PRICE_CHANGED", async () => {

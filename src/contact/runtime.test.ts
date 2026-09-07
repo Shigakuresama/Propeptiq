@@ -31,6 +31,7 @@ const configured = {
   APP_ORIGIN: "https://preview.example.test",
   EMAIL_MODE: "test",
   DATABASE_MODE: "test",
+  TEST_DATABASE_URL: "postgresql://synthetic@database.example.test/contact_test",
   AUTH_EMAIL_DELIVERY_VERIFIED: "verified",
   RESEND_API_KEY: "re_synthetic",
   RESEND_FROM: "from@example.test",
@@ -49,11 +50,33 @@ describe("contact runtime configuration", () => {
   it("requires an explicit recipient and matching database/email modes", () => {
     expect(isContactRuntimeConfigured({ ...configured, CONTACT_SUPPORT_EMAIL: undefined })).toBe(false);
     expect(isContactRuntimeConfigured({ ...configured, DATABASE_MODE: "disabled" })).toBe(false);
+    expect(isContactRuntimeConfigured({ ...configured, EMAIL_MODE: "live" })).toBe(false);
+  });
+
+  it.each(["test", "live"] as const)("requires the %s mode database URL without falling back to the other mode", (mode) => {
+    // Both URLs are synthetic test doubles; no database service is contacted.
+    const environment: ServerEnv = {
+      ...configured,
+      DATABASE_MODE: mode,
+      EMAIL_MODE: mode,
+      DATABASE_URL: "postgresql://synthetic@database.example.test/contact_live",
+    };
+    const requiredUrl = mode === "test" ? "TEST_DATABASE_URL" : "DATABASE_URL";
+    expect(isContactRuntimeConfigured(environment)).toBe(true);
+    expect(isContactRuntimeConfigured({ ...environment, [requiredUrl]: undefined })).toBe(false);
+    expect(isContactRuntimeConfigured({ ...environment, [requiredUrl]: "" })).toBe(false);
   });
 });
 
 describe("production contact composition", () => {
-  const production = { ...configured, APP_ENV: "production", EMAIL_MODE: "live", DATABASE_MODE: "live" } as ServerEnv;
+  const production = {
+    ...configured,
+    APP_ENV: "production",
+    EMAIL_MODE: "live",
+    DATABASE_MODE: "live",
+    DATABASE_URL: "postgresql://synthetic@database.example.test/contact_live",
+    TEST_DATABASE_URL: undefined,
+  } as ServerEnv;
   const requestId = "10000000-0000-4000-8000-000000000001";
   const query = vi.fn(async () => ({ rows: [{ count: 1 }] }));
   const release = vi.fn();
@@ -105,6 +128,25 @@ describe("production contact composition", () => {
 
   it("keeps a key without a configured recipient unavailable without connecting or sending", async () => {
     services.readServerEnv.mockReturnValue({ ...production, CONTACT_SUPPORT_EMAIL: undefined });
+
+    const result = await createProductionContactPostHandler()(request());
+
+    expect(result.status).toBe(503);
+    expect(await result.json()).toEqual({ status: "UNAVAILABLE" });
+    expect(services.Resend).not.toHaveBeenCalled();
+    expect(services.connect).not.toHaveBeenCalled();
+    expect(services.send).not.toHaveBeenCalled();
+  });
+
+  it.each(["test", "live"] as const)("keeps incomplete %s database configuration unavailable without connecting or sending", async (mode) => {
+    services.readServerEnv.mockReturnValue({
+      ...production,
+      APP_ENV: mode === "test" ? "preview" : "production",
+      EMAIL_MODE: mode,
+      DATABASE_MODE: mode,
+      DATABASE_URL: mode === "test" ? production.DATABASE_URL : undefined,
+      TEST_DATABASE_URL: mode === "live" ? configured.TEST_DATABASE_URL : undefined,
+    });
 
     const result = await createProductionContactPostHandler()(request());
 

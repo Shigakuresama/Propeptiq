@@ -77,6 +77,9 @@ test("annotated storefront reflows and preserves usable footer, contact and rewa
   await expect(page.getByRole("listitem").filter({ hasText: /^PayPal$/ })).toBeVisible();
 
   await page.goto("/rewards");
+  const programLinks = page.getByRole("navigation", { name: "PROPEPTIQ programs" }).getByRole("link");
+  await expect(programLinks).toHaveCount(4);
+  for (const link of await programLinks.all()) await expect(link).toHaveCSS("text-transform", "uppercase");
   const actions = page.locator("main .rewards-action");
   expect(await actions.count()).toBeGreaterThan(0);
   for (const action of await actions.all()) await expect(action).toHaveCSS("text-transform", "uppercase");

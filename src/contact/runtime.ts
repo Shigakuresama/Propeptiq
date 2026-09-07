@@ -15,16 +15,18 @@ type ConfiguredContactEnv = ServerEnv & Readonly<{
   CONTACT_RATE_LIMIT_MAX: number;
   CONTACT_RATE_LIMIT_WINDOW_SECONDS: number;
   CONTACT_SUPPORT_EMAIL: string;
-  DATABASE_MODE: "test" | "live";
-  EMAIL_MODE: "test" | "live";
   RATE_LIMIT_SECRET: string;
   RESEND_API_KEY: string;
   RESEND_FROM: string;
-}>;
+}> & (
+  | Readonly<{ DATABASE_MODE: "test"; EMAIL_MODE: "test"; TEST_DATABASE_URL: string }>
+  | Readonly<{ DATABASE_MODE: "live"; EMAIL_MODE: "live"; DATABASE_URL: string }>
+);
 
 export function isContactRuntimeConfigured(env: ServerEnv): env is ConfiguredContactEnv {
   return env.EMAIL_MODE !== "disabled" && env.DATABASE_MODE !== "disabled" &&
     env.EMAIL_MODE === env.DATABASE_MODE && env.AUTH_EMAIL_DELIVERY_VERIFIED === "verified" &&
+    Boolean(env.DATABASE_MODE === "test" ? env.TEST_DATABASE_URL : env.DATABASE_URL) &&
     Boolean(env.APP_ORIGIN && env.RESEND_API_KEY && env.RESEND_FROM &&
       env.CONTACT_SUPPORT_EMAIL && env.RATE_LIMIT_SECRET &&
       env.CONTACT_RATE_LIMIT_MAX && env.CONTACT_RATE_LIMIT_WINDOW_SECONDS);
