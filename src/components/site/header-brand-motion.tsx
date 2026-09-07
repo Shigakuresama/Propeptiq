@@ -73,15 +73,17 @@ export function HeaderBrandMotion({ children }: { children: ReactNode }) {
         focusable="false"
         viewBox="0 0 240 64"
       >
-        <g fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8">
-          <path d="M8 43 38 18l33 24 33-26 34 27 35-25 58 24" />
-          <path d="M22 52 55 31l33 22 33-24 34 21 34-22 39 18" opacity="0.7" />
-          <path d="m38 18 17 13m16 11 17 11m16-37 17 13m17 14 17 7m18-32 16 10" opacity="0.65" />
+        <g className="header-brand-motion__bonds" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8">
+          <path pathLength="1" d="M8 43 38 18l33 24 33-26 34 27 35-25 58 24" />
+          <path pathLength="1" d="M22 52 55 31l33 22 33-24 34 21 34-22 39 18" opacity="0.7" />
+          <path pathLength="1" d="m38 18 17 13m16 11 17 11m16-37 17 13m17 14 17 7m18-32 16 10" opacity="0.65" />
+        </g>
+        <g fill="none" stroke="currentColor" strokeWidth="1">
           <circle cx="38" cy="18" r="7" opacity="0.4" />
           <circle cx="104" cy="16" r="8" opacity="0.4" />
           <circle cx="173" cy="18" r="7" opacity="0.4" />
         </g>
-        <g fill="currentColor">
+        <g className="header-brand-motion__nodes" fill="currentColor">
           <circle cx="8" cy="43" r="2.4" />
           <circle cx="38" cy="18" r="3.8" />
           <circle cx="71" cy="42" r="2.6" />

@@ -5,7 +5,7 @@ import { Check, Copy } from "lucide-react";
 
 import type { Winter30PromotionView } from "@/catalog/storefront-promotion-banner";
 
-type CopyState = "idle" | "copied" | "unavailable";
+type CopyState = "idle" | "copying" | "copied" | "unavailable";
 
 export function PromotionBar({
   promotion,
@@ -20,6 +20,7 @@ export function PromotionBar({
   const copyPromotionCode = async (): Promise<void> => {
     const attempt = latestCopyAttempt.current + 1;
     latestCopyAttempt.current = attempt;
+    setCopyState("copying");
     try {
       if (typeof navigator.clipboard?.writeText !== "function") {
         throw new Error("Clipboard unavailable");
@@ -31,7 +32,9 @@ export function PromotionBar({
     }
   };
 
-  const status = copyState === "copied"
+  const status = copyState === "copying"
+    ? `Copying ${promotion.code}…`
+    : copyState === "copied"
     ? `${promotion.code} copied`
     : copyState === "unavailable"
       ? `${promotion.code} could not be copied.`
@@ -40,7 +43,7 @@ export function PromotionBar({
   return (
     <aside
       aria-label="Promotion"
-      className="promotion-banner bg-promotion px-4 py-3 text-center text-promotion-foreground"
+      className="promotion-banner bg-promotion px-4 py-2 text-center text-promotion-foreground"
     >
       <div className="promotion-banner__molecules" aria-hidden="true">
         <svg className="promotion-banner__molecule promotion-banner__molecule--first" focusable="false" viewBox="0 0 180 100" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -60,6 +63,7 @@ export function PromotionBar({
       <p className="promotion-code-pill text-sm font-semibold tracking-[0.08em]">{promotion.code}</p>
       <button
         type="button"
+        aria-busy={copyState === "copying"}
         aria-label={`${copyState === "copied" ? "Copied" : "Copy"} promotion code ${promotion.code}`}
         className="promotion-banner__copy inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-2 py-1 text-promotion-foreground transition-colors duration-200 hover:bg-promotion-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-promotion-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-promotion"
         onClick={copyPromotionCode}
@@ -68,7 +72,7 @@ export function PromotionBar({
       </button>
       <p className="promotion-banner__automatic text-[0.65rem] font-semibold tracking-wider">APPLIED AUTOMATICALLY</p>
       </div>
-      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+      <p role="status" aria-live="polite" aria-atomic="true" className="promotion-banner__copy-status">
         {status}
       </p>
     </aside>

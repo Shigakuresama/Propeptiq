@@ -172,6 +172,20 @@ describe("CatalogItemDetail", () => {
     expect(screen.getByText("Separate approved legal notice.")).toBeVisible();
   });
 
+  it("keeps the price beneath the name accurate as bundle quantity changes", () => {
+    render(<CatalogItemDetail calculator={null} product={testCanonicalProduct()} pricing={testPricingContext("production", [testWinter30])} relatedProducts={[]} />);
+    const heading = screen.getByRole("heading", { level: 1 });
+    const unitPrice = document.querySelector(".catalog-detail-price")!;
+    expect(heading.nextElementSibling).toBe(unitPrice);
+    expect(unitPrice.querySelector("strong")).toHaveTextContent("$7.00");
+    expect(unitPrice).toHaveTextContent("Save $3.00 per unit");
+    fireEvent.click(screen.getByRole("button", { name: "Select visual quantity 4" }));
+    expect(unitPrice.querySelector("strong")).toHaveTextContent("$6.58");
+    expect(unitPrice).toHaveTextContent("Save $3.42 per unit");
+    fireEvent.click(screen.getByRole("button", { name: "Invalidate visual quantity" }));
+    expect(document.querySelector(".catalog-detail-price")).toBeNull();
+  });
+
   it("keeps the hero variant label and sale badge synchronized with purchase selection", () => {
     const priced = testPublicVariant({
       id: "priced-variant",

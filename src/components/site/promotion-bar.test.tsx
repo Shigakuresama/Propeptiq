@@ -124,10 +124,33 @@ describe("PromotionBar", () => {
     expect(statuses[0]).toHaveAttribute("aria-live", "polite");
     expect(statuses[0]).toHaveAttribute("aria-atomic", "true");
     expect(statuses[0]).toHaveTextContent("WINTER30 copied");
-    expect(statuses[0]).toHaveClass("sr-only");
+    expect(statuses[0]).not.toHaveClass("sr-only");
+    expect(statuses[0]).toBeVisible();
     expect(button.querySelector("svg")).toHaveClass("lucide-check");
     expect(button).toHaveAccessibleName("Copied promotion code WINTER30");
     expect(button).toHaveFocus();
+  });
+
+  it("shows pending feedback immediately and confirms visibly only after the clipboard succeeds", async () => {
+    const pending = deferred<void>();
+    setClipboard({ writeText: vi.fn(() => pending.promise) });
+    render(<PromotionBar promotion={winter30} />);
+    const button = screen.getByRole("button", { name: "Copy promotion code WINTER30" });
+    const status = screen.getByRole("status");
+    expect(button).toHaveTextContent("");
+    fireEvent.click(button);
+    expect(status).toBeVisible();
+    expect(status).toHaveTextContent("Copying WINTER30…");
+    expect(status).not.toHaveTextContent("WINTER30 copied");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button.querySelector("svg")).toHaveClass("lucide-copy");
+
+    await act(async () => { pending.resolve(); await pending.promise; });
+    expect(status).toBeVisible();
+    expect(status).toHaveTextContent("WINTER30 copied");
+    expect(button).toHaveAttribute("aria-busy", "false");
+    expect(button.querySelector("svg")).toHaveClass("lucide-check");
+    expect(screen.getByText("APPLIED AUTOMATICALLY")).toBeVisible();
   });
 
   it("keeps clipboard failure safe and retryable without exposing the exception", async () => {
@@ -142,6 +165,7 @@ describe("PromotionBar", () => {
     await user.click(button);
 
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 could not be copied.");
+    expect(screen.getByRole("status")).toBeVisible();
     expect(screen.getByRole("status")).not.toHaveTextContent("WINTER30 copied");
     expect(screen.getByRole("status")).not.toHaveTextContent("private clipboard exception");
     expect(button.querySelector("svg")).toHaveClass("lucide-copy");
@@ -273,9 +297,6 @@ describe("PromotionBar", () => {
     const foreground = css.match(/--promotion-foreground:\s*(#[0-9a-f]{6});/iu)?.[1];
 
     expect(promotion).toBe("#105d59");
-    for (const stop of ["#103f3f", "#126b65", "#105653"]) {
-      expect(contrastRatio(stop, foreground!)).toBeGreaterThanOrEqual(4.5);
-    }
     expect(foreground).toBe("#ffffff");
     expect(css).toMatch(/--color-promotion:\s*var\(--promotion\);/u);
     expect(css).toMatch(/--color-promotion-foreground:\s*var\(--promotion-foreground\);/u);

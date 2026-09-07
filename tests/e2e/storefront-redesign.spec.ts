@@ -122,10 +122,8 @@ test("animations move, stop within five seconds and respect reduced motion", asy
   await page.waitForTimeout(300);
   const second = await field.evaluate(e => getComputedStyle(e).transform);
   expect(second).not.toBe(first);
-  const sweep1 = await page.locator(".promotion-banner").evaluate(e => getComputedStyle(e, "::before").backgroundPosition);
-  await page.waitForTimeout(300);
-  const sweep2 = await page.locator(".promotion-banner").evaluate(e => getComputedStyle(e, "::before").backgroundPosition);
-  expect(sweep2).not.toBe(sweep1);
+  expect(await page.locator(".promotion-banner").evaluate(e => getComputedStyle(e, "::before").animationName)).toBe("none");
+  await expect(page.locator(".promotion-banner__molecule").first()).toHaveCSS("animation-name", "none");
   await expect.poll(() => field.evaluate(e => e.getAnimations().every(a => a.playState === "finished")), { timeout: 6000 }).toBe(true);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await expect(field).toHaveCSS("animation-name", "none");

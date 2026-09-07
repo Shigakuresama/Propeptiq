@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import {
+  formatStorefrontMoney,
   resolvePublicVariantPrice,
   type PublicStorefrontPricingContext,
 } from "@/catalog/storefront-price-presentation";
@@ -95,6 +96,16 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
           >
             {product.name}
           </h1>
+          {visualPrice?.state === "priced" ? (
+            <div className="catalog-detail-price mt-3" aria-label="Selected unit price">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 tabular-nums">
+                <strong className="text-3xl font-semibold tracking-tight">{formatStorefrontMoney(visualPrice.price.effectiveUnitMinor)}</strong>
+                {visualPrice.price.lineSavingsMinor > 0 ? <del className="text-sm text-muted-ink">{formatStorefrontMoney(visualPrice.price.baseUnitMinor)}</del> : null}
+                <span className="text-xs text-muted-ink">{visualVariant?.label} · per unit</span>
+              </div>
+              {visualPrice.price.lineSavingsMinor > 0 ? <p className="mt-1 text-sm font-medium text-accent-readable">Save {formatStorefrontMoney(visualPrice.price.baseUnitMinor - visualPrice.price.effectiveUnitMinor)} per unit with current offers</p> : null}
+            </div>
+          ) : null}
           {canonical && product.description ? (
             <p
               className="mt-3 max-w-prose text-sm leading-6 text-muted-ink"
@@ -116,6 +127,11 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
         <div
           className="catalog-detail-image mt-4 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:mt-0"
         >
+          {/* Decorative bond motif; it does not depict this compound's molecular structure. */}
+          <svg aria-hidden="true" focusable="false" className="catalog-detail-signature" viewBox="0 0 160 28" fill="none">
+            <path d="M4 14h28l12-9 20 18 20-18 20 18 20-18 12 9h20" stroke="currentColor" strokeWidth="1" />
+            <g fill="currentColor"><circle cx="32" cy="14" r="2.5" /><circle cx="64" cy="23" r="2.5" /><circle cx="104" cy="23" r="2.5" /><circle cx="136" cy="14" r="2.5" /></g>
+          </svg>
           <CatalogProductVisual
             product={product}
             variantLabel={visualVariantLabel}

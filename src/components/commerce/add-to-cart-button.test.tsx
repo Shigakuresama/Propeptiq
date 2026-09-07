@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
-import { beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 
 const { addVariantMock, cartState } = vi.hoisted(() => ({
   addVariantMock: vi.fn(),
@@ -21,6 +21,8 @@ describe("AddToCartButton", () => {
     addVariantMock.mockReturnValue(true);
     cartState.legacyItemCount = null;
   });
+
+  afterEach(() => vi.useRealTimers());
 
   it("shows ordinary visible cart-reselection guidance and removes it when the cart authority clears the legacy state", async () => {
     const user = userEvent.setup();
@@ -90,7 +92,64 @@ describe("AddToCartButton", () => {
       variantLabel: "10 mg",
     });
     expect(onAdded).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button")).toHaveTextContent("Add to cart");
+    expect(screen.getByText("Added")).toBeVisible();
+    expect(screen.getByText("Add to cart")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("button")).toBeEnabled();
+  });
+
+  it("restarts brief confirmation for repeat adds and cleans up its timer on unmount", () => {
+    vi.useFakeTimers();
+    const onAdded = vi.fn();
+    const view = render(<AddToCartButton canAdd onAdded={onAdded} productName="Synthetic Product Alpha" variantId="variant-10mg" />);
+    const button = screen.getByRole("button", { name: "Add Synthetic Product Alpha to cart" });
+    fireEvent.click(button);
+    act(() => vi.advanceTimersByTime(1_500));
+    fireEvent.click(button);
+    expect(addVariantMock).toHaveBeenCalledTimes(2);
+    expect(onAdded).toHaveBeenCalledTimes(2);
+    act(() => vi.advanceTimersByTime(1_500));
+    expect(screen.getByText("Added")).toBeVisible();
+    act(() => vi.advanceTimersByTime(500));
+    expect(screen.queryByText("Added")).not.toBeInTheDocument();
+    expect(screen.getByText("Add to cart")).toBeVisible();
+    fireEvent.click(button);
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    { variantId: "variant-20mg" },
+    { quantity: 2 },
+    { canAdd: false },
+  ])("clears confirmation when the current selection changes %#", (change) => {
+    const props = { canAdd: true, productName: "Synthetic Product Alpha", quantity: 1, variantId: "variant-10mg" };
+    const view = render(<AddToCartButton {...props} />);
+    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getByText("Added")).toBeVisible();
+    view.rerender(<AddToCartButton {...props} {...change} />);
+    expect(screen.queryByText("Added")).not.toBeInTheDocument();
+    view.rerender(<AddToCartButton {...props} />);
+    expect(screen.queryByText("Added")).not.toBeInTheDocument();
+    expect(screen.getByText("Add to cart")).toBeVisible();
+  });
+
+  it("replaces earlier success with visible failure and keeps retry available", () => {
+    const onAdded = vi.fn();
+    addVariantMock.mockReturnValueOnce(true).mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const view = render(<AddToCartButton canAdd onAdded={onAdded} productName="Synthetic Product Alpha" variantId="variant-10mg" />);
+    const button = screen.getByRole("button");
+    fireEvent.click(button);
+    expect(screen.getByText("Added")).toBeVisible();
+    fireEvent.click(button);
+    expect(screen.queryByText("Added")).not.toBeInTheDocument();
+    expect(screen.getByText("Not added")).toBeVisible();
+    expect(onAdded).toHaveBeenCalledOnce();
+    expect(button).toBeEnabled();
+    // The cart provider already announces its authoritative success or failure.
+    expect(view.container.querySelectorAll('[aria-live], [role="status"], [role="alert"]')).toHaveLength(0);
+    fireEvent.click(button);
+    expect(screen.getByText("Added")).toBeVisible();
+    expect(onAdded).toHaveBeenCalledTimes(2);
   });
 
   it("uses unified customer cart copy without changing the cart write", async () => {
