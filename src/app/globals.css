@@ -2021,6 +2021,7 @@ footer a {
 
 .public-layout main :is(a, button, input, summary, [tabindex]),
 .public-layout > footer :is(a, button, input, summary) {
+  scroll-margin-top: calc(var(--public-purchase-header-height, 8rem) + 1rem);
   scroll-margin-bottom: calc(var(--public-action-dock-reserved-height, 0px) + 1rem);
 }
 

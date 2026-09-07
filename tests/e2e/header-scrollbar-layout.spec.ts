@@ -30,6 +30,7 @@ function headerTargets(page: Page) {
     home: header.getByRole("link", { name: "PROPEPTIQ LABS home" }),
     menu: header.getByRole("button", { name: "Open navigation" }),
     row,
+    search: header.getByRole("button", { name: "Search PropeptIQ" }),
     signIn: header.getByRole("link", { name: "Sign in" }),
   };
 }
@@ -50,10 +51,11 @@ async function bounds(locator: Locator): Promise<Bounds> {
 
 async function readHeaderGeometry(page: Page) {
   const targets = headerTargets(page);
-  const [header, row, home, cart, signIn, menu] = await Promise.all([
+  const [header, row, home, search, cart, signIn, menu] = await Promise.all([
     bounds(targets.header),
     bounds(targets.row),
     bounds(targets.home),
+    bounds(targets.search),
     bounds(targets.cart),
     bounds(targets.signIn),
     bounds(targets.menu),
@@ -63,7 +65,7 @@ async function readHeaderGeometry(page: Page) {
     innerWidth: window.innerWidth,
     scrollWidth: document.documentElement.scrollWidth,
   }));
-  return { cart, document: documentGeometry, header, home, menu, row, signIn };
+  return { cart, document: documentGeometry, header, home, menu, row, search, signIn };
 }
 
 function expectInside(container: Bounds, target: Bounds, label: string) {
@@ -91,6 +93,7 @@ async function expectHeaderContained(page: Page, expectedWidth: number) {
   expectInside(clientBounds, geometry.row, `${expectedWidth}px header row in client`);
   for (const [label, target] of [
     ["home", geometry.home],
+    ["search", geometry.search],
     ["cart", geometry.cart],
     ["sign in", geometry.signIn],
     ["open navigation", geometry.menu],
@@ -131,7 +134,7 @@ test("305px available-width equivalent contains all header actions and keyboard 
   await expectCompactBrand(page);
 
   const targets = headerTargets(page);
-  const orderedTargets = [targets.home, targets.cart, targets.signIn, targets.menu] as const;
+  const orderedTargets = [targets.home, targets.search, targets.cart, targets.signIn, targets.menu] as const;
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     window.scrollTo(0, 0);

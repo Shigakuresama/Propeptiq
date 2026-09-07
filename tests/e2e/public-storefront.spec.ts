@@ -332,7 +332,7 @@ test("desktop search leaves the untouched BPC-157 gallery rectangles clear", asy
   await page.goto("/catalog/items/bpc-157");
   const geometry = await desktopGalleryGeometry(page, "BPC-157");
   await testInfo.attach("initial-bpc157-desktop-geometry", { body: JSON.stringify(geometry, null, 2), contentType: "application/json" });
-  expect((geometry.search.left + geometry.search.right) / 2).toBeCloseTo(720, 0);
+  await expectHeaderSearch(page);
   expect(geometry.collisions, `Untouched page-top rectangles: ${JSON.stringify(geometry)}`).toEqual([]);
   expect(rectanglesIntersect(geometry.gallery, geometry.search)).toBe(false);
   expect(rectanglesIntersect(geometry.purchaseColumn, geometry.search)).toBe(false);
@@ -749,7 +749,8 @@ test("site search ultra-narrow public header keeps every keyboard focus target i
   const headerTargets = headerRow.locator(
     "a[href]:visible, button:not([disabled]):visible",
   );
-  await expect(headerTargets).toHaveCount(4);
+  await expect(headerTargets).toHaveCount(5);
+  await expect(headerRow.getByRole("button", { name: "Search PropeptIQ" })).toHaveCount(1);
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     window.scrollTo(0, 0);
@@ -758,7 +759,7 @@ test("site search ultra-narrow public header keeps every keyboard focus target i
   await expect(page.getByRole("link", { name: "Skip to main content" }))
     .toBeFocused();
 
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < 5; index += 1) {
     await page.keyboard.press("Tab");
     const target = headerTargets.nth(index);
     await expect(target).toBeFocused();
@@ -770,12 +771,16 @@ test("site search ultra-narrow public header keeps every keyboard focus target i
       return {
         bottom: bounds.bottom,
         focusExtent,
+        height: bounds.height,
         label: element.getAttribute("aria-label") ?? element.textContent?.trim() ?? "",
         left: bounds.left,
         right: bounds.right,
         top: bounds.top,
+        width: bounds.width,
       };
     });
+    expect.soft(focusTarget.width, `${focusTarget.label} touch width`).toBeGreaterThanOrEqual(44);
+    expect.soft(focusTarget.height, `${focusTarget.label} touch height`).toBeGreaterThanOrEqual(44);
     expect.soft(
       focusTarget.left - focusTarget.focusExtent,
       `${focusTarget.label} left focus ring`,
@@ -961,10 +966,25 @@ test("header search stays operable and clear of the footer across the Chromium v
       .getByRole("link")
       .last();
     await expect(footerLink).toBeVisible();
+    // At the document end an earlier footer link may have scrolled behind the
+    // sticky header. Native focus must bring the actual target into clear view.
+    await footerLink.focus();
+    await expect(footerLink).toBeFocused();
+    await expect.poll(async () => {
+      const target = await clientRect(footerLink);
+      const header = await clientRect(page.locator("header.persistent-chrome"));
+      return target.top - header.bottom;
+    }, { message: `${width}px focused footer link clears the persistent header` }).toBeGreaterThanOrEqual(0);
+    expect((await clientRect(footerLink)).bottom).toBeLessThanOrEqual(page.viewportSize()!.height);
     expect(
       rectanglesIntersect(await clientRect(trigger), await clientRect(footerLink)),
-      `${width}px launcher/footer collision`,
+      `${width}px header search/focused footer collision`,
     ).toBe(false);
+    expect(await footerLink.evaluate((element) => {
+      const target = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(target.left + target.width / 2, target.top + target.height / 2);
+      return hit !== null && element.contains(hit);
+    }), `${width}px focused footer link receives pointer input`).toBe(true);
   }
 
   expect(requests).toHaveLength(0);

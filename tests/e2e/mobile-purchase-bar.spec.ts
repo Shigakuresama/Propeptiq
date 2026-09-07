@@ -227,7 +227,9 @@ test("invalid quantity disables both purchase actions and blur restores the last
   await expect(mobilePurchase(page)).toContainText("Enter a valid quantity");
   await expect(mobilePurchase(page).getByRole("button", { name: "Tirzepatide unavailable" })).toBeDisabled();
   expect(await page.evaluate((key) => window.localStorage.getItem(key), cartKey)).toBe(savedCartBefore);
-  await searchTrigger(page).focus();
+  // Exercise input blur without a separate header-focus scroll changing whether
+  // the inline summary has passed the viewport and the mobile row is visible.
+  await quantity.blur();
   await expect(quantity).toHaveValue("2");
   await expect(mobilePurchase(page)).toContainText("2 units");
   await expect(mobilePurchase(page)).toContainText("$81.46");
