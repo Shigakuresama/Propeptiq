@@ -40,7 +40,7 @@ export type ApprovedHomepageContent = Readonly<{
 }>;
 
 const APPROVAL_NOTE =
-  "Owner-authorized neutral placeholder copy; replace with final business-reviewed content.";
+  "Descriptions of implemented catalog and cart behavior, revised under the owner storefront-redesign request of 2026-09-06.";
 
 function homepageRecord(
   id: string,
@@ -67,28 +67,28 @@ const homepageContentRecords: readonly ControlledContentRecord[] = Object.freeze
     "owner-supplied-records",
     "why_choose",
     "Catalog clarity",
-    "Find product names and configurations in a consistent, easy-to-compare format.",
+    "Compare product names and amounts in a consistent, readable format.",
     ["/catalog"],
   ),
   homepageRecord(
     "clear-purchase-states",
     "why_choose",
     "Clear availability",
-    "See current pricing and purchase availability alongside each listed configuration.",
+    "See current pricing and availability alongside each listed amount.",
     ["/catalog", "/cart"],
   ),
   homepageRecord(
     "exact-variant-identity",
     "why_choose",
-    "Exact variant selection",
-    "Choose the configuration you need, with each variant kept separate in your cart.",
+    "Your choice, clearly labeled",
+    "Choose your product amount and keep different selections separate in your cart.",
     ["/cart"],
   ),
   homepageRecord(
     "visible-quantity-pricing",
     "why_choose",
     "Transparent quantity pricing",
-    "Compare per-bottle prices, discounts, savings, and totals as you adjust quantity.",
+    "Compare unit prices, discounts, savings, and totals as you adjust quantity.",
     ["/catalog"],
   ),
   homepageRecord(
@@ -109,21 +109,21 @@ const homepageContentRecords: readonly ControlledContentRecord[] = Object.freeze
     "what-is-in-the-catalog",
     "faq",
     "What information is in the catalog?",
-    "Explore product names, configurations, and product details. Each listing shows pricing and availability when available.",
+    "Explore product names, amounts, and details. Each listing shows current pricing and availability.",
     ["/catalog"],
   ),
   homepageRecord(
     "how-does-search-work",
     "faq",
     "How does storefront search work?",
-    "Search by product name, category, SKU, or configuration. Use the search button at the bottom of the page to find products, pages, and FAQs.",
+    "Search by product name, category, SKU, or amount. Use the search button at the bottom of the page to find products, pages, and FAQs.",
     ["/catalog"],
   ),
   homepageRecord(
     "how-do-i-choose-a-configuration",
     "faq",
-    "How do I choose a product configuration?",
-    "Select the configuration you want before adding a product to your cart. Different variants stay on separate cart lines.",
+    "How do I choose a product amount?",
+    "Choose an amount before adding a product to your cart. Different amounts stay on separate cart lines.",
     ["/catalog", "/cart"],
   ),
   homepageRecord(
@@ -136,22 +136,22 @@ const homepageContentRecords: readonly ControlledContentRecord[] = Object.freeze
   homepageRecord(
     "does-the-cart-combine-configurations",
     "faq",
-    "Does the cart combine different configurations?",
-    "Repeated additions of the same exact variant merge and recalculate its quantity tier. Different variants remain separate and do not combine toward a tier.",
+    "Does the cart combine different amounts?",
+    "Adding the same product and amount again combines its quantity and updates its discount. Different amounts stay separate and do not combine for quantity discounts.",
     ["/cart"],
   ),
   homepageRecord(
     "what-does-pricing-coming-soon-mean",
     "faq",
-    "What does Pricing coming soon mean?",
-    "Pricing is not available for that variant yet. You can still view its details, but it cannot be purchased.",
+    "What does Price unavailable mean?",
+    "There is no current price for that amount. You can view its details and contact us for availability, but it cannot be purchased.",
     ["/catalog"],
   ),
   homepageRecord(
     "what-happens-before-checkout",
     "faq",
     "How are prices and availability confirmed?",
-    "Prices, discounts, and availability are checked again before checkout. If anything changes, you will be asked to review your cart. Checkout remains unavailable while ordering is not enabled.",
+    "Prices, discounts, and availability are checked again before checkout. If anything changes, you will be asked to review your cart. Orders can only be placed when purchasing is open.",
     ["/cart", "/research-use-policy"],
   ),
   homepageRecord(

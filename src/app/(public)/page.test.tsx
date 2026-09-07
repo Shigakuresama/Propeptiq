@@ -85,23 +85,16 @@ describe("public home growth projection", () => {
     expect(screen.getByRole("region", { name: "Active rewards program" })).toHaveTextContent(
       "Earn 2 points per eligible dollar",
     );
-    const explainer = screen.getByRole("region", { name: "Growth programs" });
-    expect(explainer).toHaveTextContent("Earn points");
-    expect(explainer).toHaveTextContent("Refer a lab");
-    expect(explainer).toHaveTextContent("Share a research set");
-    expect(within(explainer).getByRole("link", { name: "Earn points" })).toHaveAttribute("href", "/rewards");
-    expect(within(explainer).getByRole("link", { name: "Refer a lab" })).toHaveAttribute("href", "/rewards#referrals");
-    expect(within(explainer).getByRole("link", { name: "Share a research set" })).toHaveAttribute("href", "/research-sets");
-    expect(explainer).not.toHaveTextContent(/\$|%|save|member|limited|hurry|popular/iu);
+    const programs = screen.getByRole("region", { name: "PROPEPTIQ programs" });
+    expect(within(programs).getByRole("link", { name: "Rewards" })).toHaveAttribute("href", "/rewards");
+    expect(within(programs).getByRole("link", { name: "Referrals" })).toHaveAttribute("href", "/rewards#referrals");
+    expect(within(programs).queryByRole("link", { name: "Partner program" })).toBeNull();
+    expect(programs).not.toHaveTextContent(/\$|%|save|member|limited|hurry|popular/iu);
     expect(getPublicStorefrontViewMock).toHaveBeenCalledTimes(1);
     expect(getPublicStorefrontContentViewMock).toHaveBeenCalledTimes(1);
-    const highlights = screen.getByText("Catalog highlights");
-    const quality = screen.getByRole("heading", { name: "Follow the record, not an unsupported claim." });
-    expect(highlights.compareDocumentPosition(explainer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(explainer.compareDocumentPosition(quality) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  });
+    expect(screen.getByText("Catalog highlights").compareDocumentPosition(programs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();  });
 
-  it("keeps related programs discoverable with explicit inactive states", async () => {
+  it("promotes only active programs", async () => {
     getPublicStorefrontViewMock.mockResolvedValue({
       catalog: { products: [], displayConfigurationCount: 103 },
       pricing,
@@ -118,12 +111,10 @@ describe("public home growth projection", () => {
 
     render(await HomePage());
 
-    const explainer = screen.getByRole("region", { name: "Growth programs" });
-    expect(within(explainer).getByRole("link", { name: "Earn points" })).toBeVisible();
-    expect(within(explainer).getByRole("link", { name: "Refer a lab" })).toBeVisible();
-    expect(within(explainer).getAllByText("Not currently open")).toHaveLength(2);
-    expect(within(explainer).getByText("Eligible account required")).toBeVisible();
-  });
+    const programs = screen.getByRole("region", { name: "PROPEPTIQ programs" });
+    expect(within(programs).getByRole("link", { name: "Rewards" })).toBeVisible();
+    expect(within(programs).getAllByRole("link")).toHaveLength(1);
+    expect(programs).not.toHaveTextContent("Not currently open");  });
 
   it.each(["inactive", "read_error"] as const)(
     "omits the program strip when the growth read is %s",
@@ -137,10 +128,7 @@ describe("public home growth projection", () => {
       render(await HomePage());
 
       expect(screen.queryByRole("region", { name: "Active rewards program" })).toBeNull();
-      const programs = within(screen.getByRole("region", { name: "Growth programs" }));
-      expect(programs.getAllByText(status === "read_error" ? "Program details temporarily unavailable" : "Not currently open")).toHaveLength(3);
-      expect(programs.getByText("Eligible account required")).toBeVisible();
-      if (status === "read_error") expect(programs.queryByText("Not currently open")).toBeNull();
+      expect(screen.queryByRole("region", { name: "PROPEPTIQ programs" })).toBeNull();
     },
   );
 
@@ -214,7 +202,7 @@ describe("public home growth projection", () => {
 
       render(await HomePage());
 
-      expect(screen.getByText("Current catalog")).toBeVisible();
+      expect(screen.getByText("Catalog highlights")).toBeVisible();
       expect(screen.getByRole("region", { name: "Active rewards program" })).toBeVisible();
       expect(screen.queryByRole("heading", { name: "Why choose PropeptIQ" })).toBeNull();
       expect(screen.queryByRole("heading", { name: "Frequently Asked Questions" })).toBeNull();

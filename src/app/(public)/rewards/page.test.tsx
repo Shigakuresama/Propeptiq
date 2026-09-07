@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -52,7 +52,7 @@ describe("public rewards page", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Rewards" })).toBeVisible();
     expect(screen.getByText("Rewards are not currently available.")).toBeVisible();
-    expect(screen.getByText("No active public record")).toBeVisible();
+    expect(screen.getByText("Enrollment is not open")).toBeVisible();
     expect(screen.getByRole("complementary", { name: "Rewards policy status" })).toHaveAttribute(
       "data-status",
       "inactive",
@@ -91,9 +91,9 @@ describe("public rewards page", () => {
 
     expect(screen.getByText("Earn 7 points per eligible dollar.")).toBeVisible();
     expect(screen.getByText("19-day referral attribution window.")).toBeVisible();
-    expect(screen.getByText("Active policy signal")).toBeVisible();
-    expect(screen.getByText("Loyalty record active")).toBeVisible();
-    expect(screen.getByText("Referral record active")).toBeVisible();
+    expect(screen.getByText("Program terms available")).toBeVisible();
+    expect(screen.getByRole("list", { name: "Available programs" }).querySelector("li")).toBeVisible();
+    expect(within(screen.getByRole("list", { name: "Available programs" })).getByText("Referrals")).toBeVisible();
     expect(screen.getByRole("link", { name: "Create account" })).toHaveAttribute(
       "href",
       "/sign-up?returnTo=%2Faccount%2Frewards",
@@ -127,8 +127,8 @@ describe("public rewards page", () => {
 
     render(await RewardsPage());
 
-    expect(screen.getByText("Loyalty record active")).toBeVisible();
-    expect(screen.queryByText("Referral record active")).toBeNull();
+    expect(screen.getByRole("list", { name: "Available programs" }).querySelector("li")).toBeVisible();
+    expect(within(screen.getByRole("list", { name: "Available programs" })).queryByText("Referrals")).toBeNull();
     expect(screen.getByRole("heading", { name: "Earn points" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Research referrals" })).toBeNull();
     expect(screen.getByRole("link", { name: "Create account" })).toBeVisible();
@@ -154,8 +154,8 @@ describe("public rewards page", () => {
 
     render(await RewardsPage());
 
-    expect(screen.getByText("Referral record active")).toBeVisible();
-    expect(screen.queryByText("Loyalty record active")).toBeNull();
+    expect(within(screen.getByRole("list", { name: "Available programs" })).getByText("Referrals")).toBeVisible();
+    expect(within(screen.getByRole("list", { name: "Available programs" })).queryByText("Rewards")).toBeNull();
     expect(screen.getByRole("heading", { name: "Research referrals" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Earn points" })).toBeNull();
     expect(screen.getByRole("link", { name: "Create account" })).toBeVisible();
@@ -175,7 +175,7 @@ describe("public rewards page", () => {
     render(await RewardsPage());
 
     expect(screen.getByText("Rewards are not currently available.")).toBeVisible();
-    expect(screen.getByText("No active public record")).toBeVisible();
+    expect(screen.getByText("Enrollment is not open")).toBeVisible();
     expect(screen.queryByRole("link", { name: "Create account" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Read current rewards terms" })).toBeNull();
     expect(document.body).not.toHaveTextContent(publicRewardFactPattern);
@@ -327,7 +327,7 @@ describe("public rewards page", () => {
     expect(
       screen.getByText("Rewards are temporarily unavailable. Please try again."),
     ).toBeVisible();
-    expect(screen.getByText("Public record unavailable")).toBeVisible();
+    expect(screen.getByText("Program information unavailable")).toBeVisible();
     expect(screen.getByRole("complementary", { name: "Rewards policy status" })).toHaveAttribute(
       "data-status",
       "read_error",

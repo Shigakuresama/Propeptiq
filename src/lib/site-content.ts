@@ -251,7 +251,7 @@ export const footerNavigationGroups: readonly FooterNavigationGroup[] =
       { label: "Quality Records", href: "/quality-records" },
       { label: "Order tracking", href: "/account/orders" },
       { label: "FAQ", href: "/#faq" },
-      { label: "Contact or Support", href: null },
+      { label: "Contact us", href: "/contact" },
       { label: "Shipping information", href: null },
     ]),
     footerNavigationGroup("Legal", [

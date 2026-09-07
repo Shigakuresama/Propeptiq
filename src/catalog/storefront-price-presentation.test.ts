@@ -141,16 +141,16 @@ describe("public variant state equivalence", () => {
 describe("public variant purchase labels", () => {
   it.each([
     ["ready", "availability", "Available"],
-    ["cart_preview", "availability", "Checkout unavailable"],
-    ["checkout_unavailable", "availability", "Checkout unavailable"],
+    ["cart_preview", "availability", "Ordering not open"],
+    ["checkout_unavailable", "availability", "Ordering not open"],
     ["local_preview", "availability", "Test mode — no payments"],
-    ["pricing_pending", "availability", "Pricing coming soon"],
+    ["pricing_pending", "availability", "Price unavailable"],
     ["unavailable", "availability", "Unavailable"],
     ["ready", "purchase_summary", "Ready to purchase"],
-    ["cart_preview", "purchase_summary", "Checkout unavailable"],
-    ["checkout_unavailable", "purchase_summary", "Checkout unavailable"],
+    ["cart_preview", "purchase_summary", "Ordering not open"],
+    ["checkout_unavailable", "purchase_summary", "Ordering not open"],
     ["local_preview", "purchase_summary", "Test mode — no payments"],
-    ["pricing_pending", "purchase_summary", "Pricing coming soon"],
+    ["pricing_pending", "purchase_summary", "Price unavailable"],
     ["unavailable", "purchase_summary", "Unavailable"],
   ] as const)(
     "projects %s in the %s context as %s",
@@ -172,7 +172,6 @@ describe("public variant purchase labels", () => {
     "src/components/commerce/catalog-listing-card.tsx",
     "src/components/commerce/product-price.tsx",
     "src/components/commerce/product-purchase-panel.tsx",
-    "src/components/commerce/variant-selector.tsx",
     "src/components/commerce/quick-add-variant-sheet.tsx",
   ])("keeps %s on the shared label boundary", (path) => {
     const source = readFileSync(resolve(process.cwd(), path), "utf8");

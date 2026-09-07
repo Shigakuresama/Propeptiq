@@ -196,7 +196,7 @@ describe("QuickAddVariantSheet", () => {
     });
     expect(unavailableRadio).toBeDisabled();
     expect(pendingRadio).toBeDisabled();
-    expect(within(dialog).getAllByText("Pricing coming soon").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("Price unavailable").length).toBeGreaterThan(0);
     expect(within(dialog).queryByText("$25.00")).toBeNull();
     expect(within(dialog).getByText("$10.00").tagName).toBe("DEL");
     expect(within(dialog).getByText("$7.00").tagName).toBe("STRONG");
@@ -251,7 +251,7 @@ describe("QuickAddVariantSheet", () => {
     if (zeroRow === null) return;
     expect(zero).toBeChecked();
     expect(zero).toBeDisabled();
-    expect(within(zeroRow).getByText("Pricing coming soon")).toBeVisible();
+    expect(within(zeroRow).getByText("Price unavailable")).toBeVisible();
     expect(within(zeroRow).queryByText("$0.00")).toBeNull();
     expect(within(zeroRow).queryByText("-30%")).toBeNull();
     const confirm = within(dialog).getByRole("button", {
@@ -259,8 +259,8 @@ describe("QuickAddVariantSheet", () => {
     });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAccessibleName("Synthetic Product Alpha unavailable");
-    expect(confirm).toHaveTextContent("Pricing coming soon.");
-    expect(confirm).toHaveAttribute("title", "Pricing coming soon.");
+    expect(confirm).toHaveTextContent("Price unavailable.");
+    expect(confirm).toHaveAttribute("title", "Price unavailable.");
     expect(confirm).not.toHaveTextContent(/cart testing/iu);
   });
 
@@ -292,7 +292,7 @@ describe("QuickAddVariantSheet", () => {
     expect(confirm).toHaveTextContent("This variant cannot be added to the cart.");
     expect(confirm).toHaveAttribute("title", "This variant cannot be added to the cart.");
     expect(confirm).not.toHaveTextContent(/cart testing/iu);
-    expect(within(screen.getByRole("dialog")).getByText("Checkout unavailable")).toBeVisible();
+    expect(within(screen.getByRole("dialog")).getByText("Ordering not open")).toBeVisible();
   });
 
   it("adds the exact positive preview-only Production variant while pending stays disabled", async () => {
@@ -312,7 +312,7 @@ describe("QuickAddVariantSheet", () => {
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("radio", { name: /30 mg/iu })).toBeEnabled();
     expect(within(dialog).getByRole("radio", { name: /Pending/iu })).toBeDisabled();
-    expect(within(dialog).getByText("Checkout unavailable")).toBeVisible();
+    expect(within(dialog).getByText("Ordering not open")).toBeVisible();
     const confirm = within(dialog).getByRole("button", {
       name: "Add Synthetic Product Alpha to cart",
     });

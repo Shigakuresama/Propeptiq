@@ -51,3 +51,6 @@ next-env.d.ts
 /.superpowers/
 /.worktrees/
 .neon
+
+# Local visual and validation evidence
+/.codex-evidence/

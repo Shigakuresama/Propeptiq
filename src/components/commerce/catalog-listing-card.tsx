@@ -1,158 +1,70 @@
 "use client";
 
-import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-
-import type {
-  PublicStorefrontProduct,
-} from "@/catalog/storefront-public";
-import {
-  canAddPublicVariant,
-  publicVariantPurchaseLabel,
-  resolvePublicVariantPrice,
-  selectCardVariant,
-  summarizePublicStorefrontVariants,
-  type PublicStorefrontPricingContext,
-} from "@/catalog/storefront-price-presentation";
-
+import { useId, useState } from "react";
+import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
+import { canAddPublicVariant, publicVariantPurchaseLabel, resolvePublicVariantPrice, selectCardVariant, type PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 import { AddToCartButton } from "./add-to-cart-button";
 import { ProductPrice } from "./product-price";
-import { VariantAddTrigger } from "./quick-add-variant-sheet";
 import { CatalogProductVisual } from "./catalog-product-visual";
+import { VariantDropdown } from "./variant-dropdown";
 
-const CARD_VARIANT_LIMIT = 3;
-
-export function CatalogListingCard({
-  product,
-  priority = false,
-  pricing,
-  headingLevel = 2,
-}: {
+export function CatalogListingCard({ product, priority = false, pricing, headingLevel = 2 }: {
   product: PublicStorefrontProduct;
   priority?: boolean;
   pricing: PublicStorefrontPricingContext;
   headingLevel?: 2 | 3;
 }) {
-  const selectedVariant =
-    product.kind === "canonical"
-      ? selectCardVariant({ product, pricing })
-      : null;
-  const selectedPresentation =
-    product.kind === "canonical" && selectedVariant
-      ? resolvePublicVariantPrice({
-          variant: selectedVariant,
-          productId: product.id,
-          quantity: 1,
-          pricing,
-        })
-      : null;
-  const selectedCanAdd = selectedVariant
-    ? canAddPublicVariant(selectedVariant, pricing.mode)
-    : false;
-  const headingId = `catalog-${product.slug}`;
-  const visibleConfigurations = product.displayConfigurations.slice(
-    0,
-    CARD_VARIANT_LIMIT,
-  );
-  const remainingConfigurationCount =
-    product.displayConfigurations.length - visibleConfigurations.length;
+  const instanceId = useId();
+  const [selection, setSelection] = useState<{ slug: string; variantId: string } | null>(null);
+  const defaultVariant = product.kind === "canonical" ? selectCardVariant({ product, pricing }) : null;
+  const selected = product.kind === "canonical"
+    ? product.variants.find((variant) => selection?.slug === product.slug && variant.id === selection.variantId) ?? defaultVariant
+    : null;
+  const presentation = product.kind === "canonical" && selected
+    ? resolvePublicVariantPrice({ variant: selected, productId: product.id, quantity: 1, pricing })
+    : null;
+  const canAdd = selected ? canAddPublicVariant(selected, pricing.mode) : false;
+  const headingId = `catalog-${product.slug}-${instanceId}`;
   const Heading = headingLevel === 3 ? "h3" : "h2";
-  const discountPercent = selectedPresentation?.state === "priced"
-    ? selectedPresentation.price.effectiveDiscountBps / 100
-    : undefined;
+  const href = `/catalog/items/${product.slug}` as const;
 
   return (
-    <article
-      aria-labelledby={headingId}
-      className="catalog-listing-card group record-card flex h-full flex-col overflow-hidden p-0"
-    >
-      <div className="catalog-image-frame">
-        <CatalogProductVisual
-          product={product}
-          priority={priority}
-          variantLabel={selectedVariant?.label}
-          discountPercent={discountPercent}
-        />
-      </div>
-
-      <div className="flex flex-1 flex-col p-6 sm:p-7">
-        <Heading id={headingId} className="font-heading text-3xl leading-tight text-ink">
-          {product.name}
+    <article aria-labelledby={headingId} className="catalog-listing-card group record-card flex h-full min-w-0 flex-col p-0">
+      <Link className="catalog-image-frame block rounded-t-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        href={href} aria-label={`View ${product.name} image and details`}>
+        <CatalogProductVisual product={product} priority={priority} variantLabel={selected?.label} variantId={selected?.id}
+          discountPercent={presentation?.state === "priced" && presentation.price.lineSavingsMinor > 0 ? presentation.price.effectiveDiscountBps / 100 : undefined} />
+      </Link>
+      <div className="flex min-w-0 flex-1 flex-col p-5">
+        <Heading id={headingId} className="catalog-card-title font-heading text-ink">
+          <Link className="rounded-sm hover:text-accent-readable focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring" href={href}>{product.name}</Link>
         </Heading>
-
-        <ul
-          aria-label={`${product.name} catalog variants`}
-          className="mt-5 space-y-2 border-t border-border pt-4"
-        >
-          {visibleConfigurations.map((configuration) => (
-            <li
-              className="grid grid-cols-[minmax(3.75rem,auto)_1fr] gap-3 text-sm leading-6 text-muted-ink"
-              key={`${product.slug}-${configuration.displayCode}-${configuration.packageForm}`}
-            >
-              <span className="font-semibold tabular-nums text-ink">
-                {configuration.displayCode}
-              </span>
-              <span>{configuration.packageForm}</span>
-            </li>
-          ))}
-        </ul>
-        {remainingConfigurationCount > 0 ? (
-          <p className="mt-3 text-sm font-medium text-muted-ink">
-            +{remainingConfigurationCount} more catalog variant
-            {remainingConfigurationCount === 1 ? "" : "s"}
-          </p>
-        ) : null}
-
-        {product.kind === "canonical" && selectedVariant && selectedPresentation ? (
-          <div className="mt-5">
-            <p className="text-sm text-muted-ink">
-              {`${summarizePublicStorefrontVariants([selectedVariant])} · ${selectedVariant.packageQuantity} bottle${selectedVariant.packageQuantity === 1 ? "" : "s"}`}
-            </p>
-            <ProductPrice
-              productId={product.id}
-              variant={selectedVariant}
-              pricing={pricing}
-              showPurchaseStatus={false}
-            />
-            {selectedPresentation.purchaseState !== "checkout_unavailable" &&
-              selectedPresentation.purchaseState !== "cart_preview" ? (
-              <p className="mt-2 text-sm text-muted-ink">
-                {publicVariantPurchaseLabel(selectedPresentation.purchaseState)}
-              </p>
-            ) : null}
-          </div>
-        ) : (
-          <p className="mt-5 text-sm font-medium text-muted-ink">Pricing coming soon</p>
-        )}
-
         {product.kind === "canonical" ? (
-          product.variants.length > 1 ? (
-            <VariantAddTrigger product={product} pricing={pricing} />
-          ) : selectedVariant ? (
-            <AddToCartButton
-              variantId={selectedVariant.id}
-              productName={product.name}
-              variantLabel={selectedVariant.label}
-              canAdd={selectedCanAdd}
-              disabledReason="This product is currently unavailable."
-              className="mt-5 min-h-11"
-              {...(selectedCanAdd &&
-              selectedPresentation?.purchaseState !== "ready"
-                ? { presentation: "preview" as const }
-                : {})}
-            />
-          ) : null
-        ) : null}
-
-        <Link
-          aria-label={`View catalog item: ${product.name}`}
-          className="record-link mt-auto inline-flex min-h-11 items-center gap-2 pt-7"
-          href={`/catalog/items/${product.slug}`}
-          transitionTypes={["nav-forward"]}
-        >
-          View catalog item
-          <ArrowRight aria-hidden="true" className="size-4" />
-        </Link>
+          <VariantDropdown product={product} selectedVariantId={selected?.id ?? null} pricing={pricing}
+            onChange={(variantId) => setSelection({ slug: product.slug, variantId })} />
+        ) : (
+          <p className="mt-4 text-sm leading-6 text-muted-ink">
+            {product.displayConfigurations.map((option) => option.packageForm).join(" · ")}
+          </p>
+        )}
+        <div className="catalog-card-price mt-auto pt-5" aria-live="polite" aria-atomic="true">
+          {product.kind === "canonical" && selected && presentation ? (
+            <>
+              <p className="mb-2 text-sm text-muted-ink">{selected.label} · {selected.packageQuantity} bottle{selected.packageQuantity === 1 ? "" : "s"} per unit</p>
+              <ProductPrice productId={product.id} variant={selected} pricing={pricing} showPurchaseStatus={false} />
+              {presentation.state !== "priced" ? <p className="text-sm text-muted-ink">{publicVariantPurchaseLabel(presentation.purchaseState)}</p> : null}
+              {presentation.purchaseState === "local_preview" ? <p className="text-xs text-muted-ink">{publicVariantPurchaseLabel(presentation.purchaseState)}</p> : null}
+            </>
+          ) : <p className="text-sm text-muted-ink">Pricing not available</p>}
+        </div>
+        <div className="catalog-card-action">
+          {product.kind === "canonical" && selected ? (
+            <AddToCartButton variantId={selected.id} productName={product.name} variantLabel={selected.label}
+              canAdd={canAdd} disabledReason="Currently unavailable" className="w-full min-h-11" />
+          ) : null}
+        </div>
+        <Link aria-label={`View catalog item: ${product.name}`} className="record-link mt-2 inline-flex min-h-11 items-center justify-center text-sm" href={href}>View product</Link>
       </div>
     </article>
   );

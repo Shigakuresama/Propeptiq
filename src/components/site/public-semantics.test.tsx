@@ -42,32 +42,30 @@ const pricing = testPricingContext("test");
 describe("public storefront semantics", () => {
   it("uses the shared decorative science field without adding accessible noise", () => {
     const { container } = render(
-      <PublicHome
+      <CartProvider><PublicHome
         products={publicCatalog.products}
         variantCount={publicCatalog.displayConfigurationCount}
         pricing={pricing}
-      />,
+      /></CartProvider>,
     );
 
-    const field = container.querySelector("[data-science-field='lattice']");
-    expect(field).toHaveAttribute("aria-hidden", "true");
-    expect(field?.querySelector("svg")).toHaveAttribute("focusable", "false");
+    expect(container.querySelector("[data-science-field='lattice']")).toBeNull();
     expect(container.querySelector("[data-motion-sequence='home-hero']")).not.toBeNull();
   });
 
   it("presents the owner-supplied catalog without inventing commerce facts", () => {
     render(
-      <PublicHome
+      <CartProvider><PublicHome
         products={publicCatalog.products}
         variantCount={publicCatalog.displayConfigurationCount}
         pricing={pricing}
-      />,
+      /></CartProvider>,
     );
 
     expect(
       screen.getByRole("heading", {
         level: 1,
-        name: "Research materials, documented with greater clarity.",
+        name: "Research materials,documented with clarity.",
       }),
     ).toBeInTheDocument();
     expect(screen.getByText("For legitimate laboratory and research use only.")).toBeVisible();
@@ -80,12 +78,10 @@ describe("public storefront semantics", () => {
       "href",
       "/cart",
     );
-    expect(screen.getByText("56")).toBeVisible();
-    const catalogExplanation = screen.getByText(
-      /Explore 103 product configurations\. Select a product to see its details, pricing, and availability\./iu,
-    );
-    expect(catalogExplanation).toHaveClass("text-base");
-    expect(catalogExplanation).not.toHaveClass("text-sm");
+    expect(screen.getAllByText("56 products in the catalog").length).toBeGreaterThan(0);
+    expect(screen.getByText("Trending products")).toBeVisible();
+    expect(screen.getByText("Editorial selection")).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/103 product configurations/iu);
     expect(
       screen.getByRole("heading", { level: 3, name: "Tirzepatide" }),
     ).toBeVisible();
@@ -97,12 +93,10 @@ describe("public storefront semantics", () => {
   });
 
   it("keeps the catalog path visible when no approved products are available", () => {
-    render(<PublicHome products={[]} variantCount={0} pricing={pricing} />);
+    render(<CartProvider><PublicHome products={[]} variantCount={0} pricing={pricing} /></CartProvider>);
 
-    expect(screen.getByText("00")).toBeVisible();
-    expect(
-      screen.getByText("No products are available to view right now. Please check back later."),
-    ).toBeVisible();
+    expect(screen.queryByText("00")).not.toBeInTheDocument();
+    expect(screen.queryByText(/No products are available/iu)).not.toBeInTheDocument();
     expect(screen.getByText("Catalog highlights")).toBeVisible();
     expect(screen.getByRole("list", { name: "Catalog highlights" })).toBeEmptyDOMElement();
     expect(
@@ -135,38 +129,28 @@ describe("public storefront semantics", () => {
 
   it("keeps conditional programs and editorial movements in the required module order", () => {
     render(
-      <PublicHome
+      <CartProvider><PublicHome
         loyaltyPolicy={activeLoyaltyPolicy}
         products={publicCatalog.products}
         variantCount={publicCatalog.displayConfigurationCount}
         pricing={pricing}
-      />,
+      /></CartProvider>,
     );
 
     expect(screen.getAllByRole("region", { name: "Active rewards program" })).toHaveLength(1);
-    const rail = screen.getByRole("list", { name: "Evidence relationship" });
     const highlights = screen.getByText("Catalog highlights");
-    const programs = screen.getByRole("heading", {
-      level: 2,
-      name: "More ways to connect.",
-    });
-    const documentation = screen.getByRole("heading", {
-      level: 2,
-      name: "Follow the record, not an unsupported claim.",
-    });
+    const programs = screen.getByRole("region", { name: "PROPEPTIQ programs" });
     const restriction = screen.getByRole("heading", {
       level: 2,
-      name: "A clear boundary, integrated into the catalog.",
+      name: "Research use only",
     });
     const closingAction = screen.getByRole("heading", {
       level: 2,
       name: "Explore the full research catalog.",
     });
 
-    expect(rail.compareDocumentPosition(highlights) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(highlights.compareDocumentPosition(programs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(programs.compareDocumentPosition(documentation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(documentation.compareDocumentPosition(restriction) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(programs.compareDocumentPosition(restriction) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(restriction.compareDocumentPosition(closingAction) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -182,7 +166,7 @@ describe("public storefront semantics", () => {
     );
 
     expect(
-      screen.getAllByText(/Select a product to see its details, pricing, and availability\./iu).length,
+      screen.getAllByText(/Explore products from the PropeptIQ research catalog\./iu).length,
     ).toBeGreaterThan(0);
     expect(
       screen.queryByText(

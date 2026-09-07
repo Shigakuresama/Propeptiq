@@ -2,6 +2,7 @@ import Image from "next/image";
 import type { CSSProperties } from "react";
 
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
+import { resolveProductPhotograph } from "@/catalog/product-photography";
 import {
   catalogIllustrationDisclosure,
   getCatalogProductVisualScenes,
@@ -16,6 +17,7 @@ export const catalogProductVisualPresentation = Object.freeze({
 export function CatalogProductVisual({
   product,
   variantLabel,
+  variantId,
   priority = false,
   sizes = "(min-width: 1280px) 28vw, (min-width: 768px) 45vw, calc(100vw - 2rem)",
   discountPercent,
@@ -23,6 +25,7 @@ export function CatalogProductVisual({
 }: {
   product: PublicStorefrontProduct;
   variantLabel?: string | undefined;
+  variantId?: string | undefined;
   priority?: boolean | undefined;
   sizes?: string | undefined;
   discountPercent?: number | undefined;
@@ -30,25 +33,26 @@ export function CatalogProductVisual({
 }) {
   const resolvedScene = scene ?? getCatalogProductVisualScenes(product.slug)[0]!;
   const identity = getCatalogVisualIdentity(product.slug, product.category);
+  const photograph = resolveProductPhotograph(product.slug, variantId);
   return (
     <div
       className="catalog-product-visual"
       data-category={product.category}
       data-product-slug={product.slug}
-      data-visual-presentation={catalogProductVisualPresentation.mode}
+      data-visual-presentation={photograph ? "product_photograph" : catalogProductVisualPresentation.mode}
       data-visual-accent={identity.accent}
       data-visual-signature={identity.recordMark}
       style={{ "--catalog-rule-position": `${identity.rulePositionPercent}%` } as CSSProperties}
     >
       <div className="catalog-product-visual__image">
         <Image
-          alt={`${resolvedScene.sceneLabel} AI-generated catalog illustration for ${product.name}`}
+          alt={photograph?.alt ?? `${resolvedScene.sceneLabel} AI-generated catalog illustration for ${product.name}`}
           className="catalog-product-visual__base"
-          width={resolvedScene.width}
-          height={resolvedScene.height}
+          width={photograph?.width ?? resolvedScene.width}
+          height={photograph?.height ?? resolvedScene.height}
           {...(priority ? { preload: true } : { loading: "lazy" as const })}
           sizes={sizes}
-          src={resolvedScene.src}
+          src={photograph?.src ?? resolvedScene.src}
         />
       </div>
       <div className="catalog-product-visual__label">
@@ -59,7 +63,7 @@ export function CatalogProductVisual({
         ) : null}
         <span className="catalog-product-visual__notice">RESEARCH USE ONLY</span>
       </div>
-      <span className="catalog-image-disclosure">{catalogIllustrationDisclosure}</span>
+      {photograph ? null : <span className="catalog-image-disclosure">{catalogIllustrationDisclosure}</span>}
       {discountPercent && discountPercent > 0 ? (
         <span
           aria-label={`-${discountPercent}%`}

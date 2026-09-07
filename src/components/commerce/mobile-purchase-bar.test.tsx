@@ -25,7 +25,7 @@ function rect(top: number, height: number, width = 367): DOMRect {
 }
 
 function reportSummary(bottom: number, isIntersecting = false) {
-  const summary = screen.getByRole("status", { name: "Purchase summary" });
+  const summary = screen.getByRole("status", { name: "Purchase summary" }).closest<HTMLElement>(".purchase-summary")!;
   const observer = intersections.find((item) => item.observe.mock.calls.some(([target]) => target === summary));
   expect(observer, "the actual inline purchase summary must be observed").toBeDefined();
   act(() => observer!.callback([{
@@ -77,7 +77,7 @@ beforeEach(() => {
     if (this.classList.contains("mobile-purchase-bar")) return rect(600, rowHeight);
     if (this.classList.contains("public-action-dock")) return rect(736, 44);
     if (this.classList.contains("persistent-chrome")) return rect(0, 141);
-    if (this.getAttribute("aria-label") === "Purchase summary") return rect(summaryBottom - 200, 200);
+    if (this.classList.contains("purchase-summary")) return rect(summaryBottom - 200, 200);
     return rect(900, 200);
   });
 });
@@ -107,11 +107,11 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
 
   it.each([[1, "$7.00"], [2, "$14.00"], [3, "$21.00"], [4, "$28.00"], [9, "$63.00"], [10, "$70.00"], [11, "$77.00"], [25, "$175.00"]] as const)("mirrors exact quantity %s and its existing WINTER30 subtotal", async (quantity, subtotal) => {
     render(<Fixture />);
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: String(quantity) } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Quantity" }), { target: { value: String(quantity) } });
     const bar = await showBar();
     expect(bar).toHaveTextContent("Synthetic Product Alpha");
     expect(bar).toHaveTextContent("5 mg");
-    expect(bar).toHaveTextContent(`${quantity} bottle`);
+    expect(bar).toHaveTextContent(`${quantity} unit`);
     expect(within(bar).getByText(subtotal, { exact: true })).toBeInTheDocument();
     expect(within(bar).queryByRole("status")).toBeNull();
     expect(screen.getAllByRole("status", { name: "Purchase summary" })).toHaveLength(1);
@@ -133,7 +133,7 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
   it("uses the latest matching entry when IntersectionObserver batches opposite crossings", async () => {
     render(<Fixture />);
     await waitFor(() => expect(intersections).toHaveLength(1));
-    const summary = screen.getByRole("status", { name: "Purchase summary" });
+    const summary = screen.getByRole("status", { name: "Purchase summary" }).closest<HTMLElement>(".purchase-summary")!;
     const entry = (bottom: number, isIntersecting: boolean): IntersectionObserverEntry => ({
       target: summary, boundingClientRect: rect(bottom - 200, 200), isIntersecting,
       intersectionRatio: isIntersecting ? 1 : 0, intersectionRect: rect(bottom - 200, 200), rootBounds: null, time: 0,
@@ -148,10 +148,10 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
   it("uses the selected canonical variant for repeated adds and persists the merged line without double announcements", async () => {
     render(<Fixture product={testCanonicalProduct([testPublicVariant(), testPublicVariant({ id: "variant-10mg", label: "10 mg", baseUnitMinor: 2000, availability: "preview_only", checkoutReady: false })])} />);
     fireEvent.click(screen.getByRole("radio", { name: /10 mg/u }));
-    fireEvent.click(screen.getByRole("button", { name: "2 bottles" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Quantity" }), { target: { value: "2" } });
     const bar = await showBar();
     expect(bar).toHaveTextContent("$28.00");
-    expect(bar).toHaveTextContent("Checkout unavailable");
+    expect(bar).toHaveTextContent("Ordering not open");
     const add = within(bar).getByRole("button", { name: "Add Synthetic Product Alpha to cart" });
     fireEvent.click(add);
     fireEvent.click(add);
@@ -161,7 +161,7 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
   });
 
   it.each([
-    ["pending", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "Pricing coming soon"],
+    ["pending", testPublicVariant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false }), "Price unavailable"],
     ["unavailable", testPublicVariant({ availability: "unavailable", checkoutReady: false }), "Unavailable"],
   ] as const)("preserves %s status without a price or enabled add", async (_label, variant, status) => {
     render(<Fixture product={testCanonicalProduct([variant])} />);
@@ -171,13 +171,12 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
     expect(within(bar).getByRole("button", { name: /unavailable/u })).toBeDisabled();
   });
 
-  it("keeps invalid drafts out of sticky totals and addition", async () => {
+  it("offers only bounded numeric quantity choices", () => {
     render(<Fixture />);
-    fireEvent.change(screen.getByRole("spinbutton", { name: "Exact quantity" }), { target: { value: "" } });
-    const bar = await showBar();
-    expect(bar).toHaveTextContent("Invalid quantity");
-    expect(bar).not.toHaveTextContent("$");
-    expect(within(bar).getByRole("button", { name: /unavailable/u })).toBeDisabled();
+    const quantity = screen.getByRole("combobox", { name: "Quantity" });
+    expect(within(quantity).getAllByRole("option")).toHaveLength(25);
+    expect(within(quantity).getByRole("option", { name: "1" })).toBeInTheDocument();
+    expect(within(quantity).getByRole("option", { name: "25" })).toBeInTheDocument();
   });
 
   it("mirrors the permitted preview-zero state without turning it into checkout authority", async () => {
@@ -192,8 +191,8 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
   it("does not choose a variant when the canonical default is not a member", async () => {
     render(<Fixture product={testCanonicalProduct([testPublicVariant()], { defaultVariantId: "synthetic-missing-default" })} />);
     const bar = await showBar();
-    expect(bar).toHaveTextContent("No variant selected");
-    expect(bar).toHaveTextContent("Choose a variant");
+    expect(bar).toHaveTextContent("No amount selected");
+    expect(bar).toHaveTextContent("Choose an amount");
     expect(bar).not.toHaveTextContent("$");
     expect(within(bar).getByRole("button", { name: /unavailable/u })).toBeDisabled();
   });
@@ -203,7 +202,7 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
     const bar = await showBar();
     const change = within(bar).getByRole("link", { name: "Change selection" });
     expect(change).toHaveAttribute("href", "#purchase-heading");
-    const heading = screen.getByRole("heading", { name: "Purchase" });
+    const heading = screen.getByRole("heading", { name: "Select your product" });
     expect(heading).toHaveAttribute("tabindex", "-1");
     act(() => change.focus());
     reportSummary(200, true);
@@ -251,7 +250,7 @@ describe("Mobile purchase bar with the real purchase and cart authority", () => 
       rowHeight = 500;
       act(() => resizes.at(-1)!.callback([], {} as ResizeObserver));
     }
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Purchase" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Select your product" })).toHaveFocus());
     expect(screen.queryByRole("region", { name: "Mobile purchase controls" })).toBeNull();
     expect(screen.getByRole("button", { name: "Search PropeptIQ" })).toBeVisible();
   });

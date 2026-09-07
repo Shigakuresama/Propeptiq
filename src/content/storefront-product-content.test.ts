@@ -63,7 +63,7 @@ describe("storefront product controlled content", () => {
         kind: "product_information",
         status: "approved",
         title: "Product details",
-        body: `Compare the listed configurations for ${product.name}. Select a variant to view its price and availability.`,
+          body: `Compare the listed amounts for ${product.name}. Select an amount to view its price and availability.`,
       });
       expect(catalogRecord?.body).toContain(product.name);
       expect(literatureRecord).toMatchObject({

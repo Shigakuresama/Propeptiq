@@ -11,7 +11,7 @@ export type StorefrontProductContentProjection = Readonly<{
 
 const DNS_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";
 const APPROVAL_NOTE =
-  "Owner-authorized neutral placeholder copy; replace with final business-reviewed content.";
+  "Catalog-derived descriptions and literature links, revised under the owner storefront-redesign request of 2026-09-06.";
 
 function uuidBytes(uuid: string): Buffer {
   return Buffer.from(uuid.replaceAll("-", ""), "hex");
@@ -46,7 +46,7 @@ for (const product of browseCatalogProducts) {
     `propeptiq.com/storefront/content/${product.slug}/pubmed-discovery`,
   );
   const description =
-    `Explore ${product.name} configurations, pricing, and product information.`;
+    `Explore ${product.name} amounts, pricing, and product information.`;
   const contentIds = Object.freeze([
     descriptionContentId,
     catalogContentId,
@@ -74,7 +74,7 @@ for (const product of browseCatalogProducts) {
       kind: "product_information",
       status: "approved",
       title: "Product details",
-      body: `Compare the listed configurations for ${product.name}. Select a variant to view its price and availability.`,
+      body: `Compare the listed amounts for ${product.name}. Select an amount to view its price and availability.`,
       sourceReferences: Object.freeze(["/catalog", "/research-use-policy"]),
       approvalNote: APPROVAL_NOTE,
       reviewedAt: null,

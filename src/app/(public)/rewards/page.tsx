@@ -58,7 +58,7 @@ export default async function RewardsPage() {
           <GrowthNavigation />
           <section aria-labelledby="rewards-heading" className="rewards-hero">
             <div className="rewards-hero__copy">
-              <p className="data-label data-label-inverse">Current program record</p>
+              <p className="data-label data-label-inverse">PROPEPTIQ programs</p>
               <h1 id="rewards-heading" className="rewards-hero__title">
                 Rewards
               </h1>
@@ -111,14 +111,14 @@ export default async function RewardsPage() {
 
             {result.status === "read_error" ? (
               <p className="record-sheet rewards-state-panel" role="status">
-                <span className="data-label">Record status</span>
+                <span className="data-label">Program availability</span>
                 <span className="rewards-state-panel__message">
                   Rewards are temporarily unavailable. Please try again.
                 </span>
               </p>
             ) : !available ? (
               <p className="record-sheet rewards-state-panel">
-                <span className="data-label">Record status</span>
+                <span className="data-label">Program availability</span>
                 <span className="rewards-state-panel__message">
                   Rewards are not currently available.
                 </span>
@@ -132,7 +132,7 @@ export default async function RewardsPage() {
                   >
                     <div className="rewards-program-card__meta">
                       <BadgeCheck aria-hidden="true" className="size-5" />
-                      <span>Active loyalty record</span>
+                      <span>Rewards</span>
                     </div>
                     <h2 id="loyalty-heading" className="rewards-program-card__title">
                       Earn points
@@ -143,7 +143,7 @@ export default async function RewardsPage() {
                     <p className="rewards-program-card__secondary">
                       Redemption begins at{" "}
                       {loyalty.minimumRedemptionPoints.toLocaleString("en-US")} points and
-                      remains subject to the active policy at checkout.
+                      is subject to the current rewards terms.
                     </p>
                   </section>
                 ) : null}
@@ -155,7 +155,7 @@ export default async function RewardsPage() {
                   >
                     <div className="rewards-program-card__meta">
                       <Share2 aria-hidden="true" className="size-5" />
-                      <span>Active referral record</span>
+                      <span>Referrals</span>
                     </div>
                     <h2 id="referral-heading" className="rewards-program-card__title">
                       Research referrals
@@ -164,7 +164,7 @@ export default async function RewardsPage() {
                       {referral.attributionDays}-day referral attribution window.
                     </p>
                     <p className="rewards-program-card__secondary">
-                      Rewards apply only after the qualifying lifecycle events defined by the
+                      Rewards apply when the eligibility conditions are met under the
                       current policy.
                     </p>
                   </section>

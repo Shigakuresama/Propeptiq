@@ -72,7 +72,7 @@ export function RelatedProductsCarousel({ currentProductId, products, pricing }:
       aria-describedby={descriptionId}
       aria-labelledby={headingId}
       aria-roledescription="carousel"
-      className="mt-16 border-t border-border pt-8 sm:pt-10"
+      className="mt-12 border-t border-border pt-8 sm:pt-10"
       role="region"
     >
       <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
@@ -87,46 +87,18 @@ export function RelatedProductsCarousel({ currentProductId, products, pricing }:
             Explore more products in this category.
           </p>
         </div>
-        <div className="flex items-center justify-between gap-3 sm:justify-end">
-          <span className="mr-1 text-xs font-medium uppercase tracking-[0.14em] text-ink/55">
-            {safeProducts.length} {safeProducts.length === 1 ? "item" : "items"}
-          </span>
-          {safeProducts.length > 1 ? (
-            <>
-              <Button
-                aria-controls={relatedListId}
-                aria-label="Previous related products"
-                className="min-h-11 min-w-11 rounded-full border-border bg-canvas text-ink hover:bg-moss-soft"
-                disabled={!navigation.previous}
-                onClick={() => scroll(-1)}
-                size="icon-lg"
-                title="Previous related products"
-                type="button"
-                variant="outline"
-              >
-                <ChevronLeft aria-hidden="true" />
-              </Button>
-              <Button
-                aria-controls={relatedListId}
-                aria-label="Next related products"
-                className="min-h-11 min-w-11 rounded-full border-border bg-canvas text-ink hover:bg-moss-soft"
-                disabled={!navigation.next}
-                onClick={() => scroll(1)}
-                size="icon-lg"
-                title="Next related products"
-                type="button"
-                variant="outline"
-              >
-                <ChevronRight aria-hidden="true" />
-              </Button>
-            </>
-          ) : null}
-        </div>
       </div>
+      <div className="related-carousel">
+        {safeProducts.length > 1 ? <>
+          <Button aria-controls={relatedListId} aria-label="Previous related products" className="related-carousel__arrow related-carousel__arrow--previous min-h-11 min-w-11 rounded-full bg-canvas" disabled={!navigation.previous} onClick={() => scroll(-1)} size="icon-lg" type="button" variant="outline"><ChevronLeft aria-hidden="true" /></Button>
+          <Button aria-controls={relatedListId} aria-label="Next related products" className="related-carousel__arrow related-carousel__arrow--next min-h-11 min-w-11 rounded-full bg-canvas" disabled={!navigation.next} onClick={() => scroll(1)} size="icon-lg" type="button" variant="outline"><ChevronRight aria-hidden="true" /></Button>
+        </> : null}
+        {navigation.previous ? <span aria-hidden="true" className="related-carousel__edge related-carousel__edge--previous" /> : null}
+        {navigation.next ? <span aria-hidden="true" className="related-carousel__edge related-carousel__edge--next" /> : null}
       <ul
         ref={listRef}
         aria-label={`Related products, ${safeProducts.length} ${safeProducts.length === 1 ? "item" : "items"}`}
-        className="mt-1 flex touch-auto list-none gap-4 overflow-x-auto overscroll-x-contain px-1 pb-5 pt-6 [scrollbar-width:thin] scroll-px-2 snap-x snap-mandatory focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="related-carousel__list flex touch-auto list-none gap-5 overflow-x-auto overscroll-x-contain px-2 py-6 scroll-px-2 snap-x snap-mandatory focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         id={relatedListId}
         onScroll={updateNavigation}
         onKeyDown={(event) => {
@@ -141,7 +113,7 @@ export function RelatedProductsCarousel({ currentProductId, products, pricing }:
       >
         {safeProducts.map((product) => (
           <li
-            className="flex w-[min(82vw,20rem)] shrink-0 snap-start sm:w-[19rem] lg:w-[20rem] [&>*]:w-full"
+            className="flex w-[min(72vw,20rem)] min-w-0 shrink-0 snap-start sm:w-[19rem] lg:w-[20rem] [&>*]:w-full"
             key={product.id}
           >
             <CatalogListingCard
@@ -153,6 +125,7 @@ export function RelatedProductsCarousel({ currentProductId, products, pricing }:
           </li>
         ))}
       </ul>
+      </div>
     </section>
   );
 }

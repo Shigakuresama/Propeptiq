@@ -12,7 +12,7 @@ import {
 import type { PublicConcentrationCalculatorConfiguration } from "@/domain/concentration";
 import type { PublicCompoundResearchEntry } from "@/content/compound-research-public";
 import { CompoundResearchSection } from "./compound-research-section";
-import { CatalogProductGallery } from "./catalog-product-gallery";
+import { CatalogProductVisual } from "./catalog-product-visual";
 import { LaboratoryConcentrationCalculator } from "./laboratory-concentration-calculator";
 import { ProductInformationSections } from "./product-information-sections";
 import { ProductPurchasePanel } from "./product-purchase-panel";
@@ -60,7 +60,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
     : undefined;
 
   return (
-    <article className="site-container pb-20 pt-2 md:pt-14 lg:pt-16">
+    <article className="site-container pb-16 pt-4 md:pt-6">
       <Link
         className="record-link inline-flex min-h-11 items-center gap-2"
         href="/catalog"
@@ -70,7 +70,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
         Back to catalog
       </Link>
 
-      <div className="mt-2 grid gap-10 md:mt-8 lg:grid-cols-2 lg:items-start lg:gap-x-36 lg:gap-y-0">
+      <div className="product-detail-grid mt-4 grid gap-6 lg:grid-cols-2 lg:items-start lg:gap-x-10 lg:gap-y-0">
         <header
           className="min-w-0 lg:col-start-2 lg:row-start-1"
           data-motion-sequence="dossier-intro"
@@ -79,7 +79,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
             Product details
           </p>
           <h1
-            className="catalog-detail-heading mt-5 text-balance font-heading text-page leading-[1.02] text-ink [overflow-wrap:anywhere]"
+            className="catalog-detail-heading mt-3 text-balance font-heading text-section leading-[1.12] text-ink [overflow-wrap:anywhere]"
             data-motion-step="2"
           >
             {product.name}
@@ -105,10 +105,12 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
         <div
           className="catalog-detail-image mt-4 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:mt-0"
         >
-          <CatalogProductGallery
+          <CatalogProductVisual
             product={product}
             variantLabel={visualVariantLabel}
+            variantId={visualVariant?.id}
             discountPercent={visualDiscountPercent}
+            priority
           />
         </div>
 
@@ -133,10 +135,10 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
               selectedVariantId={selectedVariantId}
             />
           ) : null}
-          <section aria-labelledby="catalog-variants-heading" className="mt-10">
-            <h2 id="catalog-variants-heading" className="font-heading text-3xl text-ink">
-              Product configurations
-            </h2>
+          <details className="mt-6">
+            <summary className="min-h-11 cursor-pointer rounded-lg py-3 font-heading text-xl uppercase focus-visible:outline-2 focus-visible:outline-ring">
+              Product specifications
+            </summary>
             <ul className="mt-5 divide-y divide-border border-y border-border">
               {product.displayConfigurations.map((configuration) => (
                 <li
@@ -157,7 +159,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
                 </li>
               ))}
             </ul>
-          </section>
+          </details>
 
           {!canonical ? <p className="info-record mt-8 text-sm">Product details are shown above. Pricing and ordering are not available for this item.</p> : null}
         </div>
