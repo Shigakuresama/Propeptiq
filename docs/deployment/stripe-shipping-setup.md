@@ -1,6 +1,6 @@
 # Stripe sandbox catalog and USPS checkout wiring
 
-Verified 2026-09-07 against Stripe sandbox account `acct_1U9t8NR4u3cqLvC0` using a private Vercel Preview build job. No API credentials were downloaded, printed, or committed.
+Verified 2026-09-07 against Stripe sandbox account `acct_1U9t8NR4u3cqLvC0` using private Vercel Preview build jobs. The Stripe API key remained inside Vercel. Database and webhook secrets were saved as Sensitive branch-scoped Preview variables, never committed.
 
 ## Completed Stripe resources
 
@@ -20,17 +20,28 @@ Origin 92647, United States (50 states and DC) only. Ground Advantage is free wh
 
 Packing is an owner-authorized estimate, not measured supplier data. Small vials use a 32 x 55 mm protected slot and 10 g gross vial allowance; 10 mL vials use 48 x 85 mm and 35 g. Add carton/bubble allowances of 100/150/200 g for 1-4/5-10/11-20 vials, plus outer cushioning and wall dimensions. No insulation. The app uses authoritative package quantities; current sale variants have one vial each despite ten-vial source descriptions. Unknown variants and shipments exceeding 20 physical vials fail closed. Validate packed samples before buying labels.
 
+## Isolated database and webhook
+
+- Neon project `holy-water-30479318`, existing task branch `br-patient-morning-au838cso`, new empty database `propeptiq_stripe_sandbox`. The branch's inherited `neondb` is not the sandbox target. No production/customer rows were copied to the new database.
+- Applied all 33 migrations (0000-0032) atomically to the verified empty database and recorded the migration hashes in `drizzle.__drizzle_migrations`.
+- Imported 56 draft products, 103 inactive variants and 40 approved prices; bound all 103 Stripe product IDs and 40 price IDs. The 63 pending variants have no price rows or Stripe price IDs. Inventory and orders remain empty; no supplier, stock, COA or eligibility evidence was invented.
+- Persisted and read back the canonical automatic `winter30` campaign (3000 basis points). Quantity tiers remain authoritative in `src/domain/storefront-pricing.ts`; mirrored Stripe coupons must not be applied a second time.
+- Webhook `we_1UDBSaR4u3cqLvC03TfqTEQ2`, API version `2026-07-29.dahlia`, receives 15 supported checkout/refund/dispute/invoice/credit-note event types at the branch alias's `/api/webhooks/stripe` route. The URL includes a confidential Vercel automation bypass parameter; do not log or publish the full URL.
+- Two real Stripe sandbox `product.updated` probes reached the deployed application and were persisted with `status=processed`, `livemode=false`: `evt_1UDBVxR4u3cqLvC06sjGZ9B9` and `evt_1UDBWtR4u3cqLvC05n6hd24J`. These validate signed ingress and database persistence, not order settlement. The temporary product event subscription was removed afterward.
+- Preview health returned 200; an invalid webhook signature returned 400 `invalid_delivery`. Deployment `dpl_EMtWxLoNQFpXDdEM2a9foA6fycGK` was READY for commit `be6d7ba`.
+- An unexpected Vercel CLI debug path printed the automation bypass token during a failed curl invocation. It was revoked and regenerated immediately; the webhook URL was updated and successful delivery reverified. Consumers holding a manually copied old bypass token need the replacement. Use direct HTTP with an in-memory header and sanitized output, not CLI debug mode.
+
+Reproduce database readback with `npx tsx scripts/stripe-sandbox/verify-database.ts`, passing the branch's direct verified-TLS connection as `TEST_DATABASE_URL`. Bootstrap is intentionally empty-only and must not be rerun against populated databases. Binding and promotion configuration are idempotent and reject conflicting records.
+
 ## Remaining dependencies
 
 1. USPS credentials and an actual successful rate response. No live USPS rate has been tested. Confirm current USPS request ingredients and retail rate totals using real origin/destination cases before enabling live payments.
-2. Isolated Preview PostgreSQL database with the commerce schema and truthful catalog records. `TEST_DATABASE_URL` is currently absent. Never use production data with sandbox payment IDs.
-3. Run `npx tsx scripts/bind-stripe-sandbox-catalog.ts` only with the explicit isolated Preview/test guards documented in the script. It locks records, checks SKU/package/price identity, rejects mapping conflicts, and rolls back the entire transaction on a mismatch. It does not invent inventory, activate prices, or grant buyer eligibility. This binding step has NOT been executed.
-4. A reachable application webhook endpoint, signing secret, and signed-delivery verification. The temporary catalog job has no payment webhook.
-5. The existing production-only buyer gate still blocks a complete Preview purchase. Sandbox checkout enablement needs a separate isolated test capability; do not spoof production identity to bypass that boundary.
+2. Inventory/lot and buyer eligibility data. Current sandbox products remain draft and variants inactive until those dependencies are deliberately supplied; catalog import alone does not make an order purchasable.
+3. The existing production-only buyer gate still blocks a complete Preview purchase. Sandbox buyer authentication and a separate isolated test capability remain to implement; do not spoof production identity to bypass that boundary. Full card payment and order settlement have not been tested.
 
 ## Validation
 
-Focused tests cover strict service selection, free-shipping boundary, package quantities, larger liquid packaging, missing credentials, checkout totals, existing promotion stacking, and legacy fixed-rate behavior. Provider rate validation and end-to-end sandbox payment remain unverified until the dependencies above exist.
+Focused tests cover strict service selection, free-shipping boundary, package quantities, larger liquid packaging, missing credentials, checkout totals, existing promotion stacking, and legacy fixed-rate behavior. This setup added a real database migration/import/readback and signed webhook ingress verification. The four focused webhook/pricing suites passed 83 tests; TypeScript and focused ESLint passed. Provider rate validation and end-to-end sandbox payment remain unverified until the dependencies above exist.
 
 Primary references:
 - https://github.com/USPS/api-examples (OAuth and Domestic Prices v3)
