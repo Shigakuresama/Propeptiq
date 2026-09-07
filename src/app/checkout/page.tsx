@@ -130,7 +130,7 @@ export default async function CheckoutPage() {
               ) : null}
             </RecordPanel>
           ) : null}
-          {buyerCheckoutReady ? <CheckoutForm syntheticLocal={request.localDriver !== null} /> : null}
+          {buyerCheckoutReady ? <CheckoutForm syntheticLocal={request.localDriver !== null} uspsShipping={request.environment.SHIPPING_PROVIDER === "usps"} /> : null}
         </div>
         <CheckoutCartStatus />
       </div>

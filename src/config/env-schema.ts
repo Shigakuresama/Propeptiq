@@ -141,6 +141,9 @@ const rawServerEnvSchema = z.object({
   STRIPE_SECRET_KEY: nonBlank.optional(),
   STRIPE_WEBHOOK_SECRET: nonBlank.optional(),
   STRIPE_SHIPPING_RATE_ID: stripeShippingRateId.optional(),
+  SHIPPING_PROVIDER: z.enum(["stripe", "usps"]).optional(),
+  USPS_CLIENT_ID: nonBlank.optional(),
+  USPS_CLIENT_SECRET: nonBlank.optional(),
   /**
    * Business days a reversible (ACH) invoice payment is held before the order
    * may be released. See docs/adr/0006. Unset means NO release: an absent

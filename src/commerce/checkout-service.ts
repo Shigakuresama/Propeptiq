@@ -1613,7 +1613,8 @@ export function createCheckoutService(dependencies: Readonly<{
       await dependencies.shippingQuotePort.quoteShipping({
         schemaVersion: 1,
         bindingHash: shippingBindingHash,
-        items: merchandiseLines,
+        shippingService: request.shippingService,
+        items: merchandiseLines.map(line => ({ ...line, packageQuantity: facts.items.find(fact => fact.variantId === line.productId)?.packageQuantity })),
         merchandiseTotalMinor,
         currency: "USD",
         destination: request.destination,

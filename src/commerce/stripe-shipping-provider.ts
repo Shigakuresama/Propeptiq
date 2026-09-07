@@ -76,6 +76,7 @@ export function createStripeShippingQuotePort(input: Readonly<{
 
   return Object.freeze({
     async quoteShipping(request: ShippingQuoteRequest) {
+      if (request.shippingService === "priority_mail") return unavailable("configuration_unavailable");
       // The catalog ships domestically only; refuse before spending a call.
       if (request.destination.countryCode !== "US") {
         return unavailable("unsupported_destination");

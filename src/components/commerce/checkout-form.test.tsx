@@ -158,6 +158,17 @@ describe("CheckoutForm", () => {
     expect(await screen.findByLabelText("Checking your cart")).toBeVisible();
   });
 
+  it("offers the two configured USPS services and allows keyboard selection", async () => {
+    const user = userEvent.setup();
+    render(<CheckoutForm uspsShipping />);
+    const selector = screen.getByRole("combobox", {name:"Shipping service"});
+    expect(selector).toHaveValue("ground_advantage");
+    selector.focus();
+    await user.selectOptions(selector, "priority_mail");
+    expect(selector).toHaveValue("priority_mail");
+    expect(screen.getByText(/Free standard shipping on merchandise totals above \$200/)).toBeVisible();
+  });
+
   it("sends only variant authority and destination when requesting a quote", async () => {
     const user = userEvent.setup();
     fetchMock.mockReset()

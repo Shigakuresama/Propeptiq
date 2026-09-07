@@ -24,6 +24,7 @@ import {
   type StripeBindingVerifierSdkClient,
   type StripeSdkClient,
 } from "@/commerce/stripe-payment-provider";
+import { createUspsShippingQuotePort } from "@/commerce/usps-shipping-provider";
 import { createStripeShippingQuotePort } from "@/commerce/stripe-shipping-provider";
 import { createStripeTaxQuotePort } from "@/commerce/stripe-tax-provider";
 import { createStaffCommerceCommandRuntimeV1, type StaffCommerceCommandRuntimeV1 } from "@/commerce/staff-commerce-command-runtime";
@@ -162,7 +163,7 @@ export function isPostgresBuyerCheckoutReady(
     (environment.PAYMENTS_MODE === "test" || environment.PAYMENTS_MODE === "live") &&
     environment.STRIPE_SECRET_KEY !== undefined &&
     environment.STRIPE_ACCOUNT_ID !== undefined &&
-    environment.STRIPE_SHIPPING_RATE_ID !== undefined &&
+    (environment.SHIPPING_PROVIDER === "usps" || environment.STRIPE_SHIPPING_RATE_ID !== undefined) &&
     environment.STRIPE_TAX_CODE !== undefined &&
     environment.RATE_LIMIT_SECRET !== undefined;
 }
@@ -262,7 +263,9 @@ async function createPostgresCheckoutServerRuntime(
   });
   const checkoutService = createCheckoutService({
     repository: checkoutRepository,
-    shippingQuotePort: createStripeShippingQuotePort({
+    shippingQuotePort: environment.SHIPPING_PROVIDER === "usps"
+      ? createUspsShippingQuotePort({clientId:environment.USPS_CLIENT_ID, clientSecret:environment.USPS_CLIENT_SECRET, testMode:!livemode})
+      : createStripeShippingQuotePort({
       sdk: {
         shippingRates: {
           retrieve: (id, params, options) =>

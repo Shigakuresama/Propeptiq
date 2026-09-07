@@ -27,9 +27,11 @@ export type QuoteUnavailableReason =
 export type ShippingQuoteRequest = Readonly<{
   schemaVersion: 1;
   bindingHash: string;
+  shippingService?: "ground_advantage" | "priority_mail" | undefined;
   items: readonly Readonly<{
     productId: string;
     quantity: number;
+    packageQuantity?: number | undefined;
     netAmountMinor: number;
   }>[];
   merchandiseTotalMinor: number;

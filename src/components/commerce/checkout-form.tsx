@@ -312,13 +312,16 @@ function rewardsUnavailableCopy(reason: string | null): string | null {
 
 export function CheckoutForm({
   syntheticLocal = false,
+  uspsShipping = false,
   navigate = (url) => window.location.assign(url),
 }: {
   syntheticLocal?: boolean;
+  uspsShipping?: boolean;
   navigate?: (url: string) => void;
 }) {
   const { items, hydrated } = useCart();
   const [destination, setDestination] = useState(initialDestination);
+  const [shippingService, setShippingService] = useState<"ground_advantage" | "priority_mail">("ground_advantage");
   const [rewardRedemptionPoints, setRewardRedemptionPoints] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [quoteView, setQuoteView] = useState<QuoteView | null>(null);
@@ -354,6 +357,7 @@ export function CheckoutForm({
     Number.isSafeInteger(requestedRewardPoints) && requestedRewardPoints > 0;
   const normalizedRequest = useMemo(() => ({
     items: checkoutItems,
+    ...(shippingService === "priority_mail" ? {shippingService} : {}),
     destination: {
       recipientName: normalizedText(destination.recipientName),
       line1: normalizedText(destination.line1),
@@ -366,7 +370,7 @@ export function CheckoutForm({
     ...(hasValidRequestedRewardPoints
       ? { rewardRedemptionPoints: requestedRewardPoints }
       : {}),
-  }), [checkoutItems, destination, hasValidRequestedRewardPoints, requestedRewardPoints]);
+  }), [checkoutItems, destination, shippingService, hasValidRequestedRewardPoints, requestedRewardPoints]);
   const fingerprint = useMemo(() => JSON.stringify(normalizedRequest), [normalizedRequest]);
   const cartKey = useMemo(() => JSON.stringify(checkoutItems), [checkoutItems]);
   const currentFeedback = feedback?.fingerprint === fingerprint ? feedback : null;
@@ -689,6 +693,13 @@ export function CheckoutForm({
             <input id="countryCode" name="countryCode" className="form-input" value="United States (US)" readOnly />
           </Field>
         </div>
+        {uspsShipping ? <Field id="shippingService" label="Shipping service">
+          <select id="shippingService" className="form-input min-h-11" value={shippingService} onChange={event => setShippingService(event.currentTarget.value as "ground_advantage" | "priority_mail")}>
+            <option value="ground_advantage">USPS Ground Advantage — standard</option>
+            <option value="priority_mail">USPS Priority Mail — expedited</option>
+          </select>
+          <p className="mt-2 text-sm">Free standard shipping on merchandise totals above $200 after discounts. Expedited shipping is priced separately.</p>
+        </Field> : null}
         <Field id="line1" label="Address line 1" error={errors.line1}>
           <input id="line1" name="line1" className="form-input" autoComplete="address-line1" maxLength={120} required aria-required="true" value={destination.line1} aria-invalid={Boolean(errors.line1)} aria-describedby={errors.line1 ? "line1-error" : undefined} onChange={(event) => updateField("line1", event.currentTarget.value)} />
         </Field>
