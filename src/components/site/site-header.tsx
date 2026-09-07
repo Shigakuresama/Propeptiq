@@ -2,7 +2,7 @@
 
 import { Menu, UserRound } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import { SIGN_IN_ROUTE } from "@/auth/routes";
 import { useSessionNavigation } from "@/auth/session-navigation";
@@ -29,14 +29,43 @@ import {
 } from "@/lib/site-content";
 
 export function SiteHeader({ cartDrawer = false, search }: Readonly<{ cartDrawer?: boolean; search?: ReactNode }>) {
+  const headerRef = useRef<HTMLElement>(null);
   const { itemCount } = useCart();
   const session = useSessionNavigation();
   const accountHref = session === "signed-out" ? SIGN_IN_ROUTE : "/account";
   const accountLabel = session === "signed-in" ? "Account"
     : session === "signed-out" ? "Sign in" : "Account access";
 
+  useEffect(() => {
+    const header = headerRef.current;
+    const layout = header?.closest<HTMLElement>(".public-layout");
+    if (!header || !layout) return;
+    const property = "--public-header-height";
+    const previousHeight = layout.style.getPropertyValue(property);
+    let active = true;
+    const measure = () => {
+      if (!active) return;
+      const height = Math.ceil(header.getBoundingClientRect().height);
+      if (height > 0) layout.style.setProperty(property, `${height}px`);
+    };
+    // Observe the header itself: font wrapping and account labels can change
+    // its height without resizing the viewport or mounting a purchase bar.
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(header, { box: "border-box" });
+    window.addEventListener("resize", measure);
+    void document.fonts?.ready.then(measure);
+    measure();
+    return () => {
+      active = false;
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+      if (previousHeight) layout.style.setProperty(property, previousHeight);
+      else layout.style.removeProperty(property);
+    };
+  }, []);
+
   return (
-    <header className="persistent-chrome">
+    <header className="persistent-chrome" ref={headerRef}>
       <ResearchRestrictionBar />
       <div className="border-b border-border bg-canvas">
         <div className="site-container site-header-row flex min-h-[4.75rem] flex-wrap items-center gap-2 py-2 sm:gap-3">

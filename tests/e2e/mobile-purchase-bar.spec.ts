@@ -231,6 +231,10 @@ test("invalid quantity disables both purchase actions and blur restores the last
   // the inline summary has passed the viewport and the mobile row is visible.
   await quantity.blur();
   await expect(quantity).toHaveValue("2");
+  await expect(purchaseSummary(page).getByRole("button", { name: addLabel })).toBeEnabled();
+  // Restoring the price text can reflow the summary back into the viewport.
+  // Reestablish its above-viewport position before checking the mobile mirror.
+  await showMobilePurchase(page);
   await expect(mobilePurchase(page)).toContainText("2 units");
   await expect(mobilePurchase(page)).toContainText("$81.46");
   await expect(mobilePurchase(page).getByRole("button", { name: addLabel })).toBeEnabled();
