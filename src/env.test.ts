@@ -94,6 +94,28 @@ const liveAuthInput = {
 } as const;
 
 describe("parseServerEnv", () => {
+  it("parses explicit bounded contact delivery configuration without inferring a recipient", () => {
+    const env = parseServerEnv({
+      CONTACT_SUPPORT_EMAIL: "support@example.test",
+      CONTACT_RATE_LIMIT_MAX: "3",
+      CONTACT_RATE_LIMIT_WINDOW_SECONDS: "600",
+    });
+    expect(env.CONTACT_SUPPORT_EMAIL).toBe("support@example.test");
+    expect(env.CONTACT_RATE_LIMIT_MAX).toBe(3);
+    expect(env.CONTACT_RATE_LIMIT_WINDOW_SECONDS).toBe(600);
+    expect(env.RESEND_FROM).toBeUndefined();
+  });
+
+  it.each([
+    ["CONTACT_SUPPORT_EMAIL", "not-an-email"],
+    ["CONTACT_RATE_LIMIT_MAX", "0"],
+    ["CONTACT_RATE_LIMIT_MAX", "21"],
+    ["CONTACT_RATE_LIMIT_WINDOW_SECONDS", "59"],
+    ["CONTACT_RATE_LIMIT_WINDOW_SECONDS", "86401"],
+  ])("rejects invalid contact configuration %s", (field, value) => {
+    expect(() => parseServerEnv({ [field]: value })).toThrow(new RegExp(field));
+  });
+
   it("defaults every external capability to disabled", () => {
     const env = parseServerEnv({});
 

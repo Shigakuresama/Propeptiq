@@ -67,14 +67,13 @@ test("configured BPC-157 and Tirzepatide facts merge, persist, and match the ful
   await expect(bpcLine.getByRole("heading", { name: "BPC-157" })).toBeVisible();
   await expect(bpcLine.getByText("10mg", { exact: true })).toBeVisible();
   await expect(bpcLine.getByRole("img", {
-    name: "AI-generated catalog illustration beside BPC-157, 10mg",
+    name: "Catalog image beside BPC-157, 10mg",
   })).toBeVisible();
   const disclosure = bpcLine.getByText(
     "AI-generated catalog illustration — not actual product photography.",
     { exact: true },
   );
-  await disclosure.scrollIntoViewIfNeeded();
-  await expect(disclosure).toBeVisible();
+  await expect(disclosure).toHaveCount(0);
   await expect(bpcLine.locator("del")).toHaveText("$39.99");
   await expect(bpcLine.locator("strong")).toHaveText("$27.99");
   await expect(bpcLine.getByText("$55.98", { exact: true })).toBeVisible();

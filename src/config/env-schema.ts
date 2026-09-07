@@ -57,6 +57,8 @@ const newsletterRateLimitWindowSeconds = z.coerce
   .int()
   .min(60)
   .max(86_400);
+const contactRateLimitMaximum = z.coerce.number().int().min(1).max(20);
+const contactRateLimitWindowSeconds = z.coerce.number().int().min(60).max(86_400);
 const settlementWindowDays = z.coerce.number().int().min(1).max(90);
 /** Owner-configured Stripe ShippingRate backing the shipping quote port. */
 const stripeShippingRateId = z.string().min(1).refine(
@@ -149,6 +151,9 @@ const rawServerEnvSchema = z.object({
   BLOB_READ_WRITE_TOKEN: nonBlank.optional(),
   RESEND_API_KEY: nonBlank.optional(),
   RESEND_FROM: nonBlank.pipe(z.email()).optional(),
+  CONTACT_SUPPORT_EMAIL: nonBlank.pipe(z.email()).optional(),
+  CONTACT_RATE_LIMIT_MAX: contactRateLimitMaximum.optional(),
+  CONTACT_RATE_LIMIT_WINDOW_SECONDS: contactRateLimitWindowSeconds.optional(),
   NEWSLETTER_RESEND_API_KEY: nonBlank.optional(),
   NEWSLETTER_RESEND_TOPIC_ID: newsletterTopicId.optional(),
   NEWSLETTER_RATE_LIMIT_MAX: newsletterRateLimitMaximum.optional(),

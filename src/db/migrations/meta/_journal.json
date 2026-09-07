@@ -225,6 +225,13 @@
       "when": 1788179594517,
       "tag": "0031_phase1-reservation-variant-identity",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1788739280639,
+      "tag": "0032_contact-email-deliveries",
+      "breakpoints": true
     }
   ]
 }

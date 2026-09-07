@@ -121,7 +121,7 @@ describe("CartDrawer accessible progressive enhancement", () => {
     unmount();
   });
 
-  it("renders only verified adjacent identity with the shared disclosed front scene and current preview prices", async () => {
+  it("renders only verified adjacent identity with the shared front scene and current preview prices", async () => {
     seed([{ variantId: alphaId, quantity: 2 }]);
     const { dialog } = await renderAndOpen();
     const cartLine = await within(dialog).findByRole("listitem");
@@ -132,12 +132,12 @@ describe("CartDrawer accessible progressive enhancement", () => {
     expect(within(dialog).queryByText("Referral benefit", { exact: true })).toBeNull();
     expect(within(dialog).queryByText("Points redemption", { exact: true })).toBeNull();
     expect(within(cartLine).getByRole("img", {
-      name: "AI-generated catalog illustration beside Synthetic cart Alpha, Synthetic 10 mg",
+      name: "Catalog image beside Synthetic cart Alpha, Synthetic 10 mg",
     })).toHaveAttribute("src", expect.stringContaining("front.webp"));
-    expect(within(cartLine).getByText(
+    expect(within(cartLine).queryByText(
       "AI-generated catalog illustration — not actual product photography.",
       { exact: true },
-    )).toBeVisible();
+    )).not.toBeInTheDocument();
     expect(within(cartLine).getByRole("heading", { name: "Synthetic cart Alpha" })).toBeVisible();
     expect(within(cartLine).getByText("Synthetic 10 mg", { exact: true })).toBeVisible();
     expect(within(cartLine).getByText("SKU SYN-ALPHA-10", { exact: true })).toBeVisible();

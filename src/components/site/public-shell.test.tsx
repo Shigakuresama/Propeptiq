@@ -59,7 +59,7 @@ describe("public shell growth navigation", () => {
 
     const footer = screen.getByRole("navigation", { name: "Footer" });
     expect(screen.getAllByRole("navigation", { name: "Footer" })).toHaveLength(1);
-    const footerRestriction = screen.getByText(/Explore research materials, compare product configurations, and review the details that matter to your selection/iu);
+    const footerRestriction = screen.getByText(/Explore research materials, compare product amounts, and review the details that matter to your selection/iu);
     expect(footerRestriction).toHaveClass("text-base");
     expect(footerRestriction).not.toHaveClass("text-sm");
     expect(within(footer).getByRole("link", { name: "Partner Program" })).toHaveAttribute(

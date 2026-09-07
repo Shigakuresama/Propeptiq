@@ -24,7 +24,7 @@ export function ProductPrice({
     );
   }
   const price = presentation.price;
-  const discounted = price.effectiveDiscountBps > 0;
+  const discounted = price.lineSavingsMinor > 0;
   return (
     <div className="grid gap-1">
       <div className="flex flex-wrap items-baseline gap-2 tabular-nums">

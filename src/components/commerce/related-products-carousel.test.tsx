@@ -53,11 +53,10 @@ describe("RelatedProductsCarousel", () => {
     expect(region).toHaveAttribute("aria-roledescription", "carousel");
     expect(screen.getByText("Related catalog")).toBeVisible();
     expect(screen.getByText("Explore more products in this category.")).toBeVisible();
-    expect(screen.getByText("2 items")).toBeVisible();
     expect(list).toHaveAttribute("aria-label", "Related products, 2 items");
     expect(list).toHaveAttribute("tabindex", "0");
-    expect(list).toHaveClass("flex", "list-none", "gap-4", "overflow-x-auto", "overscroll-x-contain", "scroll-px-2", "snap-x", "snap-mandatory");
-    expect(screen.getAllByRole("listitem")[0]).toHaveClass("flex", "w-[min(82vw,20rem)]", "shrink-0", "snap-start", "sm:w-[19rem]", "lg:w-[20rem]");
+    expect(list).toHaveClass("flex", "list-none", "gap-5", "overflow-x-auto", "overscroll-x-contain", "scroll-px-2", "snap-x", "snap-mandatory");
+    expect(screen.getAllByRole("listitem")[0]).toHaveClass("flex", "w-[min(72vw,20rem)]", "min-w-0", "shrink-0", "snap-start", "sm:w-[19rem]", "lg:w-[20rem]");
     next.focus();
     await user.keyboard("{Enter}");
     expect(document.activeElement).toBe(next);
@@ -67,8 +66,8 @@ describe("RelatedProductsCarousel", () => {
     expect(screen.getAllByRole("article")[0]).toHaveAttribute("data-priority", "false");
     expect(next).toHaveAttribute("aria-controls", list.id);
     expect(previous).toHaveAttribute("aria-controls", list.id);
-    expect(next).toHaveAttribute("title", "Next related products");
-    expect(previous).toHaveAttribute("title", "Previous related products");
+    expect(next).toHaveAttribute("aria-label", "Next related products");
+    expect(previous).toHaveAttribute("aria-label", "Previous related products");
     expect(capturedCards.every((card) => card.headingLevel === 3 && card.priority === false && card.pricing === pricing)).toBe(true);
     expect(previous).toBeDisabled();
     list.scrollLeft = 640;
@@ -133,7 +132,6 @@ describe("RelatedProductsCarousel", () => {
     render(<RelatedProductsCarousel currentProductId="current" products={[only]} pricing={testPricingContext()} />);
 
     expect(screen.getByRole("region", { name: "Related Products" })).toBeVisible();
-    expect(screen.getByText("1 item")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Previous related products" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Next related products" })).toBeNull();
   });

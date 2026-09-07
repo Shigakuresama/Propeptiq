@@ -1,15 +1,7 @@
-import { Calculator, ClipboardList, FlaskConical, Layers, LibraryBig, Search } from "lucide-react";
+import { BrandIllustration } from "./brand-illustration";
 
 import type { ApprovedWhyChooseItem } from "@/content/storefront-content";
 
-const icons = {
-  "owner-supplied-records": LibraryBig,
-  "clear-purchase-states": ClipboardList,
-  "exact-variant-identity": Layers,
-  "visible-quantity-pricing": Calculator,
-  "shared-search-index": Search,
-  "research-use-boundary": FlaskConical,
-} as const;
 
 export function WhyChoosePropeptIQ({
   items,
@@ -41,14 +33,9 @@ export function WhyChoosePropeptIQ({
           </header>
           <ul className="grid list-none gap-5 p-0 md:grid-cols-2 xl:grid-cols-3">
             {items.map((item) => {
-              const Icon = Object.hasOwn(icons, item.id)
-                ? icons[item.id as keyof typeof icons]
-                : LibraryBig;
               return (
-                <li className="advantage-card record-card min-w-0 bg-surface-record p-6 [overflow-wrap:anywhere] sm:p-7" key={item.id}>
-                  <span className="advantage-icon inline-flex size-12 items-center justify-center rounded-xl border">
-                    <Icon aria-hidden="true" className="size-5" />
-                  </span>
+                <li tabIndex={0} className="advantage-card record-card min-w-0 bg-surface-record p-6 [overflow-wrap:anywhere] sm:p-7" key={item.id}>
+                  <BrandIllustration kind={item.id} />
                   <h3 className="mt-6 font-heading text-2xl leading-tight text-ink">
                     {item.title}
                   </h3>

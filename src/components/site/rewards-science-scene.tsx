@@ -5,9 +5,9 @@ type RewardsScienceSceneProps = {
 };
 
 const STATUS_COPY = {
-  active: "Active policy signal",
-  inactive: "No active public record",
-  read_error: "Public record unavailable",
+  active: "Program terms available",
+  inactive: "Enrollment is not open",
+  read_error: "Program information unavailable",
 } as const;
 
 export function RewardsScienceScene({
@@ -25,7 +25,7 @@ export function RewardsScienceScene({
         <span aria-hidden="true" className="rewards-signal-dot" />
         <p>{STATUS_COPY[status]}</p>
         <span aria-hidden="true" className="rewards-scene-index">
-          PROPEPTIQ / POLICY
+          PROPEPTIQ / REWARDS
         </span>
       </div>
 
@@ -90,15 +90,15 @@ export function RewardsScienceScene({
       </div>
 
       {status === "active" ? (
-        <ul className="rewards-science-scene__records" aria-label="Active reward records">
-          {loyaltyAvailable ? <li>Loyalty record active</li> : null}
-          {referralAvailable ? <li>Referral record active</li> : null}
+        <ul className="rewards-science-scene__records" aria-label="Available programs">
+          {loyaltyAvailable ? <li>Rewards</li> : null}
+          {referralAvailable ? <li>Referrals</li> : null}
         </ul>
       ) : (
         <p className="rewards-science-scene__note">
           {status === "read_error"
-            ? "The policy record could not be read safely."
-            : "Program values remain hidden until a current record is active."}
+            ? "Please try again later."
+            : "Rewards and referrals are not currently available."}
         </p>
       )}
     </aside>

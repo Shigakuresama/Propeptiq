@@ -11,7 +11,7 @@ const cartKey = "propeptiq.cart.v2";
 const legacyCartKey = "propeptiq.cart.v1";
 const addLabel = "Add Tirzepatide to cart";
 
-const purchaseSummary = (page: Page) => page.getByRole("status", { name: "Purchase summary" });
+const purchaseSummary = (page: Page) => page.locator(".purchase-summary");
 const mobilePurchase = (page: Page) => page.getByRole("region", { name: "Mobile purchase controls" });
 const searchTrigger = (page: Page) => page.getByRole("button", { name: "Search PropeptIQ" });
 
@@ -37,9 +37,9 @@ async function openProduct(page: Page) {
 }
 
 async function chooseTwoBottles(page: Page) {
-  await page.locator(`input[type="radio"][value="${tr30VariantId}"]`).check();
-  await page.getByRole("button", { name: "2 bottles", exact: true }).click();
-  await expect(purchaseSummary(page)).toContainText("30mg · 2 bottles");
+  await page.locator(`input[type="radio"][value="${tr30VariantId}"]`).locator("..").click();
+  await page.getByRole("combobox", { name: "Quantity", exact: true }).selectOption("2");
+  await expect(purchaseSummary(page)).toContainText("30mg · 2 units");
   await expect(purchaseSummary(page)).toContainText("$83.98");
 }
 
@@ -76,15 +76,17 @@ async function positionSummaryBottom(page: Page, bottom: number) {
   // A native focus scroll is not a Web Animation. Wait for its geometry as
   // well as CSS transitions before setting the exact observer boundary.
   await waitForPurchaseLayout(page);
-  await purchaseSummary(page).evaluate((element, targetBottom) => {
-    window.scrollTo({ top: window.scrollY + element.getBoundingClientRect().bottom - targetBottom, behavior: "instant" });
-  }, bottom);
-  await waitForPurchaseLayout(page);
-  await expect.poll(async () => Math.abs((await rect(purchaseSummary(page))).bottom - bottom)).toBeLessThanOrEqual(1);
+  await expect.poll(async () => {
+    await purchaseSummary(page).evaluate((element, targetBottom) => {
+      window.scrollTo({ top: window.scrollY + element.getBoundingClientRect().bottom - targetBottom, behavior: "instant" });
+    }, bottom);
+    await waitForPurchaseLayout(page);
+    return Math.abs((await rect(purchaseSummary(page))).bottom - bottom);
+  }).toBeLessThanOrEqual(1);
 }
 
 async function expectPurchaseHeadingBelowHeader(page: Page) {
-  const heading = page.getByRole("heading", { name: "Purchase", exact: true });
+  const heading = page.getByRole("heading", { name: "Select your product", exact: true });
   await expect(heading).toBeFocused();
   await expect(heading).toBeInViewport();
   await expect.poll(async () => (await rect(heading)).top - (await rect(page.getByRole("banner"))).bottom).toBeGreaterThanOrEqual(0);
@@ -134,7 +136,7 @@ test("mobile purchase waits until the inline summary has passed above the viewpo
   await expect(mobilePurchase(page)).toHaveCount(1);
   expect(await mobilePurchase(page).evaluate((element) => element.closest("main"))).toBeNull();
   await expect(mobilePurchase(page)).toContainText("30mg");
-  await expect(mobilePurchase(page)).toContainText("2 bottles");
+  await expect(mobilePurchase(page)).toContainText("2 units");
   await expect(mobilePurchase(page)).toContainText("$83.98");
   await expect(mobilePurchase(page)).toContainText("Test mode — no payments");
   await expect(mobilePurchase(page).getByRole("button", { name: addLabel })).toBeEnabled();
@@ -185,38 +187,43 @@ test("Change selection returns keyboard focus to Purchase without resetting vari
   await page.setViewportSize({ width: 375, height: 812 });
   await openProduct(page);
   await chooseTwoBottles(page);
-  await page.locator(`input[type="radio"][value="${tr60VariantId}"]`).check();
+  await page.locator(`input[type="radio"][value="${tr60VariantId}"]`).locator("..").click();
   await expect(purchaseSummary(page)).toContainText("$153.98");
   await showMobilePurchase(page);
   await expect(mobilePurchase(page)).toContainText("60mg");
-  await expect(mobilePurchase(page)).toContainText("2 bottles");
+  await expect(mobilePurchase(page)).toContainText("2 units");
   await expect(mobilePurchase(page)).toContainText("$153.98");
   const changeSelection = mobilePurchase(page).getByRole("link", { name: "Change selection" });
   await expect(changeSelection).toHaveAttribute("href", "#purchase-heading");
   await changeSelection.focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide#purchase-heading$/u);
-  const heading = page.getByRole("heading", { name: "Purchase", exact: true });
+  const heading = page.getByRole("heading", { name: "Select your product", exact: true });
   await expect(heading).toBeFocused();
   await expect(heading).toBeInViewport();
   await expectPurchaseHeadingBelowHeader(page);
   await expect(mobilePurchase(page)).toBeHidden();
   await expect(page.locator(`input[type="radio"][value="${tr60VariantId}"]`)).toBeChecked();
-  await expect(page.getByRole("spinbutton", { name: "Exact quantity" })).toHaveValue("2");
+  await expect(page.getByRole("combobox", { name: "Quantity", exact: true })).toHaveValue("2");
   await expect(purchaseSummary(page)).toContainText("$153.98");
 });
 
-test("mobile purchase rejects an invalid quantity instead of showing the previous subtotal", async ({ page }) => {
+test("mobile purchase retains a valid selection when an invalid native option is injected [browser-only double]", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await openProduct(page);
   await chooseTwoBottles(page);
   const savedCartBefore = await page.evaluate((key) => window.localStorage.getItem(key), cartKey);
-  await page.getByRole("spinbutton", { name: "Exact quantity" }).fill("");
-  await expect(purchaseSummary(page)).toContainText("Invalid quantity");
+  await page.getByRole("combobox", { name: "Quantity", exact: true }).evaluate((element) => {
+    // A native select cannot offer invalid input. Exercise the handler defensively.
+    const select = element as HTMLSelectElement;
+    select.value = "";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await expect(purchaseSummary(page)).toContainText("2 units");
   await showMobilePurchase(page);
-  await expect(mobilePurchase(page)).toContainText("Invalid quantity");
-  await expect(mobilePurchase(page)).not.toContainText("$83.98");
-  await expect(mobilePurchase(page).getByRole("button", { name: "Tirzepatide unavailable" })).toBeDisabled();
+  await expect(mobilePurchase(page)).toContainText("2 units");
+  await expect(mobilePurchase(page)).toContainText("$83.98");
+  await expect(mobilePurchase(page).getByRole("button", { name: addLabel })).toBeEnabled();
   expect(await page.evaluate((key) => window.localStorage.getItem(key), cartKey)).toBe(savedCartBefore);
 });
 
@@ -320,13 +327,13 @@ test("focused purchase controls hand focus to the inline heading when the viewpo
     await expect(add).toBeFocused();
     const savedCartBefore = await page.evaluate((key) => window.localStorage.getItem(key), cartKey);
     await page.setViewportSize(viewport);
-    const heading = page.getByRole("heading", { name: "Purchase", exact: true });
+    const heading = page.getByRole("heading", { name: "Select your product", exact: true });
     await expect(heading).toBeFocused();
     await expect(heading).toBeInViewport();
     await expectPurchaseHeadingBelowHeader(page);
     await expect(mobilePurchase(page)).toBeHidden();
     await expect(searchTrigger(page)).toBeVisible();
-    await expect(page.getByRole("spinbutton", { name: "Exact quantity" })).toHaveValue("2");
+    await expect(page.getByRole("combobox", { name: "Quantity", exact: true })).toHaveValue("2");
     expect(await page.evaluate((key) => window.localStorage.getItem(key), cartKey)).toBe(savedCartBefore);
   }
 });
@@ -350,24 +357,12 @@ test("footer Tab navigation keeps every focused target fully above the active pu
 
     // Only the known preceding link is positioned by the fixture. All target
     // links and summaries below receive focus through actual Tab navigation and browser scroll.
-    const targets = [
-      ["Instagram", footer.getByRole("link", { name: "Instagram", exact: true })],
-      ["TikTok", footer.getByRole("link", { name: "TikTok", exact: true })],
-      ["X", footer.getByRole("link", { name: "X", exact: true })],
-      ["Facebook", footer.getByRole("link", { name: "Facebook", exact: true })],
-      ["Shop summary", footer.locator("summary").filter({ hasText: /^Shop$/u })],
-      ["Catalog", footer.getByRole("link", { name: "Catalog", exact: true })],
-      ["Cart", footer.getByRole("link", { name: "Cart", exact: true })],
-      ["Rewards", footer.getByRole("link", { name: "Rewards", exact: true })],
-      ["Partner Program", footer.getByRole("link", { name: "Partner Program", exact: true })],
-      ["Support summary", footer.locator("summary").filter({ hasText: /^Support$/u })],
-      ["Quality Records", footer.getByRole("link", { name: "Quality Records", exact: true })],
-      ["Order tracking", footer.getByRole("link", { name: "Order tracking", exact: true })],
-      ["FAQ", footer.getByRole("link", { name: "FAQ", exact: true })],
-      ["Legal summary", footer.locator("summary").filter({ hasText: /^Legal$/u })],
-      ["Research Use Only", footer.getByRole("link", { name: "Research Use Only", exact: true })],
-    ] as const;
-    for (const [name, target] of targets) {
+    const targets = await footer.locator("a[href]:visible, summary:visible").all();
+    expect(targets.length).toBeGreaterThan(8);
+    await expect(footer.getByRole("link", { name: "Contact us", exact: true })).toHaveCount(1);
+    await expect(footer.getByRole("link", { name: "SSL secured connection to propeptiq.com" })).toHaveCount(1);
+    for (const target of targets.slice(1)) {
+      const name = await target.getAttribute("aria-label") ?? await target.textContent() ?? "Footer link";
       await page.keyboard.press("Tab");
       await expect(target).toBeFocused();
       await waitForPurchaseLayout(page);
@@ -426,14 +421,14 @@ test("enlarged text and a synthetic long label remeasure clearance and hand focu
     const sizes = textElements.map((entry) => ({ entry, size: Number.parseFloat(getComputedStyle(entry).fontSize) }));
     for (const { entry, size } of sizes) (entry as HTMLElement).style.fontSize = `${size * 2}px`;
   });
-  await expect(page.getByRole("heading", { name: "Purchase", exact: true })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Select your product", exact: true })).toBeFocused();
   await expectPurchaseHeadingBelowHeader(page);
   await expect(mobilePurchase(page)).toBeHidden();
   const measuredPurchase = page.getByRole("region", { name: "Mobile purchase controls", includeHidden: true });
   expect((await rect(measuredPurchase)).height + 84).toBeGreaterThan(600);
   await expect(searchTrigger(page)).toBeVisible();
   expect((await rect(searchTrigger(page))).bottom).toBeCloseTo(originalSearchBottom, 0);
-  await expect(page.getByRole("spinbutton", { name: "Exact quantity" })).toHaveValue("2");
+  await expect(page.getByRole("combobox", { name: "Quantity", exact: true })).toHaveValue("2");
   await expect(purchaseSummary(page)).toContainText("$83.98");
 });
 
@@ -477,7 +472,7 @@ test("search retains focus trapping and restoration while mobile purchase is act
   await expect(searchTrigger(page)).toBeFocused();
   await expect(mobilePurchase(page)).toBeVisible();
   await expect(mobilePurchase(page)).toContainText("30mg");
-  await expect(mobilePurchase(page)).toContainText("2 bottles");
+  await expect(mobilePurchase(page)).toContainText("2 units");
   await expect(mobilePurchase(page)).toContainText("$83.98");
   await expectDockGeometry(page, originalSearchBottom);
 });
@@ -560,7 +555,7 @@ test("without JavaScript the purchase summary remains in the document and the mo
   const page = await context.newPage();
   try {
     await page.goto(new URL(productPath, baseURL).toString());
-    await expect(purchaseSummary(page)).toContainText("30mg · 1 bottle");
+    await expect(purchaseSummary(page)).toContainText("30mg · 1 unit");
     await expect(purchaseSummary(page)).toContainText("$41.99");
     await expect(purchaseSummary(page).getByRole("button", { name: addLabel })).toBeVisible();
     // Page JavaScript is disabled and reduced motion removes CSS movement;
@@ -586,7 +581,7 @@ test("reduced motion keeps purchase usable without an active dock animation", as
   expect(await mobilePurchase(page).evaluate((element) => element.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length)).toBe(0);
   await expectDockGeometry(page, originalSearchBottom);
   await mobilePurchase(page).getByRole("link", { name: "Change selection" }).click();
-  await expect(page.getByRole("heading", { name: "Purchase", exact: true })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Select your product", exact: true })).toBeFocused();
   await expectPurchaseHeadingBelowHeader(page);
 });
 

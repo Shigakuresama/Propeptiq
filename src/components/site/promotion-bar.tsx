@@ -45,8 +45,8 @@ export function PromotionBar({
         {promotion.displayName.toUpperCase()}: {promotion.percentage}% OFF
         {" "}SITEWIDE
       </p>
-      <div className="mt-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
-      <p className="text-sm font-semibold tracking-[0.08em]">{promotion.code} APPLIED AUTOMATICALLY</p>
+      <div className="promotion-code-pill mx-auto mt-3 flex w-fit max-w-full flex-wrap items-center justify-center gap-x-4 gap-y-1">
+      <p className="text-sm font-semibold tracking-[0.08em]">{promotion.code}{" "}<span className="block text-[0.65rem] tracking-wider">APPLIED AUTOMATICALLY</span></p>
       <button
         type="button"
         aria-label={`${copyState === "copied" ? "Copied" : "Copy"} promotion code ${promotion.code}`}

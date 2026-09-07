@@ -159,7 +159,7 @@ export function MobilePurchaseBar({ productSlug, inlineSummaryRef, quantity, pre
       <div className="mobile-purchase-bar__summary">
         <div>
           <p className="mobile-purchase-bar__name">{addToCartProps.productName}</p>
-          <p>{addToCartProps.variantLabel ?? "No variant selected"} · {quantity === null ? "Invalid quantity" : `${quantity} bottle${quantity === 1 ? "" : "s"}`}</p>
+          <p>{addToCartProps.variantLabel ?? "No amount selected"} · {quantity === null ? "Choose a quantity" : `${quantity} unit${quantity === 1 ? "" : "s"}`}</p>
         </div>
         <div className="mobile-purchase-bar__price">
           {subtotal !== null ? <p><span className="sr-only">Subtotal </span><strong>{subtotal}</strong></p> : null}

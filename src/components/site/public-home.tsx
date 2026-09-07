@@ -1,68 +1,24 @@
-import { ArrowRight, Coins, FileCheck2, FlaskConical, Handshake, LibraryBig, Share2 } from "lucide-react";
-import type { Route } from "next";
+import { ArrowRight, FlaskConical, LibraryBig } from "lucide-react";
 import Link from "next/link";
-
 import type { PublicStorefrontPricingContext } from "@/catalog/storefront-price-presentation";
 import type { PublicStorefrontProduct } from "@/catalog/storefront-public";
 import { CatalogListingCard } from "@/components/commerce/catalog-listing-card";
-import {
-  DataLabel,
-  Metric,
-  RecordPanel,
-  SectionShell,
-} from "@/components/design-system/archive-primitives";
+import { DataLabel, SectionShell } from "@/components/design-system/archive-primitives";
 import { ProgramStrip } from "@/components/growth/program-strip";
 import { FaqSection } from "@/components/site/faq-section";
 import { FaqJsonLd } from "@/components/site/faq-json-ld";
-import { ProofRail } from "@/components/site/proof-rail";
-import { ScienceField } from "@/components/site/science-field";
 import { SectionHeading } from "@/components/site/section-heading";
 import { WhyChoosePropeptIQ } from "@/components/site/why-choose-propeptiq";
+import { TrendingProducts } from "@/components/site/trending-products";
 import { Button } from "@/components/ui/button";
 import type { ApprovedHomepageContent } from "@/content/storefront-content";
 import type { LoyaltyPolicy } from "@/domain/rewards";
 import type { ReferralPolicy } from "@/domain/referrals";
 import { researchRestrictions } from "@/lib/site-content";
 
-const documentationStages = [
-  {
-    index: "01",
-    label: "Material",
-    detail: "Current catalog identity",
-  },
-  {
-    index: "02",
-    label: "Record",
-    detail: "Product configuration",
-  },
-  {
-    index: "03",
-    label: "Method",
-    detail: "Approved analytical context, when available",
-  },
-  {
-    index: "04",
-    label: "Document",
-    detail: "Public destination, when approved",
-  },
-] as const;
+const emptyHomepageContent: ApprovedHomepageContent = Object.freeze({ whyChoose: Object.freeze([]), faqs: Object.freeze([]) });
 
-const emptyHomepageContent: ApprovedHomepageContent = Object.freeze({
-  whyChoose: Object.freeze([]),
-  faqs: Object.freeze([]),
-});
-
-export function PublicHome({
-  homepageContent = emptyHomepageContent,
-  loyaltyPolicy = null,
-  referralPolicy = null,
-  partnerAvailable = false,
-  programsUnavailable = false,
-  syntheticLocal = false,
-  products,
-  variantCount,
-  pricing,
-}: {
+export function PublicHome({ homepageContent = emptyHomepageContent, loyaltyPolicy = null, referralPolicy = null, partnerAvailable = false, syntheticLocal = false, products, pricing }: {
   homepageContent?: ApprovedHomepageContent | undefined;
   loyaltyPolicy?: LoyaltyPolicy | null;
   referralPolicy?: ReferralPolicy | null;
@@ -73,310 +29,60 @@ export function PublicHome({
   variantCount: number;
   pricing: PublicStorefrontPricingContext;
 }) {
-  const allBrowseOnly = products.every((product) => product.kind === "browse_only");
-  const catalogSummary = products.length === 0
-    ? "No products are available to view right now. Please check back later."
-    : `Explore ${variantCount} product configurations. ${allBrowseOnly
-        ? "Select a product to see its listed details. Pricing and ordering are not available for these items."
-        : "Select a product to see its details, pricing, and availability."}`;
-  const growthPrograms = [
-    {
-      title: "Earn points",
-      description: "Rewards from eligible activity, governed by current program terms.",
-      href: "/rewards" as const,
-      Icon: Coins,
-      active: loyaltyPolicy?.status === "active",
-    },
-    {
-      title: "Refer a lab",
-      description: "Share an eligible referral and track rewards in your account.",
-      href: "/rewards#referrals" as const,
-      Icon: FlaskConical,
-      active: referralPolicy?.status === "active",
-    }, {
-      title: "Share a research set",
-      description: "Keep selected materials together in a shareable research set.",
-      href: "/research-sets" as const,
-      Icon: Share2,
-      // Account/catalog eligibility owns this feature, not the referral policy.
-      active: null,
-    }, {
-      title: "Partner with PROPEPTIQ",
-      description: "Explore the formal partner program and application requirements.",
-      href: "/partners" as const,
-      Icon: Handshake,
-      active: partnerAvailable,
-    },
-  ];
+  const programs = [
+    { title: "Rewards", href: "/rewards" as const, active: loyaltyPolicy?.status === "active" },
+    { title: "Referrals", href: "/rewards#referrals" as const, active: referralPolicy?.status === "active" },
+    { title: "Partner program", href: "/partners" as const, active: partnerAvailable },
+  ].filter((program) => program.active);
 
-  return (
-    <div>
-      {syntheticLocal ? (
-        <div className="site-container pt-5">
-          <p className="warning-record text-base font-semibold">Synthetic local test only</p>
+  return <div>
+    {syntheticLocal ? <div className="site-container pt-5"><p className="warning-record text-base font-semibold">Synthetic local test only</p></div> : null}
+    <ProgramStrip loyaltyPolicy={loyaltyPolicy} />
+    <section aria-labelledby="home-hero-heading" className="home-hero border-b border-border">
+      <SectionShell className="grid gap-10 py-10 sm:py-12 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-center lg:gap-12">
+        <div className="min-w-0" data-motion-sequence="home-hero">
+          <DataLabel>PROPEPTIQ LABS · Research-use catalog</DataLabel>
+          <h1 id="home-hero-heading" className="home-hero-title mt-5 font-heading text-ink">
+            Research materials,<br /><span className="text-accent-readable">documented with clarity.</span>
+          </h1>
+          <p className="mt-6 max-w-[48ch] text-lg leading-8 text-muted-ink">Explore the research catalog. Compare amounts, see current pricing, and keep your selections together.</p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <Button asChild className="action-primary"><Link href="/catalog">Browse catalog <ArrowRight aria-hidden="true" /></Link></Button>
+            <Button asChild className="action-secondary" variant="outline"><Link href="/cart">View cart</Link></Button>
+          </div>
+          {products.length ? <p className="mt-8 text-sm font-semibold uppercase tracking-wider text-accent-readable">{products.length} products in the catalog</p> : null}
         </div>
-      ) : null}
-      <ProgramStrip loyaltyPolicy={loyaltyPolicy} />
-
-      <section aria-labelledby="home-hero-heading" className="overflow-hidden border-b border-border">
-        <SectionShell className="grid gap-8 py-12 sm:gap-10 sm:py-16 lg:grid-cols-[minmax(0,7fr)_minmax(14rem,5fr)] lg:items-stretch lg:py-20 xl:gap-14 xl:py-24">
-          <div className="flex min-w-0 max-w-[54rem] flex-col justify-center lg:py-8" data-motion-sequence="home-hero">
-            <DataLabel>Research-use catalog</DataLabel>
-            <h1
-              aria-label="Research materials, documented with greater clarity."
-              id="home-hero-heading"
-              className="mt-5 break-words font-heading text-page leading-[0.97] tracking-[-0.025em] text-ink xl:text-[5.75rem]"
-            >
-              <span className="block">Research materials,</span>
-              <span className="block">documented with</span>
-              <span className="block">greater clarity.</span>
-            </h1>
-            <p className="mt-7 min-h-40 max-w-[62ch] text-pretty text-lg leading-8 text-muted-ink sm:min-h-0 sm:text-xl">
-              Explore research materials, compare product configurations, and find the details you need in one place.
-            </p>
-            <div className="mt-6 flex flex-wrap gap-3 sm:mt-9">
-              <Button asChild className="action-primary">
-                <Link href="/catalog">
-                  Browse catalog
-                  <ArrowRight aria-hidden="true" />
-                </Link>
-              </Button>
-              <Button asChild className="action-secondary" variant="outline">
-                <Link href="/cart">View cart</Link>
-              </Button>
-            </div>
-          </div>
-
-          <RecordPanel className="relative min-h-[26rem] overflow-hidden bg-surface-recessed p-0 shadow-none sm:min-h-[34rem] lg:min-h-[38rem]">
-            <ScienceField className="home-research-lattice" variant="lattice" />
-            <div className="relative z-10 flex h-full min-h-[26rem] flex-col justify-between sm:min-h-[34rem] lg:min-h-[38rem]">
-              <div className="flex items-start justify-between gap-4 p-6 sm:p-8">
-                <DataLabel>Current catalog</DataLabel>
-                <p className="rounded-full border border-border bg-surface-record px-3 py-1 text-xs font-bold uppercase tracking-[0.08em] text-accent-readable">
-                  Explore the collection
-                </p>
-              </div>
-              <div className="border-t border-border bg-surface-record p-6 sm:p-8">
-                <div className="grid grid-cols-2 gap-6 divide-x divide-border">
-                  <Metric
-                    className="pr-4"
-                    label="Product families"
-                    value={products.length.toString().padStart(2, "0")}
-                  />
-                  <Metric
-                    className="pl-1 sm:pl-3"
-                    label="Configurations"
-                    value={variantCount.toString()}
-                  />
-                </div>
-                <p className="mt-6 max-w-[38ch] border-t border-border pt-5 text-base leading-7 text-muted-ink">
-                  {catalogSummary}
-                </p>
-              </div>
-            </div>
-          </RecordPanel>
-        </SectionShell>
-      </section>
-
-      <section
-        aria-labelledby="home-evidence-heading"
-        className="border-b border-border bg-surface-record/35 py-12 sm:py-16 lg:py-24 xl:py-28"
-      >
-        <SectionShell>
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,8fr)_minmax(16rem,4fr)] lg:items-end">
-            <SectionHeading
-              description="Each stage remains distinct, and an unavailable stage stays explicitly unavailable."
-              eyebrow="Evidence relationship"
-              id="home-evidence-heading"
-              title="Public records stay linked to their source evidence."
-            />
-            <div className="border-l-2 border-moss pl-5">
-              <DataLabel>Reading note</DataLabel>
-              <p className="mt-3 text-base leading-7 text-muted-ink">
-                This ordered rail describes a relationship. It is not a progress score.
-              </p>
-            </div>
-          </div>
-          <div className="mt-10">
-            <ProofRail />
-          </div>
-        </SectionShell>
-      </section>
-
-      <section aria-labelledby="home-highlights-heading" className="py-12 sm:py-16 lg:py-24 xl:py-28">
-        <SectionShell>
-          <div className="grid gap-7 lg:grid-cols-[minmax(0,8fr)_minmax(14rem,4fr)] lg:items-end">
-            <SectionHeading
-              description="Explore products from the PropeptIQ research catalog."
-              eyebrow="Catalog highlights"
-              id="home-highlights-heading"
-              title="Find your next research material."
-            />
-            <div className="flex items-center gap-3 lg:justify-end">
-              <LibraryBig aria-hidden="true" className="size-5 text-moss" />
-              <Link className="record-link inline-flex min-h-11 items-center" href="/catalog">
-                View the full catalog
-              </Link>
-            </div>
-          </div>
-          <ul
-            aria-label="Catalog highlights"
-            className="mt-10 grid list-none gap-6 p-0 md:grid-cols-2 xl:grid-cols-12"
-          >
-            {products.slice(0, 3).map((product, index) => (
-              <li
-                className={index === 0
-                  ? "md:col-span-2 xl:col-span-6 [&_.catalog-image-frame]:aspect-[16/10] sm:[&_.catalog-image-frame]:aspect-[4/3]"
-                  : "xl:col-span-3 [&_.catalog-image-frame]:hidden [&_.record-panel-recessed]:hidden sm:[&_.catalog-image-frame]:block sm:[&_.record-panel-recessed]:block"}
-                key={product.slug}
-              >
-                <CatalogListingCard
-                  headingLevel={3}
-                  product={product}
-                  priority={index === 0}
-                  pricing={pricing}
-                />
-              </li>
-            ))}
-          </ul>
-        </SectionShell>
-      </section>
-
-      {growthPrograms.length > 0 ? (
-        <section
-          aria-label="Growth programs"
-          className="border-t border-border bg-moss-soft/25 py-10 sm:py-12 lg:py-14"
-        >
-          <SectionShell>
-            <SectionHeading
-              className="max-w-[48rem]"
-              eyebrow="PROPEPTIQ programs"
-              id="home-programs-heading"
-              title="More ways to connect."
-            />
-            <ul className="mt-6 grid list-none gap-4 p-0 md:grid-cols-2 xl:grid-cols-4">
-              {growthPrograms.map(({ title, description, href, Icon, active }) => (
-                <li className="min-w-0" key={title}>
-                  <RecordPanel className="h-full p-5" interactive>
-                    <Icon aria-hidden="true" className="size-6 text-accent-readable" />
-                    <h3>
-                    <Link
-                      className="record-link mt-4 inline-flex min-h-11 items-center text-lg font-semibold"
-                      href={href as Route}
-                    >
-                      {title}
-                    </Link>
-                    </h3>
-                    <p className="mt-2 text-base leading-7 text-muted-ink">{description}</p>
-                    {active !== true ? <p className="mt-3 text-sm font-semibold text-muted-ink">{active === null ? "Eligible account required" : programsUnavailable ? "Program details temporarily unavailable" : "Not currently open"}</p> : null}
-                  </RecordPanel>
-                </li>
-              ))}
-            </ul>
-          </SectionShell>
-        </section>
-      ) : null}
-
-      <WhyChoosePropeptIQ items={homepageContent.whyChoose} />
-      <FaqSection entries={homepageContent.faqs} />
-      <FaqJsonLd entries={homepageContent.faqs} />
-
-      <section
-        aria-labelledby="quality-callout-heading"
-        className="border-t border-border bg-surface-recessed py-12 sm:py-16 lg:py-24 xl:py-28"
-      >
-        <SectionShell className="grid gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-14">
-          <div className="max-w-[38rem]">
-            <div className="flex items-center gap-3">
-              <FileCheck2 aria-hidden="true" className="size-5 text-moss" />
-              <DataLabel>Documentation philosophy</DataLabel>
-            </div>
-            <h2
-              id="quality-callout-heading"
-              className="mt-5 text-balance font-heading text-section leading-[1.08] text-ink"
-            >
-              Follow the record, not an unsupported claim.
-            </h2>
-            <p className="mt-6 text-pretty text-base leading-7 text-muted-ink">
-              Catalog identity is presented separately from analytical context, lot information,
-              and public COA availability. Each appears only from its corresponding record.
-            </p>
-            <Link
-              className="record-link mt-7 inline-flex min-h-11 items-center gap-2"
-              href="/quality-records"
-            >
-              View quality records
-              <ArrowRight aria-hidden="true" className="size-4" />
-            </Link>
-          </div>
-
-          <ol className="grid list-none gap-px overflow-hidden rounded-[0.875rem] border border-border bg-border p-0 sm:grid-cols-2">
-            {documentationStages.map((stage) => (
-              <li className="min-h-36 bg-surface-record p-5 sm:min-h-44 sm:p-7" key={stage.index}>
-                <DataLabel className="break-words">{stage.index} / {stage.label}</DataLabel>
-                <p className="mt-6 max-w-[24ch] break-words font-heading text-2xl leading-tight text-ink sm:mt-8">
-                  {stage.detail}
-                </p>
-              </li>
-            ))}
-          </ol>
-        </SectionShell>
-      </section>
-
-      <section aria-labelledby="research-use-heading" className="border-t border-border py-10 sm:py-16 lg:py-20">
-        <SectionShell>
-          <RecordPanel className="grid overflow-hidden p-0 lg:grid-cols-[minmax(0,7fr)_minmax(18rem,5fr)]">
-            <div className="bg-surface-inverse p-7 text-canvas sm:p-10 lg:p-12">
-              <FlaskConical aria-hidden="true" className="size-6 text-canvas/75" />
-              <DataLabel className="data-label-inverse mt-8">Research-use boundary</DataLabel>
-              <h2
-                id="research-use-heading"
-                className="mt-4 max-w-[18ch] break-words text-balance font-heading text-section leading-[1.08] text-canvas"
-              >
-                A clear boundary, integrated into the catalog.
-              </h2>
-            </div>
-            <div className="flex flex-col justify-center p-7 sm:p-10 lg:p-12">
-              <div className="restriction-copy border-l-2 border-moss pl-5 text-base leading-7 text-ink">
-                <p>{researchRestrictions[0]}</p>
-                <p>{researchRestrictions[1]}</p>
-              </div>
-              <p className="mt-6 text-base leading-7 text-muted-ink">
-                Review each product&apos;s details and the Research-Use Policy before making your selection.
-              </p>
-              <Link
-                className="record-link mt-7 inline-flex min-h-11 items-center"
-                href="/research-use-policy"
-              >
-                Read the research-use policy
-              </Link>
-            </div>
-          </RecordPanel>
-        </SectionShell>
-      </section>
-
-      <section aria-labelledby="catalog-cta-heading" className="border-t border-border bg-surface-inverse text-canvas">
-        <SectionShell className="grid gap-8 py-12 sm:py-16 lg:grid-cols-[minmax(0,8fr)_auto] lg:items-end lg:py-20">
-          <div>
-            <DataLabel className="data-label-inverse">Research catalog</DataLabel>
-            <h2
-              id="catalog-cta-heading"
-              className="mt-4 max-w-[18ch] break-words text-balance font-heading text-section leading-[1.04] text-canvas"
-            >
-              Explore the full research catalog.
-            </h2>
-            <p className="mt-5 max-w-[58ch] text-base leading-7 text-canvas/75">
-              Explore every product and configuration in our research catalog.
-            </p>
-          </div>
-          <Button asChild className="action-inverse" variant="outline">
-            <Link href="/catalog">
-              Explore the catalog
-              <ArrowRight aria-hidden="true" />
-            </Link>
-          </Button>
-        </SectionShell>
-      </section>
-    </div>
-  );
+        <TrendingProducts products={products} />
+      </SectionShell>
+    </section>
+    <section aria-labelledby="home-highlights-heading" className="py-12 sm:py-16 lg:py-20">
+      <SectionShell>
+        <div className="flex flex-wrap items-end justify-between gap-6">
+          <SectionHeading description="Explore products from the PropeptIQ research catalog." eyebrow="Catalog highlights" id="home-highlights-heading" title="Find your next research material." />
+          <Link className="record-link inline-flex min-h-11 items-center gap-2" href="/catalog"><LibraryBig aria-hidden="true" className="size-4" />View the full catalog</Link>
+        </div>
+        <ul aria-label="Catalog highlights" className="home-product-grid mt-8 grid list-none gap-5 p-0 md:grid-cols-3">
+          {products.slice(0, 3).map((product, index) => <li className="min-w-0" key={product.slug}><CatalogListingCard headingLevel={3} product={product} priority={index === 0} pricing={pricing} /></li>)}
+        </ul>
+      </SectionShell>
+    </section>
+    {programs.length ? <section className="border-y border-border bg-surface-recessed py-10" aria-label="PROPEPTIQ programs">
+      <SectionShell><ul className="flex list-none flex-wrap gap-6 p-0">{programs.map((program) => <li key={program.href}><h2 className="font-heading text-2xl"><Link className="record-link inline-flex min-h-11 items-center gap-2" href={program.href}>{program.title}<ArrowRight aria-hidden="true" className="size-4" /></Link></h2></li>)}</ul></SectionShell>
+    </section> : null}
+    <WhyChoosePropeptIQ items={homepageContent.whyChoose} />
+    <FaqSection entries={homepageContent.faqs} />
+    <FaqJsonLd entries={homepageContent.faqs} />
+    <section aria-labelledby="research-use-heading" className="border-t border-border py-12 sm:py-16">
+      <SectionShell className="grid gap-6 md:grid-cols-2 md:items-center">
+        <div><FlaskConical aria-hidden="true" className="size-7 text-accent-readable" /><h2 id="research-use-heading" className="mt-4 font-heading text-section leading-tight">Research use only</h2></div>
+        <div><div className="restriction-copy border-l-2 border-moss pl-5 text-base leading-7"><p>{researchRestrictions[0]}</p><p>{researchRestrictions[1]}</p></div><Link className="record-link mt-4 inline-flex min-h-11 items-center" href="/research-use-policy">Read the research-use policy</Link></div>
+      </SectionShell>
+    </section>
+    <section aria-labelledby="catalog-cta-heading" className="border-t border-border bg-surface-inverse text-canvas">
+      <SectionShell className="flex flex-wrap items-end justify-between gap-8 py-12 sm:py-16">
+        <div className="min-w-0 max-w-2xl"><DataLabel className="data-label-inverse">Research catalog</DataLabel><h2 id="catalog-cta-heading" className="mt-4 font-heading text-section leading-tight">Explore the full research catalog.</h2></div>
+        <Button asChild className="action-inverse" variant="outline"><Link href="/catalog">Explore the catalog<ArrowRight aria-hidden="true" /></Link></Button>
+      </SectionShell>
+    </section>
+  </div>;
 }

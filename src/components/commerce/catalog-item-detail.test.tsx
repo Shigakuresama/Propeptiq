@@ -105,11 +105,10 @@ describe("CatalogItemDetail", () => {
     );
     if (product.description) expect(screen.getByText(product.description)).toBeVisible();
     const image = screen.getByRole("img", {
-      name: "Front AI-generated catalog illustration for Pinealon",
+      name: "Front view of Pinealon",
     });
-    const suppliedConfigurations = screen.getByRole("heading", {
-      name: "Product configurations",
-    });
+    const suppliedConfigurations = screen.getByText("Product specifications");
+    expect(suppliedConfigurations.closest("details")).not.toHaveAttribute("open");
     expect(image).toBeVisible();
     expect(
       heading.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -137,10 +136,10 @@ describe("CatalogItemDetail", () => {
     );
     expect(screen.getByText("Also listed as Pinealon10mg")).toBeVisible();
     expect(screen.getByText("Product details")).toBeVisible();
-    expect(screen.getByText("PN5")).toBeVisible();
-    expect(within(suppliedConfigurations.closest("section")!).getByText("5mg")).toBeVisible();
+    expect(screen.getByText("PN5")).toBeInTheDocument();
+    expect(within(suppliedConfigurations.closest("details")!).getByText("5mg")).toBeInTheDocument();
     expect(screen.queryByText("5mg × 10 vials")).not.toBeInTheDocument();
-    expect(screen.getByText("AI-generated catalog illustration — not actual product photography.")).toBeVisible();
+    expect(screen.queryByText("AI-generated catalog illustration — not actual product photography.")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull();
     expect(document.body).not.toHaveTextContent(/\$|usd/i);
   });
@@ -159,7 +158,7 @@ describe("CatalogItemDetail", () => {
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
     const purchase = screen.getByRole("heading", { name: "Purchase" });
-    const configurations = screen.getByRole("heading", { name: "Product configurations" });
+    const configurations = screen.getByText("Product specifications");
     const information = screen.getByRole("heading", { name: "Approved product information" });
     expect(purchase.compareDocumentPosition(configurations) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(configurations.compareDocumentPosition(information) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -249,7 +248,7 @@ describe("CatalogItemDetail", () => {
     const product = findPublicStorefrontProduct(browseOnlyCatalog, "pinealon")!;
     render(<CatalogItemDetail product={product} pricing={testPricingContext()} relatedProducts={[]} calculator={null} />);
 
-    const configurations = screen.getByRole("heading", { name: "Product configurations" });
+    const configurations = screen.getByText("Product specifications");
     const notice = screen.getByText("Product details are shown above. Pricing and ordering are not available for this item.");
     expect(configurations.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Purchase" })).toBeNull();
@@ -267,7 +266,7 @@ describe("CatalogItemDetail", () => {
 
     const variantRow = screen.getByText(code).closest("li");
     expect(variantRow).not.toBeNull();
-    expect(within(variantRow!).getByText(`Also listed as ${sourceName}`)).toBeVisible();
+    expect(within(variantRow!).getByText(`Also listed as ${sourceName}`)).toBeInTheDocument();
   });
 
   it("renders only approved allowed content literally and forwards exact pricing", () => {
@@ -302,7 +301,7 @@ describe("CatalogItemDetail", () => {
     expect(base.kind).toBe("browse_only");
     const browse = { ...base, displayConfigurations: [{ displayCode: "A", packageForm: "one" }, { displayCode: "B", packageForm: "two" }, { displayCode: "C", packageForm: "three" }] };
     render(<CatalogItemDetail product={browse} pricing={testPricingContext()} relatedProducts={[]} calculator={calculator} />);
-    expect(screen.getByText("A")).toBeVisible(); expect(screen.getByText("B")).toBeVisible(); expect(screen.getByText("C")).toBeVisible(); expect(screen.queryByRole("radio")).toBeNull(); expect(screen.queryByRole("spinbutton")).toBeNull(); expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull(); expect(screen.queryByRole("status", { name: "Purchase summary" })).toBeNull(); expect(screen.queryByText(/approved information/i)).toBeNull(); expect(document.body).not.toHaveTextContent(/\$|usd/i);
+    expect(screen.getByText("A")).toBeInTheDocument(); expect(screen.getByText("B")).toBeInTheDocument(); expect(screen.getByText("C")).toBeInTheDocument(); expect(screen.getByText("Product specifications").closest("details")).not.toHaveAttribute("open"); expect(screen.queryByRole("radio")).toBeNull(); expect(screen.queryByRole("spinbutton")).toBeNull(); expect(screen.queryByRole("button", { name: /add to cart/i })).toBeNull(); expect(screen.queryByRole("status", { name: "Purchase summary" })).toBeNull(); expect(screen.queryByText(/approved information/i)).toBeNull(); expect(document.body).not.toHaveTextContent(/\$|usd/i);
     expect(screen.queryByRole("heading", { name: calculator.title })).toBeNull();
   });
 

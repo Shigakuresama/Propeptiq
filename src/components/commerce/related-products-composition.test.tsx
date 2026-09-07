@@ -109,19 +109,14 @@ describe("related products through the published catalog and real purchase compo
     if (!selected) throw new Error("Expected a second reviewed Retatrutide variant");
     render(<CartProvider><CatalogItemDetail calculator={null} product={product} pricing={productionPricing} relatedProducts={relatedProducts} /></CartProvider>);
     const section = screen.getByRole("region", { name: "Related Products" });
-    const trigger = within(section).getByRole("button", { name: "Add Retatrutide: choose a variant" });
+    const select = within(section).getByRole("combobox", { name: "Retatrutide amount" });
+    await user.selectOptions(select, selected.id);
+    const trigger = within(section).getByRole("button", { name: "Add Retatrutide to cart" });
     for (let quantity = 1; quantity <= 2; quantity += 1) {
       await user.click(trigger);
-      const sheet = screen.getByRole("dialog", { name: "Choose a variant for Retatrutide" });
       expect(loadCart(window.localStorage)).toEqual({
-        status: "ready", items: quantity === 1 ? [] : [{ variantId: selected.id, quantity: 1 }],
+        status: "ready", items: [{ variantId: selected.id, quantity }],
       });
-      const option = within(sheet).getByRole("radio", { name: new RegExp(`^${selected.label} `, "u") });
-      option.focus();
-      await user.keyboard(" ");
-      expect(option).toBeChecked();
-      await user.click(within(sheet).getByRole("button", { name: "Add Retatrutide to cart" }));
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
       await waitFor(() => expect(loadCart(window.localStorage)).toEqual({
         status: "ready", items: [{ variantId: selected.id, quantity }],
       }));

@@ -713,7 +713,7 @@ async function waitForGeometryStable(page: Page, options = { allowKnownHeaderLog
         document.querySelector("main#main-content"),
         document.querySelector("footer"),
         document.querySelector('button[aria-label="Search PropeptIQ"]'),
-        document.querySelector('[role="status"][aria-label="Purchase summary"]'),
+        document.querySelector(".purchase-summary"),
         document.querySelector('[role="region"][aria-label="Mobile purchase controls"]'),
       ].filter((target): target is Element => target instanceof Element);
       const geometry = [
@@ -919,7 +919,7 @@ async function inspectGeometry(page: Page, width: number, requireFooterControlsI
       };
     };
     const touchTargetElements = [...document.querySelectorAll<HTMLElement>(
-      'header a, header button, button[aria-label="Search PropeptIQ"], [aria-label="Purchase summary"] button, [aria-label="Purchase summary"] input',
+      'header a, header button, button[aria-label="Search PropeptIQ"], section[aria-labelledby="purchase-heading"] button, section[aria-labelledby="purchase-heading"] .amount-option, section[aria-labelledby="purchase-heading"] select',
     )].filter(visible);
     const touchTargets = touchTargetElements.map((element) => ({
       label: element.getAttribute("aria-label") ?? element.textContent?.trim().slice(0, 80) ?? element.tagName,
@@ -1003,13 +1003,16 @@ function geometryErrors(snapshot: any) {
 }
 
 async function positionPurchaseSummaryPastViewport(page: Page) {
-  const summary = page.getByRole("status", { name: "Purchase summary" });
+  const summary = page.locator(".purchase-summary");
   if (await summary.count() !== 1) throw new Error("PDP purchase summary is missing.");
   await waitForGeometryStable(page);
-  await summary.evaluate((element, targetBottom) => {
-    window.scrollTo({ top: window.scrollY + element.getBoundingClientRect().bottom - targetBottom, behavior: "instant" });
-  }, -12);
-  await expect.poll(() => summary.evaluate((element) => Math.abs(element.getBoundingClientRect().bottom + 12)), {
+  await expect.poll(async () => {
+    await summary.evaluate((element, targetBottom) => {
+      window.scrollTo({ top: window.scrollY + element.getBoundingClientRect().bottom - targetBottom, behavior: "instant" });
+    }, -12);
+    await waitForGeometryStable(page);
+    return summary.evaluate((element) => Math.abs(element.getBoundingClientRect().bottom + 12));
+  }, {
     message: "exact purchase summary boundary",
   }).toBeLessThanOrEqual(1);
   const stability = await waitForGeometryStable(page);
@@ -1064,8 +1067,8 @@ async function waitForFooterReadiness(page: Page, expectReservedPurchase: boolea
 function expectedHiddenImages(routeLabel: string, width: number) {
   return routeLabel === "home" && width < 640
     ? [
-      "Front AI-generated catalog illustration for Retatrutide",
-      "Front AI-generated catalog illustration for NAD+",
+      "Front view of Retatrutide",
+      "Front view of NAD+",
     ]
     : [];
 }
@@ -1161,7 +1164,7 @@ async function readNoJavaScriptStabilitySnapshot(page: Page) {
       document.querySelector("main#main-content"),
       document.querySelector("footer"),
       document.querySelector('button[aria-label="Search PropeptIQ"]'),
-      document.querySelector('[role="status"][aria-label="Purchase summary"]'),
+      document.querySelector(".purchase-summary"),
     ].filter((target): target is Element => target instanceof Element);
     const geometry = [
       window.scrollY,
@@ -1349,7 +1352,7 @@ async function noJavaScriptCase(browser: Browser, path: string, routeLabel: stri
     result.essentials = await page.evaluate((label) => {
       const main = document.querySelector<HTMLElement>("main#main-content");
       const heading = main?.querySelector<HTMLElement>("h1");
-      const purchaseSummary = document.querySelector<HTMLElement>('[role="status"][aria-label="Purchase summary"]');
+      const purchaseSummary = document.querySelector<HTMLElement>(".purchase-summary");
       const positive = (element: HTMLElement | null | undefined) => {
         if (!element) return false;
         const bounds = element.getBoundingClientRect();

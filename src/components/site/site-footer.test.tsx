@@ -84,7 +84,7 @@ describe("footer configuration", () => {
           { label: "Quality Records", href: "/quality-records" },
           { label: "Order tracking", href: "/account/orders" },
           { label: "FAQ", href: "/#faq" },
-          { label: "Contact or Support", href: null },
+          { label: "Contact us", href: "/contact" },
           { label: "Shipping information", href: null },
         ],
       },
@@ -222,6 +222,7 @@ describe("SiteFooter", () => {
       { label: "Quality Records", href: "/quality-records" },
       { label: "Order tracking", href: "/account/orders" },
       { label: "FAQ", href: "/#faq" },
+      { label: "Contact us", href: "/contact" },
       { label: "Research Use Only", href: "/research-use-policy" },
     ]);
 
@@ -266,21 +267,12 @@ describe("SiteFooter", () => {
     expect(summaries.map((summary) => summary?.textContent)).toEqual(["Shop", "Support", "Legal"]);
   });
 
-  it("owns exactly one disabled newsletter and projects only an approved privacy destination", () => {
+  it("hides the newsletter entirely while the program is disabled", () => {
     render(<SiteFooter newsletterPrivacyHref={fictionalPrivacyHref} />);
 
-    expect(screen.getAllByRole("heading", { name: "PropeptIQ newsletter" })).toHaveLength(1);
-    expect(screen.getAllByRole("form", { name: "Newsletter signup" })).toHaveLength(1);
-    expect(screen.getAllByRole("textbox", { name: "Email address" })).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute(
-      "href",
-      fictionalPrivacyHref.href,
-    );
-    expect(screen.getByRole("checkbox")).not.toBeChecked();
-    expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Newsletter signup is temporarily unavailable.",
-    );
+    expect(screen.queryByRole("form", { name: "Newsletter signup" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Email address" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Privacy Policy" })).not.toBeInTheDocument();
   });
 
   it("rejects an unapproved serialized privacy clone at the footer boundary", () => {
@@ -291,7 +283,7 @@ describe("SiteFooter", () => {
     render(<SiteFooter newsletterPrivacyHref={clonedPrivacyHref} />);
 
     expect(screen.queryByRole("link", { name: "Privacy Policy" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Subscribe" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Subscribe" })).not.toBeInTheDocument();
   });
 
   it("omits an injected group whose destinations are all unavailable", () => {
@@ -339,12 +331,10 @@ describe("SiteFooter", () => {
     }
   });
 
-  it("puts the newsletter before the main footer and omits unconfigured socials", () => {
+  it("omits disabled newsletter and unconfigured socials", () => {
     render(<SiteFooter />);
-    const newsletter = screen.getByRole("form", { name: "Newsletter signup" });
-    const footer = screen.getByRole("contentinfo");
-    expect(footer.contains(newsletter)).toBe(false);
-    expect(newsletter.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole("form", { name: "Newsletter signup" })).not.toBeInTheDocument();
+    expect(screen.getByRole("contentinfo")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Social media" })).toBeNull();
   });
 
@@ -417,7 +407,7 @@ describe("SiteFooter", () => {
     }
     expect(
       screen.getByText(
-        /Explore research materials, compare product configurations, and review the details that matter to your selection\./u,
+        /Explore research materials, compare product amounts, and review the details that matter to your selection\./u,
       ),
     ).toHaveClass("text-base");
     expect(screen.queryByText(/FDA disclaimer/iu)).toBeNull();

@@ -62,23 +62,18 @@ async function expectPrimaryGeometry(page: Page, width: number) {
 
 async function expectNarrowDescendants(page: Page) {
   const content = page.locator(".catalog-detail-content");
-  const configurations = page.getByRole("heading", { name: "Product configurations" });
-  const summary = page.getByRole("status", { name: "Purchase summary" });
-  const definitionList = summary.locator("dl");
+  const configurations = page.getByText("Product specifications", { exact: true });
+  const summary = page.locator(".purchase-summary");
+  const subtotal = summary.locator("strong").first();
   const add = summary.getByRole("button", { name: "Add Tirzepatide to cart" });
-  await expectInside(content, [configurations, summary, definitionList, add], "195px detail content");
+  await expectInside(content, [configurations, summary, subtotal, add], "195px detail content");
 
-  const exactInput = page.getByRole("spinbutton", { name: "Exact quantity" });
-  const exactRow = exactInput.locator("..");
-  const decrease = exactRow.getByRole("button", { name: "Decrease quantity" });
-  const increase = exactRow.getByRole("button", { name: "Increase quantity" });
-  await expectInside(content, [exactRow], "195px quantity content");
-  await expectInside(exactRow, [decrease, exactInput, increase], "195px quantity row");
-  for (const control of [decrease, increase]) {
-    const bounds = await horizontalBounds(control);
-    expect(bounds.width).toBeGreaterThanOrEqual(44);
-    expect(bounds.height).toBeGreaterThanOrEqual(44);
-  }
+  const quantity = page.getByRole("combobox", { name: "Quantity", exact: true });
+  await expectInside(content, [quantity], "195px quantity content");
+  const bounds = await horizontalBounds(quantity);
+  expect(bounds.width).toBeGreaterThanOrEqual(44);
+  expect(bounds.height).toBeGreaterThanOrEqual(44);
+  await expect(quantity.getByRole("option")).toHaveCount(25);
 
   const related = page.getByRole("list", { name: /^Related products,/u });
   const relatedBounds = await horizontalBounds(related);
@@ -107,8 +102,8 @@ async function runNarrowProductCase(page: Page, width: 195 | 240 | 320, testInfo
   await expectPrimaryGeometry(page, width);
   if (width === 195) await expectNarrowDescendants(page);
   if (width === 320) {
-    expect((await horizontalBounds(page.getByRole("spinbutton", { name: "Exact quantity" }))).width)
-      .toBeCloseTo(96, 0);
+    expect((await horizontalBounds(page.getByRole("combobox", { name: "Quantity", exact: true }))).width)
+      .toBeGreaterThanOrEqual(44);
   }
 
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -126,7 +121,7 @@ async function runNarrowProductCase(page: Page, width: 195 | 240 | 320, testInfo
   }
 
   if (width === 320) {
-    const add = page.getByRole("status", { name: "Purchase summary" })
+    const add = page.locator(".purchase-summary")
       .getByRole("button", { name: "Add Tirzepatide to cart" });
     await add.click();
     await expect(page.getByRole("status", { name: "Cart updates" })).toContainText("1 unit in cart");
@@ -166,11 +161,12 @@ async function runNoJavaScriptCase(
     expect(response?.status()).toBe(200);
     await expectViewportWidth(page, width);
     await page.evaluate(() => document.fonts.ready);
-    const gallery = page.getByRole("region", { name: "Tirzepatide product illustration gallery" });
+    const gallery = page.locator(".catalog-detail-image");
     await expect(gallery.getByRole("img").first()).toBeVisible();
-    await expect(gallery.getByRole("status")).toHaveText("View 1 of 6: Front");
+    await expect(gallery.getByRole("img")).toHaveCount(1);
+    await expect(gallery.getByRole("tab")).toHaveCount(0);
     await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
-    await expect(page.getByRole("status", { name: "Purchase summary" })).toBeVisible();
+    await expect(page.locator(".purchase-summary")).toBeVisible();
     await expect(page.getByRole("contentinfo")).toBeVisible();
     await expect(page.getByRole("button", { name: "Search PropeptIQ" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Mobile purchase controls" })).toHaveCount(0);

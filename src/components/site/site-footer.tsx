@@ -27,7 +27,7 @@ type SiteFooterProps = Readonly<{
 }>;
 
 const footerLinkClassName =
-  "inline-flex min-h-11 min-w-11 items-center rounded-md px-2 py-2 text-sm text-canvas/80 transition-colors duration-200 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas";
+  "footer-nav-link inline-flex min-h-11 min-w-11 items-center rounded-md px-2 py-2 text-sm text-canvas/80 transition-colors duration-200 hover:text-canvas focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-canvas";
 
 function SocialIcon({ platform }: { platform: FooterSocialPlatform }) {
   if (platform === "instagram") {
@@ -127,7 +127,7 @@ export function SiteFooter({
 
   return (
     <>
-    <div className="newsletter-prefooter bg-ink text-canvas">
+    {newsletterConfiguration.enabled ? <div className="newsletter-prefooter bg-ink text-canvas">
       <div className="site-container">
         <NewsletterForm
           available={newsletterConfiguration.enabled}
@@ -135,7 +135,7 @@ export function SiteFooter({
           privacyHref={newsletterPrivacyLink}
         />
       </div>
-    </div>
+    </div> : null}
     <footer className="bg-ink text-canvas">
       <div className="site-container py-14 md:py-20">
         <div className="footer-primary-grid grid min-w-0 gap-10 md:grid-cols-2 lg:grid-cols-4 lg:gap-8 xl:gap-12">
@@ -151,7 +151,7 @@ export function SiteFooter({
               Research materials,<br />documented with clarity.
             </p>
             <p className="mt-5 max-w-[62ch] text-base leading-7 text-canvas/70">
-              Explore research materials, compare product configurations, and review the details
+              Explore research materials, compare product amounts, and review the details
               that matter to your selection.
             </p>
 
@@ -252,6 +252,13 @@ export function SiteFooter({
           <p className="mt-8 border-t border-canvas/20 pt-6 text-sm leading-6 text-canvas/70">
             © {currentYear} {siteName}
           </p>
+          {/* The release checklist verifies this origin with verify:production-https.
+              This describes the linked production origin, not a certification. */}
+          <a href="https://propeptiq.com" className={footerLinkClassName}
+            aria-label="SSL secured connection to propeptiq.com">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="mr-2 size-4" stroke="currentColor" strokeWidth="1.8"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+            SSL SECURED · propeptiq.com
+          </a>
         </section>
       </div>
     </footer>

@@ -51,21 +51,21 @@ describe("ProductPrice", () => {
   it("shows the explicit zero-dollar preview sale only outside production", () => {
     const pendingZero = variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: 0, checkoutReady: false });
     const { rerender } = render(<ProductPrice productId="product-alpha" variant={pendingZero} pricing={pricing("preview")} />);
-    expect(screen.getAllByText("$0.00")).toHaveLength(2);
-    expect(screen.getByText("-30%")).toBeVisible();
+    expect(screen.getAllByText("$0.00")).toHaveLength(1);
+    expect(screen.queryByText("-30%")).not.toBeInTheDocument();
     expect(screen.getByText("Test mode — no payments")).toBeVisible();
 
     rerender(<ProductPrice productId="product-alpha" variant={pendingZero} pricing={pricing("production")} />);
-    expect(screen.getByText("Pricing coming soon")).toBeVisible();
+    expect(screen.getByText("Price unavailable")).toBeVisible();
     expect(screen.queryByText("-30%")).toBeNull();
     expect(screen.queryByText("$0.00")).toBeNull();
   });
 
   it.each([
     ["unavailable", variant({ availability: "unavailable", checkoutReady: false }), "Unavailable"],
-    ["pending positive", variant({ priceStatus: "pending", availability: "preview_only", checkoutReady: false }), "Pricing coming soon"],
-    ["pending null", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: null, currency: null, checkoutReady: false }), "Pricing coming soon"],
-    ["active zero", variant({ baseUnitMinor: 0, checkoutReady: false }), "Pricing coming soon"],
+    ["pending positive", variant({ priceStatus: "pending", availability: "preview_only", checkoutReady: false }), "Price unavailable"],
+    ["pending null", variant({ priceStatus: "pending", availability: "preview_only", baseUnitMinor: null, currency: null, checkoutReady: false }), "Price unavailable"],
+    ["active zero", variant({ baseUnitMinor: 0, checkoutReady: false }), "Price unavailable"],
   ] as const)("renders honest status for %s", (_label, input, copy) => {
     const { unmount } = render(<ProductPrice productId="product-alpha" variant={input} pricing={pricing("preview")} />);
     expect(screen.getByText(copy)).toBeVisible();

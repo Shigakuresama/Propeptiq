@@ -53,32 +53,30 @@ describe("PublicHome approved content composition", () => {
       />,
     );
 
-    const introduction = screen.getByText("Explore research materials, compare product configurations, and find the details you need in one place.");
+    const introduction = screen.getByText("Explore the research catalog. Compare amounts, see current pricing, and keep your selections together.");
     expect(introduction).toBeVisible();
     expect(introduction).toHaveClass(
-      "min-h-40",
-      "sm:min-h-0",
+      "text-lg",
+      "leading-8",
     );
-    expect(screen.getByText("Explore the collection")).toBeVisible();
-    expect(screen.getByText("Explore 1 product configurations. Select a product to see its details, pricing, and availability.")).toBeVisible();
+    expect(screen.getByText("1 products in the catalog")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Find your next research material." })).toBeVisible();
     expect(screen.getByText("Explore products from the PropeptIQ research catalog.")).toBeVisible();
-    expect(screen.getByText("Product configuration")).toBeVisible();
-    expect(screen.getByText("Review each product's details and the Research-Use Policy before making your selection.")).toBeVisible();
-    expect(screen.getByText("Explore every product and configuration in our research catalog.")).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/product configuration/iu);
     expect(document.body).not.toHaveTextContent(/owner-supplied|browse publication|current owner-supplied publication/iu);
   });
 
   it("keeps browse-only catalog language explicit without implying pricing or ordering", () => {
     render(<PublicHome products={browseCatalog.products} variantCount={browseCatalog.displayConfigurationCount} pricing={testPricingContext()} />);
 
-    expect(screen.getByText(`Explore ${browseCatalog.displayConfigurationCount} product configurations. Select a product to see its listed details. Pricing and ordering are not available for these items.`)).toBeVisible();
+    expect(screen.getAllByText(`${browseCatalog.products.length} products in the catalog`).length).toBeGreaterThan(0);
+    expect(document.body).not.toHaveTextContent(/product configurations/iu);
   });
 
   it("uses the dedicated unavailable message when the homepage catalog is empty", () => {
     render(<PublicHome products={[]} variantCount={0} pricing={testPricingContext()} />);
 
-    expect(screen.getByText("No products are available to view right now. Please check back later.")).toBeVisible();
+    expect(screen.queryByText(/No products are available/iu)).not.toBeInTheDocument();
     expect(screen.queryByText(/Explore 0 product configurations/u)).toBeNull();
   });
 
@@ -95,9 +93,7 @@ describe("PublicHome approved content composition", () => {
     const catalog = screen.getByText("Catalog highlights");
     const why = screen.getByRole("heading", { name: "Why choose PropeptIQ" });
     const faq = screen.getByRole("heading", { name: "Frequently Asked Questions" });
-    const quality = screen.getByRole("heading", {
-      name: "Follow the record, not an unsupported claim.",
-    });
+    const quality = screen.getByRole("heading", { name: "Research use only" });
 
     expect(catalog.compareDocumentPosition(why) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(why.compareDocumentPosition(faq) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -114,9 +110,7 @@ describe("PublicHome approved content composition", () => {
     expect(screen.queryByRole("heading", { name: "Frequently Asked Questions" })).toBeNull();
     expect(document.getElementById("why-choose-propeptiq")).toBeNull();
     expect(document.getElementById("faq")).toBeNull();
-    expect(screen.getByRole("heading", {
-      name: "Follow the record, not an unsupported claim.",
-    })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Research use only" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "PropeptIQ newsletter" })).toBeNull();
     expect(screen.queryByRole("form", { name: "Newsletter signup" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Privacy Policy" })).toBeNull();

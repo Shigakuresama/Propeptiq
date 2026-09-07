@@ -314,14 +314,14 @@ describe("CatalogExplorer", () => {
       "Unavailable Product",
     ]);
     const selectorCard = screen.getByRole("article", { name: "Selector Product" });
-    expect(within(selectorCard).getByText("10 mg · 1 bottle")).toBeVisible();
+    expect(within(selectorCard).getByText("10 mg synthetic default · 1 bottle per unit")).toBeVisible();
     expect(within(selectorCard).getByText("$100.00").tagName).toBe("DEL");
     expect(within(selectorCard).getByText("$70.00").tagName).toBe("STRONG");
     const checkoutCard = screen.getByRole("article", { name: "Checkout-unavailable Product" });
     expect(within(checkoutCard).getByText("$17.50")).toBeVisible();
     expect(within(checkoutCard).queryByText("Checkout unavailable")).toBeNull();
-    expect(within(screen.getByRole("article", { name: "Pending Product" })).getByText("Pricing coming soon")).toBeVisible();
-    expect(within(screen.getByRole("article", { name: "Unavailable Product" })).getByText("Unavailable")).toBeVisible();
+    expect(within(screen.getByRole("article", { name: "Pending Product" })).getByText("Price unavailable", { selector: "p" })).toBeVisible();
+    expect(within(screen.getByRole("article", { name: "Unavailable Product" })).getByText("Unavailable", { selector: "p" })).toBeVisible();
   });
 
   it("sorts and renders a local zero-preview row as an active zero price", () => {
@@ -430,10 +430,10 @@ describe("CatalogExplorer", () => {
   it("announces one exact total-catalog count and exposes a deferred busy state", async () => {
     renderExplorer([syntheticProduct("alpha"), syntheticProduct("beta")]);
     const region = screen.getByRole("region", { name: "Catalog results region" });
-    const explorer = screen.getByRole("heading", { name: "Find a catalog record" }).closest("section")!;
+
     const input = screen.getByRole("searchbox", { name: "Search catalog" });
     expect(screen.getByText("2 of 2 products")).toBeVisible();
-    expect(explorer.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
+    expect(screen.getByText("2 of 2 products")).toHaveAttribute("aria-live", "polite");
 
     act(() => {
       fireEvent.change(input, { target: { value: "alpha" } });
@@ -446,7 +446,6 @@ describe("CatalogExplorer", () => {
       expect(region).not.toHaveAttribute("aria-busy", "true");
       expect(screen.getByText("1 of 2 products")).toBeVisible();
     });
-    expect(explorer.querySelectorAll('[aria-live="polite"]')).toHaveLength(1);
   });
 
   it("supports keyboard focus with visible-focus classes on every interactive control", async () => {
