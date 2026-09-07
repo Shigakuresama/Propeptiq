@@ -945,6 +945,7 @@ const variantFacts = Object.freeze({
     productActive: true,
     policyGroupActive: true,
     variantActive: true,
+    packageQuantity: 1,
     availabilityRevision: "variant-revision-1",
     inventoryRevision: "inventory-revision-1",
     price: Object.freeze({
@@ -1082,6 +1083,52 @@ function setupVariant(
 }
 
 describe("authoritative canonical variant quote lifecycle", () => {
+  it.each([
+    [2, 1, 3395], [3, 1, 3395], [4, 1, 3290], [10, 1, 3290], [11, 1, 2450],
+    [1, 10, 3290], [2, 10, 2450], [2, 2, 3290],
+  ])("quotes %i packages of %i bottles with campaign then volume cents", async (quantity, packageQuantity, unitMinor) => {
+    const { service, repository } = setupVariant({
+      automaticPromotions: [automaticPromotion()],
+      items: [{ ...variantFacts.items[0]!, packageQuantity,
+        eligibleLots: [{ ...variantFacts.items[0]!.eligibleLots[0]!, receivedQuantity: 25, availableQuantity: 25 }],
+      }],
+    });
+    const result = await service.quote({ buyerUserId: ids.buyer, idempotencyKey: ids.key,
+      paymentProviderAvailable: true, request: { ...variantRequest, items: [{ variantId: ids.variant, quantity }] },
+    });
+    expect(result).toMatchObject({ status: "quoted", quote: {
+      promotionDiscountMinor: (5000 - unitMinor) * quantity,
+      lines: [{ quantity, unitAmountMinor: 5000, totalMinor: unitMinor * quantity }],
+    } });
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 0, -1, 1.5])("fails malformed canonical package quantity %s closed before external quotes", async (packageQuantity) => {
+    const { service, repository, shippingQuote, taxQuote } = setupVariant({
+      items: [{ ...variantFacts.items[0]!, packageQuantity }],
+    });
+    const result = await service.quote({ buyerUserId: ids.buyer, idempotencyKey: ids.key,
+      paymentProviderAvailable: true, request: variantRequest });
+    expect(result.status).not.toBe("quoted");
+    expect(shippingQuote).not.toHaveBeenCalled();
+    expect(taxQuote).not.toHaveBeenCalled();
+    expect(repository.prepare).not.toHaveBeenCalled();
+  });
+
+  it("invalidates a pricing revision when canonical package count changes", async () => {
+    async function quotePackage(packageQuantity: number) {
+      return setupVariant({ items: [{ ...variantFacts.items[0]!, packageQuantity }] }).service.quote({
+        buyerUserId: ids.buyer, idempotencyKey: ids.key, paymentProviderAvailable: true, request: variantRequest,
+      });
+    }
+    const one = await quotePackage(1);
+    const two = await quotePackage(2);
+    if (one.status !== "quoted" || two.status !== "quoted") throw new Error("expected synthetic quotes");
+    expect(two.pricingRevision).not.toBe(one.pricingRevision);
+    expect(two.quote.lines[0]?.totalMinor).toBe(9400);
+    expect(one.quote.lines[0]?.totalMinor).toBe(9700);
+  });
+
   it("fails the real default active WINTER30 closed before quote or write work when authority is absent", async () => {
     const { service, repository, shippingQuote, taxQuote, rewardsService } = setupVariant(
       { automaticPromotions: Object.freeze([]) },
@@ -1129,7 +1176,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
     expect(repository.prepare).not.toHaveBeenCalled();
   });
 
-  it("permits the real default when exact persisted WINTER30 retains database identity and gives 30%", async () => {
+  it("permits the real default when exact persisted WINTER30 retains database identity before applying the bottle tier", async () => {
     const { service } = setupVariant(
       { automaticPromotions: [automaticPromotion()] },
       { useDefaultConfiguredPromotions: true },
@@ -1145,8 +1192,8 @@ describe("authoritative canonical variant quote lifecycle", () => {
     expect(result).toMatchObject({
       status: "quoted",
       quote: {
-        promotionDiscountMinor: 3_000,
-        lines: [{ totalMinor: 7_000 }],
+        promotionDiscountMinor: 3_210,
+        lines: [{ totalMinor: 6_790 }],
       },
     });
     if (result.status !== "quoted") throw new Error("expected exact configured quote");
@@ -1761,7 +1808,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
     })).resolves.toMatchObject({
       status: "PRICE_CHANGED",
       pricingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
-      cart: { items: [{ variantId: ids.variant, unitAmountMinor: 5_520 }] },
+      cart: { items: [{ variantId: ids.variant, unitAmountMinor: 5_820 }] },
     });
     expect(changed.repository.prepare).not.toHaveBeenCalled();
   });
@@ -1842,7 +1889,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
       redemptionPoints: 500,
       redemptionMinor: 500,
       maximumPoints: 1_000,
-      eligibleMerchandiseMinor: 9_200,
+      eligibleMerchandiseMinor: 9_700,
       pendingBaseEarnPoints,
     });
     const rewardsRequest = Object.freeze({
@@ -1936,11 +1983,11 @@ describe("authoritative canonical variant quote lifecycle", () => {
   });
 
   it.each([
-    ["disabled", automaticPromotion({ enabled: false }), 9_200],
-    ["scheduled", automaticPromotion({ startAt: "2026-08-25T12:00:00.001Z" }), 9_200],
-    ["expired", automaticPromotion({ endAt: now.toISOString() }), 9_200],
-    ["partial scope", automaticPromotion({ scope: { kind: "variants", variantIds: [ids.variant2] } }), 9_200],
-    ["active inclusive start", automaticPromotion({ startAt: now.toISOString() }), 7_000],
+    ["disabled", automaticPromotion({ enabled: false }), 9_700],
+    ["scheduled", automaticPromotion({ startAt: "2026-08-25T12:00:00.001Z" }), 9_700],
+    ["expired", automaticPromotion({ endAt: now.toISOString() }), 9_700],
+    ["partial scope", automaticPromotion({ scope: { kind: "variants", variantIds: [ids.variant2] } }), 9_700],
+    ["active inclusive start", automaticPromotion({ startAt: now.toISOString() }), 6_790],
   ] as const)("resolves %s promotion only from server time and scope", async (_label, promotion, expectedSubtotal) => {
     const { service } = setupVariant({ automaticPromotions: [promotion] });
     const result = await service.quote({
@@ -1970,7 +2017,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
     });
     expect(result).toMatchObject({
       status: "quoted",
-      quote: { promotionDiscountMinor: 3_000, discountMinor: 3_000 },
+      quote: { promotionDiscountMinor: 3_210, discountMinor: 3_210 },
     });
   });
 
@@ -2002,7 +2049,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
 
     expect(result).toMatchObject({
       status: "quoted",
-      quote: { status: "review_required", promotionDiscountMinor: 3_000 },
+      quote: { status: "review_required", promotionDiscountMinor: 3_210 },
     });
     if (result.status !== "quoted") throw new Error("expected review quote");
     expect(projectAuthoritativeCheckoutPlan(result.plan)).toMatchObject({
@@ -2065,7 +2112,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
       status: "PRICE_CHANGED",
       pricingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u),
       cart: {
-        items: [{ variantId: ids.variant, unitAmountMinor: 4_200 }],
+        items: [{ variantId: ids.variant, unitAmountMinor: 4_074 }],
       },
     });
     expect(changed.repository.prepare).not.toHaveBeenCalled();
@@ -2090,7 +2137,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
   });
 
   it.each([
-    [2_000, 3_000, 0],
+    [2_000, 3_210, 0],
     [4_000, 0, 4_000],
   ] as const)("selects one storefront/referral winner at %i referral minor", async (referralMinor, promotionMinor, referralExpected) => {
     const rewardsQuoteResult = Object.freeze({
@@ -2123,7 +2170,7 @@ describe("authoritative canonical variant quote lifecycle", () => {
         promotionDiscountMinor: promotionMinor,
         referralDiscountMinor: referralExpected,
         rewardRedemptionMinor: 500,
-        discountMinor: Math.max(3_000, referralMinor) + 500,
+        discountMinor: Math.max(3_210, referralMinor) + 500,
       },
     });
     if (result.status !== "quoted") throw new Error("expected acquisition quote");

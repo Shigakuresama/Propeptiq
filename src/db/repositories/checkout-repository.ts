@@ -1069,6 +1069,7 @@ type VariantCore = Readonly<{
   variantLabel: string;
   productName: string;
   packageForm: string;
+  packageQuantity: number;
   policyGroupId: string;
   productActive: boolean;
   policyGroupActive: boolean;
@@ -1119,6 +1120,7 @@ async function loadVariantFactsFromClient(
     variantLabel: string;
     productName: string;
     packageForm: string;
+    packageQuantity: number | string;
     policyGroupId: string;
     variantStatus: "inactive" | "active";
     productStatus: "draft" | "active" | "retired";
@@ -1235,6 +1237,7 @@ async function loadVariantFactsFromClient(
     const variants = await client.query<VariantRow>(
       `SELECT v.id::text AS "variantId", v.product_id::text AS "productId",
               v.sku, v.label AS "variantLabel", p.name AS "productName",
+              v.package_quantity AS "packageQuantity",
               p.package_form AS "packageForm",
               p.policy_group_id::text AS "policyGroupId",
               v.status AS "variantStatus", p.status AS "productStatus",
@@ -1270,6 +1273,7 @@ async function loadVariantFactsFromClient(
       !isCanonicalUuid(row.variantId) || !isCanonicalUuid(row.productId) ||
       !isCanonicalUuid(row.policyGroupId) || !nonblank(row.sku) ||
       !nonblank(row.variantLabel) || !nonblank(row.productName) ||
+      !Number.isSafeInteger(Number(row.packageQuantity)) || Number(row.packageQuantity) < 1 ||
       !nonblank(row.packageForm) || !isCanonicalUuid(selectedPrice.priceId) ||
       !nonblank(selectedPrice.currency)
     ) {
@@ -1282,6 +1286,7 @@ async function loadVariantFactsFromClient(
       variantLabel: row.variantLabel,
       productName: row.productName,
       packageForm: row.packageForm,
+      packageQuantity: safeInteger(row.packageQuantity),
       policyGroupId: row.policyGroupId,
       productActive: row.productStatus === "active",
       policyGroupActive: row.policyGroupActive,
@@ -1384,11 +1389,13 @@ async function loadVariantFactsFromClient(
       variantLabel: core.variantLabel,
       productName: core.productName,
       packageForm: core.packageForm,
+      packageQuantity: core.packageQuantity,
       policyGroupId: core.policyGroupId,
       productActive: core.productActive,
       policyGroupActive: core.policyGroupActive,
       variantActive: core.variantActive,
       availabilityRevision: canonicalJson({
+        packageQuantity: core.packageQuantity,
         variantUpdatedAt: core.variantUpdatedAt,
         productUpdatedAt: core.productUpdatedAt,
         productActive: core.productActive,

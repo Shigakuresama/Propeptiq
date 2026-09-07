@@ -196,7 +196,7 @@ describe("QuickAddVariantSheet", () => {
     });
     expect(unavailableRadio).toBeDisabled();
     expect(pendingRadio).toBeDisabled();
-    expect(within(dialog).getAllByText("Price unavailable").length).toBeGreaterThan(0);
+    expect(within(dialog).getAllByText("Currently unavailable").length).toBeGreaterThan(0);
     expect(within(dialog).queryByText("$25.00")).toBeNull();
     expect(within(dialog).getByText("$10.00").tagName).toBe("DEL");
     expect(within(dialog).getByText("$7.00").tagName).toBe("STRONG");
@@ -251,7 +251,7 @@ describe("QuickAddVariantSheet", () => {
     if (zeroRow === null) return;
     expect(zero).toBeChecked();
     expect(zero).toBeDisabled();
-    expect(within(zeroRow).getByText("Price unavailable")).toBeVisible();
+    expect(within(zeroRow).getByText("Currently unavailable")).toBeVisible();
     expect(within(zeroRow).queryByText("$0.00")).toBeNull();
     expect(within(zeroRow).queryByText("-30%")).toBeNull();
     const confirm = within(dialog).getByRole("button", {
@@ -259,8 +259,8 @@ describe("QuickAddVariantSheet", () => {
     });
     expect(confirm).toBeDisabled();
     expect(confirm).toHaveAccessibleName("Synthetic Product Alpha unavailable");
-    expect(confirm).toHaveTextContent("Price unavailable.");
-    expect(confirm).toHaveAttribute("title", "Price unavailable.");
+    expect(confirm).toHaveTextContent("Currently unavailable.");
+    expect(confirm).toHaveAttribute("title", "Currently unavailable.");
     expect(confirm).not.toHaveTextContent(/cart testing/iu);
   });
 

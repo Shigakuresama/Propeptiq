@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { BrandLogo } from "@/components/site/brand-mark";
 import { NewsletterForm } from "@/components/site/newsletter-form";
+import { FooterPaymentMethods } from "@/components/site/footer-payment-methods";
 import {
   getApprovedStorefrontContent,
   type ControlledContentRecord,
@@ -137,7 +138,7 @@ export function SiteFooter({
       </div>
     </div> : null}
     <footer className="bg-ink text-canvas">
-      <div className="site-container py-14 md:py-20">
+      <div className="footer-inner site-container pt-10 pb-3 md:pt-12">
         <div className="footer-primary-grid grid min-w-0 gap-10 md:grid-cols-2 lg:grid-cols-4 lg:gap-8 xl:gap-12">
           <div className="footer-brand min-w-0 max-w-xl">
             <Link
@@ -224,7 +225,7 @@ export function SiteFooter({
 
         <section
           aria-labelledby="footer-notices-heading"
-          className="footer-bottom-row border-t border-canvas/20 pt-8"
+          className="footer-bottom-row mt-8 border-t border-canvas/20 pt-6"
         >
           <h2
             id="footer-notices-heading"
@@ -249,16 +250,19 @@ export function SiteFooter({
               ))}
             </div>
           ) : null}
-          <p className="mt-8 border-t border-canvas/20 pt-6 text-sm leading-6 text-canvas/70">
-            © {currentYear} {siteName}
-          </p>
+          <div className="footer-assurance-row mt-6 border-t border-canvas/20 pt-4">
           {/* The release checklist verifies this origin with verify:production-https.
               This describes the linked production origin, not a certification. */}
-          <a href="https://propeptiq.com" className={footerLinkClassName}
+          <a href="https://propeptiq.com" className={`footer-ssl ${footerLinkClassName}`}
             aria-label="SSL secured connection to propeptiq.com">
             <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" className="mr-2 size-4" stroke="currentColor" strokeWidth="1.8"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
             SSL SECURED · propeptiq.com
           </a>
+          <FooterPaymentMethods />
+          <p className="footer-copyright text-sm leading-6 text-canvas/70">
+            © {currentYear} {siteName}
+          </p>
+          </div>
         </section>
       </div>
     </footer>

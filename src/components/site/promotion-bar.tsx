@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
 
 import type { Winter30PromotionView } from "@/catalog/storefront-promotion-banner";
 
@@ -39,22 +40,33 @@ export function PromotionBar({
   return (
     <aside
       aria-label="Promotion"
-      className="promotion-banner bg-promotion px-4 py-5 text-center text-promotion-foreground sm:py-6"
+      className="promotion-banner bg-promotion px-4 py-3 text-center text-promotion-foreground"
     >
+      <div className="promotion-banner__molecules" aria-hidden="true">
+        <svg className="promotion-banner__molecule promotion-banner__molecule--first" focusable="false" viewBox="0 0 180 100" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="m38 59 18-28 33 5 16 29-20 23-31-4Z M89 36l26-20 28 12m-38 37 33 8 19-22" />
+          <circle cx="56" cy="31" r="3" /><circle cx="105" cy="65" r="4" /><circle cx="143" cy="28" r="3" />
+        </svg>
+        <svg className="promotion-banner__molecule promotion-banner__molecule--second" focusable="false" viewBox="800 0 180 100" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="m818 32 27 15 27-17 28 16 27-17 33 17m-115 1v26m55-27v27m-73-42 13-18" />
+          <circle cx="818" cy="32" r="3" /><circle cx="872" cy="30" r="4" /><circle cx="927" cy="29" r="3" /><circle cx="900" cy="73" r="3" />
+        </svg>
+      </div>
       <p className="promotion-banner__title">
         {promotion.displayName.toUpperCase()}: {promotion.percentage}% OFF
         {" "}SITEWIDE
       </p>
-      <div className="promotion-code-pill mx-auto mt-3 flex w-fit max-w-full flex-wrap items-center justify-center gap-x-4 gap-y-1">
-      <p className="text-sm font-semibold tracking-[0.08em]">{promotion.code}{" "}<span className="block text-[0.65rem] tracking-wider">APPLIED AUTOMATICALLY</span></p>
+      <div className="promotion-banner__code-row mx-auto mt-1 flex w-fit max-w-full flex-wrap items-center justify-center gap-x-2 gap-y-0">
+      <p className="promotion-code-pill text-sm font-semibold tracking-[0.08em]">{promotion.code}</p>
       <button
         type="button"
         aria-label={`${copyState === "copied" ? "Copied" : "Copy"} promotion code ${promotion.code}`}
-        className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border border-promotion-foreground/70 px-2 py-1 font-semibold text-promotion-foreground transition-colors duration-200 hover:bg-promotion-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-promotion-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-promotion sm:px-3"
+        className="promotion-banner__copy inline-flex min-h-11 min-w-11 items-center justify-center rounded-md px-2 py-1 text-promotion-foreground transition-colors duration-200 hover:bg-promotion-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-promotion-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-promotion"
         onClick={copyPromotionCode}
       >
-        {copyState === "copied" ? "Copied" : "Copy"}
+        {copyState === "copied" ? <Check aria-hidden="true" className="size-4" /> : <Copy aria-hidden="true" className="size-4" />}
       </button>
+      <p className="promotion-banner__automatic text-[0.65rem] font-semibold tracking-wider">APPLIED AUTOMATICALLY</p>
       </div>
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
         {status}

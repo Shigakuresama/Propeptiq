@@ -14,12 +14,23 @@ import type { PublicCompoundResearchEntry } from "@/content/compound-research-pu
 import { CompoundResearchSection } from "./compound-research-section";
 import { CatalogProductVisual } from "./catalog-product-visual";
 import { LaboratoryConcentrationCalculator } from "./laboratory-concentration-calculator";
+import { CompoundInformationSection } from "./compound-information-section";
+import { getCompoundInformation } from "@/content/compound-information";
 import { ProductInformationSections } from "./product-information-sections";
 import { ProductPurchasePanel } from "./product-purchase-panel";
 import { RelatedProductsCarousel } from "./related-products-carousel";
 
 export function CatalogItemDetail({ calculator, product, pricing, relatedProducts, research = null }: { calculator: PublicConcentrationCalculatorConfiguration | null; product: PublicStorefrontProduct; pricing: PublicStorefrontPricingContext; relatedProducts: readonly Extract<PublicStorefrontProduct, { kind: "canonical" }>[]; research?: PublicCompoundResearchEntry | null }) {
   const canonical = product.kind === "canonical";
+  const compoundProfile = getCompoundInformation(product.slug);
+  const supplementalRecords = canonical ? product.content.filter((record) => {
+    if (!compoundProfile || record.kind !== "product_information") return true;
+    const genericDetails = record.title === "Product details" &&
+      record.body === `Compare the listed amounts for ${compoundProfile.name}. Select an amount to view its price and availability.`;
+    const genericDiscovery = record.title === "PubMed literature discovery" &&
+      record.body === `Search PubMed for literature about ${compoundProfile.name}. Search results are provided for literature discovery only. They are not a curated study list, endorsement, product claim, or use guidance.`;
+    return !genericDetails && !genericDiscovery;
+  }) : [];
   const configuredDefaultVariantId = product.kind === "canonical" && product.variants.some(
     (variant) => variant.id === product.defaultVariantId,
   )
@@ -70,7 +81,7 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
         Back to catalog
       </Link>
 
-      <div className="product-detail-grid mt-4 grid gap-6 lg:grid-cols-2 lg:items-start lg:gap-x-40 lg:gap-y-0">
+      <div className="product-detail-grid mt-4 grid gap-6 lg:grid-cols-2 lg:items-start lg:gap-x-10 lg:gap-y-0">
         <header
           className="min-w-0 lg:col-start-2 lg:row-start-1"
           data-motion-sequence="dossier-intro"
@@ -79,14 +90,14 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
             Product details
           </p>
           <h1
-            className="catalog-detail-heading mt-3 text-balance font-heading text-section leading-[1.12] text-ink [overflow-wrap:anywhere]"
+            className="catalog-detail-heading mt-2 text-balance font-heading text-section leading-[1.12] text-ink [overflow-wrap:anywhere]"
             data-motion-step="2"
           >
             {product.name}
           </h1>
           {canonical && product.description ? (
             <p
-              className="mt-5 max-w-prose text-base leading-7 text-muted-ink"
+              className="mt-3 max-w-prose text-sm leading-6 text-muted-ink"
               data-motion-step="3"
             >
               {product.description}
@@ -135,36 +146,11 @@ export function CatalogItemDetail({ calculator, product, pricing, relatedProduct
               selectedVariantId={selectedVariantId}
             />
           ) : null}
-          <details className="mt-6">
-            <summary className="min-h-11 cursor-pointer rounded-lg py-3 font-heading text-xl uppercase focus-visible:outline-2 focus-visible:outline-ring">
-              Product specifications
-            </summary>
-            <ul className="mt-5 divide-y divide-border border-y border-border">
-              {product.displayConfigurations.map((configuration) => (
-                <li
-                  className="grid gap-1 py-4 sm:grid-cols-[minmax(5rem,auto)_1fr] sm:gap-6"
-                  key={`${product.slug}-${configuration.displayCode}-${configuration.packageForm}`}
-                >
-                  <span className="font-semibold tabular-nums text-ink">
-                    {configuration.displayCode}
-                  </span>
-                  <span className="leading-6 text-muted-ink">
-                    {configuration.packageForm}
-                  </span>
-                  {configuration.sourceName ? (
-                    <span className="text-sm leading-6 text-muted-ink sm:col-start-2">
-                      Also listed as {configuration.sourceName}
-                    </span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </details>
-
           {!canonical ? <p className="info-record mt-8 text-sm">Product details are shown above. Pricing and ordering are not available for this item.</p> : null}
         </div>
       </div>
-      {canonical ? <ProductInformationSections records={product.content} /> : null}
+      <CompoundInformationSection product={product} />
+      {canonical ? <ProductInformationSections records={supplementalRecords} /> : null}
       {canonical ? <CompoundResearchSection research={research} /> : null}
       {canonical && calculator ? (
         <LaboratoryConcentrationCalculator calculator={calculator} />

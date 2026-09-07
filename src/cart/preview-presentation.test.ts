@@ -25,18 +25,18 @@ const preview = withToken({
     available: true,
     purchaseState: "ready",
     name: "Synthetic local test only — Alpha",
-    packageForm: "Research vial",
+    packageQuantity: 1, packageForm: "Research vial",
     variantLabel: "Synthetic 5 mg",
     sku: "SYNTHETIC-5MG",
     baseUnitMinor: 2400,
-    unitAmountMinor: 2208,
-    lineSubtotalMinor: 4416,
-    lineSavingsMinor: 384,
-    effectiveDiscountBps: 800,
+    unitAmountMinor: 2328,
+    lineSubtotalMinor: 4656,
+    lineSavingsMinor: 144,
+    effectiveDiscountBps: 300, campaignDiscountBps: 0, volumeDiscountBps: 300, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 144,
     appliedPromotions: [],
     currency: "USD",
   }],
-  subtotalMinor: 4416,
+  subtotalMinor: 4656,
   currency: "USD",
   taxMinor: null,
   shippingMinor: null,
@@ -81,12 +81,12 @@ describe("same-tab cart preview presentation", () => {
       name: null,
       variantLabel: null,
       sku: null,
-      packageForm: null,
+      packageQuantity: null, packageForm: null,
       baseUnitMinor: null,
       unitAmountMinor: null,
       lineSubtotalMinor: null,
       lineSavingsMinor: null,
-      effectiveDiscountBps: null,
+      effectiveDiscountBps: null, campaignDiscountBps: null, volumeDiscountBps: null, campaignUnitMinor: null, lineCampaignSavingsMinor: null, lineVolumeSavingsMinor: null,
       currency: null,
     };
     const atLimit = withToken({
@@ -114,12 +114,12 @@ describe("same-tab cart preview presentation", () => {
       name: null,
       variantLabel: null,
       sku: null,
-      packageForm: null,
+      packageQuantity: null, packageForm: null,
       baseUnitMinor: null,
       unitAmountMinor: null,
       lineSubtotalMinor: null,
       lineSavingsMinor: null,
-      effectiveDiscountBps: null,
+      effectiveDiscountBps: null, campaignDiscountBps: null, volumeDiscountBps: null, campaignUnitMinor: null, lineCampaignSavingsMinor: null, lineVolumeSavingsMinor: null,
       appliedPromotions: [],
       currency: null,
     }));
@@ -150,17 +150,17 @@ describe("same-tab cart preview presentation", () => {
     { id: "winter30", label: "Changed public label" },
     { id: "different-promotion", label: "WINTER30" },
   ])("rejects changed promotion metadata %j with the original valid token", (changedPromotion) => {
-    const items = [{ ...preview.items[0], unitAmountMinor: 1680, lineSubtotalMinor: 3360, lineSavingsMinor: 1440, effectiveDiscountBps: 3000, appliedPromotions: [{ id: "winter30", label: "WINTER30" }] }];
-    const original = withToken({ ...preview, items, subtotalMinor: 3360 });
+    const items = [{ ...preview.items[0], unitAmountMinor: 1630, lineSubtotalMinor: 3260, lineSavingsMinor: 1540, effectiveDiscountBps: 3210, campaignDiscountBps: 3000, volumeDiscountBps: 300, campaignUnitMinor: 1680, lineCampaignSavingsMinor: 1440, lineVolumeSavingsMinor: 100, appliedPromotions: [{ id: "winter30", label: "WINTER30" }] }];
+    const original = withToken({ ...preview, items, subtotalMinor: 3260 });
     expect(parsePreviewPresentation(original)).not.toBeNull();
     expect(parsePreviewPresentation({ ...original, items: [{ ...items[0], appliedPromotions: [changedPromotion] }] })).toBeNull();
   });
 
   it("accepts equivalent reordered JSON keys and binds storage to the item facts", () => {
     const original = withToken({ ...preview,
-      items: [{ ...preview.items[0], unitAmountMinor: 1680, lineSubtotalMinor: 3360, lineSavingsMinor: 1440,
-        effectiveDiscountBps: 3000, appliedPromotions: [{ id: "winter30", label: "WINTER30" }],
-      }], subtotalMinor: 3360,
+      items: [{ ...preview.items[0], unitAmountMinor: 1630, lineSubtotalMinor: 3260, lineSavingsMinor: 1540,
+        effectiveDiscountBps: 3210, campaignDiscountBps: 3000, volumeDiscountBps: 300, campaignUnitMinor: 1680, lineCampaignSavingsMinor: 1440, lineVolumeSavingsMinor: 100, appliedPromotions: [{ id: "winter30", label: "WINTER30" }],
+      }], subtotalMinor: 3260,
     });
     const reorderedItem = Object.fromEntries(Object.entries(original.items[0]!).reverse());
     reorderedItem.appliedPromotions = [{ label: "WINTER30", id: "winter30" }];
@@ -214,8 +214,8 @@ describe("same-tab cart preview presentation", () => {
     }
     for (const purchaseState of ["pricing_pending", "unavailable", "unknown_variant"] as const) {
       const input = withToken({ ...preview, items: [{ ...preview.items[0], available: false, purchaseState,
-        ...(purchaseState === "unknown_variant" ? { name: null, variantLabel: null, sku: null, packageForm: null } : {}),
-        baseUnitMinor: null, unitAmountMinor: null, lineSubtotalMinor: null, lineSavingsMinor: null, effectiveDiscountBps: null, currency: null,
+        ...(purchaseState === "unknown_variant" ? { name: null, variantLabel: null, sku: null, packageQuantity: null, packageForm: null } : {}),
+        baseUnitMinor: null, unitAmountMinor: null, lineSubtotalMinor: null, lineSavingsMinor: null, effectiveDiscountBps: null, campaignDiscountBps: null, volumeDiscountBps: null, campaignUnitMinor: null, lineCampaignSavingsMinor: null, lineVolumeSavingsMinor: null, currency: null,
       }], subtotalMinor: 0, currency: null, requiresAcknowledgement: true, reasons: [purchaseState === "unavailable" ? "product_unavailable" : purchaseState] });
       expect(parsePreviewPresentation(input)).toEqual(input);
     }
@@ -227,6 +227,9 @@ describe("same-tab cart preview presentation", () => {
       { variantLabel: null }, { sku: "" }, { currency: "EUR" }, { baseUnitMinor: 0 },
       { baseUnitMinor: Number.MAX_SAFE_INTEGER }, { unitAmountMinor: 2209 },
       { lineSubtotalMinor: 4417 }, { lineSavingsMinor: 385 }, { effectiveDiscountBps: 801 },
+      { packageQuantity: null }, { packageQuantity: 0 }, { packageQuantity: 10 },
+      { campaignDiscountBps: 3000 }, { volumeDiscountBps: 600 }, { campaignUnitMinor: 2000 },
+      { lineCampaignSavingsMinor: 1 }, { lineVolumeSavingsMinor: 145 },
       { appliedPromotions: [{ id: "tier-is-not-a-campaign", label: "" }] },
       { appliedPromotions: [{ id: "promotion", label: "Sale", providerId: "private" }] },
       { appliedPromotions: [{ id: "promotion", label: "Sale" }, { id: "promotion", label: "Sale" }] },
@@ -262,7 +265,7 @@ describe("same-tab cart preview presentation", () => {
 
   it("checks zero-layout arithmetic and one highest promotion without changing the input", () => {
     const input = withToken({ ...preview, items: [{ ...preview.items[0], available: false, purchaseState: "local_preview", baseUnitMinor: 0, unitAmountMinor: 0, lineSubtotalMinor: 0, lineSavingsMinor: 0,
-      effectiveDiscountBps: 3000, appliedPromotions: [{ id: "winter30", label: "WINTER30" }],
+      effectiveDiscountBps: 3210, campaignDiscountBps: 3000, volumeDiscountBps: 300, campaignUnitMinor: 0, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: 0, appliedPromotions: [{ id: "winter30", label: "WINTER30" }],
     }], subtotalMinor: 0, reasons: ["checkout_unavailable"], requiresAcknowledgement: true });
     const before = JSON.stringify(input);
     const result = parsePreviewPresentation(input);

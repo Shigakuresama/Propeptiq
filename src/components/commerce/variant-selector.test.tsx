@@ -16,15 +16,18 @@ describe("VariantSelector", () => {
     await user.click(screen.getByRole("radio", { name: /A/u })); expect(change).toHaveBeenCalledWith("a");
   });
 
-  it("moves visible selection with native arrow keys and keeps every unsafe option inspectable", async () => {
+  it("disables unpriced choices and keeps priced choices selectable", async () => {
     const user = userEvent.setup(); let selected = "b";
     const { rerender, container } = render(<VariantSelector productId="keyboard" productName="P" variants={variants} selectedVariantId={selected} quantity={1} pricing={testPricingContext()} onSelectedVariantIdChange={(id) => { selected = id; rerender(<VariantSelector productId="keyboard" productName="P" variants={variants} selectedVariantId={selected} quantity={1} pricing={testPricingContext()} onSelectedVariantIdChange={(next) => { selected = next; }} />); }} />);
     const radios = screen.getAllByRole("radio");
     expect(radios[1]).toBeDisabled();
-    expect(radios[2]).toBeEnabled();
+    expect(radios[2]).toBeDisabled();
+    expect(radios[3]).toBeEnabled();
     await user.click(radios[2]!);
-    expect(selected).toBe("c");
-    expect(screen.getByText("Price unavailable")).toBeVisible();
+    expect(selected).toBe("b");
+    await user.click(radios[3]!);
+    expect(selected).toBe("d");
+    expect(screen.queryByText(/price unavailable|currently unavailable/i)).toBeNull();
     expect(container.querySelectorAll("label")).toHaveLength(4);
     expect(screen.getByText("D").parentElement).not.toHaveTextContent("Checkout unavailable");
   });

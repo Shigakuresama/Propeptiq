@@ -39,6 +39,19 @@ async function expectInside(container: Locator, targets: readonly Locator[], lab
   }
 }
 
+async function expectHeaderSearch(page: Page) {
+  const header = page.getByRole("banner");
+  const search = header.getByRole("button", { name: "Search PropeptIQ", exact: true });
+  await expect(search).toBeVisible();
+  await expect(page.getByRole("button", { name: "Search PropeptIQ", exact: true })).toHaveCount(1);
+  await expectInside(header, [search], "header search");
+  expect(await search.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const headerBounds = element.closest("header")!.getBoundingClientRect();
+    return bounds.top >= headerBounds.top && bounds.bottom <= headerBounds.bottom;
+  })).toBe(true);
+}
+
 async function expectPrimaryGeometry(page: Page, width: number) {
   await expectViewportWidth(page, width);
   await page.evaluate(() => document.fonts.ready);
@@ -54,6 +67,7 @@ async function expectPrimaryGeometry(page: Page, width: number) {
     expect(bounds.left, `${width}px primary ${index} left`).toBeGreaterThanOrEqual(-0.5);
     expect(bounds.right, `${width}px primary ${index} right`).toBeLessThanOrEqual(clientWidth + 0.5);
   }
+  await expectHeaderSearch(page);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth),
     `${width}px document overflow`,
@@ -62,22 +76,38 @@ async function expectPrimaryGeometry(page: Page, width: number) {
 
 async function expectNarrowDescendants(page: Page) {
   const content = page.locator(".catalog-detail-content");
-  const configurations = page.getByText("Product specifications", { exact: true });
+  const information = page.getByRole("region", { name: "Compound information", exact: true });
+  await expect(information.getByRole("heading", { name: "Compound information", exact: true })).toBeVisible();
+  const gridBounds = await page.locator(".product-detail-grid").boundingBox();
+  const informationBounds = await information.boundingBox();
+  expect(gridBounds).not.toBeNull();
+  expect(informationBounds).not.toBeNull();
+  expect(informationBounds!.y).toBeGreaterThanOrEqual(gridBounds!.y + gridBounds!.height);
   const summary = page.locator(".purchase-summary");
   const subtotal = summary.locator("strong").first();
   const add = summary.getByRole("button", { name: "Add Tirzepatide to cart" });
-  await expectInside(content, [configurations, summary, subtotal, add], "195px detail content");
+  await expectInside(content, [summary, subtotal, add], "195px detail content");
 
-  const quantity = page.getByRole("combobox", { name: "Quantity", exact: true });
-  await expectInside(content, [quantity], "195px quantity content");
-  const bounds = await horizontalBounds(quantity);
-  expect(bounds.width).toBeGreaterThanOrEqual(44);
-  expect(bounds.height).toBeGreaterThanOrEqual(44);
-  await expect(quantity.getByRole("option")).toHaveCount(25);
+  const quantity = page.getByRole("spinbutton", { name: "Quantity", exact: true });
+  const quantityControls = [
+    page.getByRole("button", { name: "Decrease quantity", exact: true }),
+    quantity,
+    page.getByRole("button", { name: "Increase quantity", exact: true }),
+  ];
+  await expectInside(content, quantityControls, "195px quantity content");
+  for (const control of quantityControls) {
+    const bounds = await horizontalBounds(control);
+    expect(bounds.width).toBeGreaterThanOrEqual(44);
+    expect(bounds.height).toBeGreaterThanOrEqual(44);
+  }
+  await expect(quantity).toHaveAttribute("min", "1");
+  await expect(quantity).toHaveAttribute("max", "25");
 
   const related = page.getByRole("list", { name: /^Related products,/u });
   const relatedBounds = await horizontalBounds(related);
   const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+  expect(informationBounds!.x).toBeGreaterThanOrEqual(-0.5);
+  expect(informationBounds!.x + informationBounds!.width).toBeLessThanOrEqual(clientWidth + 0.5);
   expect(relatedBounds.left).toBeGreaterThanOrEqual(-0.5);
   expect(relatedBounds.right).toBeLessThanOrEqual(clientWidth + 0.5);
   expect(await related.evaluate((list) => list.scrollWidth)).toBeGreaterThan(
@@ -102,7 +132,7 @@ async function runNarrowProductCase(page: Page, width: 195 | 240 | 320, testInfo
   await expectPrimaryGeometry(page, width);
   if (width === 195) await expectNarrowDescendants(page);
   if (width === 320) {
-    expect((await horizontalBounds(page.getByRole("combobox", { name: "Quantity", exact: true }))).width)
+    expect((await horizontalBounds(page.getByRole("spinbutton", { name: "Quantity", exact: true }))).width)
       .toBeGreaterThanOrEqual(44);
   }
 
@@ -168,7 +198,8 @@ async function runNoJavaScriptCase(
     await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
     await expect(page.locator(".purchase-summary")).toBeVisible();
     await expect(page.getByRole("contentinfo")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Search PropeptIQ" })).toBeVisible();
+    await expectHeaderSearch(page);
+    await expect(page.getByRole("region", { name: "Compound information", exact: true })).toBeVisible();
     await expect(page.getByRole("region", { name: "Mobile purchase controls" })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth))
       .toBeLessThanOrEqual(1);

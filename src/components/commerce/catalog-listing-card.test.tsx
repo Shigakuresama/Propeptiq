@@ -76,7 +76,7 @@ describe("CatalogListingCard", () => {
     renderCanonical(testCanonicalProduct([unavailable, available], { defaultVariantId: available.id }));
 
     const select = screen.getByRole("combobox", { name: "Synthetic Product Alpha amount" });
-    expect(screen.getByRole("option", { name: "20 mg — Unavailable" })).toBeDisabled();
+    expect(screen.getByRole("option", { name: "20 mg" })).toBeDisabled();
     await userEvent.setup().selectOptions(select, "variant-unavailable");
     expect(select).toHaveValue("variant-available");
     expect(JSON.parse(window.localStorage.getItem(CART_STORAGE_KEY) ?? "{}")).toEqual({ version: 2, items: [] });
@@ -117,7 +117,7 @@ describe("CatalogListingCard", () => {
     expect(within(article).queryByText("TR5")).not.toBeInTheDocument();
     expect(within(article).queryByText("5mg")).not.toBeInTheDocument();
     expect(within(article).queryByText("AI-generated catalog illustration — not actual product photography.")).not.toBeInTheDocument();
-    expect(within(article).getByText("Pricing not available")).toBeVisible();
+    expect(within(article).getByText("Currently unavailable")).toBeVisible();
     expect(
       within(article).getByRole("link", {
         name: `View catalog item: ${product.name}`,
@@ -219,7 +219,7 @@ describe("CatalogListingCard", () => {
     );
 
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
-    expect(within(article).getByText("Price unavailable", { selector: "p" })).toBeVisible();
+    expect(within(article).getByText("Currently unavailable", { selector: "p" })).toBeVisible();
     expect(within(article).queryByText("$0.00")).toBeNull();
     expect(within(article).queryByText("-30%")).toBeNull();
     expect(within(article).queryByText(/save/iu)).toBeNull();
@@ -227,8 +227,8 @@ describe("CatalogListingCard", () => {
       name: /synthetic product alpha unavailable/iu,
     });
     expect(unavailable).toBeDisabled();
-    expect(unavailable).toHaveTextContent("Price unavailable");
-    expect(unavailable).toHaveAttribute("title", "Price unavailable");
+    expect(unavailable).toHaveTextContent("Currently unavailable");
+    expect(unavailable).toHaveAttribute("title", "Currently unavailable");
   });
 
   it("shows explicit zero-dollar sale layout only in a local cart preview", () => {
@@ -279,7 +279,7 @@ describe("CatalogListingCard", () => {
     const article = screen.getByRole("article", { name: "Synthetic Product Alpha" });
     expect(within(article).getAllByText("30 mg · 2 bottles per unit")).toHaveLength(2);
     expect(within(article).getByText("$59.99").tagName).toBe("DEL");
-    expect(within(article).getByText("$41.99").tagName).toBe("STRONG");
+    expect(within(article).getByText("$40.73").tagName).toBe("STRONG");
     expect(within(article).queryByText("Checkout unavailable")).toBeNull();
     expect(within(article).queryByText("Available")).toBeNull();
     expect(screen.getByRole("status", { name: "Cart updates" })).toHaveTextContent("");

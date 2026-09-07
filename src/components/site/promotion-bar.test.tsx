@@ -54,13 +54,15 @@ describe("PromotionBar", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("renders a dominant sale heading above truthful automatic promotion instructions", () => {
+  it("renders a compact sale heading with only the code boxed and an accessible icon copy action", () => {
     const { container } = render(<PromotionBar promotion={winter30} />);
 
     expect(
       screen.getByText("WINTER SALE: 30% OFF SITEWIDE"),
     ).toBeVisible();
-    expect(container).toHaveTextContent("WINTER30 APPLIED AUTOMATICALLY");
+    expect(screen.getByText("WINTER30")).toHaveClass("promotion-code-pill");
+    expect(screen.getByText("APPLIED AUTOMATICALLY").closest(".promotion-code-pill")).toBeNull();
+    expect(container.querySelector(".promotion-banner__molecules")).toHaveAttribute("aria-hidden", "true");
     expect(container).not.toHaveTextContent("USE CODE");
     const banner = screen.getByRole("complementary", { name: "Promotion" });
     expect(banner).toHaveClass(
@@ -69,6 +71,7 @@ describe("PromotionBar", () => {
       "promotion-banner",
     );
     expect(banner).not.toHaveClass("flex-wrap");
+    expect(screen.getByRole("button", { name: "Copy promotion code WINTER30" }).textContent).toBe("");
     expect(screen.getByRole("button", { name: "Copy promotion code WINTER30" }))
       .toHaveClass("min-h-11", "min-w-11", "px-2");
   });
@@ -93,7 +96,7 @@ describe("PromotionBar", () => {
         `${safeProp.displayName.toUpperCase()}: ${safeProp.percentage}% OFF SITEWIDE`,
       ),
     ).toBeVisible();
-    expect(copy).toHaveTextContent("Copy");
+    expect(copy.querySelector("svg")).toHaveClass("lucide-copy");
 
     await user.click(copy);
 
@@ -101,7 +104,7 @@ describe("PromotionBar", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       `${safeProp.code} copied`,
     );
-    expect(copy).toHaveTextContent("Copied");
+    expect(copy.querySelector("svg")).toHaveClass("lucide-check");
     expect(copy).toHaveAccessibleName(`Copied promotion code ${safeProp.code}`);
   });
 
@@ -122,7 +125,7 @@ describe("PromotionBar", () => {
     expect(statuses[0]).toHaveAttribute("aria-atomic", "true");
     expect(statuses[0]).toHaveTextContent("WINTER30 copied");
     expect(statuses[0]).toHaveClass("sr-only");
-    expect(button).toHaveTextContent("Copied");
+    expect(button.querySelector("svg")).toHaveClass("lucide-check");
     expect(button).toHaveAccessibleName("Copied promotion code WINTER30");
     expect(button).toHaveFocus();
   });
@@ -141,12 +144,12 @@ describe("PromotionBar", () => {
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 could not be copied.");
     expect(screen.getByRole("status")).not.toHaveTextContent("WINTER30 copied");
     expect(screen.getByRole("status")).not.toHaveTextContent("private clipboard exception");
-    expect(button).toHaveTextContent("Copy");
+    expect(button.querySelector("svg")).toHaveClass("lucide-copy");
     expect(button).toHaveFocus();
 
     await user.click(button);
     expect(writeText).toHaveBeenCalledTimes(2);
-    expect(button).toHaveTextContent("Copied");
+    expect(button.querySelector("svg")).toHaveClass("lucide-check");
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
   });
 
@@ -159,7 +162,7 @@ describe("PromotionBar", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 could not be copied.");
     expect(screen.getByRole("status")).not.toHaveTextContent("WINTER30 copied");
-    expect(screen.getByRole("button", { name: "Copy promotion code WINTER30" })).toHaveTextContent("Copy");
+    expect(screen.getByRole("button", { name: "Copy promotion code WINTER30" }).querySelector("svg")).toHaveClass("lucide-copy");
   });
 
   it("supports keyboard activation while retaining focus on the copy button", async () => {
@@ -175,7 +178,7 @@ describe("PromotionBar", () => {
 
     expect(writeText).toHaveBeenCalledWith("WINTER30");
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
-    expect(button).toHaveTextContent("Copied");
+    expect(button.querySelector("svg")).toHaveClass("lucide-check");
     expect(button).toHaveFocus();
   });
 
@@ -209,7 +212,7 @@ describe("PromotionBar", () => {
     expect(statuses[0]).toHaveTextContent("WINTER30 could not be copied.");
     expect(statuses[0]).toHaveAttribute("aria-live", "polite");
     expect(statuses[0]).toHaveAttribute("aria-atomic", "true");
-    expect(button).toHaveTextContent("Copy");
+    expect(button.querySelector("svg")).toHaveClass("lucide-copy");
     expect(button).toHaveFocus();
   });
 
@@ -233,7 +236,7 @@ describe("PromotionBar", () => {
       await Promise.resolve();
     });
     expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
-    expect(button).toHaveTextContent("Copied");
+    expect(button.querySelector("svg")).toHaveClass("lucide-check");
 
     await act(async () => {
       first.reject(new Error("stale clipboard failure"));
@@ -255,10 +258,10 @@ describe("PromotionBar", () => {
         await Promise.resolve();
       });
       expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
-      expect(button).toHaveTextContent("Copied");
+      expect(button.querySelector("svg")).toHaveClass("lucide-check");
       act(() => vi.advanceTimersByTime(60_000));
       expect(screen.getByRole("status")).toHaveTextContent("WINTER30 copied");
-      expect(button).toHaveTextContent("Copied");
+      expect(button.querySelector("svg")).toHaveClass("lucide-check");
     } finally {
       vi.useRealTimers();
     }

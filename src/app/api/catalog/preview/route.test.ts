@@ -34,7 +34,7 @@ const syntheticVariantId = "55000000-0000-4000-8000-000000000001";
 const syntheticVariant: previewModel.CartPreviewVariant = {
   variantId: syntheticVariantId,
   productId: "61000000-0000-4000-8000-000000000001",
-  name: "Synthetic Reference Alpha — Demo Only", packageForm: "Synthetic sealed reference unit",
+  name: "Synthetic Reference Alpha — Demo Only", packageQuantity: 1, packageForm: "Synthetic sealed reference unit",
   variantLabel: "Synthetic 5 mg fixture", sku: "SYNTHETIC-ALPHA-5MG",
   baseUnitMinor: 2_400, currency: "USD", priceStatus: "active", availability: "available",
   availableQuantity: 12, checkoutReady: true, eligiblePromotions: [],
@@ -82,9 +82,9 @@ function request(payload: unknown = { items: [{ variantId: publicVariantId, quan
 function expectedPublicLine(purchaseState: "checkout_unavailable" | "local_preview" = "checkout_unavailable") {
   return {
     variantId: publicVariantId, quantity: 2, available: false, purchaseState,
-    name: "Tirzepatide", variantLabel: "30mg", sku: "PPQ-TIRZEPATIDE-TR30", packageForm: "1 bottle",
-    baseUnitMinor: 5_999, unitAmountMinor: 4_199, lineSubtotalMinor: 8_398, lineSavingsMinor: 3_600,
-    effectiveDiscountBps: 3_000, appliedPromotions: [{ id: "winter30", label: "WINTER30" }], currency: "USD",
+    name: "Tirzepatide", variantLabel: "30mg", sku: "PPQ-TIRZEPATIDE-TR30", packageQuantity: 1, packageForm: "1 bottle",
+    baseUnitMinor: 5_999, unitAmountMinor: 4_073, lineSubtotalMinor: 8_146, lineSavingsMinor: 3_852,
+    effectiveDiscountBps: 3_210, campaignDiscountBps: 3000, volumeDiscountBps: 300, campaignUnitMinor: 4199, lineCampaignSavingsMinor: 3600, lineVolumeSavingsMinor: 252, appliedPromotions: [{ id: "winter30", label: "WINTER30" }], currency: "USD",
   };
 }
 async function expectUnavailable(response: Response) {
@@ -137,7 +137,7 @@ describe("POST /api/catalog/preview public display boundary", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     const preview: CartPreview = await response.json();
     expect(preview.items).toEqual([expectedPublicLine(mode === "production" ? "checkout_unavailable" : "local_preview")]);
-    expect(preview).toMatchObject({ schemaVersion: 2, subtotalMinor: 8_398, currency: "USD", taxMinor: null,
+    expect(preview).toMatchObject({ schemaVersion: 2, subtotalMinor: 8_146, currency: "USD", taxMinor: null,
       shippingMinor: null, finalDiscountMinor: null, reasons: ["checkout_unavailable"], requiresAcknowledgement: true });
     expect(getPublicStorefrontView).toHaveBeenCalledExactlyOnceWith();
     expect(getRequestIdentity).toHaveBeenCalledExactlyOnceWith();
@@ -175,8 +175,8 @@ describe("POST /api/catalog/preview public display boundary", () => {
     const preview: CartPreview = await response.json();
     expect(preview.items[0]).toEqual(expectedPublicLine("local_preview"));
     expect(preview.items[1]).toMatchObject({ variantId: syntheticVariantId, name: "Synthetic Reference Alpha — Demo Only",
-      available: true, purchaseState: "ready", unitAmountMinor: 2_208, lineSubtotalMinor: 4_416 });
-    expect(preview.subtotalMinor).toBe(12_814);
+      available: true, purchaseState: "ready", unitAmountMinor: 2_328, lineSubtotalMinor: 4_656 });
+    expect(preview.subtotalMinor).toBe(12_802);
     expect(cartPreviewSource).toHaveBeenCalledExactlyOnceWith();
     expect(canContinueFromPreview(preview, preview.previewToken)).toBe(false);
   });

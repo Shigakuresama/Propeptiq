@@ -230,7 +230,6 @@ async function expectFooterColumns(
       style: `
         .skip-link,
         .public-layout > header,
-        .site-search-launcher-lane,
         .mobile-purchase-bar {
           visibility: hidden !important;
         }
@@ -251,7 +250,7 @@ test("footer forms four columns at 1440px", async ({ page }, testInfo) => {
   await expectFooterColumns(page, 1440, 4, testInfo);
 });
 
-test("shared footer exposes the exact links and one disabled newsletter on home catalog and product routes", async ({ page }) => {
+test("shared footer exposes the exact links and omits the disabled newsletter on home catalog and product routes", async ({ page }) => {
   const newsletterRequests: string[] = [];
   page.on("request", (request) => {
     if (request.method() === "POST" && new URL(request.url()).pathname === "/api/newsletter") {
@@ -261,19 +260,9 @@ test("shared footer exposes the exact links and one disabled newsletter on home 
 
   for (const route of ["/", "/catalog", "/catalog/items/tirzepatide"] as const) {
     const footer = await openFooter(page, route, 375);
-    await expect(page.getByRole("form", { name: "Newsletter signup" })).toHaveCount(1);
-    await expect(footer.getByRole("form", { name: "Newsletter signup" })).toHaveCount(0);
-    await expect(page.getByRole("textbox", { name: "Email address" })).toHaveCount(1);
-    await expect(page.getByRole("textbox", { name: "Email address" })).toBeDisabled();
-    await expect(page.getByRole("checkbox")).not.toBeChecked();
-    const subscribe = page.getByRole("button", { name: "Subscribe" });
-    await expect(subscribe).toBeDisabled();
-    await subscribe.evaluate((button) => {
-      if (button instanceof HTMLButtonElement) button.click();
-    });
-    await expect(page.getByRole("form", { name: "Newsletter signup" }).getByRole("status")).toHaveText(
-      "Newsletter signup is temporarily unavailable.",
-    );
+    await expect(page.getByRole("form", { name: "Newsletter signup" })).toHaveCount(0);
+    await expect(page.getByRole("textbox", { name: "Email address" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Subscribe", exact: true })).toHaveCount(0);
     expect(await footer.getByRole("navigation", { name: "Footer" }).getByRole("link").evaluateAll(
       (links) => links.map((link) => ({ href: link.getAttribute("href"), label: link.textContent?.trim() })),
     )).toEqual([
@@ -284,6 +273,7 @@ test("shared footer exposes the exact links and one disabled newsletter on home 
       { href: "/quality-records", label: "Quality Records" },
       { href: "/account/orders", label: "Order tracking" },
       { href: "/#faq", label: "FAQ" },
+      { href: "/contact", label: "Contact us" },
       { href: "/research-use-policy", label: "Research Use Only" },
     ]);
     await expect(footer).toContainText(`© ${new Date().getFullYear()} PROPEPTIQ LABS`);
@@ -408,12 +398,7 @@ test("footer clears fixed public controls and passes Axe under reduced motion", 
   await expect(search).toBeVisible();
   await expect.poll(async () => {
     const geometry = await footerDockGeometry(page);
-    const purchaseHeight = geometry.purchase?.height ?? 0;
-    const searchHeight = geometry.search?.height ?? 0;
-    const searchBottom = geometry.search?.bottom ?? geometry.clientHeight;
-    const occupiedHeight = Math.ceil(
-      purchaseHeight + 8 + searchHeight + geometry.clientHeight - searchBottom,
-    );
+    const occupiedHeight = Math.ceil(geometry.clientHeight - (geometry.purchase?.top ?? geometry.clientHeight));
     const reservation = Number.parseFloat(geometry.reservation);
     const footerPadding = Number.parseFloat(geometry.footerPaddingBottom);
     return {
@@ -457,7 +442,7 @@ test("footer clears fixed public controls and passes Axe under reduced motion", 
       purchaseBounds!.y < rowBounds!.y + rowBounds!.height &&
       purchaseBounds!.y + purchaseBounds!.height > rowBounds!.y,
   ).toBe(false);
-  expect(purchaseBounds!.y + purchaseBounds!.height).toBeLessThan(searchBounds!.y);
+  expect(searchBounds!.y + searchBounds!.height).toBeLessThan(purchaseBounds!.y);
   expect((await new AxeBuilder({ page }).include("footer").analyze()).violations).toEqual([]);
 });
 
@@ -472,8 +457,9 @@ test("footer content and native disclosures remain available without JavaScript"
   try {
     await page.goto(new URL("/catalog", baseURL).toString());
     const footer = page.getByRole("contentinfo");
-    await expect(page.getByRole("form", { name: "Newsletter signup" })).toHaveCount(1);
-    const details = footer.locator("details");
+    await expect(page.getByRole("form", { name: "Newsletter signup" })).toHaveCount(0);
+    await expect(footer.getByRole("link", { name: "Contact us", exact: true })).toHaveAttribute("href", "/contact");
+    const details = footer.getByRole("navigation", { name: "Footer", exact: true }).locator("details");
     await expect(details).toHaveCount(3);
     await expect(details.first()).toHaveAttribute("open", "");
     await details.first().locator("summary").focus();

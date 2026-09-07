@@ -215,10 +215,10 @@ test("single primary product image keeps native selection, focus, and geometry s
     }
     const frame = primary.locator(".catalog-product-visual__image");
     const before = (await frame.boundingBox())!;
-    expect(before.width / before.height).toBeCloseTo(4 / 3, 2);
+    await expectProductImageLayout(page, width);
     const search = page.getByRole("button", { name: "Search PropeptIQ" });
     const initialSearch = await clientRect(search);
-    expect((initialSearch.left + initialSearch.right) / 2).toBeCloseTo(width / 2, 0);
+    await expectHeaderSearch(page);
     const amount = page.locator('section[aria-labelledby="purchase-heading"] input[type="radio"]:checked');
     await amount.focus();
     await page.keyboard.press("ArrowRight");
@@ -226,13 +226,14 @@ test("single primary product image keeps native selection, focus, and geometry s
     await expect(selected).toBeFocused();
     const selectedLabel = await selected.locator("..").locator("span").first().textContent();
     await expect(primary.locator(".catalog-product-visual__variant")).toHaveText(selectedLabel!);
-    const quantity = page.getByRole("combobox", { name: "Quantity", exact: true });
-    await quantity.selectOption("2");
+    const quantity = page.getByRole("spinbutton", { name: "Quantity", exact: true });
+    await quantity.fill("2");
     await quantity.focus();
     await expect(quantity).toBeFocused();
     const after = (await frame.boundingBox())!;
     expect(after.width).toBeCloseTo(before.width, 1);
-    expect(after.height).toBeCloseTo(before.height, 1);
+    if (width < 1024) expect(after.height).toBeCloseTo(before.height, 1);
+    await expectProductImageLayout(page, width);
     expect((await clientRect(search)).bottom).toBeCloseTo(initialSearch.bottom, 0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     expect((await new AxeBuilder({ page }).include(".catalog-detail-image").analyze()).violations).toEqual([]);
@@ -331,7 +332,7 @@ test("desktop search leaves the untouched BPC-157 gallery rectangles clear", asy
   await page.goto("/catalog/items/bpc-157");
   const geometry = await desktopGalleryGeometry(page, "BPC-157");
   await testInfo.attach("initial-bpc157-desktop-geometry", { body: JSON.stringify(geometry, null, 2), contentType: "application/json" });
-  expect((geometry.search.left + geometry.search.right) / 2).toBeCloseTo(720, 0);
+  await expectHeaderSearch(page);
   expect(geometry.collisions, `Untouched page-top rectangles: ${JSON.stringify(geometry)}`).toEqual([]);
   expect(rectanglesIntersect(geometry.gallery, geometry.search)).toBe(false);
   expect(rectanglesIntersect(geometry.purchaseColumn, geometry.search)).toBe(false);
@@ -358,9 +359,8 @@ test("desktop gallery clearance survives container widths and real catalog title
       expect(geometry.collisions, `Untouched page-top rectangles: ${JSON.stringify(geometry)}`).toEqual([]);
       expect(rectanglesIntersect(geometry.gallery, geometry.search)).toBe(false);
       expect(rectanglesIntersect(geometry.purchaseColumn, geometry.search)).toBe(false);
-      expect((geometry.search.left + geometry.search.right) / 2).toBeCloseTo(viewport.width / 2, 0);
-      expect(viewport.height - geometry.search.bottom).toBeCloseTo(32, 0);
-      expect(geometry.imageFrame.width / geometry.imageFrame.height).toBeCloseTo(4 / 3, 2);
+      await expectHeaderSearch(page);
+      await expectProductImageLayout(page, viewport.width);
       if (viewport.width === 1024 || viewport.width === 1025) {
         expect(geometry.displayedName).toBe(product.name);
         expect(rectangleFitsInside(geometry.panel, geometry.labelPanel, 1), `${product.name} label panel at ${viewport.width}px`).toBe(true);
@@ -541,6 +541,37 @@ function rectangleFitsInside(
     inner.bottom <= outer.bottom + tolerance;
 }
 
+async function expectHeaderSearch(page: Page) {
+  const trigger = page.getByRole("button", { name: "Search PropeptIQ" });
+  await expect(trigger).toHaveCount(1);
+  await expect(page.locator("header.persistent-chrome").getByRole("button", { name: "Search PropeptIQ" })).toHaveCount(1);
+  const header = await clientRect(page.locator("header.persistent-chrome"));
+  const bounds = await clientRect(trigger);
+  expect(rectangleFitsInside(header, bounds), "Search remains inside the persistent header").toBe(true);
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(bounds.right).toBeLessThanOrEqual(page.viewportSize()!.width);
+  expect(await trigger.locator("..").evaluate((element) => getComputedStyle(element).position)).toBe("static");
+}
+
+async function expectProductImageLayout(page: Page, viewportWidth: number) {
+  const gallery = page.locator(".catalog-detail-image");
+  const image = gallery.locator(".catalog-product-visual__base");
+  const frame = await clientRect(gallery.locator(".catalog-product-visual__image"));
+  expect(rectangleFitsInside(await clientRect(gallery), frame)).toBe(true);
+  if (viewportWidth < 1024) {
+    expect(frame.width / frame.height, `${viewportWidth}px mobile image ratio`).toBeCloseTo(4 / 3, 2);
+    await expect(image).toHaveCSS("object-fit", "contain");
+  } else {
+    const grid = await clientRect(page.locator(".product-detail-grid"));
+    const galleryBounds = await clientRect(gallery);
+    const purchaseBounds = await clientRect(page.locator(".catalog-detail-content"));
+    expect(galleryBounds.top, `${viewportWidth}px gallery starts with the product grid`).toBeCloseTo(grid.top, 0);
+    expect(galleryBounds.bottom, `${viewportWidth}px gallery fills the product grid`).toBeCloseTo(grid.bottom, 0);
+    expect(galleryBounds.bottom + 1, `${viewportWidth}px gallery reaches the purchase column`).toBeGreaterThanOrEqual(purchaseBounds.bottom);
+    await expect(image).toHaveCSS("object-fit", "cover");
+  }
+}
+
 async function horizontalLayout(page: Page) {
   return page.evaluate(() => {
     const root = document.documentElement;
@@ -683,9 +714,10 @@ test("owner-configured WINTER30 promotion remains visible with preview-only cano
   expect(layout.buttonHeight).toBeGreaterThanOrEqual(44);
   expect(layout.buttonWidth).toBeGreaterThanOrEqual(44);
   expect(layout.overflow).toBeLessThanOrEqual(1);
-  await expect(banner).toContainText('WINTER30 APPLIED AUTOMATICALLY');
+  await expect(banner.getByText("WINTER30", { exact: true })).toBeVisible();
+  await expect(banner.getByText("APPLIED AUTOMATICALLY", { exact: true })).toBeVisible();
   await copy.click();
-  await expect(banner.getByRole("button", { name: "Copied promotion code WINTER30" })).toHaveText("Copied");
+  await expect(banner.getByRole("button", { name: "Copied promotion code WINTER30" })).toBeVisible();
   await expect(banner.getByRole("status")).toHaveText("WINTER30 copied");
 });
 
@@ -717,7 +749,8 @@ test("site search ultra-narrow public header keeps every keyboard focus target i
   const headerTargets = headerRow.locator(
     "a[href]:visible, button:not([disabled]):visible",
   );
-  await expect(headerTargets).toHaveCount(4);
+  await expect(headerTargets).toHaveCount(5);
+  await expect(headerRow.getByRole("button", { name: "Search PropeptIQ" })).toHaveCount(1);
   await page.evaluate(() => {
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     window.scrollTo(0, 0);
@@ -726,7 +759,7 @@ test("site search ultra-narrow public header keeps every keyboard focus target i
   await expect(page.getByRole("link", { name: "Skip to main content" }))
     .toBeFocused();
 
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < 5; index += 1) {
     await page.keyboard.press("Tab");
     const target = headerTargets.nth(index);
     await expect(target).toBeFocused();
@@ -738,12 +771,16 @@ test("site search ultra-narrow public header keeps every keyboard focus target i
       return {
         bottom: bounds.bottom,
         focusExtent,
+        height: bounds.height,
         label: element.getAttribute("aria-label") ?? element.textContent?.trim() ?? "",
         left: bounds.left,
         right: bounds.right,
         top: bounds.top,
+        width: bounds.width,
       };
     });
+    expect.soft(focusTarget.width, `${focusTarget.label} touch width`).toBeGreaterThanOrEqual(44);
+    expect.soft(focusTarget.height, `${focusTarget.label} touch height`).toBeGreaterThanOrEqual(44);
     expect.soft(
       focusTarget.left - focusTarget.focusExtent,
       `${focusTarget.label} left focus ring`,
@@ -862,7 +899,7 @@ test("site search ultra-narrow layout exposes a removable test-only long-content
   expect(requests).toHaveLength(0);
 });
 
-test("site search launcher stays centered, operable, and clear of the footer across the Chromium viewport matrix", async ({
+test("header search stays operable and clear of the footer across the Chromium viewport matrix", async ({
   page,
 }) => {
   const requests = await interceptFictionalSearch(page);
@@ -905,26 +942,12 @@ test("site search launcher stays centered, operable, and clear of the footer acr
     const triggerBounds = await clientRect(trigger);
     expect(triggerBounds.width, `${width}px trigger width`).toBeGreaterThanOrEqual(44);
     expect(triggerBounds.height, `${width}px trigger height`).toBeGreaterThanOrEqual(44);
-    expect(
-      Math.abs((triggerBounds.left + triggerBounds.right) / 2 - width / 2),
-      `${width}px launcher centering`,
-    ).toBeLessThanOrEqual(1);
+    await expectHeaderSearch(page);
     const layout = await horizontalLayout(page);
     expect(
       layout.scrollWidth - layout.clientWidth,
       `${width}px horizontal overflow: ${JSON.stringify(layout.offenders)}`,
     ).toBeLessThanOrEqual(1);
-
-    if (width === 195) {
-      const laneBounds = await clientRect(page.locator(".site-search-launcher-lane"));
-      expect(laneBounds.left).toBeGreaterThanOrEqual(0);
-      expect(laneBounds.right).toBeLessThanOrEqual(width);
-      expect(
-        Math.abs((laneBounds.left + laneBounds.right) / 2 - width / 2),
-      ).toBeLessThanOrEqual(1);
-      expect(triggerBounds.left).toBeGreaterThanOrEqual(0);
-      expect(triggerBounds.right).toBeLessThanOrEqual(width);
-    }
 
     await page.evaluate(() => {
       document.documentElement.style.scrollBehavior = "auto";
@@ -935,15 +958,33 @@ test("site search launcher stays centered, operable, and clear of the footer acr
       document.documentElement.scrollHeight - window.innerHeight - window.scrollY,
     ))).toBeLessThanOrEqual(1);
 
+    await expectHeaderSearch(page);
+    expect((await clientRect(trigger)).top).toBeCloseTo(triggerBounds.top, 0);
+
     const footerLink = page
       .getByRole("navigation", { name: "Footer" })
       .getByRole("link")
       .last();
     await expect(footerLink).toBeVisible();
+    // At the document end an earlier footer link may have scrolled behind the
+    // sticky header. Native focus must bring the actual target into clear view.
+    await footerLink.focus();
+    await expect(footerLink).toBeFocused();
+    await expect.poll(async () => {
+      const target = await clientRect(footerLink);
+      const header = await clientRect(page.locator("header.persistent-chrome"));
+      return target.top - header.bottom;
+    }, { message: `${width}px focused footer link clears the persistent header` }).toBeGreaterThanOrEqual(0);
+    expect((await clientRect(footerLink)).bottom).toBeLessThanOrEqual(page.viewportSize()!.height);
     expect(
       rectanglesIntersect(await clientRect(trigger), await clientRect(footerLink)),
-      `${width}px launcher/footer collision`,
+      `${width}px header search/focused footer collision`,
     ).toBe(false);
+    expect(await footerLink.evaluate((element) => {
+      const target = element.getBoundingClientRect();
+      const hit = document.elementFromPoint(target.left + target.width / 2, target.top + target.height / 2);
+      return hit !== null && element.contains(hit);
+    }), `${width}px focused footer link receives pointer input`).toBe(true);
   }
 
   expect(requests).toHaveLength(0);
@@ -970,12 +1011,14 @@ test("canonical catalog and detail stay within the viewport at every required wi
   }
 });
 
-test("fixed mobile search stays compact and clear of product identity and purchase headings", async ({
+test("header search stays compact and clear of product identity and purchase headings", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
 
   for (const { width, height } of [
+    { width: 195, height: 844 },
+    { width: 375, height: 1045 },
     { width: 320, height: 812 },
     { width: 320, height: 760 },
     { width: 320, height: 761 },
@@ -998,17 +1041,11 @@ test("fixed mobile search stays compact and clear of product identity and purcha
     const triggerBounds = await clientRect(trigger);
     expect(triggerBounds.width, `${width}x${height} compact search width`).toBeCloseTo(44, 0);
     expect(triggerBounds.height, `${width}x${height} compact search height`).toBeCloseTo(44, 0);
-    expect(
-      Math.abs((triggerBounds.left + triggerBounds.right) / 2 - width / 2),
-      `${width}x${height} centered search`,
-    ).toBeLessThanOrEqual(1);
-    expect(await page.locator(".site-search-launcher-lane").evaluate(
-      (element) => getComputedStyle(element).position,
-    )).toBe("fixed");
+    await expectHeaderSearch(page);
 
     for (const [label, locator] of [
       ["product title", page.getByRole("heading", { level: 1, name: "Tirzepatide" })],
-      ["configuration heading", page.getByText("Product specifications", { exact: true })],
+      ["compound heading", page.getByRole("heading", { name: "Compound information", exact: true })],
       ["purchase heading", page.getByRole("heading", { name: "Select your product" })],
     ] as const) {
       const targetBounds = await clientRect(locator);
@@ -1019,7 +1056,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
     }
 
     const purchaseControls = page.locator(
-      'section[aria-labelledby="purchase-heading"] button, section[aria-labelledby="purchase-heading"] label, section[aria-labelledby="purchase-heading"] select',
+      'section[aria-labelledby="purchase-heading"] button, section[aria-labelledby="purchase-heading"] label, section[aria-labelledby="purchase-heading"] input[type="number"]',
     );
     for (let index = 0; index < await purchaseControls.count(); index += 1) {
       const controlBounds = await clientRect(purchaseControls.nth(index));
@@ -1060,7 +1097,7 @@ test("fixed mobile search stays compact and clear of product identity and purcha
     page.getByRole("heading", { level: 1, name: "Tirzepatide" }),
   );
   expect(desktopImageBounds.right).toBeLessThan(desktopTitleBounds.left);
-  expect(desktopImageBounds.width / desktopImageBounds.height).toBeCloseTo(4 / 3, 1);
+  await expectProductImageLayout(page, 1440);
 
   await page.setViewportSize({ width: 375, height: 720 });
   await page.goto("/catalog/items/tirzepatide");
@@ -1085,11 +1122,14 @@ test("catalog product hierarchy keeps purchase first and cards content-sized", a
     await page.goto("/catalog/items/tirzepatide");
     const detailContent = page.locator(".catalog-detail-content");
     const purchaseHeading = detailContent.getByRole("heading", { name: "Select your product" });
-    const configurationsHeading = detailContent.getByText("Product specifications", { exact: true });
-    expect(await purchaseHeading.evaluate((element) => Boolean(element.compareDocumentPosition(document.querySelector(".catalog-detail-content details")!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+    const configurationsHeading = page.getByRole("heading", { name: "Compound information", exact: true });
+    expect(await purchaseHeading.evaluate((element) => Boolean(element.compareDocumentPosition(document.querySelector(".compound-information")!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
     const purchaseBounds = await clientRect(purchaseHeading);
     const configurationsBounds = await clientRect(configurationsHeading);
     expect(purchaseBounds.top, `${width}px purchase geometry`).toBeLessThan(configurationsBounds.top);
+    const productGridBounds = await clientRect(page.locator(".product-detail-grid"));
+    expect(configurationsBounds.top, `${width}px compound information follows both product columns`).toBeGreaterThan(productGridBounds.bottom);
+    await expect(detailContent.getByRole("heading", { name: "Compound information", exact: true })).toHaveCount(0);
     const detailLayout = await horizontalLayout(page);
     expect(detailLayout.scrollWidth - detailLayout.clientWidth, `${width}px detail horizontal overflow`).toBeLessThanOrEqual(1);
 
@@ -1983,7 +2023,7 @@ test("homepage stays contained and reduced-motion safe before hydration with Jav
     });
     expect(staticMotion).toEqual({
       animationName: "none",
-      opacity: "0.3",
+      opacity: "0.48",
       transform: "none",
     });
 
@@ -2214,8 +2254,8 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
   await page.goto("/catalog/items/tirzepatide");
   await expect(page).toHaveURL(/\/catalog\/items\/tirzepatide$/u);
   await expect(page.getByRole("heading", { level: 1, name: "Tirzepatide" })).toBeVisible();
-  await page.getByText("Product specifications", { exact: true }).click();
-  await expect(page.getByText("TR5", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Compound information", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Compound information", exact: true })).toContainText("Laboratory research");
   await expect(page.getByRole("radio")).toHaveCount(9);
   await expect(page.locator("main")).toContainText("$41.99");
   await expect(page.locator("main")).toContainText("Test mode — no payments");
@@ -2227,7 +2267,7 @@ test("owner-supplied catalog is complete, priced where reviewed, and serves indi
     return element.complete && element.naturalWidth > 0 && element.naturalHeight > 0;
   });
   expect(imageLoaded).toBe(true);
-  await expect(page.locator(".catalog-detail-image .catalog-product-visual__base")).toHaveCSS("object-fit", "contain");
+  await expectProductImageLayout(page, page.viewportSize()!.width);
   await expect(page.locator(".catalog-detail-image .catalog-product-visual__base")).toHaveCSS(
     "object-position",
     "50% 50%",
@@ -2391,8 +2431,7 @@ test("long CP20 front loads from its exact individual source on card and PDP at 
     await expect(pdpVariant).toHaveText(variantLabel);
     const panelRect = await clientRect(panel);
     const labelRect = await clientRect(gallery.locator(".catalog-product-visual__label"));
-    const imageRect = await clientRect(pdpImage.locator(".."));
-    expect(imageRect.width / imageRect.height, `${width}px CP20 PDP reserved ratio`).toBeCloseTo(4 / 3, 2);
+    await expectProductImageLayout(page, width);
     expect(rectangleFitsInside(panelRect, labelRect), `${width}px CP20 PDP label containment`).toBe(true);
     expect(
       rectanglesIntersect(await clientRect(pdpName), await clientRect(pdpVariant)),
@@ -2421,8 +2460,7 @@ async function expectIndividualAlternateGallery(
     await expect(primary.getByRole("img")).toHaveCount(1);
     await expect(primary.getByRole("tab")).toHaveCount(0);
     await expect.poll(() => image.evaluate((node) => (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0)).toBe(true);
-    const frame = await clientRect(image.locator(".."));
-    expect(frame.width / frame.height).toBeCloseTo(4 / 3, 2);
+    await expectProductImageLayout(page, width);
     await expect(primary.locator(".catalog-product-visual__name")).toHaveText(product.name);
     await expect(primary.locator(".catalog-product-visual__variant")).toHaveText(product.variant);
     await expect(primary.getByText("RESEARCH USE ONLY", { exact: true })).toBeVisible();
@@ -2476,10 +2514,10 @@ test("navigation, homepage trust content, product research, and related records 
     return url.searchParams.get("url") ?? url.pathname;
   })).toBe("/catalog/individual/bpc-157/front-v1.webp");
   await expect(page.getByText("Explore BPC-157 amounts, pricing, and product information.")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Product information" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Search PubMed for BPC-157" })).toHaveAttribute(
+  await expect(page.getByRole("heading", { name: "Compound information" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Explore the PubChem record" })).toHaveAttribute(
     "href",
-    "https://pubmed.ncbi.nlm.nih.gov/?term=BPC-157",
+    "https://pubchem.ncbi.nlm.nih.gov/compound/9941957",
   );
   await expect(page.getByRole("region", { name: "Related Products" })).toBeVisible();
   await expect(page.getByRole("list", { name: "Related products, 4 items" }).locator(":scope > li")).toHaveCount(4);
@@ -2501,11 +2539,11 @@ test("preview item keeps the calculator gated while product information and rela
   await expect(page.getByRole("textbox", { name: "Diluent volume (mL)", exact: true })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "Sample volume (mL, optional)", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Calculate", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Product information", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "PubMed literature discovery", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Search PubMed for Tirzepatide" })).toHaveAttribute(
+  await expect(page.getByRole("heading", { name: "Compound information", exact: true })).toBeVisible();
+  await expect(page.locator(".compound-information")).toContainText("C225H348N48O68");
+  await expect(page.getByRole("link", { name: "Explore the PubChem record" })).toHaveAttribute(
     "href",
-    "https://pubmed.ncbi.nlm.nih.gov/?term=Tirzepatide",
+    "https://pubchem.ncbi.nlm.nih.gov/compound/156588324",
   );
   await expect(page.getByRole("heading", { name: "Related Products", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Previous related products" })).toBeVisible();
@@ -2690,25 +2728,53 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(pricing).toContainText("$41.99");
   await expect(pricing).toContainText("30%");
   await expect(pricing).toContainText("$18.00");
-  await expect(pricing).toContainText("subtotal");
-  const quantitySelect = page.getByRole("combobox", { name: "Quantity", exact: true });
-  const expectedSubtotals = new Map([[1, "$41.99"], [2, "$83.98"], [3, "$125.97"], [4, "$167.96"], [9, "$377.91"], [10, "$419.90"], [11, "$461.89"]]);
-  for (const quantity of [1, 2, 3, 4, 9, 10, 11]) {
-    await quantitySelect.selectOption(String(quantity));
+  const quantityInput = page.getByRole("spinbutton", { name: "Quantity", exact: true });
+  // Audited policy: $59.99 -> $41.99 WINTER30 unit price, then round each
+  // unit after the 3% / 6% / 30% volume discount before multiplying quantity.
+  const expectedPrices = [
+    { quantity: 1, unit: "$41.99", subtotal: "$41.99", extra: 0 },
+    { quantity: 2, unit: "$40.73", subtotal: "$81.46", extra: 3 },
+    { quantity: 3, unit: "$40.73", subtotal: "$122.19", extra: 3 },
+    { quantity: 4, unit: "$39.47", subtotal: "$157.88", extra: 6 },
+    { quantity: 9, unit: "$39.47", subtotal: "$355.23", extra: 6 },
+    { quantity: 10, unit: "$39.47", subtotal: "$394.70", extra: 6 },
+    { quantity: 11, unit: "$29.39", subtotal: "$323.29", extra: 30 },
+  ];
+  for (const expected of expectedPrices) {
+    await quantityInput.fill(String(expected.quantity));
     await expect(pricing).toContainText("30%");
-    await expect(pricing).not.toContainText(/(?:38|40)%/u);
-    await expect(pricing.locator("strong")).toHaveText(expectedSubtotals.get(quantity)!);
+    await expect(pricing).toContainText(`${expected.unit} per unit`);
+    await expect(pricing.locator("strong")).toHaveText(expected.subtotal);
+    if (expected.extra > 0) await expect(pricing).toContainText(`Bundle −${expected.extra}% extra`);
+    else await expect(pricing).not.toContainText("Bundle −");
   }
-  await expect(quantitySelect.getByRole("option")).toHaveCount(25);
-  await page.getByRole("button", { name: "3 units, 3 bottles, $125.97 total" }).click();
-  await expect(quantitySelect).toHaveValue("3");
+  await expect(quantityInput).toHaveAttribute("min", "1");
+  await expect(quantityInput).toHaveAttribute("max", "25");
+  for (const bundle of [
+    { quantity: 2, name: "2 bottles, 3% extra bundle discount, $81.46 total" },
+    { quantity: 4, name: "4 bottles, 6% extra bundle discount, $157.88 total" },
+    { quantity: 11, name: "11 bottles, 30% extra bundle discount, $323.29 total" },
+  ]) {
+    const button = page.getByRole("button", { name: bundle.name, exact: true });
+    await button.click();
+    await expect(button).toHaveAttribute("aria-pressed", "true");
+    await expect(quantityInput).toHaveValue(String(bundle.quantity));
+    await expect(pricing).toContainText(`${bundle.quantity} units`);
+  }
+  await page.getByRole("button", { name: "2 bottles, 3% extra bundle discount, $81.46 total", exact: true }).click();
+  const increaseQuantity = page.getByRole("button", { name: "Increase quantity", exact: true });
+  await increaseQuantity.focus();
+  await expect(increaseQuantity).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(quantityInput).toHaveValue("3");
   await expect(pricing).toContainText("3 units");
-  await quantitySelect.focus();
-  await page.keyboard.press("ArrowDown");
-  await expect(pricing).toContainText("4 units");
-  await page.keyboard.press("ArrowUp");
-  await expect(pricing).toContainText("3 units");
-  await quantitySelect.selectOption("1");
+  const decreaseQuantity = page.getByRole("button", { name: "Decrease quantity", exact: true });
+  await decreaseQuantity.focus();
+  await expect(decreaseQuantity).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(quantityInput).toHaveValue("2");
+  await expect(pricing).toContainText("2 units");
+  await quantityInput.fill("1");
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).locator("..").click();
   const addToPreviewCart = page.getByRole("button", { name: "Add Tirzepatide to cart" });
   await expect(addToPreviewCart).toHaveText("Add to cart");
@@ -2742,7 +2808,6 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     await expect(line.getByRole("heading", { name: "Tirzepatide" })).toBeVisible();
     await expect(line.getByText("1 bottle", { exact: true })).toBeVisible();
     await expect(line.getByText("WINTER30", { exact: true })).toBeVisible();
-    await expect(line.getByText("-30%", { exact: true })).toBeVisible();
     await expect(line.getByText(
       "Test mode — no payments.",
       { exact: true },
@@ -2751,17 +2816,19 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await expect(tr30Line.getByText("30mg", { exact: true })).toBeVisible();
   await expect(tr30Line.getByText("SKU PPQ-TIRZEPATIDE-TR30", { exact: true })).toBeVisible();
   await expect(tr30Line.locator("del")).toHaveText("$59.99");
-  await expect(tr30Line.locator("strong")).toHaveText("$41.99");
-  await expect(tr30Line.getByText("Save $36.00", { exact: true })).toBeVisible();
-  await expect(tr30Line.getByText("$83.98", { exact: true })).toBeVisible();
+  await expect(tr30Line.locator("strong")).toHaveText("$40.73");
+  await expect(tr30Line.getByText("-32.1%", { exact: true })).toBeVisible();
+  await expect(tr30Line.getByText("Save $38.52", { exact: true })).toBeVisible();
+  await expect(tr30Line.getByText("$81.46", { exact: true })).toBeVisible();
   await expect(tr60Line.getByText("60mg", { exact: true })).toBeVisible();
   await expect(tr60Line.getByText("SKU PPQ-TIRZEPATIDE-TR60", { exact: true })).toBeVisible();
   await expect(tr60Line.locator("del")).toHaveText("$109.99");
   await expect(tr60Line.locator("strong")).toHaveText("$76.99");
+  await expect(tr60Line.getByText("-30%", { exact: true })).toBeVisible();
   await expect(tr60Line.getByText("Save $33.00", { exact: true })).toBeVisible();
   await expect(tr60Line.getByText("Item subtotal").locator("xpath=following-sibling::dd")).toHaveText("$76.99");
   const cartSummary = page.getByRole("complementary", { name: "Order summary" });
-  await expect(cartSummary.getByText("$160.97", { exact: true })).toBeVisible();
+  await expect(cartSummary.getByText("$158.45", { exact: true })).toBeVisible();
   await expect(cartSummary.getByText(
     "Included in displayed merchandise prices",
     { exact: true },
@@ -2775,8 +2842,8 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await increaseTr30.focus();
   await expect(increaseTr30).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(tr30Line.getByText("$125.97", { exact: true })).toBeVisible();
-  await expect(cartSummary.getByText("$202.96", { exact: true })).toBeVisible();
+  await expect(tr30Line.getByText("$122.19", { exact: true })).toBeVisible();
+  await expect(cartSummary.getByText("$199.18", { exact: true })).toBeVisible();
   await expect(tr30Line.getByText(
     "Test mode — no payments.",
     { exact: true },
@@ -2787,8 +2854,8 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
   await decreaseTr30.focus();
   await expect(decreaseTr30).toBeFocused();
   await page.keyboard.press("Enter");
-  await expect(tr30Line.getByText("$83.98", { exact: true })).toBeVisible();
-  await expect(cartSummary.getByText("$160.97", { exact: true })).toBeVisible();
+  await expect(tr30Line.getByText("$81.46", { exact: true })).toBeVisible();
+  await expect(cartSummary.getByText("$158.45", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(window.localStorage.getItem("propeptiq.cart.v2") ?? "null"))).toEqual({
     version: 2,
     items: [
@@ -2807,7 +2874,7 @@ test("canonical product pricing, variant switching, tiers, and local cart identi
     await expect(page.getByText("60mg", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Increase quantity for Tirzepatide, 30mg" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Remove Tirzepatide, 60mg from cart" })).toBeVisible();
-    await expect(responsiveSummary.getByText("$160.97", { exact: true })).toBeVisible();
+    await expect(responsiveSummary.getByText("$158.45", { exact: true })).toBeVisible();
     const layout = await horizontalLayout(page);
     expect(
       layout.scrollWidth - layout.clientWidth,
@@ -2892,7 +2959,7 @@ test("captures approved desktop and mobile storefront evidence", async ({ page }
     await page.setViewportSize(viewport);
     await page.goto("/catalog/items/retatrutide");
     await page.evaluate(() => document.fonts.ready);
-    await expect(page.getByRole("combobox", { name: "Quantity", exact: true })).toHaveValue("1");
+    await expect(page.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("1");
     await expect(page.locator(".catalog-detail-image .catalog-product-visual__variant")).toHaveText("10mg");
     await expect.poll(() => page.locator(".catalog-detail-image img").evaluate((image) => {
       const productImage = image as HTMLImageElement;
@@ -3133,25 +3200,6 @@ test("PDP purchase choices synchronize the live hero discount badge without relo
 
     const response = await route.fetch();
     let body = await response.text();
-    const promotionMarker = '"automaticPromotions":[';
-    let promotionStart = body.indexOf(promotionMarker);
-    while (promotionStart >= 0) {
-      const arrayStart = promotionStart + promotionMarker.length - 1;
-      let depth = 0;
-      let arrayEnd = -1;
-      for (let index = arrayStart; index < body.length; index += 1) {
-        if (body[index] === "[") depth += 1;
-        if (body[index] === "]") depth -= 1;
-        if (depth === 0) {
-          arrayEnd = index;
-          break;
-        }
-      }
-      expect(arrayEnd, "promotion array terminator").toBeGreaterThan(arrayStart);
-      body = `${body.slice(0, arrayStart)}[]${body.slice(arrayEnd + 1)}`;
-      promotionStart = body.indexOf(promotionMarker, arrayStart + 2);
-    }
-
     const unavailableVariantId = "b1cdf4ea-2eb6-58dc-9dd3-a8245470cadf";
     const unavailableStart = body.indexOf(`{"id":"${unavailableVariantId}"`);
     expect(unavailableStart, "unavailable variant fixture").toBeGreaterThanOrEqual(0);
@@ -3180,47 +3228,49 @@ test("PDP purchase choices synchronize the live hero discount badge without relo
 
   const hero = page.locator(".catalog-detail-image .catalog-product-visual");
   const heroVariant = hero.locator(".catalog-product-visual__variant");
-  const heroBadge = hero.getByLabel(/^-[1-9]\d*%$/u);
-  const exactQuantity = page.getByRole("combobox", { name: "Quantity", exact: true });
+  const heroBadge = hero.getByLabel(/^-[1-9]\d*(?:\.\d+)?%$/u);
+  const exactQuantity = page.getByRole("spinbutton", { name: "Quantity", exact: true });
   await expect(heroVariant).toHaveText("30mg");
-  await expect(heroBadge).toHaveCount(0);
+  await expect(hero.getByLabel("-30%", { exact: true })).toBeVisible();
 
-  await exactQuantity.selectOption("2");
-  await expect(hero.getByLabel("-8%")).toBeVisible();
-  await exactQuantity.selectOption("3");
-  await expect(hero.getByLabel("-10%")).toBeVisible();
-  await exactQuantity.selectOption("10");
-  await expect(hero.getByLabel("-30%")).toBeVisible();
+  await exactQuantity.fill("2");
+  await expect(hero.getByLabel("-32.1%", { exact: true })).toBeVisible();
+  await exactQuantity.fill("3");
+  await expect(hero.getByLabel("-32.1%", { exact: true })).toBeVisible();
+  await exactQuantity.fill("10");
+  await expect(hero.getByLabel("-34.2%", { exact: true })).toBeVisible();
   await expect(exactQuantity).toHaveValue("10");
+  await exactQuantity.fill("11");
+  await expect(hero.getByLabel("-51%", { exact: true })).toBeVisible();
 
-  await exactQuantity.selectOption("9");
+  await exactQuantity.fill("9");
   await expect(exactQuantity).toHaveValue("9");
-  await expect(exactQuantity.getByRole("option")).toHaveCount(25);
-  await expect(hero.getByLabel("-10%")).toBeVisible();
+  await expect(exactQuantity).toHaveAttribute("max", "25");
+  await expect(hero.getByLabel("-34.2%", { exact: true })).toBeVisible();
 
-  await exactQuantity.selectOption("1");
+  await exactQuantity.fill("1");
   await expect(page.getByRole("status", { name: "Purchase summary" })).toContainText("1 unit");
-  await expect(heroBadge).toHaveCount(0);
+  await expect(hero.getByLabel("-30%", { exact: true })).toBeVisible();
 
-  await exactQuantity.selectOption("2");
-  await expect(hero.getByLabel("-8%")).toBeVisible();
+  await exactQuantity.fill("2");
+  await expect(hero.getByLabel("-32.1%", { exact: true })).toBeVisible();
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr5}"]`).locator("..").click();
   await expect(heroVariant).toHaveText("5mg");
   await expect(heroBadge).toHaveCount(0);
 
   await page.locator(`input[type="radio"][value="${tirzepatideVariantIds.tr30}"]`).locator("..").click();
   await expect(heroVariant).toHaveText("30mg");
-  await expect(hero.getByLabel("-8%")).toBeVisible();
+  await expect(hero.getByLabel("-32.1%", { exact: true })).toBeVisible();
   const unavailable = page.locator('input[type="radio"][value="b1cdf4ea-2eb6-58dc-9dd3-a8245470cadf"]');
   await expect(unavailable).toBeDisabled();
-  await expect(unavailable.locator("..")).toContainText("Unavailable");
+  await expect(unavailable.locator("..")).not.toContainText(/Unavailable|Pricing/iu);
   await unavailable.locator("..").scrollIntoViewIfNeeded();
   const unavailableBounds = (await unavailable.locator("..").boundingBox())!;
   // Click the actual disabled target; Playwright's locator click intentionally
   // waits for an enabled associated input and would never attempt this action.
   await page.mouse.click(unavailableBounds.x + unavailableBounds.width / 2, unavailableBounds.y + unavailableBounds.height / 2);
   await expect(heroVariant).toHaveText("30mg");
-  await expect(hero.getByLabel("-8%")).toBeVisible();
+  await expect(hero.getByLabel("-32.1%", { exact: true })).toBeVisible();
 
 
   expect(

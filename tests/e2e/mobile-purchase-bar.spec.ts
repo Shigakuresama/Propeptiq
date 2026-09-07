@@ -38,9 +38,9 @@ async function openProduct(page: Page) {
 
 async function chooseTwoBottles(page: Page) {
   await page.locator(`input[type="radio"][value="${tr30VariantId}"]`).locator("..").click();
-  await page.getByRole("combobox", { name: "Quantity", exact: true }).selectOption("2");
+  await page.getByRole("spinbutton", { name: "Quantity", exact: true }).fill("2");
   await expect(purchaseSummary(page)).toContainText("30mg · 2 units");
-  await expect(purchaseSummary(page)).toContainText("$83.98");
+  await expect(purchaseSummary(page)).toContainText("$81.46");
 }
 
 async function waitForPurchaseLayout(page: Page) {
@@ -105,9 +105,15 @@ async function expectDockGeometry(page: Page, originalSearchBottom: number) {
   expect(purchaseBounds.left).toBeGreaterThanOrEqual(0);
   expect(purchaseBounds.right).toBeLessThanOrEqual(viewport.width);
   expect(purchaseBounds.top).toBeGreaterThanOrEqual(0);
-  expect(purchaseBounds.bottom).toBeLessThan(searchBounds.top);
+  const headerBounds = await rect(page.locator("header.persistent-chrome"));
+  expect(purchaseBounds.top).toBeGreaterThan(headerBounds.bottom);
+  expect(viewport.height - purchaseBounds.bottom).toBeCloseTo(16, 0);
+  await expect(page.locator("header.persistent-chrome").getByRole("button", { name: "Search PropeptIQ" })).toHaveCount(1);
+  expect(searchBounds.top).toBeGreaterThanOrEqual(headerBounds.top);
+  expect(searchBounds.bottom).toBeLessThanOrEqual(headerBounds.bottom);
   expect(searchBounds.bottom).toBeCloseTo(originalSearchBottom, 0);
-  expect((searchBounds.left + searchBounds.right) / 2).toBeCloseTo(viewport.width / 2, 0);
+  expect(searchBounds.left).toBeGreaterThanOrEqual(0);
+  expect(searchBounds.right).toBeLessThanOrEqual(viewport.width);
   expect(searchBounds.width).toBeCloseTo(44, 0);
   expect(searchBounds.height).toBeCloseTo(44, 0);
   for (const control of await purchase.locator("button, a").all()) {
@@ -137,7 +143,7 @@ test("mobile purchase waits until the inline summary has passed above the viewpo
   expect(await mobilePurchase(page).evaluate((element) => element.closest("main"))).toBeNull();
   await expect(mobilePurchase(page)).toContainText("30mg");
   await expect(mobilePurchase(page)).toContainText("2 units");
-  await expect(mobilePurchase(page)).toContainText("$83.98");
+  await expect(mobilePurchase(page)).toContainText("$81.46");
   await expect(mobilePurchase(page)).toContainText("Test mode — no payments");
   await expect(mobilePurchase(page).getByRole("button", { name: addLabel })).toBeEnabled();
   await expect(mobilePurchase(page).locator('[aria-live], [role="status"], [role="alert"]')).toHaveCount(0);
@@ -176,8 +182,8 @@ test("inline and mobile additions merge the same canonical variant and persist t
   await expect(lines.getByText("30mg", { exact: true })).toBeVisible();
   await expect(lines.getByText("SKU PPQ-TIRZEPATIDE-TR30", { exact: true })).toBeVisible();
   await expect(lines.getByRole("spinbutton")).toHaveValue("4");
-  await expect(lines.locator("strong")).toHaveText("$41.99");
-  await expect(lines.getByText("Item subtotal").locator("xpath=following-sibling::dd")).toHaveText("$167.96");
+  await expect(lines.locator("strong")).toHaveText("$39.47");
+  await expect(lines.getByText("Item subtotal").locator("xpath=following-sibling::dd")).toHaveText("$157.88");
   await expect(page.getByRole("button", { name: "Checkout unavailable" })).toBeDisabled();
   await expect(mobilePurchase(page)).toBeHidden();
   expect(paymentRequests).toEqual([]);
@@ -188,11 +194,11 @@ test("Change selection returns keyboard focus to Purchase without resetting vari
   await openProduct(page);
   await chooseTwoBottles(page);
   await page.locator(`input[type="radio"][value="${tr60VariantId}"]`).locator("..").click();
-  await expect(purchaseSummary(page)).toContainText("$153.98");
+  await expect(purchaseSummary(page)).toContainText("$149.36");
   await showMobilePurchase(page);
   await expect(mobilePurchase(page)).toContainText("60mg");
   await expect(mobilePurchase(page)).toContainText("2 units");
-  await expect(mobilePurchase(page)).toContainText("$153.98");
+  await expect(mobilePurchase(page)).toContainText("$149.36");
   const changeSelection = mobilePurchase(page).getByRole("link", { name: "Change selection" });
   await expect(changeSelection).toHaveAttribute("href", "#purchase-heading");
   await changeSelection.focus();
@@ -204,25 +210,33 @@ test("Change selection returns keyboard focus to Purchase without resetting vari
   await expectPurchaseHeadingBelowHeader(page);
   await expect(mobilePurchase(page)).toBeHidden();
   await expect(page.locator(`input[type="radio"][value="${tr60VariantId}"]`)).toBeChecked();
-  await expect(page.getByRole("combobox", { name: "Quantity", exact: true })).toHaveValue("2");
-  await expect(purchaseSummary(page)).toContainText("$153.98");
+  await expect(page.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("2");
+  await expect(purchaseSummary(page)).toContainText("$149.36");
 });
 
-test("mobile purchase retains a valid selection when an invalid native option is injected [browser-only double]", async ({ page }) => {
+test("invalid quantity disables both purchase actions and blur restores the last valid selection", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await openProduct(page);
   await chooseTwoBottles(page);
   const savedCartBefore = await page.evaluate((key) => window.localStorage.getItem(key), cartKey);
-  await page.getByRole("combobox", { name: "Quantity", exact: true }).evaluate((element) => {
-    // A native select cannot offer invalid input. Exercise the handler defensively.
-    const select = element as HTMLSelectElement;
-    select.value = "";
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  const quantity = page.getByRole("spinbutton", { name: "Quantity", exact: true });
+  await quantity.fill("");
   await expect(purchaseSummary(page)).toContainText("2 units");
+  await expect(purchaseSummary(page).getByRole("button", { name: "Tirzepatide unavailable" })).toBeDisabled();
+  await showMobilePurchase(page);
+  await expect(mobilePurchase(page)).toContainText("Enter a valid quantity");
+  await expect(mobilePurchase(page).getByRole("button", { name: "Tirzepatide unavailable" })).toBeDisabled();
+  expect(await page.evaluate((key) => window.localStorage.getItem(key), cartKey)).toBe(savedCartBefore);
+  // Exercise input blur without a separate header-focus scroll changing whether
+  // the inline summary has passed the viewport and the mobile row is visible.
+  await quantity.blur();
+  await expect(quantity).toHaveValue("2");
+  await expect(purchaseSummary(page).getByRole("button", { name: addLabel })).toBeEnabled();
+  // Restoring the price text can reflow the summary back into the viewport.
+  // Reestablish its above-viewport position before checking the mobile mirror.
   await showMobilePurchase(page);
   await expect(mobilePurchase(page)).toContainText("2 units");
-  await expect(mobilePurchase(page)).toContainText("$83.98");
+  await expect(mobilePurchase(page)).toContainText("$81.46");
   await expect(mobilePurchase(page).getByRole("button", { name: addLabel })).toBeEnabled();
   expect(await page.evaluate((key) => window.localStorage.getItem(key), cartKey)).toBe(savedCartBefore);
 });
@@ -311,7 +325,7 @@ test("header navigation owns hit testing and focus while the purchase dock is un
   await expect(navigationDialog).toBeHidden();
   await expect(trigger).toBeFocused();
   await expect(mobilePurchase(page)).toBeVisible();
-  await expect(mobilePurchase(page)).toContainText("$83.98");
+  await expect(mobilePurchase(page)).toContainText("$81.46");
   await expectDockGeometry(page, originalSearchBottom);
   expect(await page.evaluate((key) => window.localStorage.getItem(key), cartKey)).toBe(savedCartBefore);
 });
@@ -333,7 +347,7 @@ test("focused purchase controls hand focus to the inline heading when the viewpo
     await expectPurchaseHeadingBelowHeader(page);
     await expect(mobilePurchase(page)).toBeHidden();
     await expect(searchTrigger(page)).toBeVisible();
-    await expect(page.getByRole("combobox", { name: "Quantity", exact: true })).toHaveValue("2");
+    await expect(page.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("2");
     expect(await page.evaluate((key) => window.localStorage.getItem(key), cartKey)).toBe(savedCartBefore);
   }
 });
@@ -406,9 +420,9 @@ test("enlarged text and a synthetic long label remeasure clearance and hand focu
   expect(await name.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeCloseTo(originalNameFont * 2, 1);
   expect(await name.evaluate((element) => element.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(element).lineHeight))).toBeGreaterThan(1.5);
   await expect(mobilePurchase(page)).toContainText("30mg");
-  await expect(mobilePurchase(page)).toContainText("$83.98");
+  await expect(mobilePurchase(page)).toContainText("$81.46");
   await expectDockGeometry(page, originalSearchBottom);
-  const occupiedHeight = (await rect(mobilePurchase(page))).height + 8 + 44 + (1200 - originalSearchBottom);
+  const occupiedHeight = 1200 - (await rect(mobilePurchase(page))).top;
   await expect.poll(() => page.locator(".public-layout > footer").evaluate((element) => Number.parseFloat(getComputedStyle(element).paddingBottom))).toBeGreaterThanOrEqual(occupiedHeight);
 
   const add = mobilePurchase(page).getByRole("button", { name: addLabel });
@@ -425,11 +439,11 @@ test("enlarged text and a synthetic long label remeasure clearance and hand focu
   await expectPurchaseHeadingBelowHeader(page);
   await expect(mobilePurchase(page)).toBeHidden();
   const measuredPurchase = page.getByRole("region", { name: "Mobile purchase controls", includeHidden: true });
-  expect((await rect(measuredPurchase)).height + 84).toBeGreaterThan(600);
+  expect((await rect(measuredPurchase)).height + 16).toBeGreaterThan(600);
   await expect(searchTrigger(page)).toBeVisible();
   expect((await rect(searchTrigger(page))).bottom).toBeCloseTo(originalSearchBottom, 0);
-  await expect(page.getByRole("combobox", { name: "Quantity", exact: true })).toHaveValue("2");
-  await expect(purchaseSummary(page)).toContainText("$83.98");
+  await expect(page.getByRole("spinbutton", { name: "Quantity", exact: true })).toHaveValue("2");
+  await expect(purchaseSummary(page)).toContainText("$81.46");
 });
 
 test("search retains focus trapping and restoration while mobile purchase is active", async ({ page }) => {
@@ -473,14 +487,15 @@ test("search retains focus trapping and restoration while mobile purchase is act
   await expect(mobilePurchase(page)).toBeVisible();
   await expect(mobilePurchase(page)).toContainText("30mg");
   await expect(mobilePurchase(page)).toContainText("2 units");
-  await expect(mobilePurchase(page)).toContainText("$83.98");
+  await expect(mobilePurchase(page)).toContainText("$81.46");
   await expectDockGeometry(page, originalSearchBottom);
 });
 
-test("mobile widths keep purchase above centered search and the desktop breakpoint removes it", async ({ page }) => {
+test("mobile widths keep purchase at the bottom independently from header search and the desktop breakpoint removes it", async ({ page }) => {
   for (const viewport of [
     { width: 320, height: 812 },
     { width: 375, height: 812 },
+    { width: 375, height: 1045 },
     { width: 390, height: 520 },
     { width: 767, height: 812 },
   ]) {
@@ -520,11 +535,11 @@ test("insufficient usable width or height keeps search available and restores pu
     expect(searchBounds.left).toBeGreaterThanOrEqual(0);
     expect(searchBounds.right).toBeLessThanOrEqual(viewport.width);
     expect(searchBounds.bottom).toBeLessThanOrEqual(viewport.height);
-    expect((searchBounds.left + searchBounds.right) / 2).toBeCloseTo(viewport.width / 2, 0);
+    await expect(page.locator("header").getByRole("button", { name: "Search PropeptIQ" })).toHaveCount(1);
   }
   await page.setViewportSize({ width: 375, height: 812 });
   await showMobilePurchase(page);
-  await expect(mobilePurchase(page)).toContainText("$83.98");
+  await expect(mobilePurchase(page)).toContainText("$81.46");
 });
 
 test("missing IntersectionObserver keeps the inline purchase and search available", async ({ page }) => {
@@ -599,7 +614,7 @@ test("legacy-cart help wraps inside the purchase row and denied additions leave 
     await positionSummaryBottom(page, -12);
     const measuredPurchase = page.getByRole("region", { name: "Mobile purchase controls", includeHidden: true });
     await expect(measuredPurchase).toHaveCount(1);
-    const occupiedHeight = (await rect(measuredPurchase)).height + 8 + 44 + (812 - originalSearchBottom);
+    const occupiedHeight = 812 - (await rect(measuredPurchase)).top;
     const headerHeight = (await rect(page.getByRole("banner"))).height;
     const availableHeight = Math.min(406, 812 - headerHeight - 96);
     if (occupiedHeight > availableHeight) {

@@ -90,7 +90,7 @@ describe("public storefront cart source", () => {
       expect(row.availableQuantity).toBeNull();
       expect(row.checkoutReady).toBe(false);
       expect(row.availability).toBe("preview_only");
-      expect(Object.keys(row).sort()).toEqual(["variantId", "productId", "name", "variantLabel", "sku", "packageForm", "baseUnitMinor", "currency", "priceStatus", "availability", "availableQuantity", "checkoutReady", "eligiblePromotions"].sort());
+      expect(Object.keys(row).sort()).toEqual(["variantId", "productId", "name", "variantLabel", "sku", "packageForm", "packageQuantity", "baseUnitMinor", "currency", "priceStatus", "availability", "availableQuantity", "checkoutReady", "eligiblePromotions"].sort());
     }
     expect(JSON.stringify(source)).not.toMatch(/stripe|provider|payment|inventory|browseCode|displayConfigurations/iu);
     const items = [];

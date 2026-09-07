@@ -1,4 +1,4 @@
-import { calculateVariantLinePrice, quantityDiscountBps } from "@/domain/storefront-pricing";
+import { calculateVariantLinePrice, quantityDiscountBps, resolveEffectiveDiscount } from "@/domain/storefront-pricing";
 import { MAX_CART_DISTINCT_ITEMS, MAX_CART_ITEM_QUANTITY } from "./cart-storage";
 import { createCartPreviewToken } from "./preview-token";
 import {
@@ -49,14 +49,17 @@ function identifier(value: unknown): value is string {
 
 function item(value: unknown): CartPreviewItem | null {
   if (!exactRecord(value, [
-    "variantId", "quantity", "available", "purchaseState", "name", "variantLabel", "sku", "packageForm",
+    "variantId", "quantity", "packageQuantity", "available", "purchaseState", "name", "variantLabel", "sku", "packageForm",
     "baseUnitMinor", "unitAmountMinor", "lineSubtotalMinor", "lineSavingsMinor", "effectiveDiscountBps", "appliedPromotions", "currency",
+    "campaignDiscountBps", "volumeDiscountBps", "campaignUnitMinor", "lineCampaignSavingsMinor", "lineVolumeSavingsMinor",
   ]) || !identifier(value.variantId) || !Number.isSafeInteger(value.quantity) || (value.quantity as number) < 1 || (value.quantity as number) > MAX_CART_ITEM_QUANTITY ||
     typeof value.available !== "boolean" || typeof value.purchaseState !== "string" ||
     !["ready", "checkout_unavailable", "local_preview", "pricing_pending", "unavailable", "insufficient_quantity", "unknown_variant"].includes(value.purchaseState) ||
     value.available !== (value.purchaseState === "ready") || !denseArray(value.appliedPromotions, 1)) return null;
 
   const purchaseState = value.purchaseState as CartPreviewPurchaseState;
+  if (purchaseState === "unknown_variant" ? value.packageQuantity !== null
+    : !Number.isSafeInteger(value.packageQuantity) || (value.packageQuantity as number) < 1) return null;
   const identity = [value.name, value.variantLabel, value.sku, value.packageForm];
   if (purchaseState === "unknown_variant" ? identity.some((field) => field !== null)
     : !boundedText(value.name, MAX_CART_PREVIEW_TEXT_LENGTH) || !boundedText(value.variantLabel, MAX_CART_PREVIEW_TEXT_LENGTH) ||
@@ -73,22 +76,32 @@ function item(value: unknown): CartPreviewItem | null {
     if (!money(value.baseUnitMinor) || !money(value.unitAmountMinor) || !money(value.lineSubtotalMinor) || !money(value.lineSavingsMinor) ||
       !money(value.effectiveDiscountBps) || value.effectiveDiscountBps > 10_000 || value.currency !== "USD" ||
       (value.baseUnitMinor === 0 && purchaseState !== "local_preview")) return null;
-    const tier = quantityDiscountBps(value.quantity as number);
+    const tier = quantityDiscountBps(value.quantity as number, value.packageQuantity as number);
     const promotionId = appliedPromotions[0]?.id ?? null;
-    if (promotionId === null ? value.effectiveDiscountBps !== tier : value.effectiveDiscountBps < tier || value.effectiveDiscountBps === 0) return null;
+    if (!money(value.campaignDiscountBps) || value.campaignDiscountBps > 10_000 || value.volumeDiscountBps !== tier ||
+      !money(value.campaignUnitMinor) || !money(value.lineCampaignSavingsMinor) || !money(value.lineVolumeSavingsMinor) ||
+      (promotionId === null ? value.campaignDiscountBps !== 0 : value.campaignDiscountBps === 0)) return null;
     const calculated = calculateVariantLinePrice({
       variantId: value.variantId, quantity: value.quantity as number, baseUnitMinor: value.baseUnitMinor,
-      effectiveDiscount: { source: promotionId === null ? "quantity" : "promotion", discountBps: value.effectiveDiscountBps, promotionId },
+      effectiveDiscount: resolveEffectiveDiscount({ quantityDiscountBps: tier,
+        eligiblePromotions: promotionId === null ? [] : [{ id: promotionId, discountBps: value.campaignDiscountBps }] }),
     });
-    if (calculated.effectiveUnitMinor !== value.unitAmountMinor || calculated.lineSubtotalMinor !== value.lineSubtotalMinor || calculated.lineSavingsMinor !== value.lineSavingsMinor) return null;
-  } else if ([value.baseUnitMinor, value.unitAmountMinor, value.lineSubtotalMinor, value.lineSavingsMinor, value.effectiveDiscountBps, value.currency].some((field) => field !== null) || appliedPromotions.length !== 0) return null;
+    if (calculated.effectiveDiscountBps !== value.effectiveDiscountBps || calculated.campaignUnitMinor !== value.campaignUnitMinor ||
+      calculated.lineCampaignSavingsMinor !== value.lineCampaignSavingsMinor || calculated.lineVolumeSavingsMinor !== value.lineVolumeSavingsMinor ||
+      calculated.effectiveUnitMinor !== value.unitAmountMinor || calculated.lineSubtotalMinor !== value.lineSubtotalMinor || calculated.lineSavingsMinor !== value.lineSavingsMinor) return null;
+  } else if ([value.baseUnitMinor, value.unitAmountMinor, value.lineSubtotalMinor, value.lineSavingsMinor, value.effectiveDiscountBps,
+    value.campaignDiscountBps, value.volumeDiscountBps, value.campaignUnitMinor, value.lineCampaignSavingsMinor, value.lineVolumeSavingsMinor, value.currency].some((field) => field !== null) || appliedPromotions.length !== 0) return null;
 
   return Object.freeze({
     variantId: value.variantId, quantity: value.quantity as number, available: value.available, purchaseState,
+    packageQuantity: value.packageQuantity as number | null,
     name: value.name as string | null, variantLabel: value.variantLabel as string | null, sku: value.sku as string | null,
     packageForm: value.packageForm as string | null, baseUnitMinor: value.baseUnitMinor as number | null,
     unitAmountMinor: value.unitAmountMinor as number | null, lineSubtotalMinor: value.lineSubtotalMinor as number | null,
     lineSavingsMinor: value.lineSavingsMinor as number | null, effectiveDiscountBps: value.effectiveDiscountBps as number | null,
+    campaignDiscountBps: value.campaignDiscountBps as number | null, volumeDiscountBps: value.volumeDiscountBps as number | null,
+    campaignUnitMinor: value.campaignUnitMinor as number | null, lineCampaignSavingsMinor: value.lineCampaignSavingsMinor as number | null,
+    lineVolumeSavingsMinor: value.lineVolumeSavingsMinor as number | null,
     appliedPromotions: Object.freeze(appliedPromotions), currency: value.currency as string | null,
   });
 }

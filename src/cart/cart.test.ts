@@ -15,12 +15,12 @@ import { CartPreviewProjectionError } from "./storefront-preview-source";
 const variants = [
   {
     variantId: "variant-5mg", productId: "product-alpha", name: "Synthetic local test only — Alpha",
-    packageForm: "5mg research vial", variantLabel: "5 mg", sku: "TEST-5MG", checkoutReady: true, baseUnitMinor: 2400, currency: "USD" as const,
+    packageQuantity: 1, packageForm: "5mg research vial", variantLabel: "5 mg", sku: "TEST-5MG", checkoutReady: true, baseUnitMinor: 2400, currency: "USD" as const,
     priceStatus: "active" as const, availability: "available" as const, availableQuantity: 25, eligiblePromotions: [],
   },
   {
     variantId: "variant-10mg", productId: "product-alpha", name: "Synthetic local test only — Alpha",
-    packageForm: "10mg research vial", variantLabel: "10 mg", sku: "TEST-10MG", checkoutReady: true, baseUnitMinor: 3200, currency: "USD" as const,
+    packageQuantity: 1, packageForm: "10mg research vial", variantLabel: "10 mg", sku: "TEST-10MG", checkoutReady: true, baseUnitMinor: 3200, currency: "USD" as const,
     priceStatus: "active" as const, availability: "available" as const, availableQuantity: 25, eligiblePromotions: [],
   },
 ] as const;
@@ -101,9 +101,9 @@ describe("authoritative variant cart preview", () => {
     const three = buildCartPreview([{ variantId: "variant-5mg", quantity: 3 }], source);
     const ten = buildCartPreview([{ variantId: "variant-5mg", quantity: 10 }], source);
     expect(one.items[0]).toMatchObject({ variantId: "variant-5mg", lineSubtotalMinor: 2400 });
-    expect(two.items[0]).toMatchObject({ variantId: "variant-5mg", lineSubtotalMinor: 4416 });
-    expect(three.items[0]).toMatchObject({ variantId: "variant-5mg", lineSubtotalMinor: 6480 });
-    expect(ten.items[0]).toMatchObject({ variantId: "variant-5mg", lineSubtotalMinor: 16800 });
+    expect(two.items[0]).toMatchObject({ variantId: "variant-5mg", lineSubtotalMinor: 4656 });
+    expect(three.items[0]).toMatchObject({ variantId: "variant-5mg", lineSubtotalMinor: 6984 });
+    expect(ten.items[0]).toMatchObject({ variantId: "variant-5mg", lineSubtotalMinor: 22560 });
   });
 
   it("keeps unknown canonical variants unavailable without accepting browser facts", () => {
@@ -126,9 +126,9 @@ describe("version 2 display preview truth", () => {
     expect(() => buildCartPreview(variants.map((variant) => ({ variantId: variant.variantId, quantity: 1 })), oversized)).toThrow(CartPreviewProjectionError);
   });
   it.each([
-    [1, 0, 2_400, 2_400, 0], [2, 800, 2_208, 4_416, 384],
-    [3, 1_000, 2_160, 6_480, 720], [4, 1_000, 2_160, 8_640, 960],
-    [9, 1_000, 2_160, 19_440, 2_160], [10, 3_000, 1_680, 16_800, 7_200],
+    [1, 0, 2_400, 2_400, 0], [2, 300, 2_328, 4_656, 144],
+    [3, 300, 2_328, 6_984, 216], [4, 600, 2_256, 9_024, 576],
+    [9, 600, 2_256, 20_304, 1_296], [10, 600, 2_256, 22_560, 1_440],
     [11, 3_000, 1_680, 18_480, 7_920],
   ])("projects quantity %i with coherent full display facts", (quantity, discount, unit, subtotal, savings) => {
     const preview = previewLine({}, quantity);
@@ -136,8 +136,8 @@ describe("version 2 display preview truth", () => {
     expect(preview.items).toEqual([{
       variantId: "variant-5mg", quantity, available: true, purchaseState: "ready",
       name: "Synthetic local test only — Alpha", variantLabel: "5 mg", sku: "TEST-5MG",
-      packageForm: "5mg research vial", baseUnitMinor: 2_400, unitAmountMinor: unit,
-      lineSubtotalMinor: subtotal, lineSavingsMinor: savings, effectiveDiscountBps: discount,
+      packageQuantity: 1, packageForm: "5mg research vial", baseUnitMinor: 2_400, unitAmountMinor: unit,
+      lineSubtotalMinor: subtotal, lineSavingsMinor: savings, effectiveDiscountBps: discount, campaignDiscountBps: 0, volumeDiscountBps: discount, campaignUnitMinor: 2400, lineCampaignSavingsMinor: 0, lineVolumeSavingsMinor: savings,
       appliedPromotions: [], currency: "USD",
     }]);
     expect(preview.subtotalMinor).toBe(subtotal);
@@ -146,24 +146,30 @@ describe("version 2 display preview truth", () => {
     expect(canContinueFromPreview(preview, null)).toBe(true);
   });
 
-  it.each([1, 2, 3, 4, 9, 10, 11])("applies WINTER30 once at quantity %i", (quantity) => {
+  it.each([[1, 1680, 0, 3000], [2, 1630, 300, 3210], [3, 1630, 300, 3210], [4, 1579, 600, 3420], [10, 1579, 600, 3420], [11, 1176, 3000, 5100]])("stacks WINTER30 then volume at quantity %i", (quantity, unit, volume, combined) => {
     expect(previewLine({ eligiblePromotions: [winter30] }, quantity).items[0]).toMatchObject({
-      unitAmountMinor: 1_680, lineSubtotalMinor: 1_680 * quantity,
-      lineSavingsMinor: 720 * quantity, effectiveDiscountBps: 3_000,
+      unitAmountMinor: unit, lineSubtotalMinor: unit * quantity,
+      lineSavingsMinor: (2400 - unit) * quantity, effectiveDiscountBps: combined,
+      campaignDiscountBps: 3000, volumeDiscountBps: volume, campaignUnitMinor: 1680,
+      lineCampaignSavingsMinor: 720 * quantity, lineVolumeSavingsMinor: (1680 - unit) * quantity,
       appliedPromotions: [{ id: "winter30", label: "WINTER30" }],
     });
   });
 
-  it("chooses only the highest campaign and uses no promotion label when a tier wins", () => {
+  it("chooses only the highest campaign before stacking volume", () => {
     expect(previewLine({ eligiblePromotions: [winter30, { id: "test35", displayLabel: "Synthetic 35", discountBps: 3_500 }] }, 2).items[0])
-      .toMatchObject({ unitAmountMinor: 1_560, lineSubtotalMinor: 3_120, effectiveDiscountBps: 3_500, appliedPromotions: [{ id: "test35", label: "Synthetic 35" }] });
+      .toMatchObject({ unitAmountMinor: 1_513, lineSubtotalMinor: 3_026, effectiveDiscountBps: 3_695, appliedPromotions: [{ id: "test35", label: "Synthetic 35" }] });
     expect(previewLine({ eligiblePromotions: [{ ...winter30, discountBps: 800 }] }, 10).items[0])
-      .toMatchObject({ unitAmountMinor: 1_680, effectiveDiscountBps: 3_000, appliedPromotions: [] });
+      .toMatchObject({ unitAmountMinor: 2_076, effectiveDiscountBps: 1_352, appliedPromotions: [{ id: "winter30", label: "WINTER30" }] });
+  });
+
+  it.each([[1, 10, 600, 1579], [2, 10, 3000, 1176], [2, 2, 600, 1579]])("prices %i packages of %i bottles", (quantity, packageQuantity, volumeDiscountBps, unitAmountMinor) => {
+    expect(previewLine({ packageQuantity, eligiblePromotions: [winter30] }, quantity).items[0]).toMatchObject({ packageQuantity, volumeDiscountBps, unitAmountMinor, lineSubtotalMinor: quantity * unitAmountMinor });
   });
 
   it.each(["local", "test", "preview", "production"] as const)("keeps priced public rows display-only in %s", (mode) => {
     const preview = previewLine({ availability: "preview_only", checkoutReady: false, availableQuantity: null, eligiblePromotions: [winter30] }, 2, mode);
-    expect(preview.items[0]).toMatchObject({ purchaseState: mode === "production" ? "checkout_unavailable" : "local_preview", available: false, unitAmountMinor: 1_680 });
+    expect(preview.items[0]).toMatchObject({ purchaseState: mode === "production" ? "checkout_unavailable" : "local_preview", available: false, unitAmountMinor: 1_630 });
     expect(preview.reasons).toEqual(["checkout_unavailable"]);
     expect(canContinueFromPreview(preview, preview.previewToken)).toBe(false);
   });
@@ -173,19 +179,19 @@ describe("version 2 display preview truth", () => {
     const zero = previewLine({ ...pending, baseUnitMinor: 0 }, 2, mode);
     expect(zero.items[0]).toMatchObject(mode === "production" ? {
       purchaseState: "pricing_pending", baseUnitMinor: null, unitAmountMinor: null, lineSubtotalMinor: null,
-      lineSavingsMinor: null, effectiveDiscountBps: null, appliedPromotions: [], currency: null,
-    } : { purchaseState: "local_preview", baseUnitMinor: 0, unitAmountMinor: 0, lineSubtotalMinor: 0, lineSavingsMinor: 0, effectiveDiscountBps: 3_000, currency: "USD" });
+      lineSavingsMinor: null, effectiveDiscountBps: null, campaignDiscountBps: null, volumeDiscountBps: null, campaignUnitMinor: null, lineCampaignSavingsMinor: null, lineVolumeSavingsMinor: null, appliedPromotions: [], currency: null,
+    } : { purchaseState: "local_preview", baseUnitMinor: 0, unitAmountMinor: 0, lineSubtotalMinor: 0, lineSavingsMinor: 0, effectiveDiscountBps: 3_210, currency: "USD" });
     expect(previewLine({ ...pending, baseUnitMinor: null, currency: null }, 2, mode).items[0]).toMatchObject({
       purchaseState: "pricing_pending", available: false, baseUnitMinor: null, unitAmountMinor: null,
-      lineSubtotalMinor: null, lineSavingsMinor: null, effectiveDiscountBps: null, appliedPromotions: [], currency: null,
+      lineSubtotalMinor: null, lineSavingsMinor: null, effectiveDiscountBps: null, campaignDiscountBps: null, volumeDiscountBps: null, campaignUnitMinor: null, lineCampaignSavingsMinor: null, lineVolumeSavingsMinor: null, appliedPromotions: [], currency: null,
     });
   });
 
   it.each([
-    [{ availableQuantity: 1 }, "insufficient_quantity", 2_208],
-    [{ availableQuantity: 2 }, "ready", 2_208],
-    [{ availableQuantity: null }, "checkout_unavailable", 2_208],
-    [{ checkoutReady: false, availableQuantity: 0 }, "checkout_unavailable", 2_208],
+    [{ availableQuantity: 1 }, "insufficient_quantity", 2_328],
+    [{ availableQuantity: 2 }, "ready", 2_328],
+    [{ availableQuantity: null }, "checkout_unavailable", 2_328],
+    [{ checkoutReady: false, availableQuantity: 0 }, "checkout_unavailable", 2_328],
     [{ availability: "unavailable" }, "unavailable", null],
     [{ priceStatus: "unavailable" }, "unavailable", null],
   ] as const)("resolves authoritative state for %j", (overrides, state, unit) => {
@@ -198,27 +204,27 @@ describe("version 2 display preview truth", () => {
     const preview = buildCartPreview([{ variantId: "unknown", quantity: 1, name: "Lie", available: true, unitAmountMinor: 1, purchaseState: "ready" }], source);
     expect(preview.items).toEqual([{
       variantId: "unknown", quantity: 1, available: false, purchaseState: "unknown_variant",
-      name: null, variantLabel: null, sku: null, packageForm: null, baseUnitMinor: null,
+      name: null, variantLabel: null, sku: null, packageQuantity: null, packageForm: null, baseUnitMinor: null,
       unitAmountMinor: null, lineSubtotalMinor: null, lineSavingsMinor: null,
-      effectiveDiscountBps: null, appliedPromotions: [], currency: null,
+      effectiveDiscountBps: null, campaignDiscountBps: null, volumeDiscountBps: null, campaignUnitMinor: null, lineCampaignSavingsMinor: null, lineVolumeSavingsMinor: null, appliedPromotions: [], currency: null,
     }]);
     expect(preview.reasons).toEqual(["unknown_variant"]);
   });
 
   it("merges exact IDs before calculating while keeping another variant separate", () => {
     const preview = buildCartPreview([{ variantId: "variant-5mg", quantity: 1 }, { variantId: "variant-5mg", quantity: 1 }, { variantId: "variant-10mg", quantity: 1 }], source);
-    expect(preview.items).toMatchObject([{ variantId: "variant-5mg", quantity: 2, unitAmountMinor: 2_208 }, { variantId: "variant-10mg", quantity: 1, unitAmountMinor: 3_200 }]);
+    expect(preview.items).toMatchObject([{ variantId: "variant-5mg", quantity: 2, unitAmountMinor: 2_328 }, { variantId: "variant-10mg", quantity: 1, unitAmountMinor: 3_200 }]);
   });
 
   it("hashes quantities and every changed identity, price, promotion and state fact", () => {
     const base = { eligiblePromotions: [winter30] };
     const original = previewLine(base, 1);
     expect(previewLine(base, 1).previewToken).toBe(original.previewToken);
-    expect(previewLine(base, 2).items[0]?.unitAmountMinor).toBe(original.items[0]?.unitAmountMinor);
+    expect(previewLine(base, 2).items[0]?.unitAmountMinor).toBe(1630);
     expect(previewLine(base, 2).previewToken).not.toBe(original.previewToken);
     for (const changed of [
       { name: "Synthetic renamed product" }, { variantLabel: "Synthetic renamed variant" },
-      { sku: "TEST-NEW-SKU" }, { packageForm: "Synthetic new package" },
+      { sku: "TEST-NEW-SKU" }, { packageQuantity: 1, packageForm: "Synthetic new package" },
       { checkoutReady: false }, { baseUnitMinor: 2_401 },
       { eligiblePromotions: [{ ...winter30, id: "new-promotion-id" }] },
       { eligiblePromotions: [{ ...winter30, displayLabel: "NEW LABEL" }] },
