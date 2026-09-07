@@ -17,13 +17,11 @@ export function BundleOptions({ product, variant, pricing, quantity, onSelect }:
   if (!options.length) return null;
   const scene = getCatalogProductVisualScenes(product.slug)[0]!;
   const photograph = resolveProductPhotograph(product.slug, variant.id);
-  const currentBottles = quantity * variant.packageQuantity;
   return <fieldset className="bundle-options">
     <legend className="purchase-field-label">Bundle and save</legend>
     <div className="bundle-options__grid">
       {options.map((option) => {
-        const selected = currentBottles >= option.minBottleCount &&
-          (option.maxBottleCount === null || currentBottles <= option.maxBottleCount);
+        const selected = quantity === option.quantity;
         const bulk = option.maxBottleCount === null;
         const tone = bulk ? "bulk" : option.minBottleCount === 2 ? "recommended" : "value";
         return <button key={option.quantity} type="button"

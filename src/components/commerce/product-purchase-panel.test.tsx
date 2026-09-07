@@ -119,6 +119,20 @@ describe("ProductPurchasePanel", () => {
     expect(summary()).not.toHaveTextContent(/eligible35|other40|WINTER30/);
   });
 
+  it.each([1, 2])("highlights the exact four-bottle choice for %s-bottle packages", (packageQuantity) => {
+    renderPanel(testCanonicalProduct([testPublicVariant({ packageQuantity })]));
+    const bundle = screen.getByRole("button", { name: /^4 bottles,/ });
+    fireEvent.click(bundle);
+    expect(bundle).toHaveAttribute("aria-pressed", "true");
+    expect(quantityControl()).toHaveValue(4 / packageQuantity);
+    fireEvent.click(screen.getByRole("button", { name: "Increase quantity" }));
+    expect(quantityControl()).toHaveValue(4 / packageQuantity + 1);
+    expect(summary()).toHaveTextContent("Bundle −6% extra");
+    expect(bundle).toHaveAttribute("aria-pressed", "false");
+    expect(within(screen.getByRole("group", { name: "Bundle and save" })).getAllByRole("button")
+      .every((button) => button.getAttribute("aria-pressed") === "false")).toBe(true);
+  });
+
   it("preserves quantity on amount change and adds the exact selected id", async () => {
     const user = userEvent.setup();
     renderPanel(testCanonicalProduct([
