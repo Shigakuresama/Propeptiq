@@ -281,6 +281,12 @@ describe("checkout HTTP controllers", () => {
     expect(withoutRateAuthority.startSession).not.toHaveBeenCalled();
   });
 
+  it.each(["https://checkout.stripe.com/c/pay/cs_test_synthetic#synthetic", "https://example.com/#synthetic"])("limits hosted fragments to Stripe: %s", async (url) => {
+    const ready = fixture({startSession: async () => ({status: "open", orderId: "61000000-0000-4000-8000-000000000003", url, expiresAt: "2026-08-26T13:00:00.000Z"})});
+    const result = await ready.handlers.session(request("/api/checkout/sessions"));
+    expect(result.status).toBe(url.startsWith("https://checkout.stripe.com/") ? 200 : 503);
+  });
+
   it("uses separate quote/session scopes and exposes a hosted URL only for strict open", async () => {
     const scopes: string[] = [];
     const ready = fixture({

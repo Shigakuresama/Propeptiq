@@ -17,6 +17,8 @@ try {
     (SELECT count(*)::int FROM lots) AS lots,
     (SELECT count(*)::int FROM promotions WHERE campaign_key='winter30' AND basis_points=3000 AND application_mode='automatic' AND enabled) AS automatic_promotions`);
   const events=await client.query("SELECT provider_event_id,event_type,status,livemode FROM provider_events ORDER BY received_at DESC LIMIT 10");
+  const attempts=await client.query("SELECT id,order_id,status,permitted,provider_session_id,provider_livemode FROM checkout_attempts ORDER BY created_at DESC LIMIT 10");
+  const orders=await client.query("SELECT id,state,total_minor FROM orders ORDER BY created_at DESC LIMIT 10");
   await client.query("COMMIT");
-  console.log(JSON.stringify({catalog:catalog.rows[0],events:events.rows}));
+  console.log(JSON.stringify({catalog:catalog.rows[0],events:events.rows,attempts:attempts.rows,orders:orders.rows}));
 } finally {await client.end();}
