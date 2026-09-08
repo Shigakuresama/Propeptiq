@@ -240,7 +240,9 @@ async function createPostgresCheckoutServerRuntime(
     contextPromise ??= createProviderExecutionContextV1({
       environment,
       identity: request.identity,
-      now: runtimeNow(),
+      // Better Auth projects verification at millisecond precision. Truncating
+      // this instant can make the just-verified identity appear in the future.
+      now: new Date(),
       async resolveDatabaseUsersByClerkId(clerkUserId) {
         const result = await client.query<{ id: string }>(
           `SELECT id::text AS id FROM users WHERE clerk_id = $1 ORDER BY id`,
