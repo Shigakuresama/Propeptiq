@@ -19,6 +19,7 @@ try {
   const events=await client.query("SELECT provider_event_id,event_type,status,livemode FROM provider_events ORDER BY received_at DESC LIMIT 10");
   const attempts=await client.query("SELECT id,order_id,status,permitted,provider_session_id,provider_livemode FROM checkout_attempts ORDER BY created_at DESC LIMIT 10");
   const orders=await client.query("SELECT id,state,total_minor FROM orders ORDER BY created_at DESC LIMIT 10");
+  const reservations=await client.query("SELECT order_id,state,quantity_reserved,quantity_remaining FROM inventory_reservations ORDER BY created_at DESC LIMIT 10");
   await client.query("COMMIT");
-  console.log(JSON.stringify({catalog:catalog.rows[0],events:events.rows,attempts:attempts.rows,orders:orders.rows}));
+  console.log(JSON.stringify({catalog:catalog.rows[0],events:events.rows,attempts:attempts.rows,orders:orders.rows,reservations:reservations.rows}));
 } finally {await client.end();}

@@ -26,6 +26,7 @@ try {
  const auth=await client.query(`INSERT INTO neon_auth."user"(id,name,email,"emailVerified","createdAt","updatedAt") VALUES($1,'Synthetic Sandbox Buyer',$2,true,now(),now()) ON CONFLICT(email) DO UPDATE SET name=EXCLUDED.name RETURNING id`,[authId,credentials.email]);
  const userId=auth.rows[0].id;
  const account=await client.query(`SELECT id FROM neon_auth.account WHERE "userId"=$1 AND "providerId"='credential'`,[userId]);
+ if(account.rowCount!==0&&!existsSync(credentialFile))throw Error("Existing sandbox account requires its original local credential file");
  if(account.rows.length===0)await client.query(`INSERT INTO neon_auth.account(id,"accountId","providerId","userId",password,"createdAt","updatedAt") VALUES($1,($2::uuid)::text,'credential',$2::uuid,$3,now(),now())`,[randomUUID(),userId,await hashPassword(credentials.password)]);
  const user=await client.query("INSERT INTO users(clerk_id,email_verified_at) VALUES($1,now()) ON CONFLICT(clerk_id) DO UPDATE SET email_verified_at=EXCLUDED.email_verified_at RETURNING id",[userId]);
  const buyerId=user.rows[0].id;
