@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isSandboxCheckoutEnvironmentConfigured } from "./sandbox-configuration";
 
 const capabilityMode = z.enum(["disabled", "test", "live"]);
 const appEnvironment = z.enum(["local", "preview", "production"]);
@@ -118,6 +119,7 @@ const rawServerEnvSchema = z.object({
   EMAIL_MODE: capabilityMode.default("disabled"),
   NEWSLETTER_MODE: capabilityMode.default("disabled"),
   COMMERCE_LIVE_CAPABILITY: z.enum(["disabled", "enabled"]).default("disabled"),
+  SANDBOX_CHECKOUT_CAPABILITY: z.enum(["disabled", "enabled"]).default("disabled"),
   PAYMENTS_LIVE_CAPABILITY: z.enum(["disabled", "enabled"]).default("disabled"),
   TAX_MODE: capabilityMode.default("disabled"),
   SHIPPING_MODE: capabilityMode.default("disabled"),
@@ -172,7 +174,8 @@ type ParsedServerEnv = z.infer<typeof rawServerEnvSchema>;
  * the structural port so existing injected test/runtime environments retain
  * the same meaning as the parser's disabled default.
  */
-export type ServerEnv = Omit<ParsedServerEnv, "NEWSLETTER_MODE"> & Readonly<{
+export type ServerEnv = Omit<ParsedServerEnv, "NEWSLETTER_MODE" | "SANDBOX_CHECKOUT_CAPABILITY"> & Readonly<{
+  SANDBOX_CHECKOUT_CAPABILITY?: ParsedServerEnv["SANDBOX_CHECKOUT_CAPABILITY"];
   NEWSLETTER_MODE?: ParsedServerEnv["NEWSLETTER_MODE"];
 }>;
 
@@ -360,7 +363,7 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
         message: `AUTH_MODE=${env.AUTH_MODE} requires DATABASE_MODE=${env.AUTH_MODE}`,
       });
     }
-    if (env.EMAIL_MODE !== env.AUTH_MODE) {
+    if (env.EMAIL_MODE !== env.AUTH_MODE && !isSandboxCheckoutEnvironmentConfigured(env)) {
       context.addIssue({
         code: "custom",
         path: ["EMAIL_MODE"],
@@ -586,6 +589,9 @@ const serverEnvSchema = rawServerEnvSchema.superRefine((env, context) => {
     for (const dependency of ["DATABASE_MODE", "PAYMENTS_MODE"] as const) {
       if (env[dependency] !== "live") context.addIssue({ code: "custom", path: [dependency], message: `PAYMENTS_LIVE_CAPABILITY=enabled requires ${dependency}=live` });
     }
+  }
+  if (env.SANDBOX_CHECKOUT_CAPABILITY === "enabled" && !isSandboxCheckoutEnvironmentConfigured(env)) {
+    context.addIssue({code:"custom",path:["SANDBOX_CHECKOUT_CAPABILITY"],message:"Sandbox checkout requires the dedicated isolated Preview configuration"});
   }
 });
 

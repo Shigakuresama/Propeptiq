@@ -25,6 +25,7 @@ import {
   type StripeSdkClient,
 } from "@/commerce/stripe-payment-provider";
 import { createUspsShippingQuotePort } from "@/commerce/usps-shipping-provider";
+import { isSandboxCheckoutEnvironmentConfigured } from "@/config/sandbox-configuration";
 import { createStripeShippingQuotePort } from "@/commerce/stripe-shipping-provider";
 import { createStripeTaxQuotePort } from "@/commerce/stripe-tax-provider";
 import { createStaffCommerceCommandRuntimeV1, type StaffCommerceCommandRuntimeV1 } from "@/commerce/staff-commerce-command-runtime";
@@ -172,7 +173,7 @@ export function isPostgresBuyerCheckoutReady(
 export function isCheckoutPageRuntimeReady(request: RequestIdentity): boolean {
   return isBuyerCheckoutRuntimeReady(request) ||
     (isPostgresBuyerCheckoutReady(request) &&
-      isLiveCheckoutEnvironmentConfigured(request.environment));
+      (isLiveCheckoutEnvironmentConfigured(request.environment) || isSandboxCheckoutEnvironmentConfigured(request.environment)));
 }
 
 async function createPostgresCheckoutServerRuntime(
