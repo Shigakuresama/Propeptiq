@@ -15,6 +15,7 @@ import { readServerEnv } from "@/env";
 import { promotionApplies } from "@/domain/storefront-pricing";
 
 import { resolvePublishedBrowseCatalog } from "./browse-catalog-publication";
+import { bindSandboxCatalog } from "./sandbox-catalog";
 import {
   CATALOG_SCHEMA_UNAVAILABLE_DIAGNOSTIC,
   isMissingCatalogSchemaError,
@@ -106,7 +107,7 @@ export async function loadPublicStorefrontView(
   environment: ServerEnv,
   dependencies: StorefrontPublicServerDependencies = {},
 ): Promise<PublicStorefrontView> {
-  const catalogData = dependencies.catalogData ?? storefrontCatalogData;
+  const catalogData = dependencies.catalogData ?? bindSandboxCatalog(environment, storefrontCatalogData);
   const bindings = parseStorefrontBindings(catalogData.bindings);
 
   // Validate the owner publication before considering any runtime source.

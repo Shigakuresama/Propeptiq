@@ -17,6 +17,7 @@ import {
 } from "@/auth/better-auth-email";
 import { createBetterAuthRateLimitStorage } from "@/auth/better-auth-rate-limit";
 import type { ServerEnv } from "@/config/env-schema";
+import { isSandboxCheckoutEnvironmentConfigured } from "@/config/sandbox-configuration";
 import { preparePostgresConnectionUrl } from "@/db/postgres-connection-url";
 import { readServerEnv } from "@/env";
 
@@ -56,24 +57,24 @@ function selectedDatabaseUrl(environment: ServerEnv): string {
 function buildBetterAuthOptions(input: Readonly<{
   environment: ServerEnv;
   pool: Pool;
-  resend: ResendLike;
+  resend: ResendLike | null;
   schedule: ScheduleAfterResponse;
 }>) {
   const { environment, pool, resend, schedule } = input;
+  const sandbox = isSandboxCheckoutEnvironmentConfigured(environment);
   if (
     !environment.APP_ORIGIN ||
     !environment.BETTER_AUTH_SECRET ||
     !environment.RATE_LIMIT_SECRET ||
-    !environment.RESEND_FROM
+    (!sandbox && !environment.RESEND_FROM)
   ) {
     throw new Error("Better Auth is enabled without complete configuration");
   }
   const appOrigin = environment.APP_ORIGIN;
 
-  const sendEmail = createAuthEmailSender({
-    from: environment.RESEND_FROM,
-    deliver: (payload) => resend.emails.send(payload),
-  });
+  const sendEmail = sandbox
+    ? async () => { throw new Error("Sandbox uses provisioned test accounts; email delivery is disabled"); }
+    : createAuthEmailSender({from: environment.RESEND_FROM!, deliver: (payload) => resend!.emails.send(payload)});
   const rateLimitStore = createAuthPostgresRateLimitStore({
     async query<T extends object>(sql: string, params?: unknown[]) {
       const result = await pool.query<T>(sql, params);
@@ -119,6 +120,7 @@ function buildBetterAuthOptions(input: Readonly<{
     },
     emailAndPassword: {
       enabled: true,
+      disableSignUp: sandbox,
       requireEmailVerification: true,
       minPasswordLength: 8,
       maxPasswordLength: 128,
@@ -195,7 +197,8 @@ export function createBetterAuthForEnvironment<TAuth = BetterAuthRuntime>(
     return null;
   }
 
-  if (!environment.RESEND_API_KEY) {
+  const sandbox = isSandboxCheckoutEnvironmentConfigured(environment);
+  if (!sandbox && !environment.RESEND_API_KEY) {
     throw new Error("Better Auth email configuration is incomplete");
   }
 
@@ -207,7 +210,7 @@ export function createBetterAuthForEnvironment<TAuth = BetterAuthRuntime>(
     connectionTimeoutMillis: 5_000,
     allowExitOnIdle: true,
   });
-  const resend = dependencies.createResend(environment.RESEND_API_KEY);
+  const resend = sandbox ? null : dependencies.createResend(environment.RESEND_API_KEY!);
   return dependencies.createAuth(
     buildBetterAuthOptions({
       environment,
@@ -228,6 +231,7 @@ function configurationHash(environment: ServerEnv): string {
       [
         environment.APP_ORIGIN,
         environment.AUTH_MODE,
+        environment.SANDBOX_CHECKOUT_CAPABILITY,
         environment.DATABASE_MODE,
         environment.DATABASE_URL,
         environment.TEST_DATABASE_URL,

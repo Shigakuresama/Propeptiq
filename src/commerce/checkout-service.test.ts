@@ -1346,6 +1346,13 @@ describe("authoritative canonical variant quote lifecycle", () => {
     expect(repository.prepare).not.toHaveBeenCalled();
   });
 
+  it("preserves Priority Mail selection through session quoting", async () => {
+    const exact = setupVariant();
+    const result = await exact.service.quoteForSession({buyerUserId: ids.buyer, idempotencyKey: ids.key, paymentProviderAvailable: true, request: {...variantRequest, shippingService: "priority_mail"}});
+    expect(result.status).toBe("quoted");
+    expect(exact.shippingQuote).toHaveBeenCalledWith(expect.objectContaining({shippingService: "priority_mail"}));
+  });
+
   it("fails the locked session path closed before prepare when configured authority disappears", async () => {
     const exact = setupVariant(
       { automaticPromotions: [automaticPromotion()] },

@@ -31,6 +31,11 @@ function sessionRequest() {
 }
 
 describe("strict variant checkout requests", () => {
+  it("preserves a shipping choice in both quote and payment requests, rejecting arbitrary services", () => {
+    expect(parseCheckoutQuoteRequest({...quoteRequest(),shippingService:"priority_mail"})).toMatchObject({ok:true,value:{shippingService:"priority_mail"}});
+    expect(parseCheckoutRequest({...sessionRequest(),shippingService:"priority_mail"})).toMatchObject({ok:true,value:{shippingService:"priority_mail"}});
+    expect(parseCheckoutQuoteRequest({...quoteRequest(),shippingService:"free"})).toMatchObject({ok:false});
+  });
   it("accepts and deeply freezes only variant lines, destination, and the session revision", () => {
     const result = parseCheckoutRequest({
       items: [

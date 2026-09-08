@@ -5,6 +5,7 @@ import { getRequestIdentity } from "@/auth/server";
 import { LocalIdentityEntry } from "@/components/account/identity-entry";
 import { ManagedAuthForm } from "@/components/account/managed-auth-form";
 import { EmptyState } from "@/components/design-system/archive-primitives";
+import { isSandboxCheckoutEnvironmentConfigured } from "@/config/sandbox-configuration";
 
 export async function AuthEntry({
   kind,
@@ -14,6 +15,9 @@ export async function AuthEntry({
   returnTo: string;
 }) {
   const request = await getRequestIdentity();
+  if (kind === "sign-up" && isSandboxCheckoutEnvironmentConfigured(request.environment)) {
+    return <p>Sandbox accounts are pre-created. <Link className="record-link" href={{pathname:"/sign-in",query:{returnTo}}}>Sign in with your test account</Link>.</p>;
+  }
   if (request.environment.LOCAL_TEST_DRIVER === "enabled" && request.localDriver) {
     return <LocalIdentityEntry actors={request.localDriver.actorOptions} kind={kind} />;
   }

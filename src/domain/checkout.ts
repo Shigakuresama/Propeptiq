@@ -19,6 +19,7 @@ export type CheckoutLineRequest = Readonly<{
 export type CheckoutQuoteRequest = Readonly<{
   items: readonly CheckoutLineRequest[];
   destination: CheckoutDestination;
+  shippingService?: "ground_advantage" | "priority_mail";
   rewardRedemptionPoints?: number;
 }>;
 
@@ -152,6 +153,7 @@ function parseRequest(
     "destination",
     ...(requirePricingRevision ? ["pricingRevision"] : []),
     "rewardRedemptionPoints",
+    "shippingService",
   ];
   const unexpectedRequestField = firstUnexpectedField(input, allowed);
   if (unexpectedRequestField !== null) {
@@ -315,9 +317,13 @@ function parseRequest(
     );
   }
 
+  if (Object.hasOwn(input, "shippingService") && input.shippingService !== "ground_advantage" && input.shippingService !== "priority_mail") {
+    return fail("invalid_request", "shippingService");
+  }
   items.sort((left, right) => left.variantId.localeCompare(right.variantId));
   const value = deepFreeze({
     items,
+    ...(Object.hasOwn(input, "shippingService") ? { shippingService: input.shippingService as "ground_advantage" | "priority_mail" } : {}),
     destination: {
       recipientName,
       line1,

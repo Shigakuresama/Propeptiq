@@ -7,6 +7,7 @@ import { accountAccessReason } from "@/account/access";
 import { authRouteWithDestination, SIGN_IN_ROUTE } from "@/auth/routes";
 import { getRequestIdentity, getRequestRepositories } from "@/auth/server";
 import { isCheckoutPageRuntimeReady } from "@/commerce/server-runtime";
+import { isSandboxCheckoutEnvironmentConfigured } from "@/config/sandbox-configuration";
 import { AccountFactsForm } from "@/components/account/account-facts-form";
 import { AccountShell } from "@/components/account/account-shell";
 import { CheckoutCartStatus } from "@/components/account/checkout-cart-status";
@@ -60,7 +61,7 @@ export default async function CheckoutPage() {
     (account.status === "active" || account.status === "review");
   const buyerCheckoutReady =
     checkoutEligible && isCheckoutPageRuntimeReady(request);
-  const browseOnlyPreview = request.environment.APP_ENV === "preview";
+  const browseOnlyPreview = request.environment.APP_ENV === "preview" && !isSandboxCheckoutEnvironmentConfigured(request.environment);
   return (
     <AccountShell
       showPrograms={false}
@@ -130,7 +131,7 @@ export default async function CheckoutPage() {
               ) : null}
             </RecordPanel>
           ) : null}
-          {buyerCheckoutReady ? <CheckoutForm syntheticLocal={request.localDriver !== null} /> : null}
+          {buyerCheckoutReady ? <CheckoutForm syntheticLocal={request.localDriver !== null} uspsShipping={request.environment.SHIPPING_PROVIDER === "usps"} /> : null}
         </div>
         <CheckoutCartStatus />
       </div>

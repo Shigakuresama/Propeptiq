@@ -1,6 +1,7 @@
 import { getBetterAuth } from "@/auth/better-auth-server";
 import { readAuthCallerAddress } from "@/auth/caller-address";
 import { readServerEnv } from "@/env";
+import { isSandboxCheckoutEnvironmentConfigured } from "@/config/sandbox-configuration";
 
 type AuthRouteContext = Readonly<{
   params: Promise<Readonly<{ path: string[] }>>;
@@ -90,6 +91,10 @@ async function forward(
 ): Promise<Response> {
   const { path } = await context.params;
   const environment = readServerEnv();
+  if (isSandboxCheckoutEnvironmentConfigured(environment) &&
+    !["get-session", "sign-in/email", "sign-out", "list-sessions", "revoke-session", "revoke-sessions", "revoke-other-sessions"].includes(path.join("/"))) {
+    return disabledResponse();
+  }
   if (
     (await isPasswordRecoveryRequest(method, path, request)) &&
     environment.AUTH_PASSWORD_RESET_SESSION_REVOCATION !== "verified"

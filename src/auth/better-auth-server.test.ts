@@ -54,6 +54,21 @@ describe("application-owned Better Auth server configuration", () => {
     expect(createResend).not.toHaveBeenCalled();
   });
 
+  it("uses password sign-in without email or signup in the dedicated sandbox", () => {
+    const environment = parseServerEnv({
+      ...enabledEnvironmentInput,
+      APP_ORIGIN: "https://propeptiq-git-feat-stripe-shipping-catalog-sergiosteam.vercel.app",
+      VERCEL_ENV: "preview", SANDBOX_CHECKOUT_CAPABILITY: "enabled",
+      PAYMENTS_MODE: "test", TAX_MODE: "test", SHIPPING_MODE: "test", FULFILLMENT_MODE: "test",
+      EMAIL_MODE: "disabled", RESEND_API_KEY: undefined, RESEND_FROM: undefined,
+      TEST_DATABASE_URL: "postgresql://synthetic:synthetic@ep-blue-frog-aubaovyb.c-10.us-east-1.aws.neon.tech/propeptiq_stripe_sandbox",
+      STRIPE_ACCOUNT_ID: "acct_1U9t8NR4u3cqLvC0", STRIPE_SECRET_KEY: "sk_test_synthetic", STRIPE_WEBHOOK_SECRET: "whsec_synthetic",
+    });
+    createBetterAuthForEnvironment(environment,{createPool,createAuth,createResend,schedule});
+    expect(createResend).not.toHaveBeenCalled();
+    expect(createAuth.mock.calls[0]?.[0].emailAndPassword).toMatchObject({enabled:true,disableSignUp:true,requireEmailVerification:true});
+  });
+
   it("binds Better Auth to the existing Neon schema and security contract", () => {
     const auth = createBetterAuthForEnvironment(enabledEnvironment, {
       createPool,

@@ -447,7 +447,9 @@ function quoteResponse(result: unknown): Response {
 function safeHostedUrl(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 2_000 || !URL.canParse(value)) return false;
   const url = new URL(value);
-  if (url.username || url.password || url.hash) return false;
+  if (url.username || url.password) return false;
+  // Stripe's hosted Checkout URLs include an opaque client-side fragment.
+  if (url.hash && !(url.protocol === "https:" && url.hostname === "checkout.stripe.com" && url.port === "")) return false;
   return url.protocol === "https:" ||
     (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname.toLowerCase()));
 }

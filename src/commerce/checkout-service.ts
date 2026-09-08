@@ -1613,7 +1613,8 @@ export function createCheckoutService(dependencies: Readonly<{
       await dependencies.shippingQuotePort.quoteShipping({
         schemaVersion: 1,
         bindingHash: shippingBindingHash,
-        items: merchandiseLines,
+        shippingService: request.shippingService,
+        items: merchandiseLines.map(line => ({ ...line, packageQuantity: facts.items.find(fact => fact.variantId === line.productId)?.packageQuantity })),
         merchandiseTotalMinor,
         currency: "USD",
         destination: request.destination,
@@ -2371,6 +2372,7 @@ export function createCheckoutService(dependencies: Readonly<{
       const request: RewardsCheckoutQuoteRequest = Object.freeze({
         items: parsed.items,
         destination: parsed.destination,
+        ...(parsed.shippingService === undefined ? {} : { shippingService: parsed.shippingService }),
         ...(Object.hasOwn(parsed, "rewardRedemptionPoints")
           ? { rewardRedemptionPoints: parsed.rewardRedemptionPoints }
           : {}),
@@ -2412,6 +2414,7 @@ export function createCheckoutService(dependencies: Readonly<{
       const request: RewardsCheckoutQuoteRequest = Object.freeze({
         items: parsed.value.items,
         destination: parsed.value.destination,
+        ...(parsed.value.shippingService === undefined ? {} : { shippingService: parsed.value.shippingService }),
         ...(Object.hasOwn(parsed.value, "rewardRedemptionPoints")
           ? { rewardRedemptionPoints: parsed.value.rewardRedemptionPoints }
           : {}),
